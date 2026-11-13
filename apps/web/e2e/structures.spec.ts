@@ -137,3 +137,23 @@ test('middle-drag pans the 3D view', async ({ page }) => {
 
   await expect.poll(panX, { timeout: 5_000 }).not.toBe(before);
 });
+
+// The set selector and the "+ Set" button share one row of the tool rail. The
+// rail's full-width rule for buttons once stretched the button over the whole
+// row, on top of the label, and squeezed the selector to nothing (#154).
+test('the structure set selector and its button sit side by side', async ({ page }) => {
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+
+  const selector = (await page
+    .getByRole('combobox', { name: 'Active structure set' })
+    .boundingBox())!;
+  const button = (await page.locator('.brush-set-new').boundingBox())!;
+  const row = (await page.locator('.brush-set').boundingBox())!;
+
+  // Wide enough to read a set name, and ending before the button starts.
+  expect(selector.width).toBeGreaterThan(120);
+  expect(selector.x + selector.width).toBeLessThanOrEqual(button.x);
+  expect(button.x + button.width).toBeLessThanOrEqual(row.x + row.width + 0.5);
+});
