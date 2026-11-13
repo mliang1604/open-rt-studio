@@ -182,7 +182,7 @@ Found on the way, also present in dicom-workspace:
 | #154  | "Set" label covered by the "+ Set" button                           |
 | #158  | Code the interface can no longer reach                              |
 | #159  | Initial bundle over its warning budget; `viewer.css` near its limit |
-| #160  | Accessibility lint for templates is not on                          |
+| #160  | Accessibility lint for templates was not on (turned on since)       |
 
 ## End-to-end tests in CI
 
