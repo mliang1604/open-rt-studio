@@ -45,8 +45,8 @@ export default tseslint.config(
     },
   },
   {
-    // Repository scripts and tool configuration run in Node.
-    files: ['scripts/**/*.mjs', '**/*.config.{js,mjs,ts}'],
+    // Repository scripts, tool configuration and Node-side package tests run in Node.
+    files: ['scripts/**/*.mjs', '**/*.config.{js,mjs,ts}', 'packages/*/test/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
   {

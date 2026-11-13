@@ -1,0 +1,276 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import { largestSeries, type Series } from './series.js';
+
+/**
+ * One DICOM study: the series acquired in a single examination, sharing a
+ * StudyInstanceUID, with the descriptive fields a timeline needs lifted from a
+ * representative series.
+ */
+export interface StudyRecord {
+  /** StudyInstanceUID; the empty string for series that carry no UID. */
+  readonly studyUid: string;
+  /** StudyDate (raw DICOM `DA`, `YYYYMMDD`); null when absent. Orders the timeline. */
+  readonly date: string | null;
+  /** StudyTime (raw DICOM `TM`); null when absent. Tie-breaks same-date studies. */
+  readonly time: string | null;
+  /** StudyDescription for the label; null when absent. */
+  readonly description: string | null;
+  /** The distinct modalities present across the study's series, in encounter order. */
+  readonly modalities: readonly string[];
+  /** The study's series, in the order {@link groupStudies} received them. */
+  readonly series: Series[];
+}
+
+/**
+ * One patient: the studies sharing a PatientID, each a {@link StudyRecord}
+ * ordered along the longitudinal timeline.
+ */
+export interface PatientRecord {
+  /** PatientID; the empty string for series that carry no ID. */
+  readonly patientId: string;
+  /** PatientName (raw DICOM `PN`) lifted from a representative series; null when absent. */
+  readonly name: string | null;
+  /** The patient's studies, ordered by date ascending (undated last). */
+  readonly studies: StudyRecord[];
+}
+
+/**
+ * Group a flat list of series into studies by StudyInstanceUID.
+ *
+ * A loaded folder may span several studies (e.g. a baseline and a follow-up);
+ * this splits them so a longitudinal timeline can show one entry per
+ * examination. The descriptive fields (date, time, description, patient) are
+ * lifted from the first series of each group, mirroring how {@link groupSeries}
+ * lifts series fields from a slice. Series without a UID fall into a single
+ * unnamed study. Studies are ordered by StudyDate ascending — those without a
+ * date sort last — tie-broken by StudyTime then UID so the timeline is
+ * deterministic.
+ */
+export function groupStudies(series: readonly Series[]): StudyRecord[] {
+  const byUid = new Map<string, Series[]>();
+  for (const s of series) {
+    const uid = s.studyUid ?? '';
+    const group = byUid.get(uid);
+    if (group) group.push(s);
+    else byUid.set(uid, [s]);
+  }
+
+  const studies: StudyRecord[] = [];
+  for (const [studyUid, group] of byUid) {
+    const first = group[0];
+    studies.push({
+      studyUid,
+      date: first.studyDate,
+      time: first.studyTime,
+      description: first.studyDescription,
+      modalities: distinctModalities(group),
+      series: group,
+    });
+  }
+
+  return studies.sort(compareStudies);
+}
+
+/**
+ * Group a flat list of series into patients by PatientID, each patient's studies
+ * grouped and ordered by {@link groupStudies}.
+ *
+ * Series without an ID fall into a single unnamed patient. Patients are ordered
+ * by PatientID for stability; the meaningful ordering — the longitudinal
+ * timeline — lives within each patient's studies.
+ */
+export function groupPatients(series: readonly Series[]): PatientRecord[] {
+  const byId = new Map<string, Series[]>();
+  for (const s of series) {
+    const id = s.patientId ?? '';
+    const group = byId.get(id);
+    if (group) group.push(s);
+    else byId.set(id, [s]);
+  }
+
+  const patients: PatientRecord[] = [];
+  for (const [patientId, group] of byId) {
+    patients.push({
+      patientId,
+      name: group[0].patientName,
+      studies: groupStudies(group),
+    });
+  }
+
+  return patients.sort((a, b) => compareStrings(a.patientId, b.patientId));
+}
+
+/**
+ * A patient catalog keyed by PatientID — the accumulated, multi-patient
+ * hierarchy {@link addSeriesToCatalog} grows across imports. The empty string
+ * keys series that carry no PatientID, mirroring {@link groupPatients}.
+ */
+export type PatientCatalogMap = ReadonlyMap<string, PatientRecord>;
+
+/**
+ * Flatten a catalog back to the series it was grouped from, in patient → study →
+ * series order. The inverse of {@link groupPatients}: the hierarchy retains every
+ * series whole (slices included), so re-merging an import is lossless.
+ */
+export function catalogSeries(catalog: PatientCatalogMap): Series[] {
+  const series: Series[] = [];
+  for (const patient of catalog.values()) {
+    for (const study of patient.studies) series.push(...study.series);
+  }
+  return series;
+}
+
+/**
+ * Fold a freshly imported batch of `series` into the accumulated `catalog`,
+ * deduping by SeriesInstanceUID and rebuilding the patient → study → series
+ * hierarchy. A series already present (same UID) is kept as-is — the import
+ * doesn't drop or replace what's there — so re-picking a folder is idempotent.
+ *
+ * No {@link import('./volume').Volume} is built: each series' parsed slices are
+ * retained for an on-demand build at load time. Pure for unit testing the
+ * accumulation and dedup.
+ */
+export function addSeriesToCatalog(
+  catalog: PatientCatalogMap,
+  incoming: readonly Series[],
+): Map<string, PatientRecord> {
+  const merged = catalogSeries(catalog);
+  const seen = new Set(merged.map((s) => s.uid));
+  for (const s of incoming) {
+    if (seen.has(s.uid)) continue;
+    seen.add(s.uid);
+    merged.push(s);
+  }
+  return new Map(groupPatients(merged).map((p) => [p.patientId, p]));
+}
+
+/**
+ * The distinct PatientIDs present in a batch of imported `series`, in encounter
+ * order. The empty string stands for series carrying no PatientID, mirroring
+ * {@link groupPatients}. A single entry is the ordinary one-patient import; more
+ * than one means the batch spans patients.
+ */
+export function importPatientIds(series: readonly Series[]): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const s of series) {
+    const id = s.patientId ?? '';
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Whether importing `series` keeps the catalog focused on a single patient,
+ * given the PatientID the UI is currently on (`currentPatientId`, null when the
+ * catalog is empty). Safe when the batch carries exactly one PatientID and that
+ * id matches the current patient — or there is no current patient yet. A batch
+ * spanning several PatientIDs, or one PatientID different from the current
+ * patient, would mix patients and so needs the switch-or-cancel guard; an empty
+ * batch is a no-op and reported safe.
+ */
+export function importKeepsOnePatient(
+  currentPatientId: string | null,
+  series: readonly Series[],
+): boolean {
+  const ids = importPatientIds(series);
+  if (ids.length === 0) return true;
+  if (ids.length > 1) return false;
+  return currentPatientId === null || ids[0] === currentPatientId;
+}
+
+/**
+ * Modalities that carry no primary image and so must never open as the base
+ * series: the RT ancillary objects (dose grid, structure set, plan, treatment
+ * record) and the secondary / derived objects (registration, segmentation,
+ * presentation state, structured report, key-object selection). An RTDOSE grid
+ * in particular builds a perfectly valid {@link import('./volume').Volume}, so
+ * without excluding it the largest-series heuristic can promote the dose to the
+ * primary view (#241) — it belongs above a CT as a fusion overlay, not as the
+ * base. An unknown / absent modality is treated as a candidate, so a novel
+ * image modality still opens.
+ */
+const NON_PRIMARY_MODALITIES: ReadonlySet<string> = new Set([
+  'RTDOSE',
+  'RTSTRUCT',
+  'RTPLAN',
+  'RTRECORD',
+  'REG',
+  'SEG',
+  'PR',
+  'SR',
+  'KO',
+]);
+
+/**
+ * Whether a series can open as the primary base image — i.e. it isn't one of the
+ * RT/derived ancillary objects ({@link NON_PRIMARY_MODALITIES}). Used to keep a
+ * dose grid (and structures/plan) out of the initial-selection heuristic.
+ */
+export function isPrimarySeries(series: Series): boolean {
+  return series.modality === null || !NON_PRIMARY_MODALITIES.has(series.modality);
+}
+
+/**
+ * The series to show first after a fresh patient import: the largest image series
+ * (most images) of the most recent study, so the opening view is the primary
+ * acquisition of the latest examination rather than an arbitrary scout — or a
+ * dose grid (#241). Studies are ordered by {@link groupStudies} along the
+ * ascending timeline (undated last), so the most recent is its final entry; its
+ * RT/derived objects ({@link isPrimarySeries}) are skipped, falling back to the
+ * largest of all the study's series when it holds nothing but ancillary objects.
+ * Returns undefined only for an empty batch; callers with a known-non-empty
+ * import can assert the result.
+ */
+export function initialImportSeries(series: readonly Series[]): Series | undefined {
+  if (series.length === 0) return undefined;
+  const studies = groupStudies(series);
+  const latest = studies[studies.length - 1].series;
+  const candidates = latest.filter(isPrimarySeries);
+  return largestSeries(candidates.length > 0 ? candidates : latest);
+}
+
+/** The distinct, non-null modalities across a study's series, in encounter order. */
+function distinctModalities(series: readonly Series[]): string[] {
+  const seen = new Set<string>();
+  const modalities: string[] = [];
+  for (const s of series) {
+    if (s.modality !== null && !seen.has(s.modality)) {
+      seen.add(s.modality);
+      modalities.push(s.modality);
+    }
+  }
+  return modalities;
+}
+
+/**
+ * Order studies by StudyDate ascending (absent last), then by StudyTime (absent
+ * last), then by UID for stability. `YYYYMMDD` / DICOM `TM` strings compare
+ * correctly lexicographically, so no parsing is needed.
+ */
+function compareStudies(a: StudyRecord, b: StudyRecord): number {
+  const byDate = compareNullableLast(a.date, b.date);
+  if (byDate !== 0) return byDate;
+  const byTime = compareNullableLast(a.time, b.time);
+  if (byTime !== 0) return byTime;
+  return compareStrings(a.studyUid, b.studyUid);
+}
+
+/** Compare two optional strings ascending, sorting null/absent values last. */
+function compareNullableLast(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return compareStrings(a, b);
+}
+
+/** Stable ascending comparison of two strings. */
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}

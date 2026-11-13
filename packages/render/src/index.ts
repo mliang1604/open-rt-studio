@@ -5,10 +5,17 @@
 // Public entry point of @open-rt-studio/render. The render core is ported from
 // dicom-workspace in issue #16; until then this only proves the wiring.
 
-import { DICOM_PACKAGE } from '@open-rt-studio/dicom';
+import { Orientation } from '@open-rt-studio/dicom';
 
 /** The name other workspaces import this package by. */
 export const RENDER_PACKAGE = '@open-rt-studio/render';
 
 /** Workspace packages the renderer is allowed to depend on. */
-export const RENDER_DEPENDS_ON: readonly string[] = [DICOM_PACKAGE];
+export const RENDER_DEPENDS_ON: readonly string[] = ['@open-rt-studio/dicom'];
+
+/** The three orthogonal planes, in the order per-orientation tuples use. */
+export const PLANES: readonly Orientation[] = [
+  Orientation.Axial,
+  Orientation.Coronal,
+  Orientation.Sagittal,
+];

@@ -17,3 +17,10 @@ describe('@open-rt-studio/render', () => {
     expect((globalThis.navigator as { gpu?: unknown } | undefined)?.gpu).toBeUndefined();
   });
 });
+
+describe('dependency on the DICOM core', () => {
+  it('resolves a value from @open-rt-studio/dicom', async () => {
+    const { PLANES } = await import('./index.js');
+    expect(PLANES).toHaveLength(3);
+  });
+});
