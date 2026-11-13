@@ -731,6 +731,15 @@
     (dragleave)="loadCtl.onDragLeave($event)"
     (drop)="loadCtl.onDrop($event)"
   >
+    @if (gpuGuidance(); as guidance) {
+      <app-gpu-notice
+        [guidance]="guidance"
+        [retrying]="gpuRetrying()"
+        [hasData]="status.hasCatalog()"
+        (retry)="retryGpu()"
+        (reload)="reloadPage()"
+      />
+    }
     <canvas
       #canvas
       [class.grabbable]="isReady()"

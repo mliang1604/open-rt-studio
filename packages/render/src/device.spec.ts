@@ -100,4 +100,67 @@ describe('initWebGpu', () => {
       expect(onUncapturedError).toHaveBeenCalledWith(error);
     });
   });
+
+  /** Run with a `navigator.gpu` replaced by `gpu`, then restore the original. */
+  async function withGpu(gpu: unknown, run: () => Promise<void>): Promise<void> {
+    const original = (navigator as { gpu?: unknown }).gpu;
+    Object.defineProperty(navigator, 'gpu', { configurable: true, value: gpu });
+    try {
+      await run();
+    } finally {
+      Object.defineProperty(navigator, 'gpu', { configurable: true, value: original });
+    }
+  }
+
+  async function failure(
+    canvas: HTMLCanvasElement = fakeCanvas(),
+  ): Promise<WebGpuUnavailableError> {
+    const error = await initWebGpu(canvas).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(WebGpuUnavailableError);
+    return error as WebGpuUnavailableError;
+  }
+
+  it('reports "no-api" when navigator.gpu is missing', async () => {
+    await withGpu(undefined, async () => {
+      expect((await failure()).reason).toBe('no-api');
+    });
+  });
+
+  it('reports "no-adapter" when no adapter is offered', async () => {
+    await withGpu({ requestAdapter: async () => null }, async () => {
+      expect((await failure()).reason).toBe('no-adapter');
+    });
+  });
+
+  it('reports "no-adapter" when requesting an adapter rejects', async () => {
+    const requestAdapter = async () => {
+      throw new Error('GPU process unavailable');
+    };
+    await withGpu({ requestAdapter }, async () => {
+      expect((await failure()).reason).toBe('no-adapter');
+    });
+  });
+
+  it('reports "no-device" with the cause when the adapter refuses a device', async () => {
+    const requestDevice = async () => {
+      throw new Error('out of memory');
+    };
+    await withGpu({ requestAdapter: async () => ({ requestDevice }) }, async () => {
+      const error = await failure();
+      expect(error.reason).toBe('no-device');
+      expect(error.message).toContain('out of memory');
+    });
+  });
+
+  it('reports "no-context" when the canvas has no WebGPU context', async () => {
+    const device = { lost: new Promise(() => {}), addEventListener: () => {} };
+    const gpu = { requestAdapter: async () => ({ requestDevice: async () => device }) };
+    const canvas = { getContext: () => null } as unknown as HTMLCanvasElement;
+    await withGpu(gpu, async () => {
+      expect((await failure(canvas)).reason).toBe('no-context');
+    });
+  });
 });

@@ -1,0 +1,21 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<h2 id="gpu-notice-title">{{ guidance().title }}</h2>
+<p>{{ guidance().cause }}</p>
+<h3>What you can do</h3>
+<ol>
+  @for (step of guidance().steps; track step) {
+    <li>{{ step }}</li>
+  }
+</ol>
+<div class="actions">
+  <button type="button" class="retry" (click)="retry.emit()" [disabled]="retrying()">
+    {{ retrying() ? 'Starting…' : guidance().retryLabel }}
+  </button>
+  <button type="button" (click)="reload.emit()">Reload the page</button>
+</div>
+@if (guidance().keepsData && hasData()) {
+  <p class="note">The series you imported stay in memory while this page is open.</p>
+}

@@ -22,7 +22,9 @@ import {
 import { Orientation, clamp } from '@open-rt-studio/dicom';
 import { RecentStore } from '../recent-store';
 import { PreferencesStore } from '../preferences-store';
-import { modifierLabel } from '../platform';
+import { hostBrowser, hostOs, modifierLabel } from '../platform';
+import { gpuGuidance, type GpuProblemState } from './gpu-guidance';
+import { GpuNotice } from './gpu-notice/gpu-notice';
 import { MeasurementStore } from './measurement-store';
 import { LayersStore } from './layers-store';
 import { Camera3dStore } from './camera3d-store';
@@ -85,7 +87,7 @@ const MAX_ZOOM = 20;
 @Component({
   selector: 'app-viewer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RangeFill, HistoryPanel],
+  imports: [RangeFill, HistoryPanel, GpuNotice],
   providers: [
     MeasurementStore,
     LayersStore,
@@ -158,6 +160,23 @@ export class Viewer {
   private readonly renderer = signal<SliceRenderer | null>(null);
   private readonly load = signal<LoadState>({ status: 'idle' });
   private readonly gpuError = signal<string | null>(null);
+  /** The kind of GPU problem behind {@link gpuError}; null while WebGPU works. */
+  private readonly gpuProblem = signal<GpuProblemState | null>(null);
+  /** True while a retry of the WebGPU start-up is running. */
+  protected readonly gpuRetrying = signal(false);
+  /**
+   * What to show instead of the images when WebGPU is missing or was lost: the
+   * likely cause and what to do about it on this browser and operating system.
+   */
+  protected readonly gpuGuidance = computed(() => {
+    const state = this.gpuProblem();
+    if (!state) return null;
+    return gpuGuidance(state, {
+      os: hostOs(),
+      browser: hostBrowser(),
+      secureContext: typeof isSecureContext === 'undefined' ? true : isSecureContext,
+    });
+  });
   /** Canvas size in CSS pixels plus the device-pixel ratio; drives layout + render. */
   private readonly viewport = signal({ width: 0, height: 0, dpr: 1 });
 
@@ -484,6 +503,7 @@ export class Viewer {
       camera3d: () => this.camera3d(),
       renderer: this.renderer,
       gpuError: this.gpuError,
+      gpuProblem: this.gpuProblem,
       viewport: this.viewport,
       sliceIndices: this.sliceIndices,
       zooms: this.zooms,
@@ -594,6 +614,26 @@ export class Viewer {
   private placementAtEvent(event: MouseEvent): PanePlacement | null {
     const bounds = this.canvasRef().nativeElement.getBoundingClientRect();
     return placementAt(this.panes(), event.clientX - bounds.left, event.clientY - bounds.top);
+  }
+
+  /**
+   * Start WebGPU again without reloading the page. The loaded series stay in
+   * memory; once a renderer exists again the render effects upload and draw
+   * them as after a first start.
+   */
+  protected async retryGpu(): Promise<void> {
+    if (this.gpuRetrying()) return;
+    this.gpuRetrying.set(true);
+    try {
+      await this.render.initGpu();
+    } finally {
+      this.gpuRetrying.set(false);
+    }
+  }
+
+  /** Reload the page: the last resort when WebGPU cannot be started again. */
+  protected reloadPage(): void {
+    location.reload();
   }
 }
 

@@ -52,6 +52,9 @@ export class StatusController {
     () => this.deps!.gpuError() !== null || this.deps!.load().status === 'error',
   );
 
+  /** True once anything has been imported into the catalog in this session. */
+  readonly hasCatalog = computed(() => this.catalog.currentPatient() !== null);
+
   /** True while a load is in flight, gating the progress bar. */
   readonly isLoading = computed(() => this.deps!.load().status === 'loading');
 

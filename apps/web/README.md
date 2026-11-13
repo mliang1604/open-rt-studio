@@ -85,7 +85,10 @@ TypeScript source through `paths` in `tsconfig.base.json`, so `ng serve`
 rebuilds when a package file changes and no package build is needed first.
 
 A browser with WebGPU is required to render images: a current Chrome, Edge or
-Safari.
+Safari. Without it the viewer shows what is missing and what to do
+about it for the browser and operating system at hand (`viewer/gpu-guidance.ts`).
+When the device is lost while the application runs, Reinitialize starts a new
+device and draws the loaded series again without reloading them.
 
 Ported from dicom-workspace `src/app` (MIT, same author) and relicensed to MPL
 2.0.

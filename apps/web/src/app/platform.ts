@@ -52,3 +52,42 @@ export function modifierLabel(key: ModifierKey, mac: boolean = isMac()): string 
     }
   }
 }
+
+/** The host operating system, as far as guidance text needs to tell them apart. */
+export type HostOs = 'mac' | 'windows' | 'linux' | 'android' | 'ios' | 'other';
+
+/** The browser family, as far as guidance text needs to tell them apart. */
+export type HostBrowser = 'chrome' | 'edge' | 'firefox' | 'safari' | 'other';
+
+function hostUserAgent(): string {
+  return typeof navigator === 'undefined' ? '' : (navigator.userAgent ?? '');
+}
+
+/**
+ * The host operating system. Pass `platform` and `userAgent` explicitly to
+ * unit-test the mapping without touching the global `navigator`.
+ */
+export function hostOs(
+  platform: string = hostPlatform(),
+  userAgent: string = hostUserAgent(),
+): HostOs {
+  if (/android/i.test(platform) || /android/i.test(userAgent)) return 'android';
+  if (/iphone|ipad|ipod|ios/i.test(platform) || /iphone|ipad|ipod/i.test(userAgent)) return 'ios';
+  if (/mac/i.test(platform)) return 'mac';
+  if (/win/i.test(platform)) return 'windows';
+  if (/linux|cros|x11/i.test(platform)) return 'linux';
+  return 'other';
+}
+
+/**
+ * The browser family from a user-agent string. Edge and other Chromium
+ * browsers also say "Chrome" and every one of them says "Safari", so the order
+ * of the checks matters.
+ */
+export function hostBrowser(userAgent: string = hostUserAgent()): HostBrowser {
+  if (/\bEdg(e|A|iOS)?\//.test(userAgent)) return 'edge';
+  if (/\b(Firefox|FxiOS)\//.test(userAgent)) return 'firefox';
+  if (/\b(Chrome|Chromium|CriOS)\//.test(userAgent)) return 'chrome';
+  if (/\bSafari\//.test(userAgent)) return 'safari';
+  return 'other';
+}

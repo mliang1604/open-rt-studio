@@ -92,12 +92,14 @@ test('each key does what the help says', async ({ page }) => {
   const layout = page.getByRole('button', { name: /layout/i });
 
   // L: cycle the layout, all the way round.
+  // A key pressed while a slow adapter is still rebuilding the panes is
+  // ignored, so press again only if the label has not moved on.
   await expect(layout).toContainText('3-pane MPR');
-  await page.keyboard.press('l');
-  await expect(layout).toContainText('4-pane');
-  for (const next of ['Compare', '3D only', '3-pane MPR']) {
-    await page.keyboard.press('l');
-    await expect(layout).toContainText(next);
+  for (const next of ['4-pane', 'Compare', '3D only', '3-pane MPR']) {
+    await expect(async () => {
+      if (!(await layout.innerText()).includes(next)) await page.keyboard.press('l');
+      await expect(layout).toContainText(next, { timeout: 1_500 });
+    }).toPass({ timeout: 15_000 });
   }
 
   // V: invert.

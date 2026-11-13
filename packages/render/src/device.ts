@@ -9,7 +9,26 @@ export interface GpuContext {
   canvas: HTMLCanvasElement;
 }
 
-export class WebGpuUnavailableError extends Error {}
+/**
+ * Why WebGPU could not be started, so the application can say what to do:
+ *
+ * - `no-api`: the browser does not expose `navigator.gpu` at all
+ * - `no-adapter`: the API is there but no graphics adapter was offered
+ * - `no-device`: an adapter was found but refused to create a device
+ * - `no-context`: the canvas could not provide a WebGPU context
+ */
+export type GpuUnavailableReason = 'no-api' | 'no-adapter' | 'no-device' | 'no-context';
+
+export class WebGpuUnavailableError extends Error {
+  constructor(
+    message: string,
+    /** Which step of start-up failed. */
+    readonly reason: GpuUnavailableReason,
+  ) {
+    super(message);
+    this.name = 'WebGpuUnavailableError';
+  }
+}
 
 /** Hooks for runtime device events surfaced after a successful init. */
 export interface GpuHandlers {
@@ -36,18 +55,35 @@ export async function initWebGpu(
   if (!navigator.gpu) {
     throw new WebGpuUnavailableError(
       'WebGPU is not available in this browser. Try a recent Chrome, Edge, or Safari.',
+      'no-api',
     );
   }
 
-  const adapter = await navigator.gpu.requestAdapter();
+  // requestAdapter resolves to null when nothing suitable exists, and can also
+  // reject (for example when the GPU process is unavailable).
+  let adapter: GPUAdapter | null;
+  try {
+    adapter = await navigator.gpu.requestAdapter();
+  } catch {
+    adapter = null;
+  }
   if (!adapter) {
-    throw new WebGpuUnavailableError('No suitable GPU adapter was found.');
+    throw new WebGpuUnavailableError('No suitable GPU adapter was found.', 'no-adapter');
   }
 
-  const device = await adapter.requestDevice();
+  let device: GPUDevice;
+  try {
+    device = await adapter.requestDevice();
+  } catch (error) {
+    const detail = error instanceof Error && error.message ? ` (${error.message})` : '';
+    throw new WebGpuUnavailableError(
+      `The GPU adapter could not create a device${detail}.`,
+      'no-device',
+    );
+  }
   const context = canvas.getContext('webgpu');
   if (!context) {
-    throw new WebGpuUnavailableError('Could not create a WebGPU canvas context.');
+    throw new WebGpuUnavailableError('Could not create a WebGPU canvas context.', 'no-context');
   }
 
   // A runtime device loss otherwise just stops producing frames silently; route

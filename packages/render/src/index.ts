@@ -26,7 +26,12 @@ export {
 } from './camera.js';
 export { COLORMAPS } from './colormap.js';
 export { focusPanePoint, focusSliceIndex } from './crosshair.js';
-export { type GpuContext, initWebGpu } from './device.js';
+export {
+  type GpuContext,
+  type GpuUnavailableReason,
+  initWebGpu,
+  WebGpuUnavailableError,
+} from './device.js';
 export { DEFAULT_DVR_LIGHTING, type DvrLighting } from './dvr.js';
 export { composePaneViews } from './frame.js';
 export {
