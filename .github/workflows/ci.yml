@@ -102,7 +102,7 @@ jobs:
           name: e2e-smoke-failures
           path: |
             apps/web/test-results/
-            apps/web/playwright-report/
+            e2e.log
           retention-days: 7
           if-no-files-found: ignore
 
@@ -111,9 +111,21 @@ jobs:
   # Chromium for a software WebGPU adapter, and anything that still finds no
   # adapter reports as skipped (see apps/web/e2e/fixtures/app.ts, requireWebGpu).
   e2e:
-    name: End-to-end
+    name: End-to-end (${{ matrix.variant }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: baseline
+            args: ''
+          - variant: no-watchdog
+            args: '--disable-gpu-watchdog'
+          - variant: in-process-gpu
+            args: '--in-process-gpu'
+          - variant: baseline-2
+            args: ''
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -133,18 +145,20 @@ jobs:
 
       # Playwright starts the dev server itself and waits for it.
       - name: End-to-end tests
-        run: npm run e2e -- --repeat-each 2
+        run: npm run e2e -- --repeat-each 3 2>&1 | tee e2e.log | grep -v 'pw:browser' ; grep -E 'pw:browser' e2e.log | grep -i -E 'gpu|dawn|vulkan|swiftshader|crash|exited|lost|watchdog|error' | grep -v -i 'vite' | cut -c1-400 | sort | uniq -c | sort -rn | head -80; grep -E '[0-9]+ (failed|passed)' e2e.log | tail -3; ! grep -q -E '^ +[0-9]+ failed' e2e.log
         env:
           E2E_SOFTWARE_GPU: '1'
+          E2E_EXTRA_ARGS: ${{ matrix.args }}
+          DEBUG: 'pw:browser'
 
       # Traces and screenshots of failed tests, and the HTML report.
       - name: Upload failure artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-failures
+          name: e2e-failures-${{ matrix.variant }}
           path: |
             apps/web/test-results/
-            apps/web/playwright-report/
+            e2e.log
           retention-days: 7
           if-no-files-found: ignore

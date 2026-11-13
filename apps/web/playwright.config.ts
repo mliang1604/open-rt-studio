@@ -26,6 +26,8 @@ if (process.env['E2E_SOFTWARE_GPU']) {
 }
 // Without GPU access Chromium has no adapter to give: requestAdapter() is null.
 if (process.env['E2E_NO_WEBGPU']) gpuArgs = ['--disable-gpu'];
+if (process.env['E2E_EXTRA_ARGS']) gpuArgs.push(...process.env['E2E_EXTRA_ARGS'].split(' '));
+gpuArgs.push('--enable-logging=stderr', '--v=0');
 
 export default defineConfig({
   testDir: './e2e',
