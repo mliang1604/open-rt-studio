@@ -189,8 +189,10 @@ tests run for real instead of skipping. What the software adapter cannot do is
 read rendered pixels back, so the one pixel comparison in the suite (the pane
 before and after a device loss) runs only on a machine with a GPU.
 
-`End-to-end` is not a required check. The `main` ruleset requires `Build &
-test` only.
+At the time of the audit `End-to-end` was not a required check. Since #164
+the smoke tests run in their own job, `End-to-end smoke`, which the `main`
+ruleset requires together with `Build & test`; the whole suite stays
+optional.
 
 ## What this audit did not check
 

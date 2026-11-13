@@ -13,6 +13,8 @@ import { defineConfig, devices } from '@playwright/test';
 //                or "chrome" to use an installed Google Chrome
 //   E2E_SOFTWARE_GPU=1  ask Chromium for a software WebGPU adapter, for
 //                machines without a GPU such as CI runners
+//   E2E_REQUIRE_WEBGPU=1  fail, instead of skip, a test that needs WebGPU
+//                when there is no adapter (the required smoke job in CI)
 //   E2E_NO_WEBGPU=1     turn WebGPU off, to check that GPU-dependent tests
 //                skip and that the app explains itself without it
 const PORT = Number(process.env['E2E_PORT'] ?? 4200);

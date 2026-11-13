@@ -48,10 +48,11 @@ All commands run from the repository root. Node 24.15 or newer is required
 - End-to-end tests: `npm run e2e` (Playwright; run `npx playwright install
 chromium` in `apps/web` once). See `apps/web/README.md`.
 
-CI runs the same commands in the `Build & test` job, which is the required
-check on `main`. Keep that job name stable. A second job, `End-to-end`, runs the
-Playwright tests; it is not required by the ruleset, so wait for it yourself
-before merging.
+CI runs the same commands in the `Build & test` job. It and `End-to-end smoke`
+(`npm run e2e:smoke`, only `apps/web/e2e/smoke.spec.ts`) are the required
+checks on `main`. Keep both job names stable. A third job, `End-to-end`, runs
+the whole Playwright suite; it is not required by the ruleset, so wait for it
+yourself before merging.
 
 ## Patterns
 
