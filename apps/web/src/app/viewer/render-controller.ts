@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import {
   initWebGpu,
+  WebGpuUnavailableError,
   type GpuContext,
   ensureSurfaceSortScratch,
   packSurfaceFrame,
@@ -34,6 +35,7 @@ import {
   maskColorLut,
   MASK_LUT_SIZE,
 } from '@open-rt-studio/render';
+import type { GpuProblemState } from './gpu-guidance';
 import type { Volume } from '@open-rt-studio/dicom';
 import { LayersController } from './layers-controller';
 import { View3dController } from './view3d-controller';
@@ -81,6 +83,8 @@ export interface RenderInit {
   readonly renderer: WritableSignal<SliceRenderer | null>;
   /** Surface a fatal GPU error (or clear it on a successful init). */
   readonly gpuError: WritableSignal<string | null>;
+  /** What kind of GPU problem it is, for the guidance panel; null when healthy. */
+  readonly gpuProblem: WritableSignal<GpuProblemState | null>;
   /** The viewport size signal (synced on resize). */
   readonly viewport: WritableSignal<Viewport>;
   // Per-frame view state the pane composition reads.
@@ -121,6 +125,8 @@ export class RenderController {
   private frameHandle: number | null = null;
   private settleHandle: ReturnType<typeof setTimeout> | null = null;
   private resizeHandle: number | null = null;
+  /** Whether the canvas already has its resize observer. */
+  private resizeObserved = false;
   /** Triangle centroids (3 floats each) for the visible ROI surface mesh, for depth sorting. */
   private surfaceCentroids: Float32Array | null = null;
   private surfaceTriangleCount = 0;
@@ -222,11 +228,32 @@ export class RenderController {
         onDeviceLost: (info) => this.onDeviceLost(info),
         onUncapturedError: (error) => console.error('WebGPU error:', error.message),
       });
-      d.renderer.set(new SliceRenderer(this.gpu));
+      const renderer = new SliceRenderer(this.gpu);
+      // A retry after a device loss comes back with the data that was loaded.
+      // The base volume has to be uploaded here, because otherwise it is only
+      // pushed when a series is loaded. The overlay, the label mask and the
+      // structure surfaces follow from their effects, which re-run as soon as
+      // the renderer signal changes.
+      const volume = this.layersCtl.volume();
+      if (volume) renderer.setVolume(volume);
+      d.renderer.set(renderer);
       d.gpuError.set(null); // a successful (re)init clears any prior GPU error
-      this.observeResize(canvas);
+      d.gpuProblem.set(null);
+      // The canvas outlives the device, so a retry must not observe it twice.
+      if (!this.resizeObserved) this.observeResize(canvas);
+      else this.syncViewport(canvas);
     } catch (error) {
       d.gpuError.set(error instanceof Error ? error.message : String(error));
+      // Anything that is not one of the classified start-up failures is treated
+      // as "found an adapter but could not start", with the message as detail.
+      d.gpuProblem.set(
+        error instanceof WebGpuUnavailableError
+          ? { problem: error.reason, detail: error.reason === 'no-device' ? error.message : null }
+          : {
+              problem: 'no-device',
+              detail: error instanceof Error ? error.message : String(error),
+            },
+      );
     }
   }
 
@@ -241,10 +268,12 @@ export class RenderController {
     this.gpu = null;
     d.renderer.set(null);
     const reason = info.message ? ` (${info.message})` : '';
-    d.gpuError.set(`The GPU device was lost${reason}. Reload the page to continue.`);
+    d.gpuError.set(`The GPU device was lost${reason}. Reinitialize to continue.`);
+    d.gpuProblem.set({ problem: 'device-lost', detail: info.message || null });
   }
 
   private observeResize(canvas: HTMLCanvasElement): void {
+    this.resizeObserved = true;
     // Coalesce the burst of notifications during a drag-resize into one sync per
     // frame, so the canvas isn't repeatedly resized (and re-rendered) mid-layout.
     const observer = new ResizeObserver(() => {
