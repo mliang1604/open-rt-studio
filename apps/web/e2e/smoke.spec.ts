@@ -101,3 +101,12 @@ test.describe('test harness', () => {
     expect(info.maxTextureDimension3D).toBeGreaterThanOrEqual(256);
   });
 });
+
+test('demonstration only: fails on purpose so CI uploads its failure artifacts', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'This heading does not exist' })).toBeVisible({
+    timeout: 3_000,
+  });
+});
