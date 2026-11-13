@@ -42,9 +42,13 @@ All commands run from the repository root. Node 24.15 or newer is required
 - Build everything: `npm run build`
 - Unit tests: `npm test`
 - One workspace: add `-w <name>`, for example `npm test -w @open-rt-studio/dicom`
+- End-to-end tests: `npm run e2e` (Playwright; run `npx playwright install
+chromium` in `apps/web` once). See `apps/web/README.md`.
 
 CI runs the same commands in the `Build & test` job, which is the required
-check on `main`. Keep that job name stable.
+check on `main`. Keep that job name stable. A second job, `End-to-end`, runs the
+Playwright tests; it is not required by the ruleset, so wait for it yourself
+before merging.
 
 ## Patterns
 
@@ -65,8 +69,10 @@ check on `main`. Keep that job name stable.
   file inside the package. Add new public names to the package's
   `src/index.ts`.
 - **Specs sit next to the code** as `*.spec.ts`. Prefer testing pure helpers.
-- **Tests must pass without a GPU.** CI runners have none. Anything that needs
-  WebGPU detects that it is missing and skips explicitly.
+- **Tests must pass without a GPU.** CI runners have none. Unit tests use
+  hand-written fakes of the WebGPU objects. End-to-end tests call
+  `requireWebGpu(page)` before the first GPU-dependent step, which reports the
+  test as skipped when there is no adapter.
 
 ## Rules
 

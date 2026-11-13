@@ -60,3 +60,46 @@ jobs:
             git diff --stat
             exit 1
           fi
+
+  # Runs the application in Chromium. Not the required check: the main ruleset
+  # requires only "Build & test". Runners have no GPU, so the tests ask Chromium
+  # for a software WebGPU adapter, and anything that still finds no adapter
+  # reports as skipped (see apps/web/e2e/fixtures/app.ts, requireWebGpu).
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # Playwright starts the dev server itself and waits for it.
+      - name: End-to-end tests
+        run: npm run e2e
+        env:
+          E2E_SOFTWARE_GPU: '1'
+
+      # Traces and screenshots of failed tests, and the HTML report.
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failures
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
