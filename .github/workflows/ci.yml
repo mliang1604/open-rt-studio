@@ -113,7 +113,7 @@ jobs:
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -133,13 +133,13 @@ jobs:
 
       # Playwright starts the dev server itself and waits for it.
       - name: End-to-end tests
-        run: npm run e2e
+        run: npm run e2e -- --repeat-each 2
         env:
           E2E_SOFTWARE_GPU: '1'
 
       # Traces and screenshots of failed tests, and the HTML report.
       - name: Upload failure artifacts
-        if: ${{ failure() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-failures

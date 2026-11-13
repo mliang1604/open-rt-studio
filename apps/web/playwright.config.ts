@@ -32,7 +32,7 @@ export default defineConfig({
   outputDir: './test-results',
   fullyParallel: false,
   forbidOnly: CI,
-  retries: CI ? 1 : 0,
+  retries: 0,
   workers: 1,
   reporter: CI ? [['list'], ['github'], ['html', { open: 'never' }]] : 'list',
   timeout: 60_000,
