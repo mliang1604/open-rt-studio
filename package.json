@@ -25,10 +25,12 @@
     "format:check": "prettier --check .",
     "check:headers": "node scripts/check-license-headers.mjs",
     "test:scripts": "node --test \"scripts/**/*.spec.mjs\"",
-    "check:dicom": "node scripts/check-no-dicom.mjs"
+    "check:dicom": "node scripts/check-no-dicom.mjs",
+    "start": "npm start -w @open-rt-studio/web"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "angular-eslint": "^22.6.0",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",
     "prettier": "^3.8.4",
