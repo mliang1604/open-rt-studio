@@ -82,9 +82,15 @@ Viewer (`src/app/viewer`):
   the panel that shows the reformat. The geometry is `packages/render` `cpr.ts`.
 - `gpu-notice/`, `empty-state/`: what the viewport shows when WebGPU is missing
   and before anything is imported.
+- `metadata-panel/`, `dvr-panel/`, `shortcut-help/`: the cards that float over
+  the viewport. They share `panel-card.css`, which repeats the viewer's button
+  and input look, because a component's styles do not reach its children.
 
-New interface goes into its own component like these. `viewer.css` is close to
-its size budget, and a component keeps its styles to itself.
+New interface goes into its own component like these. `viewer.css` has a size
+budget (the build fails at 13 kB), and a component keeps its styles to itself.
+
+The viewer route is loaded on demand (`app.routes.ts`), so the notice page
+loads without it and the initial bundle stays under its 500 kB budget.
 
 The viewer is one tightly coupled component by design of the code it was
 ported from. Split it only together with the feature work that needs the

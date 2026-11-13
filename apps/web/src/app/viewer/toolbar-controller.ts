@@ -55,7 +55,6 @@ export interface ToolbarInit {
   readonly invert: WritableSignal<boolean>;
   readonly helpOpen: WritableSignal<boolean>;
   readonly infoPanelOpen: WritableSignal<boolean>;
-  readonly rawTagFilter: WritableSignal<string>;
   readonly zooms: WritableSignal<PerOrientation>;
   readonly pans: WritableSignal<PerOrientationPan>;
   readonly sliceIndices: WritableSignal<PerOrientation>;
@@ -344,10 +343,6 @@ export class ToolbarController {
   /** Open/close the metadata & raw-tag inspector panel. */
   toggleInfoPanel(): void {
     this.deps!.infoPanelOpen.update((open) => !open);
-  }
-
-  onRawTagFilterInput(event: Event): void {
-    if (event.target instanceof HTMLInputElement) this.deps!.rawTagFilter.set(event.target.value);
   }
 
   /** Save a PNG of the active pane; the export plumbing lives in the capture controller. */

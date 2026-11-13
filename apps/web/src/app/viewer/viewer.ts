@@ -29,6 +29,9 @@ import { gpuGuidance, type GpuProblemState } from './gpu-guidance';
 import { CprController } from './cpr/cpr-controller';
 import { CprOverlay, type CprPointMove } from './cpr/cpr-overlay';
 import { CprPanel } from './cpr/cpr-panel';
+import { DvrPanel } from './dvr-panel/dvr-panel';
+import { MetadataPanel } from './metadata-panel/metadata-panel';
+import { ShortcutHelp } from './shortcut-help/shortcut-help';
 import { CprStore } from './cpr/cpr-store';
 import { EmptyState } from './empty-state/empty-state';
 import { GpuNotice } from './gpu-notice/gpu-notice';
@@ -94,7 +97,17 @@ const MAX_ZOOM = 20;
 @Component({
   selector: 'app-viewer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RangeFill, HistoryPanel, GpuNotice, EmptyState, CprOverlay, CprPanel],
+  imports: [
+    RangeFill,
+    HistoryPanel,
+    GpuNotice,
+    EmptyState,
+    CprOverlay,
+    CprPanel,
+    MetadataPanel,
+    DvrPanel,
+    ShortcutHelp,
+  ],
   providers: [
     MeasurementStore,
     LayersStore,
@@ -252,7 +265,7 @@ export class Viewer {
   /** Whether the keyboard-shortcut help overlay is open. */
   protected readonly helpOpen = signal(false);
   /** The modal help panel, so the toolbar controller can move focus into it on open. */
-  private readonly helpPanelRef = viewChild<ElementRef<HTMLElement>>('helpPanel');
+  private readonly shortcutHelp = viewChild(ShortcutHelp);
   /** The shortcuts listed in the help overlay, in display order. */
   protected readonly shortcuts = SHORTCUTS;
   /** Cine playback state/logic; provided per-component (see providers). */
@@ -608,12 +621,11 @@ export class Viewer {
       invert: this.invert,
       helpOpen: this.helpOpen,
       infoPanelOpen: this.infoPanelOpen,
-      rawTagFilter: this.rawTagFilter,
       zooms: this.zooms,
       pans: this.pans,
       sliceIndices: this.sliceIndices,
       slabThicknessMm: () => this.slabThicknessMm(),
-      helpPanel: () => this.helpPanelRef()?.nativeElement,
+      helpPanel: () => this.shortcutHelp()?.panelElement(),
       activeTool: this.activeTool,
       toggleHistory: () => this.historyPanel()?.toggleCollapsedFromHotkey(),
     });

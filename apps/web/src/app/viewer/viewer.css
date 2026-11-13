@@ -794,9 +794,8 @@ canvas.movable {
   transition: width 0.15s ease-out;
 }
 
-/* Overlays that centre a single child over the viewport. */
-.drop-overlay,
-.help-overlay {
+/* An overlay that centres a single child over the viewport. */
+.drop-overlay {
   position: absolute;
   display: flex;
   align-items: center;
@@ -858,146 +857,6 @@ canvas.movable {
   font-variant-numeric: tabular-nums;
 }
 
-/* The glass card shared by the metadata inspector and the shortcut help. */
-.info-panel,
-.help-panel,
-.dvr-panel {
-  display: flex;
-  flex-direction: column;
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-  color: var(--text);
-  overflow: hidden;
-}
-
-/* Metadata & raw-tag inspector: a scrollable panel pinned to the viewport's
-   right edge. Unlike the other overlays it accepts pointer input (scroll/search). */
-.info-panel {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  bottom: 12px;
-  width: 340px;
-  max-width: calc(100% - 24px);
-}
-
-.info-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.info-close {
-  padding: 2px 8px;
-  font-size: 12px;
-}
-
-.info-body {
-  padding: 8px 12px 12px;
-  overflow-y: auto;
-}
-
-/* Keyboard & mouse shortcut help: a dimmed backdrop with a centred glass card
-   (the card's look is shared with .info-panel above). The backdrop catches
-   clicks to dismiss; the card stops them so it stays open. */
-.help-overlay {
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 24px;
-}
-
-/* The shortcut rows reuse .info-body / .info-row from the metadata panel. */
-.help-panel {
-  width: 420px;
-  max-width: 100%;
-  max-height: 100%;
-}
-
-.info-group {
-  margin-top: 12px;
-}
-
-.info-group:first-child {
-  margin-top: 0;
-}
-
-.info-group h3 {
-  margin: 0 0 6px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--accent);
-}
-
-.info-group dl {
-  margin: 0;
-}
-
-.info-row {
-  display: flex;
-  gap: 8px;
-  padding: 2px 0;
-  font-size: 12px;
-}
-
-.info-row dt {
-  flex: 0 0 38%;
-  color: var(--muted);
-}
-
-.info-row dd {
-  margin: 0;
-  flex: 1;
-  word-break: break-word;
-}
-
-.info-search {
-  width: 100%;
-  margin-bottom: 8px;
-}
-
-.raw-tags {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.raw-tag {
-  display: flex;
-  gap: 6px;
-  padding: 2px 0;
-  border-top: 1px solid var(--glass-border);
-}
-
-.raw-tag-id {
-  flex: none;
-  color: var(--muted);
-}
-
-.raw-tag-vr {
-  flex: 0 0 22px;
-  color: var(--accent);
-}
-
-.raw-tag-name,
-.raw-tag-value {
-  flex: 1;
-  word-break: break-word;
-}
-
-.raw-tag-empty {
-  padding: 6px 0;
-  color: var(--muted);
-}
-
 /* Graceful degradation: drop translucency where it harms legibility or is
    unsupported, falling back to solid surfaces. */
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
@@ -1007,8 +866,7 @@ canvas.movable {
   kbd,
   .pane-tag,
   .status,
-  .probe,
-  .info-panel {
+  .probe {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: var(--panel);
@@ -1029,95 +887,11 @@ canvas.movable {
   kbd,
   .pane-tag,
   .status,
-  .probe,
-  .info-panel,
-  .dvr-panel {
+  .probe {
     background: var(--panel);
   }
 
   .warning {
     background: rgba(60, 42, 8, 0.95);
   }
-}
-
-/* DVR transfer-function + lighting editor: a glass panel pinned to the viewport's
-   left edge, shown only in DVR mode. Drag the curve/sliders; never affects MPR. */
-.dvr-panel {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  width: 280px;
-  max-width: calc(100% - 24px);
-  font-size: 12px;
-}
-
-.dvr-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 12px;
-}
-
-/* Opacity curve: a flat box; the polyline/area use a 0..100 viewBox. */
-.tf-editor {
-  width: 100%;
-  height: 110px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  touch-action: none;
-}
-
-.tf-area {
-  fill: rgba(120, 170, 255, 0.18);
-}
-
-.tf-line {
-  fill: none;
-  stroke: var(--accent, #6aa6ff);
-}
-
-.tf-point {
-  stroke: #fff;
-  cursor: grab;
-}
-
-.tf-line,
-.tf-point {
-  stroke-width: 1.2;
-  vector-effect: non-scaling-stroke;
-}
-
-.tf-point.selected {
-  stroke-width: 2.4;
-}
-
-.tf-axis {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.tf-axis span:nth-child(2) {
-  text-align: center;
-}
-
-.dvr-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.dvr-color,
-.dvr-slider {
-  color: var(--muted);
-}
-
-.dvr-slider {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  align-items: center;
-  gap: 8px;
 }

@@ -1,0 +1,31 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* A dimmed backdrop over the viewport with a centred glass card
+   (../panel-card.css). The backdrop closes the help when clicked. */
+:host {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 24px;
+}
+
+.help-panel {
+  width: 420px;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+kbd {
+  font:
+    11px/1 ui-monospace,
+    monospace;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
