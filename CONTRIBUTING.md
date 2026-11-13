@@ -55,6 +55,10 @@ WebGPU; tests alone are not enough.
 - Auto-merge is allowed, so `gh pr merge --squash --auto` merges a pull
   request by itself once the check passes.
 
+A second job, `End-to-end`, runs the Playwright tests in Chromium with a
+software WebGPU adapter. It is not required by the ruleset, so nothing stops
+a merge while it is red: wait for it before merging.
+
 `Build & test` runs, in order: `npm ci` (fails when `package.json` and the
 lockfile disagree), `npm run lint`, `npm run format:check`, `npm run build`,
 `npm test`, and a check that none of that changed a tracked file. Any step
