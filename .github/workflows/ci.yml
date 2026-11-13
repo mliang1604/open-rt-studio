@@ -1,8 +1,8 @@
 name: CI
 
-# Gates merges into main. The job name "Build & test" is what the main ruleset
-# requires, and what auto-merge waits for, so keep it stable. See
-# CONTRIBUTING.md, "Required check and merging".
+# Gates merges into main. The job names "Build & test" and "End-to-end smoke"
+# are what the main ruleset requires, and what auto-merge waits for, so keep
+# them stable. See CONTRIBUTING.md, "Required checks and merging".
 on:
   pull_request:
   push:
@@ -61,10 +61,55 @@ jobs:
             exit 1
           fi
 
-  # Runs the application in Chromium. Not the required check: the main ruleset
-  # requires only "Build & test". Runners have no GPU, so the tests ask Chromium
-  # for a software WebGPU adapter, and anything that still finds no adapter
-  # reports as skipped (see apps/web/e2e/fixtures/app.ts, requireWebGpu).
+  # The smoke tests in Chromium: the notice flow, loading a synthetic series,
+  # a probe value and a WebGPU device. Required by the main ruleset, so it runs
+  # only apps/web/e2e/smoke.spec.ts and stays short. Runners have no GPU, so
+  # Chromium is asked for a software WebGPU adapter. E2E_REQUIRE_WEBGPU makes a
+  # missing adapter a failure here: a required check must not pass because its
+  # tests were skipped.
+  e2e-smoke:
+    name: End-to-end smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # Playwright starts the dev server itself and waits for it.
+      - name: Smoke tests
+        run: npm run e2e:smoke
+        env:
+          E2E_SOFTWARE_GPU: '1'
+          E2E_REQUIRE_WEBGPU: '1'
+
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-failures
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The whole end-to-end suite. Not a required check: the main ruleset requires
+  # "Build & test" and "End-to-end smoke". Runners have no GPU, so the tests ask
+  # Chromium for a software WebGPU adapter, and anything that still finds no
+  # adapter reports as skipped (see apps/web/e2e/fixtures/app.ts, requireWebGpu).
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest

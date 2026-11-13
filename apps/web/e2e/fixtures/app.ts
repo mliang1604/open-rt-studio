@@ -31,12 +31,21 @@ export async function hasWebGpu(page: Page): Promise<boolean> {
 }
 
 /**
- * Skip the rest of the test when there is no WebGPU adapter. CI runners have
- * no GPU, so anything that needs one must report as skipped, never as failed.
- * Call it after the page has loaded and before the first GPU-dependent step.
+ * Skip the rest of the test when there is no WebGPU adapter, so a machine
+ * without a GPU reports the test as skipped, never as failed. Call it after
+ * the page has loaded and before the first GPU-dependent step.
+ *
+ * With `E2E_REQUIRE_WEBGPU=1` a missing adapter fails the test instead. CI
+ * sets it for the required smoke job, where the software adapter is expected
+ * to work: a required check must not pass because its tests were skipped.
  */
 export async function requireWebGpu(page: Page): Promise<void> {
   const available = await hasWebGpu(page);
+  if (process.env['E2E_REQUIRE_WEBGPU']) {
+    expect(available, 'E2E_REQUIRE_WEBGPU is set and this browser has no WebGPU adapter').toBe(
+      true,
+    );
+  }
   test.skip(!available, 'No WebGPU adapter in this browser; GPU-dependent checks skipped.');
 }
 

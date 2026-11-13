@@ -12,6 +12,7 @@
     "pretest": "tsc -p e2e/tsconfig.json",
     "test": "ng test --watch=false",
     "e2e": "playwright test",
+    "e2e:smoke": "playwright test e2e/smoke.spec.ts",
     "e2e:report": "playwright show-report",
     "lint": "eslint ."
   },
