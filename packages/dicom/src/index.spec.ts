@@ -13,3 +13,9 @@ describe('@open-rt-studio/dicom', () => {
     expect(typeof document).toBe('undefined');
   });
 });
+
+describe('CI demonstration (never merge)', () => {
+  it('fails on purpose so the required check goes red', () => {
+    expect(1 + 1).toBe(3);
+  });
+});
