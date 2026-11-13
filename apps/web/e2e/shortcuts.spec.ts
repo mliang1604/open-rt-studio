@@ -84,6 +84,8 @@ test('the help lists exactly the keys the viewer handles', async ({ page }) => {
   const row = (keys: string): string => rows.find((r) => r.trim().startsWith(keys)) ?? '';
   expect(row('Right-drag')).toContain('Zoom');
   expect(row('Alt+Right-drag')).toContain('window / level');
+  expect(row('Shift+Drag')).toContain('crosshair');
+  expect(row('Crosshair drag')).toContain('Drag the ring');
 });
 
 test('each key does what the help says', async ({ page }) => {

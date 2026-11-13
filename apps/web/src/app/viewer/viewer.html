@@ -747,6 +747,7 @@
       #canvas
       [class.grabbable]="isReady()"
       [class.grabbing]="isPanning()"
+      [class.movable]="interaction.overCrosshair()"
       (wheel)="interaction.onWheel($event)"
       (pointerdown)="interaction.onPointerDown($event)"
       (pointermove)="interaction.onPointerMove($event)"
@@ -863,6 +864,11 @@
         >
           <span class="crosshair-h" [style.top.px]="mark.y - mark.rect.y"></span>
           <span class="crosshair-v" [style.left.px]="mark.x - mark.rect.x"></span>
+          <span
+            class="crosshair-grip"
+            [style.left.px]="mark.x - mark.rect.x"
+            [style.top.px]="mark.y - mark.rect.y"
+          ></span>
         </div>
       }
     </div>

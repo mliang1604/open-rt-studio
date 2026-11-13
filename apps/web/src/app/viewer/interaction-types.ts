@@ -84,6 +84,12 @@ export type Drag =
       readonly startY: number;
     }
   | {
+      /** Moving the linked crosshair: every pane follows the point under the cursor. */
+      readonly kind: 'focus';
+      /** The MPR pane the drag started on, which the cursor is read against. */
+      readonly placement: Extract<PanePlacement, { kind: 'mpr' }>;
+    }
+  | {
       readonly kind: 'oblique';
       /** Which MPR pane's plane is being tilted. */
       readonly orientation: Orientation;
@@ -176,7 +182,16 @@ export interface InteractionInit {
   /** Remember the last MPR column hovered (so the toolbar WL keeps targeting it). */
   readonly setActiveCompareGroup: (group: number) => void;
 
-  /** Shift+click an MPR pane: set the shared focus voxel there. */
+  /**
+   * Whether a canvas point (CSS pixels) is on the grab handle of the linked
+   * crosshair in this pane, so a plain press there drags the crosshair.
+   */
+  readonly crosshairGrabbable: (
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    x: number,
+    y: number,
+  ) => boolean;
+  /** Shift+click or crosshair drag on an MPR pane: set the shared focus voxel there. */
   readonly setFocus: (
     placement: Extract<PanePlacement, { kind: 'mpr' }>,
     event: PointerEvent,

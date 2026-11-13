@@ -24,7 +24,12 @@ export const SHORTCUTS = [
   { keys: 'Scroll', label: 'Change slice (MPR) · zoom (3D)' },
   { keys: 'Right-drag', label: 'Zoom a pane about the point you pressed' },
   { keys: 'Alt+Right-drag', label: 'Adjust window / level' },
-  { keys: 'Shift+Click', label: 'Link every pane to the clicked point (MPR or 3D)' },
+  {
+    keys: 'Shift+Click',
+    label: 'Place the linked crosshair: every pane goes to the point (MPR or 3D)',
+  },
+  { keys: 'Shift+Drag', label: 'Move the crosshair with the cursor; the other panes follow' },
+  { keys: 'Crosshair drag', label: 'Drag the ring where the crosshair lines meet to move it' },
   { keys: 'Knob drag', label: 'Tilt an MPR pane to an oblique plane (double-click resets)' },
   { keys: 'Alt+Drop', label: 'Fuse a dropped series or history chip over the image' },
   { keys: 'Shift+Drop', label: 'Fuse it and open the side-by-side Compare layout' },
