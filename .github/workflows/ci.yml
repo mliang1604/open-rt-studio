@@ -35,7 +35,8 @@ jobs:
       - name: Install
         run: npm ci
 
-      # ESLint, then the MPL 2.0 header check (docs/license-headers.md).
+      # ESLint, the MPL 2.0 header check (docs/license-headers.md) and the guard
+      # against committed DICOM files (docs/test-data.md).
       - name: Lint
         run: npm run lint
 
