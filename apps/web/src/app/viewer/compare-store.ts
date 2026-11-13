@@ -37,6 +37,15 @@ export function defaultGroupNav(): GroupNav[] {
 }
 
 /**
+ * Whether two columns can show one window/level: both hold a known modality
+ * and it is the same one. A CT window means nothing on an MR or a dose, so
+ * columns of different modalities always keep a window each.
+ */
+export function canShareWindow(first: string | null, second: string | null): boolean {
+  return first !== null && first !== '' && first === second;
+}
+
+/**
  * Owns the Compare-layout linking state: whether the columns navigate together
  * (`linked`) and, when unlinked, each group's independent slice/zoom/pan
  * ({@link groupNav}). Holds the regression-prone linked/unlinked resolution that
@@ -54,6 +63,33 @@ export class CompareStore {
 
   /** Per-group independent nav, used only while unlinked. */
   readonly groupNav = signal<readonly GroupNav[]>(defaultGroupNav());
+
+  /**
+   * Whether the columns are asked to show one window/level. Off by default: two
+   * modalities need a window each. It takes effect only while the columns can
+   * share one; see {@link sharesWindow}.
+   */
+  readonly windowLinked = signal(false);
+
+  /**
+   * Whether the second column shows the first column's window: asked for, and
+   * possible (`sameModality`, from {@link canShareWindow}). While it does, the
+   * viewer reads and writes one window for both columns, not two kept equal,
+   * so the columns cannot drift apart.
+   */
+  sharesWindow(sameModality: boolean): boolean {
+    return this.windowLinked() && sameModality;
+  }
+
+  /**
+   * Turn the shared window on or off. Turning it off while it is in effect
+   * calls `keep`, which gives the second column the shared window as its own,
+   * so the image holds still at the moment of unlinking.
+   */
+  toggleWindowLinked(sameModality: boolean, keep: () => void): void {
+    if (this.sharesWindow(sameModality)) keep();
+    this.windowLinked.update((on) => !on);
+  }
 
   /** Whether a Compare group navigates on its own (unlinked, and not the base group). */
   isIndependent(group: number, isCompare: boolean): boolean {
@@ -137,5 +173,6 @@ export class CompareStore {
   reset(): void {
     this.linked.set(true);
     this.groupNav.set(defaultGroupNav());
+    this.windowLinked.set(false);
   }
 }

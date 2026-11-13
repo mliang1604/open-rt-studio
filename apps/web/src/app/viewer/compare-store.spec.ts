@@ -4,7 +4,7 @@
 
 import { Orientation } from '@open-rt-studio/dicom';
 import type { Vec2 } from '@open-rt-studio/render';
-import { CompareStore, COMPARE_GROUPS, defaultGroupNav } from './compare-store';
+import { canShareWindow, CompareStore, COMPARE_GROUPS, defaultGroupNav } from './compare-store';
 
 const NO_PAN: Vec2 = { x: 0, y: 0 };
 const ZOOMS = [1, 1, 1] as const;
@@ -134,5 +134,87 @@ describe('CompareStore.reset', () => {
     store.reset();
     expect(store.linked()).toBe(true);
     expect(store.groupNav()).toEqual(defaultGroupNav());
+  });
+});
+
+describe('canShareWindow', () => {
+  it('is true for two columns of the same modality', () => {
+    expect(canShareWindow('CT', 'CT')).toBe(true);
+    expect(canShareWindow('MR', 'MR')).toBe(true);
+  });
+
+  it('is false for different modalities', () => {
+    expect(canShareWindow('CT', 'MR')).toBe(false);
+    expect(canShareWindow('CT', 'RTDOSE')).toBe(false);
+  });
+
+  it('is false when a modality is unknown, even on both sides', () => {
+    expect(canShareWindow(null, 'CT')).toBe(false);
+    expect(canShareWindow('CT', null)).toBe(false);
+    expect(canShareWindow(null, null)).toBe(false);
+    expect(canShareWindow('', '')).toBe(false);
+  });
+});
+
+describe('CompareStore window link', () => {
+  it('is off by default: each column has its own window', () => {
+    const store = new CompareStore();
+    expect(store.windowLinked()).toBe(false);
+    expect(store.sharesWindow(true)).toBe(false);
+  });
+
+  it('shares the window only when asked for and the modalities match', () => {
+    const store = new CompareStore();
+    store.toggleWindowLinked(true, () => {});
+    expect(store.windowLinked()).toBe(true);
+    expect(store.sharesWindow(true)).toBe(true);
+    // The second column now holds another modality: asked for, but not possible.
+    expect(store.sharesWindow(false)).toBe(false);
+  });
+
+  it('turning it on does not call keep', () => {
+    const store = new CompareStore();
+    const keep = vi.fn();
+    store.toggleWindowLinked(true, keep);
+    expect(keep).not.toHaveBeenCalled();
+  });
+
+  it('turning it off while shared calls keep once, before the link goes', () => {
+    const store = new CompareStore();
+    store.toggleWindowLinked(true, () => {});
+    let linkedWhenKept: boolean | null = null;
+    const keep = vi.fn(() => {
+      linkedWhenKept = store.windowLinked();
+    });
+
+    store.toggleWindowLinked(true, keep);
+
+    expect(keep).toHaveBeenCalledTimes(1);
+    expect(linkedWhenKept).toBe(true);
+    expect(store.windowLinked()).toBe(false);
+  });
+
+  it('turning it off while the modalities differ keeps nothing: the columns already differ', () => {
+    const store = new CompareStore();
+    store.toggleWindowLinked(true, () => {});
+    const keep = vi.fn();
+    store.toggleWindowLinked(false, keep);
+    expect(keep).not.toHaveBeenCalled();
+    expect(store.windowLinked()).toBe(false);
+  });
+
+  it('is independent of the navigation link', () => {
+    const store = new CompareStore();
+    store.toggleWindowLinked(true, () => {});
+    store.toggleLinked(() => defaultGroupNav());
+    expect(store.linked()).toBe(false);
+    expect(store.windowLinked()).toBe(true);
+  });
+
+  it('reset turns it off', () => {
+    const store = new CompareStore();
+    store.toggleWindowLinked(true, () => {});
+    store.reset();
+    expect(store.windowLinked()).toBe(false);
   });
 });

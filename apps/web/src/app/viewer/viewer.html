@@ -323,6 +323,21 @@
           >
             {{ layersCtl.compareLinked() ? 'Linked 🔗' : 'Unlinked 🔓' }}
           </button>
+          <button
+            type="button"
+            (click)="layersCtl.toggleCompareWindowLinked()"
+            [disabled]="!layersCtl.canShareWindow()"
+            [class.active]="layersCtl.windowShared()"
+            [attr.aria-pressed]="layersCtl.windowShared()"
+            [attr.data-window-linked]="layersCtl.windowShared()"
+            [title]="
+              layersCtl.canShareWindow()
+                ? 'Show both columns with one window/level, starting from the left column\'s. A change on either column then applies to both.'
+                : 'One window/level for both columns needs the same modality in both.'
+            "
+          >
+            Same window {{ layersCtl.windowShared() ? 'on' : 'off' }}
+          </button>
         </div>
       </details>
     }

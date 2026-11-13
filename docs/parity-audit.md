@@ -161,7 +161,7 @@ are not regressions. Each has an issue.
 | #145  | Selecting, moving and deleting one measurement (added since)                      | #27          |
 | #146  | Cine direction and loop mode (added since)                                        | #28          |
 | #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only        | #29          |
-| #149  | Window/level linking in Compare                                                   | #26          |
+| #149  | Window/level linking in Compare (added since)                                     | #26          |
 | #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot        | #22          |
 | #151  | Filled display of imported structures                                             | #104         |
 | #152  | Rename, recolour and delete for painted structures; listing them under Structures | #105         |
