@@ -44,16 +44,32 @@ WebGPU; tests alone are not enough.
 
 ## Required check and merging
 
-`main` is protected by a repository ruleset:
+`main` is protected by a repository ruleset ("Protect main"):
 
-- Changes reach `main` only through a pull request.
+- Changes reach `main` only through a pull request. No approving review is
+  required.
 - The status check **`Build & test`** must pass. This is the name of the job
-  in `.github/workflows/ci.yml`; renaming the job breaks the rule.
-- Auto-merge is allowed, so a pull request can be set to merge by itself once
-  the check passes.
+  in `.github/workflows/ci.yml`; renaming the job breaks the rule, and a pull
+  request then waits forever for a check that never reports.
+- Force pushes to `main` and deleting it are blocked.
+- Auto-merge is allowed, so `gh pr merge --squash --auto` merges a pull
+  request by itself once the check passes.
 
-To set this up on a fork or a new copy of the repository: Settings → Rules →
-Rulesets → New branch ruleset, target the default branch, enable "Require a
-pull request before merging" and "Require status checks to pass" with the
-check `Build & test`; then Settings → General → Pull Requests → "Allow
-auto-merge".
+`Build & test` runs, in order: `npm ci` (fails when `package.json` and the
+lockfile disagree), `npm run lint`, `npm run format:check`, `npm run build`,
+`npm test`, and a check that none of that changed a tracked file. Any step
+failing fails the check.
+
+### Setting it up on a fork or a new copy
+
+The ruleset is a repository setting and is not stored in the repository, so a
+fork or a re-created repository needs it set once by an administrator:
+
+1. Settings → Rules → Rulesets → New ruleset → New branch ruleset.
+2. Target: the default branch. Enforcement: Active.
+3. Enable "Restrict deletions", "Block force pushes", "Require a pull request
+   before merging" (0 approvals) and "Require status checks to pass".
+4. Under required checks, add `Build & test`. It appears in the list after
+   the workflow has run at least once.
+5. Settings → General → Pull Requests: enable "Allow auto-merge" and
+   "Automatically delete head branches".

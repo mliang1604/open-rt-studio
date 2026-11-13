@@ -1,11 +1,8 @@
 name: CI
 
-# Gates merges into main. The job name "Build & test" is what branch protection
-# requires, and what auto-merge waits for, so keep it stable.
-#
-# Until the monorepo scaffold lands there is no package.json, so the npm steps
-# are skipped and the job passes. Once package.json exists they run for real;
-# each script is optional (--if-present) until the scaffold defines it.
+# Gates merges into main. The job name "Build & test" is what the main ruleset
+# requires, and what auto-merge waits for, so keep it stable. See
+# CONTRIBUTING.md, "Required check and merging".
 on:
   pull_request:
   push:
@@ -27,39 +24,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect workspace
-        id: ws
-        run: |
-          if [ -f package.json ]; then echo "node=true" >> "$GITHUB_OUTPUT"; else echo "node=false" >> "$GITHUB_OUTPUT"; fi
-
-      - name: Nothing to build yet
-        if: steps.ws.outputs.node != 'true'
-        run: echo "No package.json yet; build and test steps are skipped."
-
       - name: Set up Node
-        if: steps.ws.outputs.node == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: npm
 
-      # npm ci fails if package.json and the lockfile disagree.
+      # npm ci installs exactly what the lockfile says and fails if
+      # package.json and the lockfile disagree.
       - name: Install
-        if: steps.ws.outputs.node == 'true'
         run: npm ci
 
+      # ESLint, then the MPL 2.0 header check (docs/license-headers.md).
       - name: Lint
-        if: steps.ws.outputs.node == 'true'
-        run: npm run lint --if-present
+        run: npm run lint
 
       - name: Format check
-        if: steps.ws.outputs.node == 'true'
-        run: npm run format:check --if-present
+        run: npm run format:check
 
       - name: Build
-        if: steps.ws.outputs.node == 'true'
-        run: npm run build --if-present
+        run: npm run build
 
+      # Runners have no GPU. Tests must pass without WebGPU.
       - name: Test
-        if: steps.ws.outputs.node == 'true'
-        run: npm test --if-present
+        run: npm test
+
+      # Catches a build or test step that rewrites tracked files, such as a
+      # lockfile that npm would regenerate differently.
+      - name: Working tree is clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::The build changed tracked files. Commit the result of running it locally."
+            git status --short
+            git diff --stat
+            exit 1
+          fi
