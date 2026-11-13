@@ -121,6 +121,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     renderer: () => ({ sliceCount: () => 16 }) as unknown as SliceRenderer,
     activeTool: () => 'none',
     brushActive: () => false,
+    crosshairGrabbable: () => false,
     ...fns,
     ...overrides,
   };
@@ -200,11 +201,75 @@ describe('InteractionController', () => {
       expect(controller.drag()).toMatchObject({ kind: 'pan', group: 0 });
     });
 
-    it('sets focus instead of dragging on Shift+left over an MPR pane', () => {
-      const { controller, fns } = setup();
-      controller.onPointerDown(pointer({ button: 0, shiftKey: true, clientX: 50, clientY: 50 }));
-      expect(fns.setFocus).toHaveBeenCalledOnce();
-      expect(controller.drag()).toBeNull();
+    it('places the crosshair and starts dragging it on Shift+left over an MPR pane', () => {
+      const h = setup();
+      h.controller.onPointerDown(pointer({ shiftKey: true, clientX: 10, clientY: 10 }));
+      expect(h.fns.setFocus).toHaveBeenCalledTimes(1);
+      expect(h.controller.drag()).toEqual({ kind: 'focus', placement: MPR_PANE });
+      expect(h.setPointerCapture).toHaveBeenCalledWith(1);
+      expect(h.fns.setMasterPan).not.toHaveBeenCalled();
+    });
+
+    it('keeps the crosshair under the cursor while a Shift+drag moves', () => {
+      const h = setup();
+      h.controller.onPointerDown(pointer({ shiftKey: true, clientX: 10, clientY: 10 }));
+      const moved = pointer({ clientX: 40, clientY: 30 });
+      h.controller.onPointerMove(moved);
+      h.controller.onPointerMove(pointer({ clientX: 60, clientY: 35 }));
+      expect(h.fns.setFocus).toHaveBeenCalledTimes(3);
+      expect(h.fns.setFocus).toHaveBeenNthCalledWith(2, MPR_PANE, moved);
+      // The pane it started on stays the reference, even past its edge.
+      h.controller.onPointerMove(pointer({ clientX: 150, clientY: 35 }));
+      expect(h.fns.setFocus).toHaveBeenLastCalledWith(MPR_PANE, expect.anything());
+      expect(h.fns.setMasterPan).not.toHaveBeenCalled();
+    });
+
+    it('stops moving the crosshair when the button is released', () => {
+      const h = setup();
+      h.controller.onPointerDown(pointer({ shiftKey: true, clientX: 10, clientY: 10 }));
+      h.controller.onPointerUp(pointer({}));
+      expect(h.controller.drag()).toBeNull();
+      expect(h.releasePointerCapture).toHaveBeenCalledWith(1);
+      h.controller.onPointerMove(pointer({ clientX: 40, clientY: 30 }));
+      expect(h.fns.setFocus).toHaveBeenCalledTimes(1);
+    });
+
+    it('drags the crosshair on a plain press on its handle', () => {
+      const crosshairGrabbable = vi.fn((_pane, x: number, y: number) => x === 50 && y === 50);
+      const h = setup({ crosshairGrabbable });
+      h.controller.onPointerDown(pointer({ clientX: 50, clientY: 50 }));
+      expect(h.controller.drag()).toEqual({ kind: 'focus', placement: MPR_PANE });
+      expect(h.fns.setFocus).toHaveBeenCalledTimes(1);
+      h.controller.onPointerMove(pointer({ clientX: 70, clientY: 20 }));
+      expect(h.fns.setFocus).toHaveBeenCalledTimes(2);
+      expect(h.fns.setMasterPan).not.toHaveBeenCalled();
+    });
+
+    it('pans as before on a plain press away from the handle', () => {
+      const h = setup({ crosshairGrabbable: (_pane, x, y) => x === 50 && y === 50 });
+      h.controller.onPointerDown(pointer({ clientX: 20, clientY: 20 }));
+      expect(h.controller.drag()?.kind).toBe('pan');
+      expect(h.fns.setFocus).not.toHaveBeenCalled();
+    });
+
+    it('leaves the handle to the brush and the measurement tools', () => {
+      const brush = setup({ crosshairGrabbable: () => true, brushActive: () => true });
+      brush.controller.onPointerDown(pointer({ clientX: 50, clientY: 50 }));
+      expect(brush.controller.drag()?.kind).toBe('draw');
+
+      TestBed.resetTestingModule();
+      const tool = setup({ crosshairGrabbable: () => true, activeTool: () => 'distance' });
+      tool.controller.onPointerDown(pointer({ clientX: 50, clientY: 50 }));
+      expect(tool.fns.placeMeasurePoint).toHaveBeenCalledTimes(1);
+      expect(tool.fns.setFocus).not.toHaveBeenCalled();
+    });
+
+    it('reports when the cursor is over the handle, for the move cursor', () => {
+      const h = setup({ crosshairGrabbable: (_pane, x, y) => x === 50 && y === 50 });
+      h.controller.onPointerMove(pointer({ clientX: 50, clientY: 50 }));
+      expect(h.controller.overCrosshair()).toBe(true);
+      h.controller.onPointerMove(pointer({ clientX: 20, clientY: 20 }));
+      expect(h.controller.overCrosshair()).toBe(false);
     });
 
     it('ray-casts focus on Shift+left over the 3D pane', () => {

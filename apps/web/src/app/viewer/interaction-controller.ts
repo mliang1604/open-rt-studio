@@ -161,8 +161,9 @@ export class InteractionController {
     // instead of starting a pan/orbit — a modifier that never clashes with the
     // plain left-drag or the right-drag zoom. Over an MPR pane it probes the slice;
     // over the 3D pane it ray-casts the projection to the location it came from.
+    // Holding the button and moving keeps the crosshair under the cursor.
     if (event.shiftKey) {
-      if (placement.kind === 'mpr') d.setFocus(placement, event);
+      if (placement.kind === 'mpr') this.beginFocusDrag(placement, event);
       else d.setFocusFromMip(placement, event);
       return;
     }
@@ -182,6 +183,17 @@ export class InteractionController {
     if (d.activeTool() !== 'none' && placement.kind === 'mpr') {
       d.placeMeasurePoint(placement, event);
       return;
+    }
+
+    // A press on the crosshair's handle drags the crosshair instead of panning.
+    if (placement.kind === 'mpr') {
+      const bounds = d.canvas().getBoundingClientRect();
+      if (
+        this.canGrabCrosshair(placement, event.clientX - bounds.left, event.clientY - bounds.top)
+      ) {
+        this.beginFocusDrag(placement, event);
+        return;
+      }
     }
 
     // Capture so the drag keeps tracking even if the pointer leaves the canvas.
@@ -205,11 +217,41 @@ export class InteractionController {
     if (this.deps?.isReady()) event.preventDefault();
   }
 
+  /** True while the cursor is on, or dragging, the linked crosshair's handle. */
+  readonly overCrosshair = signal(false);
+
+  /** A brush or measurement tool owns the left button, so the handle is inert. */
+  private canGrabCrosshair(
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    x: number,
+    y: number,
+  ): boolean {
+    const d = this.deps!;
+    if (d.brushActive() || d.activeTool() !== 'none') return false;
+    return d.crosshairGrabbable(placement, x, y);
+  }
+
+  /**
+   * Put the crosshair at the press point and keep it under the cursor until the
+   * button is released. Captured so the drag keeps tracking past the pane edge;
+   * outside the image the crosshair simply stays where it last was.
+   */
+  private beginFocusDrag(
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    event: PointerEvent,
+  ): void {
+    const d = this.deps!;
+    d.canvas().setPointerCapture(event.pointerId);
+    this.drag.set({ kind: 'focus', placement });
+    d.setFocus(placement, event);
+  }
+
   onPointerMove(event: PointerEvent): void {
     const d = this.deps;
     if (!d) return;
     const drag = this.drag();
     if (drag?.kind === 'pan') this.dragPan(event, drag);
+    else if (drag?.kind === 'focus') d.setFocus(drag.placement, event);
     else if (drag?.kind === 'draw') this.dragDraw(event, drag);
     else if (drag?.kind === 'orbit') this.dragOrbit(event, drag);
     else if (drag?.kind === 'cameraPan') this.dragCameraPan(event, drag);
@@ -223,6 +265,10 @@ export class InteractionController {
     d.setCursor({ x, y });
     const hovered = this.placementAtPoint(x, y);
     d.setHoveredKey(hovered ? d.paneKey(hovered) : null);
+    this.overCrosshair.set(
+      drag?.kind === 'focus' ||
+        (!drag && hovered?.kind === 'mpr' && this.canGrabCrosshair(hovered, x, y)),
+    );
     // Remember the last MPR column hovered so the toolbar window/level controls
     // keep targeting it once the pointer moves off the panes onto the toolbar.
     if (hovered?.kind === 'mpr') d.setActiveCompareGroup(hovered.group);

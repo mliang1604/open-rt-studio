@@ -90,6 +90,9 @@ export interface MeasureInit {
   readonly transferFunction: () => TransferFunction;
 }
 
+/** How close to the crosshair's intersection a press grabs it, in CSS pixels. */
+export const CROSSHAIR_GRAB_RADIUS = 10;
+
 /**
  * Owns the measurement-tool gestures (place / drag a distance, angle, ellipse or
  * rectangle) and the Shift+click crosshair-focus picks from both the MPR panes
@@ -239,8 +242,25 @@ export class MeasureController {
   });
 
   /**
-   * Set the shared focus voxel from a Shift+click on an MPR pane and scroll every
-   * orientation to the slice that contains it.
+   * Whether a canvas point is on the crosshair's handle in the given pane: within
+   * {@link CROSSHAIR_GRAB_RADIUS} of where its two lines cross. False when the
+   * crosshair is off or has not been placed yet.
+   */
+  crosshairGrabbable(
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    x: number,
+    y: number,
+  ): boolean {
+    const { rect } = placement;
+    const mark = this.crosshairs().find(
+      (m) => m.rect.x === rect.x && m.rect.y === rect.y && m.rect.width === rect.width,
+    );
+    return !!mark && Math.hypot(x - mark.x, y - mark.y) <= CROSSHAIR_GRAB_RADIUS;
+  }
+
+  /**
+   * Set the shared focus voxel from a Shift+click or a crosshair drag on an MPR
+   * pane and scroll every orientation to the slice that contains it.
    */
   setFocus(placement: Extract<PanePlacement, { kind: 'mpr' }>, event: PointerEvent): void {
     const d = this.deps;

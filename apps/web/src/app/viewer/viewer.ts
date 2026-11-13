@@ -412,6 +412,7 @@ export class Viewer {
       setCursor: (point) => this.cursor.set(point),
       setHoveredKey: (key) => this.hoveredKey.set(key),
       setActiveCompareGroup: (group) => this.activeCompareGroup.set(group),
+      crosshairGrabbable: (placement, x, y) => this.measureCtl.crosshairGrabbable(placement, x, y),
       setFocus: (placement, event) => this.measureCtl.setFocus(placement, event),
       setFocusFromMip: (placement, event) => this.measureCtl.setFocusFromMip(placement, event),
       activeTool: () => this.activeTool(),
