@@ -15,7 +15,6 @@ import { View3dController } from './view3d-controller';
 import { isEditableTarget, releaseSelectFocus } from './viewer-dom';
 import { nextCineIndex } from './viewer-format';
 import { paneKeyOf, type PanePlacement } from './pane-placement';
-import { type ToolMode } from './measure-controller';
 import { type PerOrientation, type PerOrientationPan } from './viewer-overlays';
 
 const NO_PAN = { x: 0, y: 0 } as const;
@@ -61,8 +60,8 @@ export interface ToolbarInit {
   readonly slabThicknessMm: () => number;
   /** The modal help panel element, for focus management. */
   readonly helpPanel: () => HTMLElement | undefined;
-  /** The active measurement tool (read + write), for the Escape teardown. */
-  readonly activeTool: WritableSignal<ToolMode>;
+  /** Put down whichever left-button tool is on, for the Escape teardown. */
+  readonly putDownTools: () => void;
   /** Toggle the study-history panel's collapsed state (the `H` hotkey). */
   readonly toggleHistory: () => void;
 }
@@ -160,7 +159,8 @@ export class ToolbarController {
 
   /**
    * Escape closes the open overlays (help, then metadata), then cancels an
-   * in-progress measurement, then deactivates the tool — most-modal first.
+   * in-progress measurement, then puts down the tool that owns the left button
+   * (a measurement tool, the brush or the reformat path) — most-modal first.
    */
   onEscapeKey(event: Event): void {
     const d = this.deps!;
@@ -177,7 +177,7 @@ export class ToolbarController {
       this.measure.cancelPending();
       return;
     }
-    if (d.activeTool() !== 'none') d.activeTool.set('none');
+    d.putDownTools();
   }
 
   /**

@@ -50,6 +50,7 @@ import { MeasureController, type ToolMode } from './measure-controller';
 import { RenderController } from './render-controller';
 import { RoiController } from './roi-controller';
 import { EditableStructuresStore } from './editable-structures-store';
+import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
 import { LayersController } from './layers-controller';
 import { ToolbarController, LAYOUT_MODES } from './toolbar-controller';
@@ -124,6 +125,7 @@ const MAX_ZOOM = 20;
     RoiController,
     EditableStructuresStore,
     BrushController,
+    ToolSwitch,
     LayersController,
     ToolbarController,
     StatusController,
@@ -163,6 +165,8 @@ export class Viewer {
   /** Owns the brush/eraser structures-editing gesture and its settings; wired in the constructor. */
   protected readonly brushCtl = inject(BrushController);
   protected readonly cpr = inject(CprStore);
+  /** Switches the tools that own the left button, one at a time. */
+  protected readonly tools = inject(ToolSwitch);
   protected readonly cprCtl = inject(CprController);
   /** Owns the layer registry / fusion / Compare domain (volume, window/level, blend); wired in the constructor. */
   protected readonly layersCtl = inject(LayersController);
@@ -606,6 +610,7 @@ export class Viewer {
     // Wire the toolbar / keyboard view-action controller: it owns the layout cycle,
     // fits, reset, the toggles, cine and capture triggers, mutating the view signals
     // through these hooks.
+    this.tools.init(this.activeTool);
     this.toolbar.init({
       renderer: () => this.renderer(),
       isReady: () => this.isReady(),
@@ -626,7 +631,7 @@ export class Viewer {
       sliceIndices: this.sliceIndices,
       slabThicknessMm: () => this.slabThicknessMm(),
       helpPanel: () => this.shortcutHelp()?.panelElement(),
-      activeTool: this.activeTool,
+      putDownTools: () => this.tools.putDown(),
       toggleHistory: () => this.historyPanel()?.toggleCollapsedFromHotkey(),
     });
 
@@ -683,19 +688,6 @@ export class Viewer {
       await this.render.initGpu();
     } finally {
       this.gpuRetrying.set(false);
-    }
-  }
-
-  /**
-   * Turn the curved reformat tool on or off. While it draws it owns the left
-   * button on the MPR panes, so a measurement tool and the brush are put down.
-   */
-  protected toggleCprDrawing(): void {
-    const drawing = !this.cpr.drawing();
-    this.cpr.drawing.set(drawing);
-    if (drawing) {
-      this.activeTool.set('none');
-      this.brushCtl.deactivate();
     }
   }
 
