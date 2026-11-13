@@ -1,0 +1,48 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (image(); as img) {
+  <canvas
+    #canvas
+    class="cpr-image"
+    [style.width.px]="display().width"
+    [style.height.px]="display().height"
+    aria-label="Reformat along the path, start at the top"
+  ></canvas>
+  <p class="readout">
+    {{ pointCount() }} points · {{ lengthMm().toFixed(0) }} mm long ·
+    {{ (2 * halfWidthMm()).toFixed(0) }} mm wide
+  </p>
+} @else {
+  <p class="hint">
+    Click along a structure on any of the three planes. The reformat appears from the second point
+    on. Drag a point to move it; double-click it to remove it.
+  </p>
+}
+
+<label>
+  Width
+  <input
+    type="range"
+    [min]="range.min"
+    [max]="range.max"
+    step="1"
+    [value]="halfWidthMm()"
+    (input)="onHalfWidth($event)"
+    aria-label="Half width of the reformat in millimetres"
+  />
+</label>
+<label>
+  Rotate
+  <input
+    type="range"
+    min="-180"
+    max="180"
+    step="1"
+    [value]="angleDeg()"
+    (input)="onAngle($event)"
+    aria-label="Rotation of the cut about the path in degrees"
+  />
+</label>
+<button type="button" (click)="clearPath.emit()" [disabled]="pointCount() === 0">Clear path</button>

@@ -201,6 +201,13 @@ export interface InteractionInit {
     placement: Extract<PanePlacement, { kind: 'mip' }>,
     event: PointerEvent,
   ) => void;
+  /** Whether the curved reformat tool is drawing, so a left press adds a path point. */
+  readonly cprDrawing: () => boolean;
+  /** Add a curved reformat path point at the press on an MPR pane. */
+  readonly placeCprPoint: (
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    event: PointerEvent,
+  ) => void;
   /** The active measurement tool, or `none` for the default pan/orbit gestures. */
   readonly activeTool: () => string;
   /** Place the next measurement point on an MPR pane (with a tool active). */

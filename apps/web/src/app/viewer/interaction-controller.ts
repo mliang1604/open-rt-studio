@@ -168,6 +168,13 @@ export class InteractionController {
       return;
     }
 
+    // While the curved reformat tool is drawing, a left press on an MPR pane adds
+    // the next point of the path. The 3D pane keeps its orbit gesture.
+    if (d.cprDrawing() && placement.kind === 'mpr') {
+      d.placeCprPoint(placement, event);
+      return;
+    }
+
     // With a brush/eraser mode selected, a left-drag over an MPR pane paints the
     // active ROI into the label volume instead of panning. Capture so the stroke
     // keeps tracking past the pane edge; the brush controller does the painting.
@@ -227,7 +234,7 @@ export class InteractionController {
     y: number,
   ): boolean {
     const d = this.deps!;
-    if (d.brushActive() || d.activeTool() !== 'none') return false;
+    if (d.brushActive() || d.activeTool() !== 'none' || d.cprDrawing()) return false;
     return d.crosshairGrabbable(placement, x, y);
   }
 

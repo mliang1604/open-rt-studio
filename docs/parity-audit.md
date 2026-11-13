@@ -3,7 +3,8 @@
 Milestone M1 is "baseline parity": Open RT Studio does everything
 [dicom-workspace](https://github.com/mliang1604/dicom-workspace) does. This is
 the feature-by-feature check, made on 2026-11-12 against dicom-workspace at
-commit `91c394f` and Open RT Studio after pull request #142.
+commit `91c394f` and Open RT Studio after pull request #142. Later changes are noted where they
+close something this audit listed.
 
 **Result: every dicom-workspace feature is present and behaves the same. No
 parity gap was found.** The differences are deliberate and are listed
@@ -69,16 +70,16 @@ something to follow up; none of those is a parity gap.
 
 ### 3D
 
-| Feature                                                  | Checked by           | Follow-up |
-| -------------------------------------------------------- | -------------------- | --------- |
-| Maximum, minimum and average projections, slab thickness | U, L                 |           |
-| Direct volume rendering with presets                     | U, L                 |           |
-| Transfer-function editor and lighting                    | U, L                 |           |
-| Cut-away to the MPR planes, clip plane                   | U                    |           |
-| Structure surfaces in 3D                                 | U, E `structures`, L |           |
-| Orbit, pan and zoom of the 3D camera; axis indicator     | U, E `structures`, L |           |
-| Shift+click in 3D to locate a point                      | U                    |           |
-| Curved planar reformat engine (no view in either)        | U                    | #24       |
+| Feature                                                    | Checked by           | Follow-up |
+| ---------------------------------------------------------- | -------------------- | --------- |
+| Maximum, minimum and average projections, slab thickness   | U, L                 |           |
+| Direct volume rendering with presets                       | U, L                 |           |
+| Transfer-function editor and lighting                      | U, L                 |           |
+| Cut-away to the MPR planes, clip plane                     | U                    |           |
+| Structure surfaces in 3D                                   | U, E `structures`, L |           |
+| Orbit, pan and zoom of the 3D camera; axis indicator       | U, E `structures`, L |           |
+| Shift+click in 3D to locate a point                        | U                    |           |
+| Curved planar reformat engine (no view in dicom-workspace) | U                    |           |
 
 ### Fusion and Compare
 
@@ -146,6 +147,7 @@ Open RT Studio differs from dicom-workspace in these ways, on purpose.
 | Empty state with a one-click synthetic demo patient                                                           | #140         |
 | The crosshair can be dragged, with Shift or by its handle                                                     | #141         |
 | Authored structures export as RTSTRUCT; a structure set can be imported on its own                            | #142         |
+| A curved planar reformat view on the engine: path tool, reformat, editing                                     | #162         |
 
 ## Beyond parity
 
@@ -154,7 +156,6 @@ are not regressions. Each has an issue.
 
 | Issue | What is missing                                                                   | Mentioned in |
 | ----- | --------------------------------------------------------------------------------- | ------------ |
-| #24   | A view for curved planar reformat; only the engine exists                         | #24          |
 | #143  | Cancelling a load                                                                 | #20          |
 | #144  | JPEG Lossless and 12-bit JPEG; one unsupported file fails the batch               | #20          |
 | #145  | Selecting, moving and deleting one measurement                                    | #27          |
@@ -182,7 +183,7 @@ Found on the way, also present in dicom-workspace:
 ## End-to-end tests in CI
 
 The fusion and oblique tests run in the `End-to-end` job on every pull
-request, with the rest of the suite: 36 tests in 10 spec files. The runner has
+request, with the rest of the suite: 39 tests in 11 spec files. The runner has
 no GPU; Chromium is started with a software WebGPU adapter, and with it the
 tests run for real instead of skipping. What the software adapter cannot do is
 read rendered pixels back, so the one pixel comparison in the suite (the pane
