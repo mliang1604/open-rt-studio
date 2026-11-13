@@ -301,7 +301,12 @@ export class LoadController {
       case 'imported':
         // A plain import is catalogued but not shown (#241): leave the viewport to
         // the user's history pick. A confirmed patient switch unloads the stale view.
+        // Either way the load is over, so the state must leave 'loading': back to
+        // the series that was showing, or to idle, where the status line prompts
+        // for a history pick. Left as it was, the status stayed on "Loading… N / N
+        // files (100%)" and a displayed series stayed blanked until the next pick.
         if (outcome.cleared) this.clearView();
+        else d.load.set(previous.status === 'ready' ? previous : { status: 'idle' });
         if (entry) this.recentStore.record(entry);
         return;
       case 'reject':
