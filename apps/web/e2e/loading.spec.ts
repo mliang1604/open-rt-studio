@@ -29,6 +29,10 @@ async function expectPatientCatalogued(page: Page): Promise<void> {
   await expect(page.locator('.history-panel, app-history-panel').first()).toContainText(
     'SYNTHETIC^PHANTOM',
   );
+  // The import is over: the status line stops counting files and says what to do next.
+  await expect(page.locator('div.status')).toHaveText(
+    'Pick a series from the history below to view it.',
+  );
 }
 
 /** Drop in-memory files on the viewport, as a drag from the desktop would. */
@@ -91,8 +95,9 @@ test('progress is shown while files are parsed', async ({ page }) => {
   const seen: string[] = [];
   const status = page.locator('div.status');
   const sampling = (async () => {
-    for (let i = 0; i < 200 && !seen.some((t) => /100%/.test(t)); i++) {
+    for (let i = 0; i < 400; i++) {
       const text = await status.innerText().catch(() => '');
+      if (/Pick a series/.test(text)) break; // the import is over
       if (/Loading/.test(text) && seen[seen.length - 1] !== text) seen.push(text);
       await page.waitForTimeout(10);
     }
@@ -118,4 +123,19 @@ test('picking a series from each study displays it', async ({ page }) => {
   await (await seriesChip(page, 'MR')).click();
   await expect(page.locator('div.status')).toContainText('volume 32 × 32 × 12');
   await expect(page.locator('.pane-overlay .pane').first()).toBeVisible();
+});
+
+test('importing more files leaves the displayed series on screen', async ({ page }) => {
+  await requireWebGpu(page);
+  await importFiles(page, syntheticPatient(12, 32).slice(0, 12)); // the planning CT
+  await pickSeries(page, 'CT');
+  await expect(page.locator('div.status')).toContainText('volume 32 × 32 × 12');
+
+  // The rest of the patient arrives while the CT is showing.
+  await importFiles(page, syntheticPatient(12, 32).slice(12));
+  await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
+
+  await expect(page.locator('div.status')).toContainText('volume 32 × 32 × 12');
+  await expect(page.getByRole('button', { name: /layout/i })).toBeEnabled();
+  await expect(page.locator('.pane-overlay .pane')).toHaveCount(3);
 });

@@ -22,10 +22,12 @@ export const SHORTCUTS = [
   { keys: 'Drag', label: 'Pan an MPR pane · orbit the 3D pane' },
   { keys: 'Middle-drag / Alt+drag', label: 'Pan the 3D pane (and MPR panes)' },
   { keys: 'Scroll', label: 'Change slice (MPR) · zoom (3D)' },
-  { keys: 'Ctrl+Scroll', label: 'Zoom an MPR pane about the cursor' },
-  { keys: 'Shift+Click', label: 'Link every pane to the clicked point' },
+  { keys: 'Right-drag', label: 'Zoom a pane about the point you pressed' },
+  { keys: 'Alt+Right-drag', label: 'Adjust window / level' },
+  { keys: 'Shift+Click', label: 'Link every pane to the clicked point (MPR or 3D)' },
   { keys: 'Knob drag', label: 'Tilt an MPR pane to an oblique plane (double-click resets)' },
-  { keys: 'Right-drag', label: 'Adjust window / level' },
+  { keys: 'Alt+Drop', label: 'Fuse a dropped series or history chip over the image' },
+  { keys: 'Shift+Drop', label: 'Fuse it and open the side-by-side Compare layout' },
 ] as const;
 
 /** The measurement tools offered in the palette, in display order. */
