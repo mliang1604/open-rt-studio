@@ -30,7 +30,7 @@ import {
   type Volume,
 } from '@open-rt-studio/dicom';
 import { LayersStore, layerLegend, type LayerLegendEntry } from './layers-store';
-import { CompareStore, type GroupNav } from './compare-store';
+import { canShareWindow, CompareStore, type GroupNav } from './compare-store';
 import { type LoadState } from './load-controller';
 import { type PanePlacement } from './pane-placement';
 import {
@@ -127,22 +127,63 @@ export class LayersController {
     return this.deps!.activeCompareGroup() >= 1 ? overlay : base;
   });
 
-  /** Resolve a layer's window/level: base reads the shared signals, an overlay its override. */
+  /** Whether the Compare columns are asked to show one window (aliases the store). */
+  readonly compareWindowLinked = this.compareStore.windowLinked;
+
+  /** The modalities of the two Compare columns: the base layer and the overlay. */
+  readonly compareModalities = computed<readonly [string | null, string | null]>(() => [
+    baseLayer(this.layers())?.volume.modality ?? null,
+    this.selectedOverlay()?.volume.modality ?? null,
+  ]);
+
+  /** Whether the two columns hold the same modality, so one window can serve both. */
+  readonly canShareWindow = computed(() => canShareWindow(...this.compareModalities()));
+
+  /** Whether the overlay is showing the base layer's window: linked, and possible. */
+  readonly windowShared = computed(() => this.compareStore.sharesWindow(this.canShareWindow()));
+
+  /** Whether a layer shows, and edits, the base window: the base, or the overlay while shared. */
+  private usesBaseWindow(layer: Layer | null): boolean {
+    if (!layer || layer.role === 'base') return true;
+    return this.windowShared() && layer.id === this.selectedOverlay()?.id;
+  }
+
+  /**
+   * Resolve a layer's window/level: base reads the shared signals, an overlay
+   * its override, or the base's window while the Compare window is linked.
+   */
   layerWindow(layer: Layer | null): WindowLevel {
-    if (!layer || layer.role === 'base') {
+    if (!layer || this.usesBaseWindow(layer)) {
       return { center: this.windowCenter(), width: this.windowWidth() };
     }
     return this.layerStore.windowFor(layer);
   }
 
-  /** Write a layer's window/level: base updates the shared signals, an overlay its override. */
+  /**
+   * Write a layer's window/level: base updates the shared signals, an overlay
+   * its override. While the Compare window is linked a change made on either
+   * column goes to the one window both show.
+   */
   setLayerWindow(layer: Layer | null, next: WindowLevel): void {
-    if (!layer || layer.role === 'base') {
+    if (!layer || this.usesBaseWindow(layer)) {
       this.windowCenter.set(next.center);
       this.windowWidth.set(next.width);
     } else {
       this.layerStore.setWindow(layer.id, next);
     }
+  }
+
+  /**
+   * Show both Compare columns with one window/level (the left column's), or
+   * give each its own again. Unlinking leaves the right column on the window it
+   * was showing.
+   */
+  toggleCompareWindowLinked(): void {
+    this.compareStore.toggleWindowLinked(this.canShareWindow(), () => {
+      const overlay = this.selectedOverlay();
+      if (overlay) this.layerStore.setWindow(overlay.id, this.layerWindow(null));
+    });
+    this.deps!.markMipSettling();
   }
 
   /** The active target's window centre, shown in the WL input. */

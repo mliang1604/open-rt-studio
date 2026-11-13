@@ -77,7 +77,11 @@ export async function importAndLoad(
  * (`dropIntentOf` → overlay; `SERIES_DND_MIME` → the dragged series).
  */
 export async function fuseSeriesByDrag(page: Page, modality: string): Promise<void> {
-  const chip = await seriesChip(page, modality);
+  await fuseChipByDrag(page, await seriesChip(page, modality));
+}
+
+/** {@link fuseSeriesByDrag} for a chip the test has found itself (two series of one modality). */
+export async function fuseChipByDrag(page: Page, chip: Locator): Promise<void> {
   await expect(chip).toBeVisible({ timeout: 30_000 });
   const viewport = await page.locator('.viewport').elementHandle();
   await chip.evaluate((chipEl, target) => {
