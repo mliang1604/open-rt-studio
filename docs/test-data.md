@@ -28,7 +28,8 @@ show patient identifiers.
 - Synthetic patients have obviously fake names and identifiers (for example
   `SYNTHETIC^PHANTOM`, `SYN-0001`).
 - Local sample data goes in `/data` or `/sample-data`, which are ignored by
-  git, as are all `*.dcm` files.
+  git, as are all `*.dcm` files. `npm run sample-data` fills `/sample-data`
+  with the synthetic patients.
 
 ## CI guard
 

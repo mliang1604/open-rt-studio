@@ -25,7 +25,9 @@ export {
   syntheticCtValue,
   syntheticMrSeries,
   syntheticMrValue,
+  writeImageSeries,
   type ImageSeriesOptions,
+  type ImageSeriesSpec,
 } from './image-series.js';
 export { SYNTHETIC_PATIENT_STUDIES, syntheticPatient } from './patient.js';
 export {
@@ -33,11 +35,35 @@ export {
   SYNTHETIC_DOSE_GRID_SCALING,
   syntheticDoseGy,
   syntheticRtDose,
+  writeRtDose,
   type RtDoseOptions,
+  type RtDoseSpec,
 } from './rtdose.js';
 export {
   syntheticRois,
   syntheticRtStruct,
+  writeRtStruct,
   type RtStructOptions,
+  type RtStructRoi,
+  type RtStructSpec,
   type SyntheticRoi,
 } from './rtstruct.js';
+export {
+  syntheticThoraxPatient,
+  THORAX,
+  THORAX_CT_TEXTURE,
+  THORAX_FOLLOW_UP_STUDY,
+  THORAX_HU,
+  THORAX_MR,
+  THORAX_PATIENT,
+  THORAX_PLANNING_STUDY,
+  THORAX_PRESCRIPTION_GY,
+  thoraxDoseGrid,
+  thoraxDoseGy,
+  thoraxGrid,
+  thoraxRois,
+  thoraxTissueAt,
+  type ThoraxOptions,
+  type ThoraxRoi,
+  type ThoraxTissue,
+} from './thorax.js';

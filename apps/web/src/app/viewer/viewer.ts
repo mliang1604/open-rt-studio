@@ -24,6 +24,7 @@ import { RecentStore } from '../recent-store';
 import { PreferencesStore } from '../preferences-store';
 import { hostBrowser, hostOs, modifierLabel } from '../platform';
 import { gpuGuidance, type GpuProblemState } from './gpu-guidance';
+import { EmptyState } from './empty-state/empty-state';
 import { GpuNotice } from './gpu-notice/gpu-notice';
 import { MeasurementStore } from './measurement-store';
 import { LayersStore } from './layers-store';
@@ -87,7 +88,7 @@ const MAX_ZOOM = 20;
 @Component({
   selector: 'app-viewer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RangeFill, HistoryPanel, GpuNotice],
+  imports: [RangeFill, HistoryPanel, GpuNotice, EmptyState],
   providers: [
     MeasurementStore,
     LayersStore,
@@ -164,6 +165,13 @@ export class Viewer {
   private readonly gpuProblem = signal<GpuProblemState | null>(null);
   /** True while a retry of the WebGPU start-up is running. */
   protected readonly gpuRetrying = signal(false);
+  /**
+   * Whether to show the empty state: nothing imported, nothing loading, and no
+   * GPU problem to explain first.
+   */
+  protected readonly showEmptyState = computed(
+    () => !this.status.hasCatalog() && this.load().status === 'idle' && this.gpuProblem() === null,
+  );
   /**
    * What to show instead of the images when WebGPU is missing or was lost: the
    * likely cause and what to do about it on this browser and operating system.

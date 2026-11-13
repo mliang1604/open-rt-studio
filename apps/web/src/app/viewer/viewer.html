@@ -740,6 +740,9 @@
         (reload)="reloadPage()"
       />
     }
+    @if (showEmptyState()) {
+      <app-empty-state [busy]="loadCtl.demoLoading()" (loadDemo)="loadCtl.loadDemo()" />
+    }
     <canvas
       #canvas
       [class.grabbable]="isReady()"

@@ -1,0 +1,61 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* Centred in the viewport it is placed in. */
+:host {
+  display: block;
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100% - 32px));
+  padding: 20px 24px;
+  text-align: center;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+p {
+  margin: 0;
+}
+
+strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+button {
+  margin: 16px 0 10px;
+  background: var(--glass-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  padding: 8px 18px;
+  font: inherit;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+
+button:hover:not(:disabled),
+button:focus-visible {
+  box-shadow: var(--accent-ring);
+  outline: none;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.note {
+  font-size: 12px;
+}

@@ -6,7 +6,7 @@
 // axial circles, so each structure is a short cylinder with known centre and
 // radius. Ported from dicom-workspace e2e/fixtures/synthetic-rtstruct.ts.
 
-import { el, numbers, part10, sequence, text, uid, type DataElement } from './dicom-writer.js';
+import { el, numbers, part10, sequence, text, uid } from './dicom-writer.js';
 import {
   frameOfReferenceUid,
   identityElements,
@@ -77,44 +77,35 @@ export function syntheticRois(count = 12, roiCount = 2): SyntheticRoi[] {
   });
 }
 
-/** A closed axial circle (CLOSED_PLANAR) at height `z`, as a Contour Sequence item. */
-function circleContour(roi: SyntheticRoi, z: number, n = 24): DataElement[] {
-  const points: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * 2 * Math.PI;
-    points.push(
-      roi.center[0] + roi.radius * Math.cos(a),
-      roi.center[1] + roi.radius * Math.sin(a),
-      z,
-    );
-  }
-  return [
-    el(0x3006, 0x0042, 'CS', text('CLOSED_PLANAR')), // ContourGeometricType
-    el(0x3006, 0x0046, 'IS', numbers([n])), // NumberOfContourPoints
-    el(0x3006, 0x0050, 'DS', numbers(points)), // ContourData (x\y\z...)
-  ];
+/** One ROI for {@link writeRtStruct}: identity plus closed planar contours. */
+export interface RtStructRoi {
+  readonly number: number;
+  readonly name: string;
+  /** RT ROI Interpreted Type. */
+  readonly type: string;
+  readonly color: readonly [number, number, number];
+  /** Each contour is a flat list of patient coordinates: x, y, z, x, y, z, ... */
+  readonly contours: readonly (readonly number[])[];
 }
 
-/**
- * An RTSTRUCT in the study's Frame of Reference with the ROIs from
- * {@link syntheticRois}.
- */
-export function syntheticRtStruct(
-  count = 12,
-  roiCount = 2,
-  options: RtStructOptions = {},
-): SyntheticFile {
-  const study = options.study ?? SYNTHETIC_STUDY;
-  const rois = syntheticRois(count, roiCount);
-  const frame = frameOfReferenceUid(study);
+export interface RtStructSpec {
+  readonly study: SyntheticStudy;
+  readonly label: string;
+  readonly fileName: string;
+  readonly rois: readonly RtStructRoi[];
+}
 
+/** Write an RTSTRUCT in the study's Frame of Reference. */
+export function writeRtStruct(spec: RtStructSpec): SyntheticFile {
+  const { study, rois } = spec;
+  const frame = frameOfReferenceUid(study);
   const bytes = part10(RTSTRUCT_SOP_CLASS, instanceUid(study, RTSTRUCT_SERIES_INDEX, 1), [
     ...identityElements(study),
     el(0x0008, 0x0060, 'CS', text('RTSTRUCT')), // Modality
     el(0x0008, 0x103e, 'LO', text('Synthetic structures')), // SeriesDescription
     el(0x0020, 0x000e, 'UI', uid(seriesUid(study, RTSTRUCT_SERIES_INDEX))), // SeriesInstanceUID
     el(0x0020, 0x0011, 'IS', numbers([RTSTRUCT_SERIES_INDEX])), // SeriesNumber
-    el(0x3006, 0x0002, 'SH', text(options.label ?? 'Synthetic Plan')), // StructureSetLabel
+    el(0x3006, 0x0002, 'SH', text(spec.label)), // StructureSetLabel
     // StructureSetROISequence: number, referenced frame of reference, name.
     sequence(
       0x3006,
@@ -134,7 +125,11 @@ export function syntheticRtStruct(
         sequence(
           0x3006,
           0x0040,
-          roi.zs.map((z) => circleContour(roi, z)),
+          roi.contours.map((points) => [
+            el(0x3006, 0x0042, 'CS', text('CLOSED_PLANAR')), // ContourGeometricType
+            el(0x3006, 0x0046, 'IS', numbers([points.length / 3])), // NumberOfContourPoints
+            el(0x3006, 0x0050, 'DS', numbers(points)), // ContourData (x\y\z...)
+          ]),
         ),
         el(0x3006, 0x0084, 'IS', numbers([roi.number])),
       ]),
@@ -149,6 +144,43 @@ export function syntheticRtStruct(
       ]),
     ),
   ]);
+  return { name: spec.fileName, mimeType: 'application/dicom', bytes };
+}
 
-  return { name: `synthetic-rtstruct-s${study.index}.dcm`, mimeType: 'application/dicom', bytes };
+/** A closed circle in the plane z, as flat x, y, z coordinates. */
+function circlePoints(roi: SyntheticRoi, z: number, n = 24): number[] {
+  const points: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const angle = (i / n) * 2 * Math.PI;
+    points.push(
+      roi.center[0] + roi.radius * Math.cos(angle),
+      roi.center[1] + roi.radius * Math.sin(angle),
+      z,
+    );
+  }
+  return points;
+}
+
+/**
+ * An RTSTRUCT in the study's Frame of Reference with the ROIs from
+ * {@link syntheticRois}.
+ */
+export function syntheticRtStruct(
+  count = 12,
+  roiCount = 2,
+  options: RtStructOptions = {},
+): SyntheticFile {
+  const study = options.study ?? SYNTHETIC_STUDY;
+  return writeRtStruct({
+    study,
+    label: options.label ?? 'Synthetic Plan',
+    fileName: `synthetic-rtstruct-s${study.index}.dcm`,
+    rois: syntheticRois(count, roiCount).map((roi) => ({
+      number: roi.number,
+      name: roi.name,
+      type: roi.type,
+      color: roi.color,
+      contours: roi.zs.map((z) => circlePoints(roi, z)),
+    })),
+  });
 }

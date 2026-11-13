@@ -1,0 +1,16 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<h2>Nothing is loaded yet</h2>
+<p>
+  Use <strong>Open folder…</strong> or <strong>Open files…</strong> above, or drop DICOM files here.
+  Files are read in this browser and are not uploaded.
+</p>
+<button type="button" class="demo" (click)="loadDemo.emit()" [disabled]="busy()">
+  {{ busy() ? 'Generating…' : 'Load the synthetic demo patient' }}
+</button>
+<p class="note">
+  The demo is a geometric thorax phantom generated in your browser: a planning CT, an MR,
+  structures, a dose and a follow-up CT. It is not patient data.
+</p>
