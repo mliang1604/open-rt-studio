@@ -23,7 +23,8 @@ application. Never commit patient data or real DICOM files
 - `packages/testdata`: synthetic DICOM generators for tests.
 - `apps/web`: the Angular application.
 - `apps/desktop`, `services/server`, `native/`: placeholders until M2 and M3.
-- `docs/`: architecture, license headers, test data policy.
+- `docs/`: architecture, license headers, test data policy, and the parity
+  audit against dicom-workspace.
 - `scripts/`: repository checks run by CI.
 
 The backlog is in GitHub issues. Each issue has scope, a "done when" list and
