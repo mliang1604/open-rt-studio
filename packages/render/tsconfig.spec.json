@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "nodenext",
+    "types": ["vitest/globals", "@webgpu/types"]
+  },
+  "include": ["src/**/*.ts"]
+}

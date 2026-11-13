@@ -36,14 +36,14 @@ HTML `<!doctype>` may come before it. Leave one blank line after it.
 
 Required, and checked in CI by `scripts/check-license-headers.mjs`:
 
-| Kind                    | Extensions                                           |
-| ----------------------- | ---------------------------------------------------- |
-| TypeScript, JavaScript  | `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs`         |
-| Styles                  | `.css`, `.scss`                                      |
-| Templates and pages     | `.html`                                              |
-| Shaders                 | `.wgsl`                                              |
-| C and C++               | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`     |
-| Build and shell scripts | `.sh`, `.cmake`, `CMakeLists.txt`                    |
+| Kind                    | Extensions                                       |
+| ----------------------- | ------------------------------------------------ |
+| TypeScript, JavaScript  | `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs`     |
+| Styles                  | `.css`, `.scss`                                  |
+| Templates and pages     | `.html`                                          |
+| Shaders                 | `.wgsl`                                          |
+| C and C++               | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp` |
+| Build and shell scripts | `.sh`, `.cmake`, `CMakeLists.txt`                |
 
 Not required:
 

@@ -1,0 +1,14 @@
+# Build output and caches
+dist/
+out-tsc/
+.angular/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Generated
+package-lock.json
+
+# Third-party files keep their own formatting
+third_party/

@@ -1,0 +1,34 @@
+# Build output
+dist/
+out-tsc/
+*.tsbuildinfo
+
+# Node
+node_modules/
+npm-debug.log
+
+# Angular
+.angular/
+
+# Test output
+coverage/
+__screenshots__/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# IDEs and editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.history/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Local DICOM data. Never commit patient data (docs/test-data.md).
+/data/
+/sample-data/
+*.dcm

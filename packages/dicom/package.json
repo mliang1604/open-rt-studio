@@ -1,0 +1,24 @@
+{
+  "name": "@open-rt-studio/dicom",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Framework-free DICOM core for Open RT Studio: runs in browsers, workers and Node.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "pretest": "tsc -p tsconfig.spec.json",
+    "test": "vitest run",
+    "lint": "eslint ."
+  }
+}

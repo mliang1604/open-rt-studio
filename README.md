@@ -51,10 +51,22 @@ It is not a treatment planning system and does not replace one.
 - [Security policy](SECURITY.md)
 - [CLAUDE.md](CLAUDE.md): commands and code patterns, for people and agents
 
-## Running it
+## Building
 
-The workspace scaffold and the first ports are in progress (issues #11 to
-#30). Build and run instructions are added here as they land.
+Node 24.15 or newer is required.
+
+```bash
+npm ci
+npm run lint          # ESLint and the license-header check
+npm run format:check  # Prettier
+npm run build         # every workspace
+npm test              # unit tests
+```
+
+The workspaces are `packages/dicom`, `packages/render`, `apps/web`,
+`apps/desktop` and `services/server`; `native/` holds the C++ tools. The
+application itself arrives with the ports in issues #15 to #30, and run
+instructions are added here as they land.
 
 ## License
 

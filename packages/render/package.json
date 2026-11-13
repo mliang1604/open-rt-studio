@@ -1,0 +1,30 @@
+{
+  "name": "@open-rt-studio/render",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WebGPU renderer and pure geometry helpers for Open RT Studio.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "pretest": "tsc -p tsconfig.spec.json",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@open-rt-studio/dicom": "0.0.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.70"
+  }
+}
