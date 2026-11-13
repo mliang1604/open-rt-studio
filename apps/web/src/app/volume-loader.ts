@@ -91,8 +91,17 @@ export class VolumeLoader {
    * a valid import, to be put on images that are already loaded. A batch with
    * neither throws the canonical "no slices" error.
    */
-  async importFiles(files: readonly File[], onProgress?: LoadProgress): Promise<FileImport> {
-    const { slices, structureSets } = await parseFilesInWorkers(files, onProgress);
+  async importFiles(
+    files: readonly File[],
+    onProgress?: LoadProgress,
+    signal?: AbortSignal,
+  ): Promise<FileImport> {
+    const { slices, structureSets } = await parseFilesInWorkers(
+      files,
+      onProgress,
+      undefined,
+      signal,
+    );
     if (slices.length === 0 && structureSets.length > 0) {
       return { kind: 'structures', structureSets };
     }

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { parseFilesInWorkers, type WorkerFactory } from './parse-pool';
+import { isAbortError, parseFilesInWorkers, type WorkerFactory } from './parse-pool';
 import type { Slice, StructureSet } from '@open-rt-studio/dicom';
 import type { ParseRequest, ParseResponse } from './parse.worker';
 
@@ -191,5 +191,89 @@ describe('parseFilesInWorkers', () => {
 
     expect(result).toEqual({ slices: [], structureSets: [] });
     expect(pool.workers).toHaveLength(0);
+  });
+
+  describe('with an abort signal', () => {
+    const files = () => Array.from({ length: 6 }, (_, i) => fakeFile(`f${i}.dcm`));
+
+    it('rejects with an AbortError and terminates the workers at once', async () => {
+      const pool = new FakeWorkerPool();
+      const controller = new AbortController();
+      const run = parseFilesInWorkers(files(), undefined, pool.create, controller.signal);
+      const rejection = run.catch((error: unknown) => error);
+      await tick(); // four files are with the workers, none answered
+
+      expect(pool.pending).toHaveLength(4);
+      controller.abort();
+
+      // Terminated synchronously with the abort: that is what stops the parsing.
+      expect(pool.workers.every((w) => w.terminated)).toBe(true);
+      expect(isAbortError(await rejection)).toBe(true);
+    });
+
+    it('hands no further file to a worker and reports no further progress', async () => {
+      const pool = new FakeWorkerPool();
+      const controller = new AbortController();
+      const loaded: number[] = [];
+      const run = parseFilesInWorkers(
+        files(),
+        (n) => loaded.push(n),
+        pool.create,
+        controller.signal,
+      );
+      const rejection = run.catch((error: unknown) => error);
+      await tick();
+      // One file comes back, then the load is cancelled.
+      const first = pool.pending.shift()!;
+      first.worker.emit('message', { data: successResponse(first.req) });
+      await tick();
+      const posted = pool.pending.length + 1;
+      controller.abort();
+      await rejection;
+
+      // A late answer from a file that was in flight changes nothing.
+      for (const { worker, req } of pool.pending.splice(0)) {
+        worker.emit('message', { data: successResponse(req) });
+      }
+      await tick();
+      await tick();
+
+      expect(loaded).toEqual([0, 1]);
+      expect(pool.pending).toHaveLength(0); // nothing posted after the abort
+      expect(posted).toBeLessThan(7);
+    });
+
+    it('rejects without spawning a worker when the signal is already aborted', async () => {
+      const pool = new FakeWorkerPool();
+      const controller = new AbortController();
+      controller.abort();
+      const loaded: number[] = [];
+
+      const run = parseFilesInWorkers(
+        files(),
+        (n) => loaded.push(n),
+        pool.create,
+        controller.signal,
+      );
+
+      await expect(run).rejects.toSatisfy(isAbortError);
+      expect(pool.workers).toHaveLength(0);
+      expect(loaded).toEqual([]);
+    });
+
+    it('a signal that never aborts changes nothing', async () => {
+      const pool = new FakeWorkerPool();
+      const controller = new AbortController();
+      const run = parseFilesInWorkers(files(), undefined, pool.create, controller.signal);
+      await drainReversed(pool, 6);
+      const result = await run;
+      expect(result.slices).toHaveLength(6);
+    });
+  });
+
+  it('isAbortError tells a cancelled parse from a failed one', () => {
+    expect(isAbortError(new DOMException('x', 'AbortError'))).toBe(true);
+    expect(isAbortError(new Error('Unsupported transfer syntax'))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
   });
 });

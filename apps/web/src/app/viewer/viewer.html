@@ -1204,6 +1204,18 @@
           </span>
         }
       </div>
+      <!-- Beside the status, not in it: the status is a live region that is read
+           out whole on every progress step. -->
+      @if (status.isLoading()) {
+        <button
+          type="button"
+          class="cancel-load"
+          (click)="loadCtl.cancelLoad()"
+          title="Stop reading these files and go back to what was shown"
+        >
+          Cancel
+        </button>
+      }
 
       @if (measureCtl.probeText(); as probe) {
         <div class="probe">{{ probe }}</div>

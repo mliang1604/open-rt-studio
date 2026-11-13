@@ -21,6 +21,16 @@ export interface ParsedFiles {
  */
 const MAX_WORKERS = 4;
 
+/** What an aborted parse rejects with: a DOMException named `AbortError`. */
+function abortError(): DOMException {
+  return new DOMException('The load was cancelled.', 'AbortError');
+}
+
+/** Whether an error is the rejection of an aborted {@link parseFilesInWorkers}. */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 /** Spawn a module worker running {@link file:parse.worker.ts}. */
 function createWorker(): Worker {
   return new Worker(new URL('./parse.worker', import.meta.url), { type: 'module' });
@@ -41,12 +51,18 @@ export type WorkerFactory = () => Worker;
  *
  * Rejects with the first file's parse error (e.g. an unsupported transfer
  * syntax), matching the previous synchronous behaviour.
+ *
+ * When `signal` aborts, the workers are terminated at once, which stops the
+ * files they were parsing; no further progress is reported and the promise
+ * rejects with an `AbortError` (see {@link isAbortError}).
  */
 export async function parseFilesInWorkers(
   files: readonly File[],
   onProgress?: LoadProgress,
   spawnWorker: WorkerFactory = createWorker,
+  signal?: AbortSignal,
 ): Promise<ParsedFiles> {
+  if (signal?.aborted) throw abortError();
   const total = files.length;
   onProgress?.(0, total);
   if (total === 0) return { slices: [], structureSets: [] };
@@ -66,14 +82,29 @@ export async function parseFilesInWorkers(
     for (let index = nextIndex++; index < total; index = nextIndex++) {
       const file = files[index];
       const buffer = await file.arrayBuffer();
+      if (signal?.aborted) return; // aborted while the file was being read
       perFile[index] = await parseInWorker(worker, index, file.name, buffer);
+      if (signal?.aborted) return;
       onProgress?.(++completed, total);
     }
   };
 
+  // Rejects when the signal aborts. Terminating the workers there, and not
+  // only in the `finally`, is what stops the parsing: a terminated worker
+  // never answers, so its request would otherwise keep the pool waiting.
+  let onAbort: (() => void) | null = null;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      for (const worker of workers) worker.terminate();
+      reject(abortError());
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
   try {
-    await Promise.all(workers.map(runWorker));
+    await Promise.race([Promise.all(workers.map(runWorker)), aborted]);
   } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
     for (const worker of workers) worker.terminate();
   }
 

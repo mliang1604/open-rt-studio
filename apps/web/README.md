@@ -68,6 +68,10 @@ Loading:
 
 - `volume-loader.ts`, `parse-pool.ts`, `parse.worker.ts`: files are parsed in
   a pool of web workers with progress reporting, then assembled into volumes.
+  The parse takes an `AbortSignal`; aborting terminates the workers.
+- `viewer/load-sequence.ts`: which import is the one in progress. Cancel, or a
+  second import, aborts the first, and an aborted import changes neither the
+  catalog nor the view.
 - `patient-catalog.ts`, `recent-store.ts`: the catalog of everything imported
   in this session, and the list of recent selections.
 
