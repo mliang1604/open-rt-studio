@@ -38,7 +38,7 @@ import { GpuNotice } from './gpu-notice/gpu-notice';
 import { MeasurementStore } from './measurement-store';
 import { LayersStore } from './layers-store';
 import { Camera3dStore } from './camera3d-store';
-import { CineStore } from './cine-store';
+import { CINE_LOOP_MODES, CineStore } from './cine-store';
 import { CompareStore } from './compare-store';
 import { LoadCoordinator, type DropIntent } from './load-coordinator';
 import { pickCaptureTarget } from './capture';
@@ -282,6 +282,9 @@ export class Viewer {
   protected readonly cineFps = this.cine.fps;
   /** The fps options offered in the cine speed selector, in display order. */
   protected readonly cineFpsOptions = CINE_FPS_OPTIONS;
+  protected readonly cineDirection = this.cine.direction;
+  protected readonly cineLoopMode = this.cine.loopMode;
+  protected readonly cineLoopModes = CINE_LOOP_MODES;
   /** The active measurement tool, or `none` for the default pan/orbit gestures. */
   protected readonly activeTool = signal<ToolMode>('none');
   /** Measurement / ROI-tool state and logic; provided per-component (see providers). */

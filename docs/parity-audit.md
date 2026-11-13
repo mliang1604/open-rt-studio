@@ -159,7 +159,7 @@ are not regressions. Each has an issue.
 | #143  | Cancelling a load                                                                 | #20          |
 | #144  | JPEG Lossless and 12-bit JPEG; one unsupported file fails the batch               | #20          |
 | #145  | Selecting, moving and deleting one measurement                                    | #27          |
-| #146  | Cine direction and loop mode                                                      | #28          |
+| #146  | Cine direction and loop mode (added since)                                        | #28          |
 | #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only        | #29          |
 | #149  | Window/level linking in Compare                                                   | #26          |
 | #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot        | #22          |

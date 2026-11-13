@@ -7,13 +7,12 @@ import { LayoutMode, scaleRect, oneToOneZoom, type SliceRenderer } from '@open-r
 import { PreferencesStore } from '../preferences-store';
 import { clamp, Orientation, type Volume } from '@open-rt-studio/dicom';
 import { CaptureController } from './capture-controller';
-import { CineStore } from './cine-store';
+import { CINE_LOOP_MODES, CineStore } from './cine-store';
 import { LayersController } from './layers-controller';
 import { MeasurementStore } from './measurement-store';
 import { RenderController } from './render-controller';
 import { View3dController } from './view3d-controller';
 import { isEditableTarget, releaseSelectFocus } from './viewer-dom';
-import { nextCineIndex } from './viewer-format';
 import { paneKeyOf, type PanePlacement } from './pane-placement';
 import { type PerOrientation, type PerOrientationPan } from './viewer-overlays';
 
@@ -360,7 +359,10 @@ export class ToolbarController {
     this.cine.toggle(() => {
       const d = this.deps!;
       if (!d.isReady() || !d.hasMprPane()) return null;
-      return { orientation: this.cinePaneOrientation(), advance: (o) => this.cineTick(o) };
+      return {
+        orientation: this.cinePaneOrientation(),
+        advance: (orientation, next) => this.cineTick(orientation, next),
+      };
     });
   }
 
@@ -370,13 +372,26 @@ export class ToolbarController {
     this.cine.setFps(Number(event.target.value));
   }
 
-  /** Advance the given orientation's pane by one slice, looping at the ends. */
-  private cineTick(orientation: Orientation): void {
+  /** Change which way cine steps through the slices. */
+  onCineDirectionChange(event: Event): void {
+    if (!(event.target instanceof HTMLSelectElement)) return;
+    this.cine.setDirection(event.target.value === '-1' ? -1 : 1);
+  }
+
+  /** Change what cine does at the last slice. */
+  onCineLoopModeChange(event: Event): void {
+    if (!(event.target instanceof HTMLSelectElement)) return;
+    const mode = CINE_LOOP_MODES.find((m) => m.value === (event.target as HTMLSelectElement).value);
+    if (mode) this.cine.setLoopMode(mode.value);
+  }
+
+  /** Move the given orientation's pane to where the cine rule says it goes next. */
+  private cineTick(orientation: Orientation, next: (index: number, count: number) => number): void {
     const renderer = this.deps!.renderer();
     if (!renderer) return;
     const count = renderer.sliceCount(orientation);
     this.deps!.sliceIndices.update((indices) =>
-      withValue(indices, orientation, nextCineIndex(indices[orientation], count, 1)),
+      withValue(indices, orientation, next(indices[orientation], count)),
     );
   }
 
