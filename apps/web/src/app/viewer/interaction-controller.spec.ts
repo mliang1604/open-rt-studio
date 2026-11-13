@@ -93,6 +93,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     setFocus: vi.fn(),
     setFocusFromMip: vi.fn(),
     placeMeasurePoint: vi.fn(),
+    placeCprPoint: vi.fn(),
     beginStroke: vi.fn(),
     extendStroke: vi.fn(),
     endStroke: vi.fn(),
@@ -122,6 +123,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     activeTool: () => 'none',
     brushActive: () => false,
     crosshairGrabbable: () => false,
+    cprDrawing: () => false,
     ...fns,
     ...overrides,
   };
@@ -262,6 +264,23 @@ describe('InteractionController', () => {
       tool.controller.onPointerDown(pointer({ clientX: 50, clientY: 50 }));
       expect(tool.fns.placeMeasurePoint).toHaveBeenCalledTimes(1);
       expect(tool.fns.setFocus).not.toHaveBeenCalled();
+    });
+
+    it('adds a curved reformat point on a left press while that tool draws', () => {
+      const h = setup({ cprDrawing: () => true, crosshairGrabbable: () => true });
+      h.controller.onPointerDown(pointer({ clientX: 50, clientY: 50 }));
+      expect(h.fns.placeCprPoint).toHaveBeenCalledTimes(1);
+      expect(h.fns.placeCprPoint).toHaveBeenCalledWith(MPR_PANE, expect.anything());
+      // No pan, no crosshair grab, and nothing is being dragged afterwards.
+      expect(h.controller.drag()).toBeNull();
+      expect(h.fns.setFocus).not.toHaveBeenCalled();
+    });
+
+    it('keeps orbiting the 3D pane while the curved reformat tool draws', () => {
+      const h = setup({ cprDrawing: () => true });
+      h.controller.onPointerDown(pointer({ clientX: 150, clientY: 50 }));
+      expect(h.fns.placeCprPoint).not.toHaveBeenCalled();
+      expect(h.controller.drag()?.kind).toBe('orbit');
     });
 
     it('reports when the cursor is over the handle, for the move cursor', () => {

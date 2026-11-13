@@ -90,6 +90,8 @@ by git) if you want files on disk to open.
   cut-away, structure surfaces
 - Fusion of a second series or a dose grid over the image, with colour maps
   and a checkerboard; a side-by-side Compare layout
+- Curved planar reformat: draw a path through the volume and see the image
+  straightened along it
 - Distance, angle and region measurements; cine; PNG and spin-video capture
 - RT structure sets: display with per-structure visibility, colour and
   opacity, and brush editing of new structures

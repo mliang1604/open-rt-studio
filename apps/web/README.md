@@ -73,6 +73,14 @@ Viewer (`src/app/viewer`):
   `camera3d-store`, `measurement-store`, `cine-store`,
   `editable-structures-store`.
 - `history-panel/`: the patient timeline and tree with series chips.
+- `cpr/`: the curved planar reformat tool: the path store, the controller
+  that maps between panes and the patient, the overlay that draws the path and
+  the panel that shows the reformat. The geometry is `packages/render` `cpr.ts`.
+- `gpu-notice/`, `empty-state/`: what the viewport shows when WebGPU is missing
+  and before anything is imported.
+
+New interface goes into its own component like these. `viewer.css` is close to
+its size budget, and a component keeps its styles to itself.
 
 The viewer is one tightly coupled component by design of the code it was
 ported from. Split it only together with the feature work that needs the

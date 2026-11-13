@@ -31,6 +31,10 @@ export const SHORTCUTS = [
   { keys: 'Shift+Drag', label: 'Move the crosshair with the cursor; the other panes follow' },
   { keys: 'Crosshair drag', label: 'Drag the ring where the crosshair lines meet to move it' },
   { keys: 'Knob drag', label: 'Tilt an MPR pane to an oblique plane (double-click resets)' },
+  {
+    keys: 'CPR path',
+    label: 'Click points along a structure for a curved reformat; drag or double-click a point',
+  },
   { keys: 'Alt+Drop', label: 'Fuse a dropped series or history chip over the image' },
   { keys: 'Shift+Drop', label: 'Fuse it and open the side-by-side Compare layout' },
 ] as const;

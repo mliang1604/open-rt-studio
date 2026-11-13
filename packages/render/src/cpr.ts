@@ -2,10 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// NOTE: Not yet wired into the viewer. This is staged CPR (curved planar
-// reformation) support with no production consumer — there is no CPR pane, so
-// this module and its spec currently exercise only each other. Keep as planned
-// work; see #207 before treating it as dead code or building the CPR view.
+// The viewer's curved reformat tool (apps/web, viewer/cpr) draws a path on the
+// MPR panes and shows the image this module computes from it.
 
 import {
   clamp01,

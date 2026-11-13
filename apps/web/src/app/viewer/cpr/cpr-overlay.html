@@ -1,0 +1,37 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@for (path of paths(); track path.key) {
+  <svg
+    class="cpr-path"
+    [style.left.px]="path.rect.x"
+    [style.top.px]="path.rect.y"
+    [attr.width]="path.rect.width"
+    [attr.height]="path.rect.height"
+  >
+    @if (path.line) {
+      <polyline class="cpr-line" [attr.points]="path.line" />
+    }
+    @for (handle of path.handles; track handle.index) {
+      <circle
+        class="cpr-handle"
+        [attr.cx]="handle.x - path.rect.x"
+        [attr.cy]="handle.y - path.rect.y"
+        r="6"
+        tabindex="0"
+        role="button"
+        [attr.aria-label]="
+          'Curved reformat point ' + (handle.index + 1) + '. Drag to move, double-click to remove.'
+        "
+        (pointerdown)="onHandleDown($event, handle.index, path.key)"
+        (pointermove)="onHandleMove($event)"
+        (pointerup)="onHandleUp($event)"
+        (pointercancel)="onHandleUp($event)"
+        (dblclick)="removePoint.emit(handle.index)"
+        (keydown.delete)="removePoint.emit(handle.index)"
+        (keydown.backspace)="removePoint.emit(handle.index)"
+      />
+    }
+  </svg>
+}

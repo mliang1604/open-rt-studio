@@ -371,6 +371,37 @@
       </div>
     </details>
 
+    <details class="tool-group" open role="group" aria-label="Curved reformat">
+      <summary class="tool-group-label">Curved reformat</summary>
+      <div class="tool-group-body">
+        <button
+          type="button"
+          (click)="toggleCprDrawing()"
+          [disabled]="!isReady() || !hasMprPane()"
+          [class.active]="cpr.drawing()"
+          [attr.aria-pressed]="cpr.drawing()"
+          title="Draw a path through the volume and show the image straightened along it"
+        >
+          CPR path ⤳ {{ cpr.drawing() ? 'on' : 'off' }}
+        </button>
+        @if (cpr.drawing() || cpr.points().length > 0) {
+          <app-cpr-panel
+            [image]="cprCtl.image()"
+            [windowCenter]="layersCtl.windowCenter()"
+            [windowWidth]="layersCtl.windowWidth()"
+            [invert]="invert()"
+            [lengthMm]="cprCtl.lengthMm()"
+            [pointCount]="cpr.points().length"
+            [halfWidthMm]="cpr.halfWidthMm()"
+            [angleDeg]="cpr.angleDeg()"
+            (halfWidthChange)="cpr.setHalfWidth($event)"
+            (angleChange)="cpr.setAngle($event)"
+            (clearPath)="cpr.clearPath()"
+          />
+        }
+      </div>
+    </details>
+
     <details
       class="tool-group"
       role="group"
@@ -860,6 +891,15 @@
           }
         }
       </svg>
+    }
+
+    <!-- Curved reformat path: centreline and draggable control points on each MPR pane. -->
+    @if (cpr.points().length > 0) {
+      <app-cpr-overlay
+        [paths]="cprCtl.panePaths()"
+        (movePoint)="onCprPointMove($event)"
+        (removePoint)="cpr.remove($event)"
+      />
     }
 
     <!-- Linked crosshairs at the shared focus voxel, one per MPR pane. -->

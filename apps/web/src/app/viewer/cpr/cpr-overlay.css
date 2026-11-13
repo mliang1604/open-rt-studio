@@ -1,0 +1,32 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+.cpr-path {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cpr-line {
+  fill: none;
+  stroke: #ffd24a;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  /* A dark edge keeps the line readable over bright anatomy. */
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
+}
+
+.cpr-handle {
+  fill: #ffd24a;
+  stroke: #0c0e12;
+  stroke-width: 1.5;
+  pointer-events: auto;
+  cursor: move;
+}
+
+.cpr-handle:hover,
+.cpr-handle:focus-visible {
+  fill: #fff;
+  outline: none;
+}

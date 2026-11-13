@@ -25,6 +25,7 @@ export {
   viewBasis,
 } from './camera.js';
 export { COLORMAPS } from './colormap.js';
+export { buildCenterline, type Centerline, type CprImage, straightenedCpr } from './cpr.js';
 export { focusPanePoint, focusSliceIndex } from './crosshair.js';
 export {
   type GpuContext,
@@ -78,6 +79,7 @@ export {
   planeExtentMm,
   sliceCountFor,
   slicePlaneCorners,
+  resolveGeometry,
 } from './plane-basis.js';
 export { type VoxelProbe, probeVoxel, sampleVolumeAtPatient } from './probe.js';
 export { ProjectionMode, defaultSlabThicknessMm, isDvr } from './projection.js';

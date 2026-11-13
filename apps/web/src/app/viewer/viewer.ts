@@ -11,6 +11,8 @@ import {
   inject,
   signal,
   viewChild,
+  effect,
+  untracked,
 } from '@angular/core';
 import {
   LayoutMode,
@@ -24,6 +26,10 @@ import { RecentStore } from '../recent-store';
 import { PreferencesStore } from '../preferences-store';
 import { hostBrowser, hostOs, modifierLabel } from '../platform';
 import { gpuGuidance, type GpuProblemState } from './gpu-guidance';
+import { CprController } from './cpr/cpr-controller';
+import { CprOverlay, type CprPointMove } from './cpr/cpr-overlay';
+import { CprPanel } from './cpr/cpr-panel';
+import { CprStore } from './cpr/cpr-store';
 import { EmptyState } from './empty-state/empty-state';
 import { GpuNotice } from './gpu-notice/gpu-notice';
 import { MeasurementStore } from './measurement-store';
@@ -88,7 +94,7 @@ const MAX_ZOOM = 20;
 @Component({
   selector: 'app-viewer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RangeFill, HistoryPanel, GpuNotice, EmptyState],
+  imports: [RangeFill, HistoryPanel, GpuNotice, EmptyState, CprOverlay, CprPanel],
   providers: [
     MeasurementStore,
     LayersStore,
@@ -108,6 +114,8 @@ const MAX_ZOOM = 20;
     LayersController,
     ToolbarController,
     StatusController,
+    CprStore,
+    CprController,
   ],
   templateUrl: './viewer.html',
   styleUrl: './viewer.css',
@@ -141,6 +149,8 @@ export class Viewer {
   protected readonly roiCtl = inject(RoiController);
   /** Owns the brush/eraser structures-editing gesture and its settings; wired in the constructor. */
   protected readonly brushCtl = inject(BrushController);
+  protected readonly cpr = inject(CprStore);
+  protected readonly cprCtl = inject(CprController);
   /** Owns the layer registry / fusion / Compare domain (volume, window/level, blend); wired in the constructor. */
   protected readonly layersCtl = inject(LayersController);
   /** Owns the toolbar / keyboard view actions (layout, fit, reset, cine, capture); wired in the constructor. */
@@ -413,6 +423,8 @@ export class Viewer {
       setHoveredKey: (key) => this.hoveredKey.set(key),
       setActiveCompareGroup: (group) => this.activeCompareGroup.set(group),
       crosshairGrabbable: (placement, x, y) => this.measureCtl.crosshairGrabbable(placement, x, y),
+      cprDrawing: () => this.cpr.drawing(),
+      placeCprPoint: (placement, event) => this.cprCtl.placePoint(placement, event),
       setFocus: (placement, event) => this.measureCtl.setFocus(placement, event),
       setFocusFromMip: (placement, event) => this.measureCtl.setFocusFromMip(placement, event),
       activeTool: () => this.activeTool(),
@@ -491,6 +503,23 @@ export class Viewer {
     // Wire the brush/eraser controller: it turns a left-drag over an MPR pane into
     // label voxels via the shared probe inverse and writes them to the editable
     // structures store, reading the same view tuples the probe does.
+    this.cprCtl.init({
+      volume: () => this.layersCtl.volume(),
+      panes: () => this.panes(),
+      paneKey: (pane) => this.paneKey(pane),
+      canvasBounds: () => this.canvasRef().nativeElement.getBoundingClientRect(),
+      zooms: this.zooms,
+      pans: this.pans,
+      obliques: this.obliques,
+      sliceIndices: this.sliceIndices,
+      sagittalFlipped: () => this.sagittalFlipped(),
+    });
+    // A path belongs to the volume it was drawn in: a new base volume drops it.
+    effect(() => {
+      this.layersCtl.volume();
+      untracked(() => this.cpr.reset());
+    });
+
     this.brushCtl.init({
       volume: () => this.layersCtl.volume(),
       isReady: () => this.isReady(),
@@ -643,6 +672,23 @@ export class Viewer {
     } finally {
       this.gpuRetrying.set(false);
     }
+  }
+
+  /**
+   * Turn the curved reformat tool on or off. While it draws it owns the left
+   * button on the MPR panes, so a measurement tool and the brush are put down.
+   */
+  protected toggleCprDrawing(): void {
+    const drawing = !this.cpr.drawing();
+    this.cpr.drawing.set(drawing);
+    if (drawing) {
+      this.activeTool.set('none');
+      this.brushCtl.deactivate();
+    }
+  }
+
+  protected onCprPointMove(move: CprPointMove): void {
+    this.cprCtl.movePoint(move.index, move.paneKey, move.clientX, move.clientY);
   }
 
   /** Reload the page: the last resort when WebGPU cannot be started again. */
