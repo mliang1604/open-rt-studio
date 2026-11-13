@@ -22,7 +22,17 @@ const CI = !!process.env['CI'];
 
 let gpuArgs = ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU'];
 if (process.env['E2E_SOFTWARE_GPU']) {
-  gpuArgs.push('--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader');
+  // --use-vulkan=swiftshader gives Chromium's GPU process a Vulkan context on
+  // the software rasterizer. Without it, on Linux, the texture a WebGPU canvas
+  // presents into cannot be created ("Could not find SharedImageBackingFactory
+  // ... WebgpuSwapChainTexture" in Chromium's log): the adapter and the device
+  // work, nothing reaches the screen, and about one time in eight the device
+  // is lost a few milliseconds after the first frame (#173).
+  gpuArgs.push(
+    '--use-webgpu-adapter=swiftshader',
+    '--use-angle=swiftshader',
+    '--use-vulkan=swiftshader',
+  );
 }
 // Without GPU access Chromium has no adapter to give: requestAdapter() is null.
 if (process.env['E2E_NO_WEBGPU']) gpuArgs = ['--disable-gpu'];
@@ -32,7 +42,9 @@ export default defineConfig({
   outputDir: './test-results',
   fullyParallel: false,
   forbidOnly: CI,
-  retries: CI ? 1 : 0,
+  // No retries, in CI either. A retry turned a device lost on the runner into
+  // a green check for a day (#173); a test that fails once is to be looked at.
+  retries: 0,
   workers: 1,
   reporter: CI ? [['list'], ['github'], ['html', { open: 'never' }]] : 'list',
   timeout: 60_000,

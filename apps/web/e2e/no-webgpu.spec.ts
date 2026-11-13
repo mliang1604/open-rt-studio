@@ -141,10 +141,9 @@ test('a lost device can be reinitialized without loading the data again', async 
   // comparison below only runs where the capture shows the image.
   const before = await capturedBrightness(page);
   const canReadPixels = before > 20;
-  test.info().annotations.push({
-    type: 'pixel comparison',
-    description: canReadPixels ? 'ran' : 'not possible: the capture is black on this adapter',
-  });
+  const comparison = canReadPixels ? 'ran' : 'not possible: the capture is black on this adapter';
+  test.info().annotations.push({ type: 'pixel comparison', description: comparison });
+  console.log(`Pixel comparison after a device loss: ${comparison}`);
 
   await page.evaluate(() => (window as unknown as { loseDevice: () => void }).loseDevice());
 

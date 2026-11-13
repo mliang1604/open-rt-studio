@@ -42,6 +42,13 @@ check cannot pass with its tests skipped. Tests check the DOM and
 watch the console for WebGPU validation errors (`watchProblems`) instead of
 reading pixels back, which is not reliable in a headless browser.
 
+The software adapter needs three Chromium flags together (`playwright.config.ts`):
+`--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader` and
+`--use-vulkan=swiftshader`. Without the last one, on Linux, the canvas cannot
+present and the device is lost in about one test in eight (#173).
+
+Tests are not retried, in CI either. A test that fails once is a finding.
+
 When a test fails in CI, the run has an `e2e-failures` artifact with the trace,
 a screenshot and the HTML report. Open a trace with
 `npx playwright show-trace <trace.zip>`.
