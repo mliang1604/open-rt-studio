@@ -441,11 +441,15 @@ canvas.movable {
   display: flex;
   width: 100%;
   gap: 6px;
-  align-items: flex-end;
+  align-items: center;
 }
 
-.brush-set-select {
-  flex: 1 1 auto;
+/* The row holds the selector and the new-set button side by side. Both need
+   the rail's full-width rule for buttons and controls undone, or the button
+   takes the whole row and lies over the label. */
+.tool-rail .brush-set-select {
+  flex: 1 1 0;
+  width: auto;
   min-width: 0;
 }
 
@@ -454,8 +458,9 @@ canvas.movable {
   min-width: 0;
 }
 
-.brush-set-new {
+.tool-rail .brush-set-new {
   flex: 0 0 auto;
+  width: auto;
   white-space: nowrap;
 }
 
