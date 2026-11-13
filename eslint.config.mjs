@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import js from '@eslint/js';
+import angular from 'angular-eslint';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -48,6 +49,28 @@ export default tseslint.config(
     // Repository scripts, tool configuration and Node-side package tests run in Node.
     files: ['scripts/**/*.mjs', '**/*.config.{js,mjs,ts}', 'packages/*/test/**/*.mjs'],
     languageOptions: { globals: globals.node },
+  },
+  {
+    // The Angular application: component and directive conventions, with
+    // inline templates linted like template files.
+    files: ['apps/web/src/**/*.ts'],
+    extends: [...angular.configs.tsRecommended],
+    processor: angular.processInlineTemplates,
+    rules: {
+      '@angular-eslint/component-selector': [
+        'error',
+        { type: 'element', prefix: 'app', style: 'kebab-case' },
+      ],
+      '@angular-eslint/directive-selector': [
+        'error',
+        { type: 'attribute', prefix: 'app', style: 'camelCase' },
+      ],
+      '@angular-eslint/prefer-on-push-component-change-detection': 'error',
+    },
+  },
+  {
+    files: ['apps/web/src/**/*.html'],
+    extends: [...angular.configs.templateRecommended],
   },
   {
     // packages/dicom depends on nothing else in the repository.

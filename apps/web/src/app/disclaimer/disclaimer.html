@@ -1,0 +1,23 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<main class="gate">
+  <section class="card" role="region" aria-labelledby="disclaimer-title">
+    <strong class="brand">Open RT Studio</strong>
+    <h1 id="disclaimer-title">Not for clinical use</h1>
+    <p class="notice">
+      Open RT Studio is research and education software. It is not a medical device and has not been
+      cleared or approved by any regulator (CE, FDA or other). It must not be used for diagnosis,
+      treatment planning, treatment delivery or any other decision about a patient's care.
+    </p>
+    <p class="notice">
+      Use it only with synthetic data or data you are clearly allowed to use. Files you open are
+      processed in this browser and are not uploaded.
+    </p>
+    <div class="actions">
+      <button type="button" class="decline" (click)="decline()">Decline</button>
+      <button type="button" class="accept" (click)="acknowledge()">I acknowledge and accept</button>
+    </div>
+  </section>
+</main>

@@ -35,6 +35,7 @@ All commands run from the repository root. Node 24.15 or newer is required
 (`.nvmrc`).
 
 - Install: `npm ci` (not `npm install`, which rewrites the lockfile).
+- Run the app: `npm start` (dev server on http://localhost:4200)
 - Lint: `npm run lint` (ESLint, the license-header check and the guard
   against committed DICOM files)
 - Format check: `npm run format:check` (fix with `npm run format`)
