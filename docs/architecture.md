@@ -147,8 +147,10 @@ desktop installers bundle them.
 
 - `Build & test` (required on pull requests): install, license-header check,
   DICOM guard, lint, format check, build, unit tests.
-- End-to-end tests (Playwright) run in a separate job.
-- A merge to `main` deploys the web client to GitHub Pages.
+- `End-to-end` runs the Playwright tests in Chromium with a software WebGPU
+  adapter. It is not a required check.
+- A merge to `main` deploys the web client to GitHub Pages
+  (`.github/workflows/deploy.yml`).
 
 The job name `Build & test` is what the `main` ruleset requires. Keep it
 stable.

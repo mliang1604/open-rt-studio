@@ -73,3 +73,14 @@ fork or a re-created repository needs it set once by an administrator:
    the workflow has run at least once.
 5. Settings → General → Pull Requests: enable "Allow auto-merge" and
    "Automatically delete head branches".
+
+## Deployment
+
+`.github/workflows/deploy.yml` builds `apps/web` on every push to `main` and
+publishes it to GitHub Pages at <https://mliang1604.github.io/open-rt-studio/>.
+The build uses the repository name as the base href, and a copy of
+`index.html` as `404.html` makes deep links and reloads work.
+
+Pages has to be enabled once by an administrator: Settings → Pages → Source
+"GitHub Actions". While it is not, the workflow says so in a warning and skips
+the build and the deployment, so merges do not fail.

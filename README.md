@@ -51,7 +51,13 @@ It is not a treatment planning system and does not replace one.
 - [Security policy](SECURITY.md)
 - [CLAUDE.md](CLAUDE.md): commands and code patterns, for people and agents
 
-## Running it
+## Try it
+
+**<https://mliang1604.github.io/open-rt-studio/>** is the current `main`,
+published on every merge. It needs a browser with WebGPU. Files you open stay
+in your browser; nothing is uploaded.
+
+## Running it locally
 
 Node 24.15 or newer and a browser with WebGPU (a current Chrome, Edge or
 Safari).
