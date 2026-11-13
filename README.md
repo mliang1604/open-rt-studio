@@ -54,8 +54,11 @@ It is not a treatment planning system and does not replace one.
 ## Try it
 
 **<https://mliang1604.github.io/open-rt-studio/>** is the current `main`,
-published on every merge. It needs a browser with WebGPU. Files you open stay
-in your browser; nothing is uploaded.
+published on every merge. It needs a browser with WebGPU. Choose **Load the
+synthetic demo patient** to try it without any files: a geometric thorax
+phantom with a planning CT, an MR, structures, a dose and a follow-up CT is
+generated in your browser. Files you open stay in your browser; nothing is
+uploaded.
 
 ## Running it locally
 
@@ -68,9 +71,13 @@ npm start             # dev server on http://localhost:4200
 ```
 
 The application first shows the not-for-clinical-use notice. Accept it to
-reach the viewer, then use **Open folder…** or **Open files…**, or drop files
-onto the window. Imported series appear in the history panel at the bottom;
-click one to display it.
+reach the viewer. **Load the synthetic demo patient** shows a phantom straight
+away. For your own data use **Open folder…** or **Open files…**, or drop files
+onto the window; imported series appear in the history panel at the bottom,
+and a click displays one.
+
+`npm run sample-data` writes the synthetic patients to `sample-data/` (ignored
+by git) if you want files on disk to open.
 
 ### What the viewer does
 

@@ -19,6 +19,12 @@ const files = [...syntheticCtSeries(12, 32), syntheticRtStruct(12)];
 | `syntheticRtDose`   | Multi-frame RTDOSE in Gy inside the CT. Value is `syntheticDoseGy(col, row, frame)`. |
 | `syntheticPatient`  | One patient, two studies: CT, MR, RTSTRUCT and RTDOSE, then a follow-up CT.          |
 
+`syntheticThoraxPatient` is the one made for looking at: a geometric thorax
+phantom (body, lungs, heart, spine, a target) with a planning CT in Hounsfield
+units, an MR, a matching structure set, a dose on the target and a follow-up
+CT. The web client loads it as its demo patient. `thoraxTissueAt`,
+`thoraxRois` and `thoraxDoseGy` say what is at any position in millimetres.
+
 The package has no runtime dependencies and uses no Node-only or DOM-only
 APIs, so the same generators run in Vitest, in Playwright and in a browser.
 

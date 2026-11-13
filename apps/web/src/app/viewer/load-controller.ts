@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { DestroyRef, Injectable, inject, type WritableSignal } from '@angular/core';
+import { DestroyRef, Injectable, inject, type WritableSignal, signal } from '@angular/core';
 import { describeSelection, RecentStore, type RecentEntry } from '../recent-store';
+import { demoPatient, demoPlanningCt } from '../demo-data';
 import { PatientCatalog } from '../patient-catalog';
 import { PreferencesStore } from '../preferences-store';
 import { VolumeLoader, type LoadResult } from '../volume-loader';
@@ -233,6 +234,47 @@ export class LoadController {
       return;
     }
     this.applyOutcome(outcome, previous, null);
+  }
+
+  /** True while the synthetic demo patient is being generated and imported. */
+  readonly demoLoading = signal(false);
+
+  /**
+   * Load the synthetic demo patient: generate it in the browser, import it the
+   * way a dropped folder is imported, then display its planning CT so there is
+   * something to look at straight away. If a different patient is loaded, the
+   * usual patient-switch confirmation applies, and declining it leaves the
+   * view as it was.
+   */
+  async loadDemo(): Promise<void> {
+    if (this.demoLoading()) return;
+    this.demoLoading.set(true);
+    try {
+      const demo = await demoPatient();
+      await this.loadFiles(demo.files, null);
+      const planningCt = demoPlanningCt(this.catalog.currentPatient(), demo);
+      // A pick is ignored until the renderer exists, and on a slow adapter the
+      // import can finish first. Wait for it, so the click is never lost.
+      if (planningCt && (await this.rendererReady())) this.loadSeriesFromPanel(planningCt);
+    } finally {
+      this.demoLoading.set(false);
+    }
+  }
+
+  /**
+   * Resolve true once the renderer exists, or false when it has not appeared
+   * within `timeoutMs` (WebGPU is missing or still failing to start; the GPU
+   * notice then says why).
+   */
+  private async rendererReady(timeoutMs = 20_000): Promise<boolean> {
+    const d = this.deps;
+    if (!d) return false;
+    const deadline = Date.now() + timeoutMs;
+    while (d.renderer() === null) {
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return true;
   }
 
   /**

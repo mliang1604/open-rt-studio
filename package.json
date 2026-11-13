@@ -27,10 +27,12 @@
     "test:scripts": "node --test \"scripts/**/*.spec.mjs\"",
     "check:dicom": "node scripts/check-no-dicom.mjs",
     "start": "npm start -w @open-rt-studio/web",
-    "e2e": "npm run e2e -w @open-rt-studio/web --"
+    "e2e": "npm run e2e -w @open-rt-studio/web --",
+    "sample-data": "npm run build -w @open-rt-studio/testdata && node scripts/write-sample-data.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@open-rt-studio/testdata": "0.0.0",
     "angular-eslint": "^22.6.0",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",

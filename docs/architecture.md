@@ -70,14 +70,15 @@ services/
 packages/
   dicom/        framework-free DICOM core
   render/       WebGPU renderer and pure geometry helpers
-  testdata/     synthetic DICOM generators for tests (added by #14)
+  testdata/     synthetic DICOM generators for tests and for the demo patient
 native/         C++ ITK/elastix command-line tools (M3)
 docs/           this documentation
 scripts/        repository checks (license headers, DICOM guard)
 ```
 
 One addition to the proposal: `packages/testdata`, so unit and end-to-end
-tests share one set of synthetic generators.
+tests share one set of synthetic generators. The web client also uses it, at
+run time and loaded on demand, for the synthetic demo patient.
 
 ### Dependency rules
 

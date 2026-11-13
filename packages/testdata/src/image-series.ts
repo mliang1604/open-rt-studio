@@ -58,9 +58,89 @@ export function syntheticMrValue(x: number, y: number, z: number, size: number):
   return Math.max(0, Math.round(1200 * (1 - Math.min(1, radius)))) + z * 10;
 }
 
+/** Everything that defines an axial image series; see {@link writeImageSeries}. */
+export interface ImageSeriesSpec {
+  readonly modality: 'CT' | 'MR';
+  readonly study: SyntheticStudy;
+  /** Distinguishes series within the study; also the Series Number. */
+  readonly seriesIndex: number;
+  readonly description: string;
+  /** Prefix of the generated file names. */
+  readonly namePrefix: string;
+  readonly rows: number;
+  readonly columns: number;
+  /** Number of slices. */
+  readonly count: number;
+  /** In-plane spacing in mm, the same along rows and columns. */
+  readonly pixelSpacing: number;
+  /** Distance between slices in mm, along +z. */
+  readonly sliceSpacing: number;
+  /** ImagePositionPatient of the first slice, in mm. */
+  readonly origin: readonly [number, number, number];
+  readonly window: readonly [center: number, width: number];
+  /** Rescale Intercept; written with a slope of 1 when given. */
+  readonly rescaleIntercept?: number;
+  /** The stored (unsigned 16-bit) value at a column, row and slice. */
+  readonly stored: (column: number, row: number, slice: number) => number;
+}
+
+const SOP_CLASS = { CT: CT_IMAGE_STORAGE, MR: MR_IMAGE_STORAGE } as const;
+
+/**
+ * Write an axial image series, one Part 10 file per slice, in the standard
+ * head-first supine orientation (rows along +x, columns along +y).
+ */
+export function writeImageSeries(spec: ImageSeriesSpec): SyntheticFile[] {
+  const { study, seriesIndex, rows, columns } = spec;
+  const [ox, oy, oz] = spec.origin;
+  const files: SyntheticFile[] = [];
+  for (let z = 0; z < spec.count; z++) {
+    const samples = new Uint16Array(rows * columns);
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < columns; x++) samples[y * columns + x] = spec.stored(x, y, z);
+    }
+    const rescale =
+      spec.rescaleIntercept === undefined
+        ? []
+        : [
+            el(0x0028, 0x1052, 'DS', numbers([spec.rescaleIntercept])), // RescaleIntercept
+            el(0x0028, 0x1053, 'DS', numbers([1])), // RescaleSlope
+          ];
+    const bytes = part10(SOP_CLASS[spec.modality], instanceUid(study, seriesIndex, z + 1), [
+      ...identityElements(study),
+      el(0x0008, 0x0060, 'CS', text(spec.modality)), // Modality
+      el(0x0008, 0x103e, 'LO', text(spec.description)), // SeriesDescription
+      el(0x0020, 0x000e, 'UI', uid(seriesUid(study, seriesIndex))), // SeriesInstanceUID
+      el(0x0020, 0x0011, 'IS', numbers([seriesIndex])), // SeriesNumber
+      el(0x0020, 0x0013, 'IS', numbers([z + 1])), // InstanceNumber
+      el(0x0020, 0x0032, 'DS', numbers([ox, oy, oz + z * spec.sliceSpacing])), // ImagePositionPatient
+      el(0x0020, 0x0037, 'DS', numbers([1, 0, 0, 0, 1, 0])), // ImageOrientationPatient
+      el(0x0020, 0x0052, 'UI', uid(frameOfReferenceUid(study))), // FrameOfReferenceUID
+      el(0x0028, 0x0002, 'US', u16le(1)), // SamplesPerPixel
+      el(0x0028, 0x0004, 'CS', text('MONOCHROME2')), // PhotometricInterpretation
+      el(0x0028, 0x0010, 'US', u16le(rows)), // Rows
+      el(0x0028, 0x0011, 'US', u16le(columns)), // Columns
+      el(0x0028, 0x0030, 'DS', numbers([spec.pixelSpacing, spec.pixelSpacing])), // PixelSpacing
+      el(0x0028, 0x0100, 'US', u16le(16)), // BitsAllocated
+      el(0x0028, 0x0101, 'US', u16le(16)), // BitsStored
+      el(0x0028, 0x0102, 'US', u16le(15)), // HighBit
+      el(0x0028, 0x0103, 'US', u16le(0)), // PixelRepresentation (unsigned)
+      el(0x0028, 0x1050, 'DS', numbers([spec.window[0]])), // WindowCenter
+      el(0x0028, 0x1051, 'DS', numbers([spec.window[1]])), // WindowWidth
+      ...rescale,
+      pixelData16(samples),
+    ]);
+    files.push({
+      name: `${spec.namePrefix}-${String(z + 1).padStart(3, '0')}.dcm`,
+      mimeType: 'application/dicom',
+      bytes,
+    });
+  }
+  return files;
+}
+
 interface Kind {
   readonly modality: 'CT' | 'MR';
-  readonly sopClass: string;
   readonly seriesIndex: number;
   readonly description: string;
   readonly namePrefix: string;
@@ -70,7 +150,6 @@ interface Kind {
 
 const CT: Kind = {
   modality: 'CT',
-  sopClass: CT_IMAGE_STORAGE,
   seriesIndex: 1,
   description: 'Synthetic CT ramp',
   namePrefix: 'synthetic-ct',
@@ -80,7 +159,6 @@ const CT: Kind = {
 
 const MR: Kind = {
   modality: 'MR',
-  sopClass: MR_IMAGE_STORAGE,
   seriesIndex: 2,
   description: 'Synthetic MR blob',
   namePrefix: 'synthetic-mr',
@@ -93,45 +171,21 @@ function imageSeries(kind: Kind, options: ImageSeriesOptions): SyntheticFile[] {
   const size = options.size ?? 32;
   const study = options.study ?? SYNTHETIC_STUDY;
   const seriesIndex = options.seriesIndex ?? kind.seriesIndex;
-  const [ox, oy, oz] = options.origin ?? [0, 0, 0];
-  const prefix = options.namePrefix ?? `${kind.namePrefix}-s${study.index}-${seriesIndex}`;
-
-  const files: SyntheticFile[] = [];
-  for (let z = 0; z < count; z++) {
-    const samples = new Uint16Array(size * size);
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) samples[y * size + x] = kind.value(x, y, z, size);
-    }
-    const bytes = part10(kind.sopClass, instanceUid(study, seriesIndex, z + 1), [
-      ...identityElements(study),
-      el(0x0008, 0x0060, 'CS', text(kind.modality)), // Modality
-      el(0x0008, 0x103e, 'LO', text(options.description ?? kind.description)), // SeriesDescription
-      el(0x0020, 0x000e, 'UI', uid(seriesUid(study, seriesIndex))), // SeriesInstanceUID
-      el(0x0020, 0x0011, 'IS', numbers([seriesIndex])), // SeriesNumber
-      el(0x0020, 0x0013, 'IS', numbers([z + 1])), // InstanceNumber
-      el(0x0020, 0x0032, 'DS', numbers([ox, oy, oz + z])), // ImagePositionPatient
-      el(0x0020, 0x0037, 'DS', numbers([1, 0, 0, 0, 1, 0])), // ImageOrientationPatient
-      el(0x0020, 0x0052, 'UI', uid(frameOfReferenceUid(study))), // FrameOfReferenceUID
-      el(0x0028, 0x0002, 'US', u16le(1)), // SamplesPerPixel
-      el(0x0028, 0x0004, 'CS', text('MONOCHROME2')), // PhotometricInterpretation
-      el(0x0028, 0x0010, 'US', u16le(size)), // Rows
-      el(0x0028, 0x0011, 'US', u16le(size)), // Columns
-      el(0x0028, 0x0030, 'DS', numbers([1, 1])), // PixelSpacing
-      el(0x0028, 0x0100, 'US', u16le(16)), // BitsAllocated
-      el(0x0028, 0x0101, 'US', u16le(16)), // BitsStored
-      el(0x0028, 0x0102, 'US', u16le(15)), // HighBit
-      el(0x0028, 0x0103, 'US', u16le(0)), // PixelRepresentation (unsigned)
-      el(0x0028, 0x1050, 'DS', numbers([kind.window[0]])), // WindowCenter
-      el(0x0028, 0x1051, 'DS', numbers([kind.window[1]])), // WindowWidth
-      pixelData16(samples),
-    ]);
-    files.push({
-      name: `${prefix}-${String(z + 1).padStart(3, '0')}.dcm`,
-      mimeType: 'application/dicom',
-      bytes,
-    });
-  }
-  return files;
+  return writeImageSeries({
+    modality: kind.modality,
+    study,
+    seriesIndex,
+    description: options.description ?? kind.description,
+    namePrefix: options.namePrefix ?? `${kind.namePrefix}-s${study.index}-${seriesIndex}`,
+    rows: size,
+    columns: size,
+    count,
+    pixelSpacing: 1,
+    sliceSpacing: 1,
+    origin: options.origin ?? [0, 0, 0],
+    window: kind.window,
+    stored: (x, y, z) => kind.value(x, y, z, size),
+  });
 }
 
 /**
