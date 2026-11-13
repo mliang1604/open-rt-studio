@@ -27,6 +27,8 @@ drives the application in Chromium. Useful variations:
 - `E2E_PORT=4300 npm run e2e` when 4200 is taken
 - `E2E_NO_WEBGPU=1 npm run e2e` to run with WebGPU turned off and see the
   GPU-dependent tests skip
+- `npm run e2e:smoke` to run only `e2e/smoke.spec.ts`, the tests CI requires
+  before a merge
 
 Test inputs come from `@open-rt-studio/testdata` and exist only in memory;
 `e2e/fixtures/files.ts` turns them into file-input payloads.
@@ -34,7 +36,9 @@ Test inputs come from `@open-rt-studio/testdata` and exist only in memory;
 **WebGPU in tests.** CI runners have no GPU. CI asks Chromium for a software
 adapter (`E2E_SOFTWARE_GPU=1`); a test that needs WebGPU calls
 `requireWebGpu(page)` first, which marks it as skipped when no adapter is
-available, so it never fails for lack of hardware. Tests check the DOM and
+available, so it never fails for lack of hardware. The required smoke job
+sets `E2E_REQUIRE_WEBGPU=1`, which turns that skip into a failure, so the
+check cannot pass with its tests skipped. Tests check the DOM and
 watch the console for WebGPU validation errors (`watchProblems`) instead of
 reading pixels back, which is not reliable in a headless browser.
 
