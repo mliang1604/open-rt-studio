@@ -93,14 +93,14 @@ something to follow up; none of those is a parity gap.
 
 ### Measurements, cine, capture
 
-| Feature                                                | Checked by          | Follow-up  |
-| ------------------------------------------------------ | ------------------- | ---------- |
-| Distance and angle                                     | U, S, L             |            |
-| Ellipse and rectangle with area, mean, SD, min and max | U, S, L             |            |
-| Drag a point of a measurement; clear all               | U                   | #145       |
-| Cine play and pause at a chosen frame rate             | U, E `shortcuts`, S | #146       |
-| PNG of a pane                                          | U, S, L             | #147, #148 |
-| 360° spin video of the 3D view                         | U, S                | #147       |
+| Feature                                                | Checked by          | Follow-up |
+| ------------------------------------------------------ | ------------------- | --------- |
+| Distance and angle                                     | U, S, L             |           |
+| Ellipse and rectangle with area, mean, SD, min and max | U, S, L             |           |
+| Drag a point of a measurement; clear all               | U                   | #145      |
+| Cine play and pause at a chosen frame rate             | U, E `shortcuts`, S | #146      |
+| PNG of a pane                                          | U, S, L             | #147      |
+| 360° spin video of the 3D view                         | U, S                | #147      |
 
 ### Information
 
@@ -161,7 +161,6 @@ are not regressions. Each has an issue.
 | #145  | Selecting, moving and deleting one measurement                                    | #27          |
 | #146  | Cine direction and loop mode                                                      | #28          |
 | #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only        | #29          |
-| #148  | A decision on marking captures as not for clinical use                            | #29          |
 | #149  | Window/level linking in Compare                                                   | #26          |
 | #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot        | #22          |
 | #151  | Filled display of imported structures                                             | #104         |
@@ -169,6 +168,11 @@ are not regressions. Each has an issue.
 | #155  | Tree view expansion remembered                                                    | #33          |
 | #156  | Reopening a recent selection without picking the files again                      | #34          |
 | #157  | Probe position in patient millimetres                                             | #21          |
+
+#148 asked whether captured images and video should carry a
+not-for-clinical-use mark, which #29 left open. Decided on 2026-11-13: no.
+Captures stay clean, as they are in dicom-workspace. Their file names and
+contents carry no patient name or ID.
 
 Found on the way, also present in dicom-workspace:
 
