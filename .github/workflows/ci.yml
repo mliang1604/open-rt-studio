@@ -120,12 +120,14 @@ jobs:
         include:
           - variant: baseline
             args: ''
-          - variant: no-watchdog
-            args: '--disable-gpu-watchdog'
-          - variant: in-process-gpu
-            args: '--in-process-gpu'
-          - variant: baseline-2
-            args: ''
+          - variant: use-vulkan-swiftshader
+            args: '--use-vulkan=swiftshader'
+          - variant: angle-vulkan
+            args: '--use-angle=vulkan --disable-vulkan-surface'
+          - variant: angle-vulkan-swiftshader
+            args: '--use-angle=vulkan --use-vulkan=swiftshader --disable-vulkan-surface'
+          - variant: vulkan-swiftshader-no-surface
+            args: '--use-vulkan=swiftshader --disable-vulkan-surface'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -145,7 +147,7 @@ jobs:
 
       # Playwright starts the dev server itself and waits for it.
       - name: End-to-end tests
-        run: npm run e2e -- --repeat-each 3 2>&1 | tee e2e.log | grep -v 'pw:browser' ; grep -E 'pw:browser' e2e.log | grep -i -E 'gpu|dawn|vulkan|swiftshader|crash|exited|lost|watchdog|error' | grep -v -i 'vite' | cut -c1-400 | sort | uniq -c | sort -rn | head -80; grep -E '[0-9]+ (failed|passed)' e2e.log | tail -3; ! grep -q -E '^ +[0-9]+ failed' e2e.log
+        run: npm run e2e -- --repeat-each 3 2>&1 | tee e2e.log | grep -v 'pw:browser' ; echo "factory errors: $(grep -c 'Could not find SharedImageBackingFactory' e2e.log) | device lost: $(grep -c 'external Instance reference' e2e.log) | adapter lines: $(grep -c 'WebGPU in this browser: adapter available' e2e.log) | skipped: $(grep -E '^ +[0-9]+ skipped' e2e.log | tr -d ' ')"; grep -E 'pw:browser' e2e.log | grep -i -E 'ERROR|FATAL' | sed -E 's/^.*pw:browser \[pid=[0-9]+\]\[err\] \[[0-9:/.]+://; s/ \+[0-9]+m?s$//' | cut -c1-230 | sed -E 's/[0-9]{3,}/N/g' | sort | uniq -c | sort -rn | head -15; grep -E '[0-9]+ (failed|passed)' e2e.log | tail -3; ! grep -q -E '^ +[0-9]+ failed' e2e.log
         env:
           E2E_SOFTWARE_GPU: '1'
           E2E_EXTRA_ARGS: ${{ matrix.args }}
