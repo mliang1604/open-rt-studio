@@ -20,7 +20,19 @@ import { formatValue, type PanePoint, type VoxelProbe } from '@open-rt-studio/re
  */
 const GAP_WARNING_RATIO = 2;
 
-/** One-line readout: orientation, voxel index, and value (plus raw if rescaled). */
+/** A coordinate in mm to one decimal, without the "-0.0" a tiny negative gives. */
+function formatMm(value: number): string {
+  const text = value.toFixed(1);
+  return text === '-0.0' ? '0.0' : text;
+}
+
+/**
+ * One-line readout: orientation, voxel index, position in the patient, and
+ * value (plus raw if rescaled). The position is the point under the cursor in
+ * DICOM patient coordinates: mm along L (towards the patient's left), P
+ * (towards the back) and S (towards the head). It is left out for a volume
+ * with no recorded geometry, where there is no patient frame to state it in.
+ */
 export function formatProbe(
   name: string,
   probe: VoxelProbe,
@@ -39,7 +51,8 @@ export function formatProbe(
       return ` · ${layer.modality ?? 'Image'} ${formatValue(sample.value)}${u ? ` ${u}` : ''}`;
     })
     .join('');
-  return `${name} · voxel (${x}, ${y}, ${z}) · value ${value}${stored}${overlays}`;
+  const position = volume.geometry ? ` · LPS (${probe.patient.map(formatMm).join(', ')}) mm` : '';
+  return `${name} · voxel (${x}, ${y}, ${z})${position} · value ${value}${stored}${overlays}`;
 }
 
 /** Join pane-local points into an SVG polyline `points` string. */

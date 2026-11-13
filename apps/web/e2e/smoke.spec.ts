@@ -133,10 +133,18 @@ test.describe('loading a series', () => {
     const probe = page.locator('.probe');
     await expect(probe).toBeVisible();
     const text = await probe.innerText();
-    const match = /voxel \((\d+), (\d+), (\d+)\) · value (-?\d+) HU/.exec(text);
+    const match =
+      /voxel \((\d+), (\d+), (\d+)\) · LPS \(([-\d.]+), ([-\d.]+), ([-\d.]+)\) mm · value (-?\d+) HU/.exec(
+        text,
+      );
     expect(match, `unexpected probe text: ${text}`).not.toBeNull();
-    const [x, , z, value] = match!.slice(1).map(Number);
+    const [x, y, z, px, py, pz, value] = match!.slice(1).map(Number);
     expect(value).toBe(syntheticCtValue(x, z, size));
+    // The series has 1 mm voxels with the first one at the origin, so the
+    // position in mm is the voxel index, to within half a voxel in the plane.
+    expect(Math.abs(px - x)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(py - y)).toBeLessThanOrEqual(0.5);
+    expect(pz).toBe(z);
   });
 });
 

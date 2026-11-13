@@ -167,7 +167,7 @@ are not regressions. Each has an issue.
 | #152  | Rename, recolour and delete for painted structures; listing them under Structures | #105         |
 | #155  | Tree view expansion remembered                                                    | #33          |
 | #156  | Reopening a recent selection without picking the files again                      | #34          |
-| #157  | Probe position in patient millimetres                                             | #21          |
+| #157  | Probe position in patient millimetres (added since)                               | #21          |
 
 #148 asked whether captured images and video should carry a
 not-for-clinical-use mark, which #29 left open. Decided on 2026-11-13: no.

@@ -759,10 +759,20 @@ canvas.movable {
   pointer-events: none;
 }
 
-.status {
+/* The bottom edge of the viewport: the status line on the left, the voxel
+   readout on the right. When both do not fit on one line the readout goes on
+   a line of its own above the status, so neither covers the other. */
+.footer-bar {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  inset: auto 12px 12px;
+  display: flex;
+  flex-wrap: wrap-reverse;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.status {
   padding: 6px 10px;
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
@@ -771,7 +781,6 @@ canvas.movable {
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   color: var(--muted);
-  pointer-events: none;
   max-width: 70%;
 }
 
@@ -851,14 +860,11 @@ canvas.movable {
   font-weight: 600;
 }
 
-/* Live voxel readout, anchored opposite the status line. */
+/* Live voxel readout, at the right end of the footer bar. */
 .probe {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
+  margin-left: auto;
   padding: 6px 10px;
   border-radius: var(--radius);
-  pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
 
