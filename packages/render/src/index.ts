@@ -2,20 +2,125 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Public entry point of @open-rt-studio/render. The render core is ported from
-// dicom-workspace in issue #16; until then this only proves the wiring.
+// Public entry point of @open-rt-studio/render. Code outside this package imports
+// from the package name only, so a name is public exactly when it is listed
+// here. Add to this list when another workspace needs something; keep helpers
+// that only this package uses out of it.
 
-import { Orientation } from '@open-rt-studio/dicom';
-
-/** The name other workspaces import this package by. */
-export const RENDER_PACKAGE = '@open-rt-studio/render';
-
-/** Workspace packages the renderer is allowed to depend on. */
-export const RENDER_DEPENDS_ON: readonly string[] = ['@open-rt-studio/dicom'];
-
-/** The three orthogonal planes, in the order per-orientation tuples use. */
-export const PLANES: readonly Orientation[] = [
-  Orientation.Axial,
-  Orientation.Coronal,
-  Orientation.Sagittal,
-];
+export { type AxisIndicatorOverlay, axisIndicatorGeometry } from './axis-indicator.js';
+export {
+  type BrushShape,
+  type VoxelIndex,
+  cursorVoxel,
+  strokeVoxels,
+  throughPlaneAxis,
+} from './brush.js';
+export {
+  type ClipPlaneGizmoGeometry,
+  type OrbitCamera,
+  cameraBasis,
+  clipPlaneGizmoGeometry,
+  projectToPane,
+  rezoomCameraPan,
+  viewBasis,
+} from './camera.js';
+export { COLORMAPS } from './colormap.js';
+export { focusPanePoint, focusSliceIndex } from './crosshair.js';
+export { type GpuContext, initWebGpu } from './device.js';
+export { DEFAULT_DVR_LIGHTING, type DvrLighting } from './dvr.js';
+export { composePaneViews } from './frame.js';
+export {
+  type BlendBar,
+  LayoutMode,
+  type PaneRect,
+  type Vec2,
+  blendBarPlacement,
+  compareLayout,
+  mprLayout,
+  scaleRect,
+  singleLayout,
+  triLayout,
+} from './layout.js';
+export { MASK_LUT_SIZE, maskColorLut } from './mask.js';
+export {
+  type RoiShape,
+  formatValue,
+  measureAngleDeg,
+  measureDistanceMm,
+  roiAreaMm2,
+  roiBounds,
+  roiLines,
+  roiStats,
+} from './measure.js';
+export { clampPan, cursorZoomPan, oneToOneZoom, steppedSliceIndex } from './pan-zoom.js';
+export {
+  type PaneEdgeLabels,
+  mmPerScreenPixel,
+  paneEdgeLabels,
+  scaleBar,
+} from './pane-annotations.js';
+export {
+  type PanePoint,
+  type PlanePoint,
+  paneToPlanePoint,
+  planePointToPane,
+} from './pane-coords.js';
+export type { PaneView } from './pane-view.js';
+export { pickProjection } from './pick.js';
+export {
+  NO_OBLIQUE,
+  type ObliqueRotation,
+  planeExtentMm,
+  sliceCountFor,
+  slicePlaneCorners,
+} from './plane-basis.js';
+export { type VoxelProbe, probeVoxel, sampleVolumeAtPatient } from './probe.js';
+export { ProjectionMode, defaultSlabThicknessMm, isDvr } from './projection.js';
+export {
+  type ReferenceLineGeometry,
+  type ReferenceLinePane,
+  referenceLineGeometry,
+} from './reference-lines.js';
+export { type PatientPlane, linkedSliceIndex, volumeBounds } from './reslice.js';
+export {
+  type ContourPaneOverlay,
+  type RoiContourCoords,
+  type RoiOverlayPane,
+  type RoiPlaneShapes,
+  rgbColor,
+  roiContourCoords,
+  roiKeyOf,
+  roiPlaneShapes,
+  roiScreenShapes,
+  setIsShown,
+} from './roi-overlay.js';
+export { DEFAULT_CHECKER_CELLS, SliceRenderer } from './slice-renderer.js';
+export {
+  type ColoredSurfaceMesh,
+  type RoiSurfaceMesh,
+  flattenSurfaceMeshes,
+  loftRoiMesh,
+} from './surface.js';
+export {
+  type SurfaceFrame,
+  type SurfaceSortScratch,
+  ensureSurfaceSortScratch,
+  packSurfaceFrame,
+} from './surface-frame.js';
+export {
+  TRANSFER_FUNCTION_PRESETS,
+  type TransferFunction,
+  TransferFunctionPreset,
+  addControlPoint,
+  moveControlPoint,
+  removeControlPoint,
+  setControlPointColor,
+  transferFunction,
+} from './transfer-function.js';
+export {
+  type WindowLevel,
+  type WindowPreset,
+  windowLevelDrag,
+  windowLevelSensitivity,
+  windowPresets,
+} from './window-level.js';
