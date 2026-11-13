@@ -652,6 +652,31 @@
             }
           </select>
         </label>
+        <label class="ctrl" title="Which way cine steps through the slices">
+          Direction
+          <select
+            [value]="cineDirection()"
+            (change)="toolbar.onCineDirectionChange($event)"
+            [disabled]="!isReady()"
+            aria-label="Cine direction"
+          >
+            <option value="1">Forward</option>
+            <option value="-1">Reverse</option>
+          </select>
+        </label>
+        <label class="ctrl" title="What cine does when it reaches the last slice">
+          At the end
+          <select
+            [value]="cineLoopMode()"
+            (change)="toolbar.onCineLoopModeChange($event)"
+            [disabled]="!isReady()"
+            aria-label="Cine loop mode"
+          >
+            @for (mode of cineLoopModes; track mode.value) {
+              <option [value]="mode.value">{{ mode.label }}</option>
+            }
+          </select>
+        </label>
       </div>
     </details>
 
