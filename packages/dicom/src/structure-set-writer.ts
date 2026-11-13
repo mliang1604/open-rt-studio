@@ -26,11 +26,28 @@ import type { Contour, Roi, StructureSet } from './types.js';
  */
 export function writeStructureSet(ss: StructureSet, opts: WriteOptions = {}): ArrayBuffer {
   const sopInstanceUid = opts.sopInstanceUid ?? generateUid();
+  const created = opts.createdAt ?? new Date();
+  // An optional text element: written only when there is a value.
+  const optional = (group: number, el: number, vr: string, value: string | null | undefined) =>
+    value ? [element(group, el, vr, vr === 'UI' ? uid(value) : text(value))] : [];
+  // Elements are in ascending tag order, as the standard requires.
   const dataSet = concat([
     element(0x0008, 0x0016, 'UI', uid(RTSTRUCT_SOP_CLASS)), // SOPClassUID
     element(0x0008, 0x0018, 'UI', uid(sopInstanceUid)), // SOPInstanceUID
+    ...optional(0x0008, 0x0020, 'DA', opts.studyDate), // StudyDate
+    ...optional(0x0008, 0x0030, 'TM', opts.studyTime), // StudyTime
     element(0x0008, 0x0060, 'CS', text('RTSTRUCT')), // Modality
+    element(0x0008, 0x0070, 'LO', text(MANUFACTURER)), // Manufacturer
+    ...optional(0x0008, 0x1030, 'LO', opts.studyDescription), // StudyDescription
+    ...optional(0x0008, 0x103e, 'LO', opts.seriesDescription), // SeriesDescription
+    ...optional(0x0010, 0x0010, 'PN', opts.patientName), // PatientName
+    ...optional(0x0010, 0x0020, 'LO', opts.patientId), // PatientID
+    ...optional(0x0020, 0x000d, 'UI', opts.studyInstanceUid), // StudyInstanceUID
+    element(0x0020, 0x000e, 'UI', uid(opts.seriesInstanceUid ?? generateUid())), // SeriesInstanceUID
     ...(ss.label ? [element(0x3006, 0x0002, 'SH', text(ss.label))] : []), // Structure Set Label
+    ...optional(0x3006, 0x0006, 'ST', opts.description), // StructureSetDescription
+    element(0x3006, 0x0008, 'DA', text(dicomDate(created))), // StructureSetDate
+    element(0x3006, 0x0009, 'TM', text(dicomTime(created))), // StructureSetTime
     ...referencedFrameOfReference(ss),
     structureSetRoiSequence(ss.rois, ss.frameOfReferenceUid),
     roiContourSequence(ss.rois),
@@ -43,6 +60,41 @@ export function writeStructureSet(ss: StructureSet, opts: WriteOptions = {}): Ar
 export interface WriteOptions {
   /** SOP Instance UID for the new object; a fresh UID is generated when omitted. */
   readonly sopInstanceUid?: string;
+  /** Series Instance UID of the new object; a fresh UID is generated when omitted. */
+  readonly seriesInstanceUid?: string;
+  /**
+   * Patient and study the structure set belongs to, normally copied from the
+   * image series it annotates, so other systems file it with those images. Each
+   * is left out of the file when not given.
+   */
+  readonly patientName?: string | null;
+  readonly patientId?: string | null;
+  readonly studyInstanceUid?: string | null;
+  /** DICOM DA, `YYYYMMDD`. */
+  readonly studyDate?: string | null;
+  /** DICOM TM, `HHMMSS`. */
+  readonly studyTime?: string | null;
+  readonly studyDescription?: string | null;
+  readonly seriesDescription?: string | null;
+  /** Structure Set Description (3006,0006): free text about the object. */
+  readonly description?: string | null;
+  /** When the object was made, for Structure Set Date and Time. Defaults to now. */
+  readonly createdAt?: Date;
+}
+
+/** Manufacturer (0008,0070) written into every object this writer produces. */
+const MANUFACTURER = 'Open RT Studio';
+
+const two = (n: number): string => String(n).padStart(2, '0');
+
+/** A date as DICOM DA (`YYYYMMDD`), in local time. */
+function dicomDate(date: Date): string {
+  return `${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}`;
+}
+
+/** A time as DICOM TM (`HHMMSS`), in local time. */
+function dicomTime(date: Date): string {
+  return `${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`;
 }
 
 /** SOP Class UID identifying an RT Structure Set Storage object. */

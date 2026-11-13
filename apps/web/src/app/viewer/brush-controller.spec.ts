@@ -77,6 +77,7 @@ function setup(): { brush: BrushController; store: EditableStructuresStore } {
     obliques: signal(noObliques),
     sliceIndices: signal<PerOrientation>([2, 2, 2]),
     sagittalFlipped: () => false,
+    baseSeries: () => null,
   };
   brush.init(deps);
   return { brush, store };
