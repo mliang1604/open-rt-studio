@@ -1139,31 +1139,33 @@
       <div class="warning" role="status">⚠ {{ warning }}</div>
     }
 
-    <div
-      class="status"
-      [class.error]="status.statusIsError()"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      {{ status.statusText() }}
-      @if (status.isLoading()) {
-        <span
-          class="progress"
-          role="progressbar"
-          aria-label="Loading DICOM files"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          [attr.aria-valuenow]="status.loadPercent()"
-        >
-          <span class="progress-fill" [style.width.%]="status.loadProgress() * 100"></span>
-        </span>
+    <div class="footer-bar">
+      <div
+        class="status"
+        [class.error]="status.statusIsError()"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {{ status.statusText() }}
+        @if (status.isLoading()) {
+          <span
+            class="progress"
+            role="progressbar"
+            aria-label="Loading DICOM files"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            [attr.aria-valuenow]="status.loadPercent()"
+          >
+            <span class="progress-fill" [style.width.%]="status.loadProgress() * 100"></span>
+          </span>
+        }
+      </div>
+
+      @if (measureCtl.probeText(); as probe) {
+        <div class="probe">{{ probe }}</div>
       }
     </div>
-
-    @if (measureCtl.probeText(); as probe) {
-      <div class="probe">{{ probe }}</div>
-    }
 
     @if (isDraggingFiles()) {
       <div class="drop-overlay" role="status">
