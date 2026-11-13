@@ -21,7 +21,9 @@ application. Never commit patient data or real DICOM files
 - `packages/render`: WebGPU device setup, WGSL shaders and pure geometry
   helpers. Depends only on `packages/dicom` and the WebGPU types.
 - `packages/testdata`: synthetic DICOM generators for tests.
-- `apps/web`: the Angular application.
+- `apps/web`: the Angular application. The viewer is one large component
+  (`src/app/viewer`) with controllers and stores beside it; newer pieces are
+  their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`).
 - `apps/desktop`, `services/server`, `native/`: placeholders until M2 and M3.
 - `docs/`: architecture, license headers, test data policy, and the parity
   audit against dicom-workspace.
@@ -70,6 +72,10 @@ before merging.
   file inside the package. Add new public names to the package's
   `src/index.ts`.
 - **Specs sit next to the code** as `*.spec.ts`. Prefer testing pure helpers.
+- **Test against the synthetic data's formulas.** The generators in
+  `packages/testdata` export what they write (`syntheticCtValue`,
+  `thoraxTissueAt`, `syntheticDoseGy`, ...), so a test can state the expected
+  probe value, contour or dose instead of copying a number.
 - **Tests must pass without a GPU.** CI runners have none. Unit tests use
   hand-written fakes of the WebGPU objects. End-to-end tests call
   `requireWebGpu(page)` before the first GPU-dependent step, which reports the
@@ -85,5 +91,12 @@ before merging.
 - One branch and one pull request per issue (or small inseparable group); the
   pull request names the issues it closes.
 - For changes to what the app shows, run it in a browser with WebGPU and look
-  before merging.
+  before merging. Looking has caught things every test passed: a panel
+  covering the image it belongs to, an overlay under the canvas.
+- Before pushing a change the end-to-end tests cover, run them twice: `npm run
+e2e`, and `E2E_SOFTWARE_GPU=1 npm run e2e`, which is how CI runs them. The
+  software adapter is slow, and it has exposed real races that a fast GPU
+  hides.
+- `viewer.css` is close to its size budget (the build fails at 13 kB). New
+  interface goes into its own component with its own styles.
 - Do not add the `claude` label to issues.
