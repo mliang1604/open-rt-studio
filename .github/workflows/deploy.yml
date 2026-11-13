@@ -1,0 +1,98 @@
+name: Deploy to GitHub Pages
+
+# Publishes the web client whenever main advances, so the current state is
+# always available to try at https://mliang1604.github.io/open-rt-studio/.
+#
+# GitHub Pages has to be enabled once in the repository settings: Settings,
+# Pages, Source "GitHub Actions". Until it is, this workflow reports that and
+# skips the build and the deployment instead of failing on every merge.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: read the repository, publish a Pages artifact, and mint the
+# OIDC token the Pages environment asks for.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time. A running deployment is not cancelled; the next
+# one queues, so every merge ends up published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check that Pages is enabled
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - name: Look up the Pages site
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if build_type=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null); then
+            if [ "$build_type" = "workflow" ]; then
+              echo "enabled=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              echo "::warning::GitHub Pages is enabled but its source is \"$build_type\". Set Settings > Pages > Source to \"GitHub Actions\" to publish the web client."
+            fi
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GitHub Pages is not enabled for this repository, so nothing was deployed. Enable it under Settings > Pages with Source \"GitHub Actions\", then re-run this workflow."
+          fi
+
+  build:
+    name: Build
+    needs: check
+    if: needs.check.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # A project site is served from /<repository>/, so the base href must
+      # match or the scripts and the router resolve against the wrong path.
+      - name: Build the web client
+        run: npm run build -w @open-rt-studio/web -- --base-href "/${{ github.event.repository.name }}/"
+
+      # Pages serves 404.html for any path it has no file for. A copy of the
+      # application's index.html there lets the router handle deep links and
+      # reloads such as /open-rt-studio/disclaimer.
+      - name: Add the single-page-app fallback
+        run: cp apps/web/dist/browser/index.html apps/web/dist/browser/404.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist/browser
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
