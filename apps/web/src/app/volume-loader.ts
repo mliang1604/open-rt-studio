@@ -15,6 +15,7 @@ import {
   overlayImageLayer,
   type Layer,
   type StructureSet,
+  VolumeBuildError,
 } from '@open-rt-studio/dicom';
 import { parseFilesInWorkers, type LoadProgress } from './parse-pool';
 
@@ -24,6 +25,11 @@ import { parseFilesInWorkers, type LoadProgress } from './parse-pool';
  * series; the grouped slices are kept so switching selection rebuilds without
  * re-reading.
  */
+/** What a batch of files turned out to hold; see {@link VolumeLoader.importFiles}. */
+export type FileImport =
+  | { readonly kind: 'images'; readonly result: LoadResult }
+  | { readonly kind: 'structures'; readonly structureSets: readonly StructureSet[] };
+
 export interface LoadResult {
   /** Every series found, in picker order. */
   readonly series: readonly Series[];
@@ -73,15 +79,38 @@ export class VolumeLoader {
    * Assembly (grouping + {@link buildVolume}) stays on the main thread.
    */
   async loadFromFiles(files: readonly File[], onProgress?: LoadProgress): Promise<LoadResult> {
-    const { slices, structureSets } = await parseFilesInWorkers(files, onProgress);
+    const imported = await this.importFiles(files, onProgress);
+    if (imported.kind === 'images') return imported.result;
+    throw new VolumeBuildError('No DICOM image slices were found.');
+  }
 
+  /**
+   * Parse a batch of files into what it holds: images (with any structure sets
+   * that came along), or structure sets only. An RT Structure Set has no pixels,
+   * so a batch of nothing but RTSTRUCT files cannot become a volume; it is still
+   * a valid import, to be put on images that are already loaded. A batch with
+   * neither throws the canonical "no slices" error.
+   */
+  async importFiles(files: readonly File[], onProgress?: LoadProgress): Promise<FileImport> {
+    const { slices, structureSets } = await parseFilesInWorkers(files, onProgress);
+    if (slices.length === 0 && structureSets.length > 0) {
+      return { kind: 'structures', structureSets };
+    }
+    return { kind: 'images', result: this.buildFromSlices(slices, structureSets, files.length) };
+  }
+
+  private buildFromSlices(
+    slices: Parameters<typeof groupSeries>[0],
+    structureSets: readonly StructureSet[],
+    fileCount: number,
+  ): LoadResult {
     const series = groupSeries(slices);
     // initialImportSeries returns undefined only for an empty batch; assemble it to
     // throw the canonical "no slices" error in that case.
     const selected = initialImportSeries(series);
-    if (!selected) buildVolume(slices); // throws the canonical "no slices" error
+    if (!selected) buildVolume([...slices]); // throws the canonical "no slices" error
 
-    return this.buildResult(series, selected!, structureSets, files.length);
+    return this.buildResult(series, selected!, structureSets, fileCount);
   }
 
   /**

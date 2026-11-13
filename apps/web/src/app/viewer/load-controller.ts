@@ -8,7 +8,15 @@ import { demoPatient, demoPlanningCt } from '../demo-data';
 import { PatientCatalog } from '../patient-catalog';
 import { PreferencesStore } from '../preferences-store';
 import { VolumeLoader, type LoadResult } from '../volume-loader';
-import { type Series, clamp, baseLayer, Orientation, type Volume } from '@open-rt-studio/dicom';
+import {
+  type Series,
+  clamp,
+  baseLayer,
+  Orientation,
+  type Volume,
+  structureSetsForSeries,
+  type StructureSet,
+} from '@open-rt-studio/dicom';
 import { volumeBounds, NO_OBLIQUE, SliceRenderer } from '@open-rt-studio/render';
 import { SERIES_DND_MIME } from './history-panel/series-chip';
 import { readDropped } from './drop-files';
@@ -300,10 +308,16 @@ export class LoadController {
     const previous = d.load();
     d.load.set({ status: 'loading', loaded: 0, total: files.length });
     try {
-      const result = await this.loader.loadFromFiles(files, (loaded, total) => {
+      const imported = await this.loader.importFiles(files, (loaded, total) => {
         // Ignore stragglers from a superseded load (a new load already started).
         if (d.load().status === 'loading') d.load.set({ status: 'loading', loaded, total });
       });
+      if (imported.kind === 'structures') {
+        this.addStructureSets(imported.structureSets, previous);
+        if (entry) this.recentStore.record(entry);
+        return;
+      }
+      const { result } = imported;
       // The coordinator runs the whole load policy — held-modifier fusion, the
       // one-patient guard (prompting through the injected confirm) and catalog
       // mutation — and hands back what to do; the patient-switch confirm is the
@@ -319,6 +333,44 @@ export class LoadController {
     } catch (error) {
       d.load.set({ status: 'error', message: messageOf(error) });
     }
+  }
+
+  /**
+   * Take in a batch that held only RT Structure Sets. They are kept for the
+   * session, and the ones that belong to the series on screen (same frame of
+   * reference, or referring to it) join the view at once, without reloading it:
+   * zoom, window and any structures being painted stay as they are.
+   */
+  private addStructureSets(sets: readonly StructureSet[], previous: LoadState): void {
+    const d = this.deps;
+    if (!d) return;
+    this.catalog.addStructureSets(sets);
+    const count = `${sets.length} structure set${sets.length === 1 ? '' : 's'}`;
+    if (previous.status !== 'ready') {
+      d.load.set({ status: 'idle' });
+      this.flashNotice(`Imported ${count}. Pick the series it belongs to from the history.`);
+      return;
+    }
+    const { result } = previous;
+    const shown = result.series.find((s) => s.uid === result.selectedUid);
+    const known = new Set(result.allStructureSets);
+    const fresh = sets.filter((set) => !known.has(set));
+    const matching = shown ? structureSetsForSeries(fresh, shown) : [];
+    if (matching.length === 0) {
+      d.load.set(previous);
+      this.flashNotice(`Imported ${count}. None of it belongs to the series on screen.`);
+      return;
+    }
+    this.roiCtl.hideAdded(matching, result.structureSets.length);
+    d.load.set({
+      status: 'ready',
+      result: {
+        ...result,
+        structureSets: [...result.structureSets, ...matching],
+        allStructureSets: [...result.allStructureSets, ...fresh],
+      },
+    });
+    this.flashNotice(`Imported ${count}. Show it under Structures.`);
   }
 
   /**

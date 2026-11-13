@@ -258,6 +258,23 @@ export class RoiController {
     this.promotedRois.update((promoted) => new Set(promoted).add(key));
   }
 
+  /**
+   * Structure sets were added to the view that is already showing, at
+   * `firstIndex` and after. Their contours start hidden like those of any
+   * imported set (#257); everything about the sets already there is kept.
+   */
+  hideAdded(added: readonly StructureSet[], firstIndex: number): void {
+    this.hiddenRois.update((hidden) => {
+      const next = new Set(hidden);
+      added.forEach((set, offset) => {
+        for (const roi of set.rois) {
+          if (roi.contours.length > 0) next.add(roiKeyOf(firstIndex + offset, roi.number));
+        }
+      });
+      return next;
+    });
+  }
+
   /** Reset the ROI state for a freshly loaded volume: hide all contours, drop overrides. */
   resetForLoad(structureSets: readonly StructureSet[]): void {
     this.hiddenRois.set(allRoiKeys(structureSets)); // contours start hidden (#257)

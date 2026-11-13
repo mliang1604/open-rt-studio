@@ -500,6 +500,11 @@ export class Viewer {
       obliques: this.obliques,
       sliceIndices: this.sliceIndices,
       sagittalFlipped: () => this.sagittalFlipped(),
+      baseSeries: () => {
+        const state = this.load();
+        if (state.status !== 'ready') return null;
+        return state.result.series.find((s) => s.uid === state.result.selectedUid) ?? null;
+      },
     });
 
     // Wire the render controller: it owns the WebGPU lifecycle, the resize sync and

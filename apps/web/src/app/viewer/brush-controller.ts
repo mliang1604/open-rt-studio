@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject, signal, type Signal } from '@angular/core';
-import { Orientation, type Volume } from '@open-rt-studio/dicom';
+import { Orientation, type Series, type Volume } from '@open-rt-studio/dicom';
 import {
   cursorVoxel,
   strokeVoxels,
@@ -12,6 +12,8 @@ import {
   type VoxelIndex,
 } from '@open-rt-studio/render';
 import { EditableStructuresStore } from './editable-structures-store';
+import { authoredSetRtStruct } from './structure-set-export';
+import { downloadBlob } from './viewer-dom';
 import { type PanePlacement } from './pane-placement';
 import {
   type PerOrientation,
@@ -37,6 +39,8 @@ export interface BrushInit {
   readonly obliques: Signal<PerOrientationOblique>;
   readonly sliceIndices: Signal<PerOrientation>;
   readonly sagittalFlipped: () => boolean;
+  /** The image series on screen, which an exported structure set is tied to. */
+  readonly baseSeries: () => Series | null;
 }
 
 /**
@@ -88,6 +92,11 @@ export class BrushController {
    * a label volume exists, and — for painting — an ROI is active. Erasing needs no
    * active ROI (it clears whatever is under the brush back to background).
    */
+  /** Whether there is anything to export: the active set has at least one structure. */
+  readonly canExport = computed(
+    () => this.store.labelVolume() !== null && (this.store.activeSet()?.rois.length ?? 0) > 0,
+  );
+
   readonly isActive = computed(() => {
     if (!this.store.labelVolume()) return false;
     const mode = this.mode();
@@ -172,6 +181,24 @@ export class BrushController {
   onShapeChange(event: Event): void {
     if (!(event.target instanceof HTMLSelectElement)) return;
     this.shape.set(event.target.value === 'disk' ? 'disk' : 'sphere');
+  }
+
+  /**
+   * Save the active authored set as a DICOM RT Structure Set file. The painted
+   * voxels become contours, and the object refers to the series on screen so it
+   * can be put back on the same images, here or in another system.
+   */
+  exportActiveSet(): void {
+    const label = this.store.labelVolume();
+    const set = this.store.activeSet();
+    if (!label || !set || set.rois.length === 0) return;
+    const { bytes, filename } = authoredSetRtStruct(
+      label,
+      set,
+      this.deps?.baseSeries() ?? null,
+      new Date(),
+    );
+    downloadBlob(new Blob([bytes], { type: 'application/dicom' }), filename);
   }
 
   /**
