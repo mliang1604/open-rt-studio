@@ -1,0 +1,7 @@
+{
+  "name": "@open-rt-studio/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Node server and PACS. Starts in milestone M2 (issue #41).",
+  "license": "MPL-2.0"
+}

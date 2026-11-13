@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "target": "ES2022",
+    "module": "preserve",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@open-rt-studio/dicom": ["./packages/dicom/src/index.ts"],
+      "@open-rt-studio/render": ["./packages/render/src/index.ts"]
+    }
+  }
+}

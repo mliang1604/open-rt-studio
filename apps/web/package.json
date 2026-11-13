@@ -1,0 +1,7 @@
+{
+  "name": "@open-rt-studio/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Angular web client. The application shell is ported in issue #17.",
+  "license": "MPL-2.0"
+}

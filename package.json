@@ -1,0 +1,38 @@
+{
+  "name": "open-rt-studio",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An open source multi-platform RT imaging application. Not for clinical use.",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mliang1604/open-rt-studio.git"
+  },
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": ">=24.15"
+  },
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test:scripts && npm run test --workspaces --if-present",
+    "lint": "eslint . --max-warnings 0 && npm run check:headers",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:headers": "node scripts/check-license-headers.mjs",
+    "test:scripts": "node --test \"scripts/**/*.spec.mjs\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "prettier": "^3.8.4",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^4.1.9"
+  }
+}

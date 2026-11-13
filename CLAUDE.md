@@ -31,11 +31,11 @@ dependencies; read the issue before working on it.
 
 ## Build and test
 
-The workspace scaffold lands with issue #11; these are the commands from then
-on. All run from the repository root.
+All commands run from the repository root. Node 24.15 or newer is required
+(`.nvmrc`).
 
 - Install: `npm ci` (not `npm install`, which rewrites the lockfile).
-- Lint: `npm run lint`
+- Lint: `npm run lint` (ESLint, then the license-header check)
 - Format check: `npm run format:check` (fix with `npm run format`)
 - Build everything: `npm run build`
 - Unit tests: `npm test`
