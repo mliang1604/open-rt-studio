@@ -180,7 +180,7 @@ Found on the way, also present in dicom-workspace:
 | ----- | -------------------------------------------------------------------------------------- |
 | #153  | The brush stayed armed when a measurement tool was chosen (fixed since)                |
 | #154  | "Set" label covered by the "+ Set" button (fixed since)                                |
-| #158  | Code the interface can no longer reach                                                 |
+| #158  | Code the interface can no longer reach (removed since; import-to-edit is left to #152) |
 | #159  | Initial bundle over its warning budget; `viewer.css` near its limit (both fixed since) |
 | #160  | Accessibility lint for templates was not on (turned on since)                          |
 

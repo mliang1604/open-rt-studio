@@ -10,7 +10,7 @@ import {
   type VolumeGeometry,
   type Series,
 } from '@open-rt-studio/dicom';
-import { doseOverlaySeries, mergeLoad, VolumeLoader, type LoadResult } from './volume-loader';
+import { mergeLoad, VolumeLoader, type LoadResult } from './volume-loader';
 
 /** A unit index→patient affine; real loads always carry one (see buildVolume). */
 const FAKE_GEOMETRY: VolumeGeometry = {
@@ -144,31 +144,6 @@ describe('VolumeLoader.loadSeries', () => {
 
     expect(result.allStructureSets).toEqual([structureSet]);
     expect(result.structureSets).toEqual([structureSet]);
-  });
-});
-
-describe('doseOverlaySeries', () => {
-  const ct = fakeSeries('ct', 'frame-1', 'CT');
-
-  it('selects a same-frame dose series to overlay above the base', () => {
-    const dose = fakeSeries('dose', 'frame-1', 'RTDOSE');
-    expect(doseOverlaySeries([ct, dose], ct)).toEqual([dose]);
-  });
-
-  it('ignores a dose in a different frame of reference', () => {
-    const dose = fakeSeries('dose', 'frame-2', 'RTDOSE');
-    expect(doseOverlaySeries([ct, dose], ct)).toEqual([]);
-  });
-
-  it('does not auto-overlay a same-frame image series (only dose)', () => {
-    const mr = fakeSeries('mr', 'frame-1', 'MR');
-    expect(doseOverlaySeries([ct, mr], ct)).toEqual([]);
-  });
-
-  it('never overlays the base onto itself', () => {
-    const dose = fakeSeries('dose', 'frame-1', 'RTDOSE');
-    // When the dose is the base (e.g. dose loaded alone), it isn't its own overlay.
-    expect(doseOverlaySeries([dose], dose)).toEqual([]);
   });
 });
 
