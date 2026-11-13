@@ -68,22 +68,38 @@ test('one click loads the synthetic demo patient and shows its planning CT', asy
 
   // The image is in Hounsfield units: hover the right lung and read the probe.
   // The main pane shows the middle axial slice fitted to the pane.
-  const pane = (await page.locator('.pane-overlay .pane').first().boundingBox())!;
-  const scale = Math.min(pane.width, pane.height) / THORAX.fieldOfView; // pixels per mm
+  //
+  // The pane rectangles in the DOM follow the layout a frame or two late, and
+  // the history panel has just grown by its two study tiles. On a slow
+  // (software) adapter a single measurement could be of the pane as it was
+  // before that, which put the cursor 36 mm too low. So measure, hover and
+  // read until the reading is the lung; a probe that is wrong stays wrong and
+  // this still fails.
   const [lungX, lungY] = [THORAX.lungRight.center[0], THORAX.lungRight.center[1] + 40];
-  await page.mouse.move(
-    pane.x + pane.width / 2 + lungX * scale,
-    pane.y + pane.height / 2 + lungY * scale,
-  );
-  const probe = page.locator('.probe');
-  await expect(probe).toBeVisible();
-  const text = await probe.innerText();
-  const match = /voxel \((\d+), (\d+), (\d+)\) · value (-?\d+) HU/.exec(text);
-  expect(match, `unexpected probe text: ${text}`).not.toBeNull();
-  const [i, , , hu] = match!.slice(1).map(Number);
-  expect(Math.abs(hu - THORAX_HU.lung)).toBeLessThanOrEqual(THORAX_CT_TEXTURE);
-  // And the cursor really is over the patient's right side (low column index).
-  expect(i).toBeLessThan(thoraxGrid().size / 2);
+  const grid = thoraxGrid();
+  await expect(async () => {
+    const pane = (await page.locator('.pane-overlay .pane').first().boundingBox())!;
+    const scale = Math.min(pane.width, pane.height) / THORAX.fieldOfView; // pixels per mm
+    await page.mouse.move(
+      pane.x + pane.width / 2 + lungX * scale,
+      pane.y + pane.height / 2 + lungY * scale,
+    );
+    const text = await page.locator('.probe').innerText();
+    const match =
+      /voxel \((\d+), (\d+), (\d+)\) · LPS \(([-\d.]+), ([-\d.]+), ([-\d.]+)\) mm · value (-?\d+) HU/.exec(
+        text,
+      );
+    expect(match, `unexpected probe text: ${text}`).not.toBeNull();
+    const [i, , , px, py, pz, hu] = match!.slice(1).map(Number);
+    expect(Math.abs(hu - THORAX_HU.lung)).toBeLessThanOrEqual(THORAX_CT_TEXTURE);
+    // The phantom is centred on the patient origin, so the position in mm is
+    // where the cursor was put, to within a voxel, on the slice being shown.
+    expect(Math.abs(px - lungX)).toBeLessThanOrEqual(grid.pixelSpacing);
+    expect(Math.abs(py - lungY)).toBeLessThanOrEqual(grid.pixelSpacing);
+    expect(Math.abs(pz)).toBeLessThanOrEqual(grid.sliceSpacing);
+    // And the cursor really is over the patient's right side (low column index).
+    expect(i).toBeLessThan(grid.size / 2);
+  }).toPass({ timeout: 15_000 });
 
   expectNoProblems(problems);
 });
