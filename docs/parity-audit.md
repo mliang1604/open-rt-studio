@@ -176,13 +176,13 @@ contents carry no patient name or ID.
 
 Found on the way, also present in dicom-workspace:
 
-| Issue | What                                                                |
-| ----- | ------------------------------------------------------------------- |
-| #153  | The brush stays armed when a measurement tool is chosen             |
-| #154  | "Set" label covered by the "+ Set" button                           |
-| #158  | Code the interface can no longer reach                              |
-| #159  | Initial bundle over its warning budget; `viewer.css` near its limit |
-| #160  | Accessibility lint for templates was not on (turned on since)       |
+| Issue | What                                                                                   |
+| ----- | -------------------------------------------------------------------------------------- |
+| #153  | The brush stays armed when a measurement tool is chosen                                |
+| #154  | "Set" label covered by the "+ Set" button                                              |
+| #158  | Code the interface can no longer reach                                                 |
+| #159  | Initial bundle over its warning budget; `viewer.css` near its limit (both fixed since) |
+| #160  | Accessibility lint for templates was not on (turned on since)                          |
 
 ## End-to-end tests in CI
 

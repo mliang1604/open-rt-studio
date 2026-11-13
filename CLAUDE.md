@@ -23,7 +23,9 @@ application. Never commit patient data or real DICOM files
 - `packages/testdata`: synthetic DICOM generators for tests.
 - `apps/web`: the Angular application. The viewer is one large component
   (`src/app/viewer`) with controllers and stores beside it; newer pieces are
-  their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`).
+  their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
+  `metadata-panel/`, `dvr-panel/`, `shortcut-help/`). The viewer route is
+  loaded on demand, so it is not in the initial bundle.
 - `apps/desktop`, `services/server`, `native/`: placeholders until M2 and M3.
 - `docs/`: architecture, license headers, test data policy, and the parity
   audit against dicom-workspace.
@@ -98,6 +100,8 @@ yourself before merging.
 e2e`, and `E2E_SOFTWARE_GPU=1 npm run e2e`, which is how CI runs them. The
   software adapter is slow, and it has exposed real races that a fast GPU
   hides.
-- `viewer.css` is close to its size budget (the build fails at 13 kB). New
-  interface goes into its own component with its own styles.
+- `viewer.css` has a size budget (the build warns at 8 kB and fails at 13 kB;
+  it is at about 10 kB). New interface goes into its own component with its
+  own styles. A child component does not inherit the viewer's button and
+  input styles; the floating cards share them through `viewer/panel-card.css`.
 - Do not add the `claude` label to issues.

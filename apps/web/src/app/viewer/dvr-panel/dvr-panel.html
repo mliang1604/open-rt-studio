@@ -1,0 +1,148 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<header class="info-header">
+  <strong>DVR — transfer function</strong>
+</header>
+
+<div class="dvr-body">
+  <!-- Opacity curve. Drag a point to reshape; double-click to add a stop. -->
+  <svg
+    class="tf-editor"
+    viewBox="0 0 100 100"
+    preserveAspectRatio="none"
+    (pointermove)="view3d.onTfPointerMove($event)"
+    (pointerup)="view3d.onTfPointerUp($event)"
+    (pointercancel)="view3d.onTfPointerUp($event)"
+    (dblclick)="view3d.onTfAddPoint($event)"
+  >
+    <polygon class="tf-area" [attr.points]="view3d.tfEditor().area" />
+    <polyline class="tf-line" [attr.points]="view3d.tfEditor().line" />
+    @for (p of view3d.tfEditor().points; track p.index) {
+      <circle
+        class="tf-point"
+        [class.selected]="p.index === view3d.tfSelected()"
+        [attr.cx]="p.x"
+        [attr.cy]="p.y"
+        r="3"
+        [attr.fill]="p.color"
+        (pointerdown)="view3d.onTfPointerDown($event, p.index)"
+      />
+    }
+  </svg>
+  <div class="tf-axis">
+    <span>{{ view3d.tfEditor().lo }} HU</span>
+    <span>opacity ↑ · drag points · dbl-click to add</span>
+    <span>{{ view3d.tfEditor().hi }} HU</span>
+  </div>
+
+  <div class="dvr-row">
+    <label class="dvr-color" title="Colour of the selected control point">
+      Colour
+      <input
+        type="color"
+        [value]="view3d.tfSelectedColor()"
+        (input)="view3d.onTfColorChange($event)"
+        [disabled]="view3d.tfSelected() === null"
+      />
+    </label>
+    <button
+      type="button"
+      class="dvr-remove"
+      (click)="view3d.onTfRemovePoint()"
+      [disabled]="!view3d.tfCanRemove()"
+      title="Remove the selected control point"
+    >
+      Remove point
+    </button>
+  </div>
+</div>
+
+<header class="info-header">
+  <strong>Lighting</strong>
+  <button
+    type="button"
+    class="dvr-toggle"
+    [class.active]="view3d.dvrLighting().enabled"
+    (click)="view3d.toggleShading()"
+    title="Toggle gradient shading on/off"
+  >
+    Shading {{ view3d.dvrLighting().enabled ? 'on' : 'off' }}
+  </button>
+</header>
+
+<div class="dvr-body">
+  <label class="dvr-slider" title="Swing the light around the view-up axis">
+    <span>Light ↔</span>
+    <input
+      type="range"
+      min="-180"
+      max="180"
+      step="1"
+      [value]="view3d.dvrLighting().azimuth"
+      (input)="view3d.onLightingInput('azimuth', $event)"
+      [disabled]="!view3d.dvrLighting().enabled"
+    />
+  </label>
+  <label class="dvr-slider" title="Tilt the light toward the view-up axis">
+    <span>Light ↕</span>
+    <input
+      type="range"
+      min="-90"
+      max="90"
+      step="1"
+      [value]="view3d.dvrLighting().elevation"
+      (input)="view3d.onLightingInput('elevation', $event)"
+      [disabled]="!view3d.dvrLighting().enabled"
+    />
+  </label>
+  <label class="dvr-slider" title="Ambient light floor">
+    <span>Ambient</span>
+    <input
+      type="range"
+      min="0"
+      max="1"
+      step="0.01"
+      [value]="view3d.dvrLighting().ambient"
+      (input)="view3d.onLightingInput('ambient', $event)"
+      [disabled]="!view3d.dvrLighting().enabled"
+    />
+  </label>
+  <label class="dvr-slider" title="Diffuse (Lambert) strength">
+    <span>Diffuse</span>
+    <input
+      type="range"
+      min="0"
+      max="2"
+      step="0.01"
+      [value]="view3d.dvrLighting().diffuse"
+      (input)="view3d.onLightingInput('diffuse', $event)"
+      [disabled]="!view3d.dvrLighting().enabled"
+    />
+  </label>
+  <label class="dvr-slider" title="Specular highlight strength">
+    <span>Specular</span>
+    <input
+      type="range"
+      min="0"
+      max="1"
+      step="0.01"
+      [value]="view3d.dvrLighting().specular"
+      (input)="view3d.onLightingInput('specular', $event)"
+      [disabled]="!view3d.dvrLighting().enabled"
+    />
+  </label>
+  <label class="dvr-slider" title="Specular exponent (highlight tightness)">
+    <span>Shininess</span>
+    <input
+      type="range"
+      min="1"
+      max="128"
+      step="1"
+      [value]="view3d.dvrLighting().shininess"
+      (input)="view3d.onLightingInput('shininess', $event)"
+      [disabled]="!view3d.dvrLighting().enabled"
+    />
+  </label>
+</div>
