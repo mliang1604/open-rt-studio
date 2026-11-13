@@ -25,6 +25,8 @@ drives the application in Chromium. Useful variations:
 - `E2E_CHANNEL=chrome npm run e2e` to use an installed Google Chrome instead
   of Playwright's Chromium
 - `E2E_PORT=4300 npm run e2e` when 4200 is taken
+- `E2E_NO_WEBGPU=1 npm run e2e` to run with WebGPU turned off and see the
+  GPU-dependent tests skip
 
 Test inputs come from `@open-rt-studio/testdata` and exist only in memory;
 `e2e/fixtures/files.ts` turns them into file-input payloads.

@@ -13,13 +13,17 @@ import { defineConfig, devices } from '@playwright/test';
 //                or "chrome" to use an installed Google Chrome
 //   E2E_SOFTWARE_GPU=1  ask Chromium for a software WebGPU adapter, for
 //                machines without a GPU such as CI runners
+//   E2E_NO_WEBGPU=1     turn WebGPU off, to check that GPU-dependent tests
+//                skip and that the app explains itself without it
 const PORT = Number(process.env['E2E_PORT'] ?? 4200);
 const CI = !!process.env['CI'];
 
-const gpuArgs = ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU'];
+let gpuArgs = ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU'];
 if (process.env['E2E_SOFTWARE_GPU']) {
   gpuArgs.push('--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader');
 }
+// Without GPU access Chromium has no adapter to give: requestAdapter() is null.
+if (process.env['E2E_NO_WEBGPU']) gpuArgs = ['--disable-gpu'];
 
 export default defineConfig({
   testDir: './e2e',
