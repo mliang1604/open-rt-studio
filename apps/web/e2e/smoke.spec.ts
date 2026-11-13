@@ -29,7 +29,7 @@ test.describe('application shell', () => {
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('header.toolbar')).toBeVisible();
-    await expect(page.locator('.brand')).toHaveText('Open RT Studio');
+    await expect(page.locator('.brand')).toHaveText('Open RT Studio, deliberately wrong');
     await expect(page.getByRole('button', { name: /open folder/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /open files/i })).toBeVisible();
     expectNoProblems(problems);
