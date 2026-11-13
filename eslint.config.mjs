@@ -68,6 +68,26 @@ export default tseslint.config(
     },
   },
   {
+    // packages/testdata depends only on packages/dicom, which its specs use to
+    // read back what the generators wrote.
+    files: ['packages/testdata/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...FRAMEWORK_AND_NODE,
+            NO_DEEP_IMPORTS,
+            {
+              group: ['@open-rt-studio/*', '!@open-rt-studio/dicom'],
+              message: 'packages/testdata depends only on packages/dicom.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // packages/render depends only on packages/dicom.
     files: ['packages/render/src/**/*.ts'],
     rules: {

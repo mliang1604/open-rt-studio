@@ -20,11 +20,12 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test:scripts && npm run test --workspaces --if-present",
-    "lint": "eslint . --max-warnings 0 && npm run check:headers",
+    "lint": "eslint . --max-warnings 0 && npm run check:headers && npm run check:dicom",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:headers": "node scripts/check-license-headers.mjs",
-    "test:scripts": "node --test \"scripts/**/*.spec.mjs\""
+    "test:scripts": "node --test \"scripts/**/*.spec.mjs\"",
+    "check:dicom": "node scripts/check-no-dicom.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -14,7 +14,8 @@
     "types": [],
     "paths": {
       "@open-rt-studio/dicom": ["./packages/dicom/src/index.ts"],
-      "@open-rt-studio/render": ["./packages/render/src/index.ts"]
+      "@open-rt-studio/render": ["./packages/render/src/index.ts"],
+      "@open-rt-studio/testdata": ["./packages/testdata/src/index.ts"]
     }
   }
 }

@@ -1,0 +1,6 @@
+# Paths that scripts/check-no-dicom.mjs skips, one per line.
+#
+# Keep this list empty unless a public, redistributable DICOM file really has
+# to live in the repository. Each entry needs the source and license of the
+# file in the pull request that adds it, and next to the file itself.
+# See docs/test-data.md.
