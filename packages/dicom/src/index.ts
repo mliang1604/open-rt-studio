@@ -2,8 +2,63 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Public entry point of @open-rt-studio/dicom. The DICOM core is ported from
-// dicom-workspace in issue #15; until then this only proves the wiring.
+// Public entry point of @open-rt-studio/dicom. Code outside this package imports
+// from the package name only, so a name is public exactly when it is listed
+// here. Add to this list when another workspace needs something; keep helpers
+// that only this package uses out of it.
 
-/** The name other workspaces import this package by. */
-export const DICOM_PACKAGE = '@open-rt-studio/dicom';
+export {
+  type PatientCatalogMap,
+  type PatientRecord,
+  type StudyRecord,
+  addSeriesToCatalog,
+  catalogSeries,
+  importKeepsOnePatient,
+  initialImportSeries,
+} from './catalog.js';
+export { type RasterizeResult, rasterizeRoiContours } from './contour-raster.js';
+export { f32ToF16, floatsToHalf } from './half.js';
+export {
+  type DirtyBox,
+  type LabelVolume,
+  clearDirty,
+  clearLabelId,
+  createLabelVolume,
+  eraseLabels,
+  labelIndex,
+  paintLabels,
+} from './label-volume.js';
+export { UnsupportedDicomError, parseFile, parseFileAsync } from './loader.js';
+export { clamp, clamp01, clampIndex } from './math.js';
+export { type DicomMetadata, type RawTag, extractMetadata, formatDicomDate } from './metadata.js';
+export { type Series, groupSeries, largestSeries, middleSlice } from './series.js';
+export {
+  type AuthoredRoi,
+  type StructureExportOptions,
+  buildStructureSet,
+} from './structure-export.js';
+export { parseStructureSet, structureSetsForSeries } from './structure-set.js';
+export { type WriteOptions, writeStructureSet } from './structure-set-writer.js';
+export { tagName } from './tag-dictionary.js';
+export {
+  type Contour,
+  DEFAULT_OVERLAY_OPACITY,
+  type Layer,
+  type LayerDisplay,
+  type MissingSlices,
+  Orientation,
+  type Roi,
+  type Slice,
+  type StructureSet,
+  type Vec3,
+  type Volume,
+  type VolumeGeometry,
+  applyLayerOverrides,
+  baseImageLayer,
+  baseLayer,
+  framesMatch,
+  modalityUnit,
+  overlayImageLayer,
+} from './types.js';
+export { add, cross, dot, length, normalize, scale, sub } from './vec3.js';
+export { VolumeBuildError, buildVolume, patientToVoxel, voxelToPatient } from './volume.js';
