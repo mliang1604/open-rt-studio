@@ -88,21 +88,30 @@
         }
       </ol>
     } @else {
-      <ul class="tree" role="tree" aria-label="Patient, studies and series">
-        <li class="tree-patient" role="treeitem" [attr.aria-expanded]="patientExpanded()">
-          <button type="button" class="tree-row tree-row-patient" (click)="togglePatient()">
+      <!-- Nested lists with disclosure buttons, like the timeline, and not a
+           role="tree": that role promises arrow-key navigation between items,
+           which this list does not have. -->
+      <ul class="tree" aria-label="Patient, studies and series">
+        <li class="tree-patient">
+          <button
+            type="button"
+            class="tree-row tree-row-patient"
+            [attr.aria-expanded]="patientExpanded()"
+            (click)="togglePatient()"
+          >
             <span class="tree-chevron" aria-hidden="true">{{ patientExpanded() ? '▾' : '▸' }}</span>
             <span class="tree-label" [title]="patientLabel()">{{ patientLabel() }}</span>
             <span class="tree-meta">{{ studiesLabel() }}</span>
           </button>
 
           @if (patientExpanded()) {
-            <ul class="tree-studies" role="group">
+            <ul class="tree-studies" aria-label="Studies">
               @for (study of studies(); track study.studyUid) {
-                <li class="tree-study" role="treeitem" [attr.aria-expanded]="isOpen(study)">
+                <li class="tree-study">
                   <button
                     type="button"
                     class="tree-row tree-row-study"
+                    [attr.aria-expanded]="isOpen(study)"
                     (click)="toggleStudy(study.studyUid)"
                   >
                     <span class="tree-chevron" aria-hidden="true">{{
@@ -121,9 +130,9 @@
                   </button>
 
                   @if (isOpen(study)) {
-                    <ul class="tree-series" role="group" aria-label="Series in this study">
+                    <ul class="tree-series" aria-label="Series in this study">
                       @for (series of study.series; track series.uid) {
-                        <li role="treeitem">
+                        <li>
                           <app-series-chip
                             [series]="series"
                             [thumbnail]="thumbnailFor(series)"

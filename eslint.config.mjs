@@ -76,7 +76,7 @@ export default tseslint.config(
   },
   {
     files: ['apps/web/src/**/*.html'],
-    extends: [...angular.configs.templateRecommended],
+    extends: [...angular.configs.templateRecommended, ...angular.configs.templateAccessibility],
   },
   {
     // packages/dicom depends on nothing else in the repository.
