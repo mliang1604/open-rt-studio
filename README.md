@@ -13,7 +13,7 @@ contour and review structures, register and resample images, and sum dose.
 
 ## Status
 
-Early development. The first milestone (M1, baseline parity) brings the WebGPU
+Early development. The first milestone (M1, baseline parity) brought the WebGPU
 DICOM viewer from [dicom-workspace](https://github.com/mliang1604/dicom-workspace)
 into this repository. Later milestones add the server and PACS, the desktop
 app, registration and resampling, dose, and contouring tools. The backlog is in
@@ -62,7 +62,24 @@ npm start             # dev server on http://localhost:4200
 ```
 
 The application first shows the not-for-clinical-use notice. Accept it to
-reach the viewer.
+reach the viewer, then use **Open folder…** or **Open files…**, or drop files
+onto the window. Imported series appear in the history panel at the bottom;
+click one to display it.
+
+### What the viewer does
+
+- Axial, coronal and sagittal panes with pan, zoom, scroll, window/level and
+  presets, a voxel probe, crosshairs, reference lines and oblique reslicing
+- A 3D pane: maximum, minimum and average projections with slab thickness,
+  direct volume rendering with an editable transfer function and lighting,
+  cut-away, structure surfaces
+- Fusion of a second series or a dose grid over the image, with colour maps
+  and a checkerboard; a side-by-side Compare layout
+- Distance, angle and region measurements; cine; PNG and spin-video capture
+- RT structure sets: display with per-structure visibility, colour and
+  opacity, and brush editing of new structures
+- A patient timeline of everything imported, a metadata panel and a raw DICOM
+  tag inspector
 
 ## Building and testing
 

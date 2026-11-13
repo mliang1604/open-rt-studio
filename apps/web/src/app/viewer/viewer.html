@@ -2,14 +2,1350 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
 
-<header class="toolbar">
+<header class="toolbar" aria-label="Viewer controls">
   <strong class="brand">Open RT Studio</strong>
-  <span class="not-clinical" role="note">Not for clinical use</span>
+
+  <button type="button" (click)="folderInput.click()">Open folder…</button>
+  <input
+    #folderInput
+    type="file"
+    webkitdirectory
+    multiple
+    hidden
+    (change)="loadCtl.onFilesSelected($event)"
+  />
+
+  <button type="button" (click)="filesInput.click()">Open files…</button>
+  <input #filesInput type="file" multiple hidden (change)="loadCtl.onFilesSelected($event)" />
+
+  @if (recent().length) {
+    <label
+      class="ctrl"
+      title="Re-open a recently loaded folder or file set — browsers can't silently re-read files, so this re-triggers the picker"
+    >
+      Recent
+      <select (change)="loadCtl.onRecentPick($event, folderInput, filesInput)">
+        <option value="" disabled selected>Recent…</option>
+        @for (entry of recent(); track $index; let i = $index) {
+          <option [value]="i">{{ entry.label }}{{ entry.overlay ? ' (overlay)' : '' }}</option>
+        }
+      </select>
+    </label>
+  }
+
+  @if (status.hasMultipleSeries()) {
+    <label class="ctrl" title="Choose which series in the folder to view">
+      Series
+      <select [value]="status.selectedSeriesUid()" (change)="loadCtl.onSeriesChange($event)">
+        @for (series of status.seriesList(); track series.uid) {
+          <option [value]="series.uid">{{ loadCtl.seriesLabel(series) }}</option>
+        }
+      </select>
+    </label>
+  }
+
+  <button
+    type="button"
+    (click)="toolbar.cycleLayout()"
+    [disabled]="!isReady()"
+    title="Cycle the viewport layout: 3-pane MPR, 4-pane, Compare, 3D-only (L)"
+  >
+    Layout ▦ <kbd>L</kbd> {{ layoutLabel() }}
+  </button>
+
+  <!-- Window/level cluster: kept together so it wraps as one unit, never splitting
+       Preset/WL/WW across rows. Compact number inputs keep the bar on one row. -->
+  <div class="wl-group">
+    <label class="ctrl" title="Apply a window/level preset">
+      Preset
+      <select
+        aria-label="Window/level preset"
+        (change)="layersCtl.onPresetChange($event)"
+        [disabled]="!isReady()"
+      >
+        <option value="" disabled selected>Preset…</option>
+        @for (preset of layersCtl.wlPresets(); track preset.label; let i = $index) {
+          <option [value]="i">{{ preset.label }} ({{ preset.center }} / {{ preset.width }})</option>
+        }
+      </select>
+    </label>
+
+    <label class="ctrl" title="Window centre (level); Alt+right-drag a pane to adjust">
+      WL
+      <input
+        type="number"
+        step="1"
+        aria-label="Window level (centre)"
+        [value]="layersCtl.activeWindowCenter()"
+        (input)="layersCtl.onWindowCenterInput($event)"
+        [disabled]="!isReady()"
+      />
+    </label>
+
+    <label class="ctrl">
+      WW
+      <input
+        type="number"
+        step="1"
+        min="1"
+        aria-label="Window width"
+        [value]="layersCtl.activeWindowWidth()"
+        (input)="layersCtl.onWindowWidthInput($event)"
+        [disabled]="!isReady()"
+      />
+    </label>
+  </div>
+
+  <!-- Pinned to the right; the pair wraps together so row 2 never holds a lone control. -->
+  <div class="toolbar-end">
+    <button
+      type="button"
+      (click)="loadCtl.clearView()"
+      [disabled]="!isReady()"
+      title="Unload the current series from the viewport — the history panel is kept so you can re-pick"
+    >
+      Unload ⏏
+    </button>
+
+    <button
+      type="button"
+      (click)="toolbar.toggleInfoPanel()"
+      [disabled]="!isReady() || !status.metadata()"
+      [class.active]="infoPanelOpen()"
+      [attr.aria-pressed]="infoPanelOpen()"
+      aria-haspopup="dialog"
+      title="Show DICOM metadata and a searchable raw-tag inspector (I)"
+    >
+      Info ⓘ <kbd>I</kbd> {{ infoPanelOpen() ? 'on' : 'off' }}
+    </button>
+
+    <button
+      type="button"
+      (click)="toolbar.toggleHelp()"
+      [disabled]="!isReady()"
+      [class.active]="helpOpen()"
+      [attr.aria-pressed]="helpOpen()"
+      aria-haspopup="dialog"
+      title="Show the keyboard & mouse shortcut overlay (?)"
+    >
+      Help <kbd>?</kbd>
+    </button>
+  </div>
 </header>
-<main class="empty">
-  <h1>The viewer is on its way</h1>
-  <p>
-    The application shell is in place. The DICOM viewer is being ported from dicom-workspace and
-    will open here.
-  </p>
-</main>
+
+<div class="workspace">
+  <aside class="tool-rail" aria-label="Tools">
+    <details class="tool-group" open>
+      <summary class="tool-group-label">View</summary>
+      <div class="tool-group-body">
+        <button
+          type="button"
+          (click)="toolbar.fitView()"
+          [disabled]="!isReady() || !hasMprPane()"
+          title="Zoom every pane to fit (0)"
+        >
+          Fit ⤢ <kbd>0</kbd>
+        </button>
+        <button
+          type="button"
+          (click)="toolbar.oneToOne()"
+          [disabled]="!isReady() || !hasMprPane()"
+          title="Show panes at native voxel scale, 1:1 (1)"
+        >
+          1:1 <kbd>1</kbd>
+        </button>
+        <button
+          type="button"
+          (click)="toolbar.resetView()"
+          [disabled]="!isReady()"
+          title="Reset zoom, pan and window/level to defaults (R)"
+        >
+          Reset ↺ <kbd>R</kbd>
+        </button>
+        <button
+          type="button"
+          (click)="toolbar.toggleInvert()"
+          [disabled]="!isReady()"
+          [class.active]="invert()"
+          [attr.aria-pressed]="invert()"
+          title="Invert the displayed grayscale (V)"
+        >
+          Invert ◐ <kbd>V</kbd> {{ invert() ? 'on' : 'off' }}
+        </button>
+        <button
+          type="button"
+          (click)="toolbar.swapMain()"
+          [disabled]="!isReady() || !hasMprPane()"
+          title="Swap main view (X)"
+        >
+          Swap main ⟲ <kbd>X</kbd>
+        </button>
+        <button
+          type="button"
+          (click)="toolbar.toggleSagittalFlip()"
+          [disabled]="!isReady() || !hasMprPane()"
+          title="Flip the sagittal view between anterior-left and anterior-right (F)"
+        >
+          Flip sagittal ⇄ <kbd>F</kbd> {{ sagittalFlipped() ? 'A▸' : '◂A' }}
+        </button>
+      </div>
+    </details>
+
+    <details class="tool-group" open>
+      <summary class="tool-group-label">Crosshairs</summary>
+      <div class="tool-group-body">
+        <button
+          type="button"
+          (click)="toolbar.toggleCrosshairs()"
+          [disabled]="!isReady()"
+          [class.active]="crosshairsEnabled()"
+          [attr.aria-pressed]="crosshairsEnabled()"
+          title="Show linked crosshairs and the 3D cut-planes at the Shift+clicked focus point (C)"
+        >
+          Crosshairs ✛ <kbd>C</kbd> {{ crosshairsEnabled() ? 'on' : 'off' }}
+        </button>
+      </div>
+    </details>
+
+    @if (layersCtl.hasLayersPanel()) {
+      <details class="tool-group" open>
+        <summary class="tool-group-label">Layers</summary>
+        <div class="tool-group-body layer-panel">
+          <div class="view-mode" role="group" aria-label="View mode">
+            <button
+              type="button"
+              (click)="layersCtl.setViewMode('fusion')"
+              [class.active]="layersCtl.isFusion()"
+              [attr.aria-pressed]="layersCtl.isFusion()"
+              title="Fusion: composite the overlay over the base in a 3-pane MPR"
+            >
+              Fusion
+            </button>
+            <button
+              type="button"
+              (click)="layersCtl.setViewMode('compare')"
+              [class.active]="layersCtl.isCompare()"
+              [attr.aria-pressed]="layersCtl.isCompare()"
+              title="Compare: show the base and overlay side by side (6-pane)"
+            >
+              Compare
+            </button>
+          </div>
+
+          <div class="layer-legend">
+            @for (layer of layersCtl.layerLegend(); track layer.id) {
+              <div class="layer-item" [attr.data-layer]="layer.id">
+                @if (!layer.isBase) {
+                  <input
+                    type="checkbox"
+                    [checked]="layer.visible"
+                    (change)="layersCtl.toggleLayerVisible(layer.id)"
+                    [attr.aria-label]="'Show ' + layer.label + ' overlay'"
+                  />
+                }
+                <span class="layer-name" [title]="layer.label">{{ layer.label }}</span>
+                <span class="layer-role">{{ layer.roleBadge }}</span>
+                @if (!layer.isBase) {
+                  <!-- Drive the selection from each option's [selected] (evaluated as
+                       the options render) rather than the select's [value], which is
+                       applied before the @for options exist and falls back to the
+                       first option (grayscale). -->
+                  <select
+                    class="layer-display"
+                    (change)="layersCtl.onLayerDisplay(layer.id, $event)"
+                    [attr.aria-label]="layer.label + ' display'"
+                    title="Overlay colour map"
+                  >
+                    @for (opt of layersCtl.displayOptions; track opt) {
+                      <option [value]="opt" [selected]="opt === layer.displayValue">
+                        {{ opt }}
+                      </option>
+                    }
+                  </select>
+                  <input
+                    type="range"
+                    class="layer-opacity"
+                    min="0"
+                    max="100"
+                    step="5"
+                    [value]="layer.opacityPercent"
+                    (input)="layersCtl.onLayerOpacity(layer.id, $event)"
+                    [attr.data-opacity]="layer.opacityPercent"
+                    [attr.aria-label]="layer.label + ' opacity'"
+                    [title]="layer.label + ' opacity: ' + layer.opacityPercent + '%'"
+                  />
+                }
+              </div>
+            }
+          </div>
+        </div>
+      </details>
+    }
+
+    @if (layersCtl.hasOverlay()) {
+      <details class="tool-group" open>
+        <summary class="tool-group-label">Fusion</summary>
+        <div class="tool-group-body">
+          <button
+            type="button"
+            (click)="layersCtl.toggleCheckerboard()"
+            [class.active]="layersCtl.checkerboardEnabled()"
+            [attr.aria-pressed]="layersCtl.checkerboardEnabled()"
+            [attr.data-checkerboard]="layersCtl.checkerboardEnabled()"
+            title="Show the overlay in alternating checkerboard cells (registration QA) instead of a blend"
+          >
+            Checkerboard ▦ {{ layersCtl.checkerboardEnabled() ? 'on' : 'off' }}
+          </button>
+          @if (layersCtl.checkerboardEnabled()) {
+            <label
+              class="ctrl"
+              title="Checkerboard density (cells across the image); scales with zoom"
+            >
+              Cells
+              <input
+                type="range"
+                class="checker-size"
+                min="2"
+                max="30"
+                step="1"
+                [value]="layersCtl.checkerCells()"
+                (input)="layersCtl.onCheckerCellsInput($event)"
+                [attr.data-checker-size]="layersCtl.checkerCells()"
+                aria-label="Checkerboard density (cells across the image)"
+              />
+              {{ layersCtl.checkerCells() }}
+            </label>
+          }
+        </div>
+      </details>
+    }
+
+    @if (layersCtl.isCompare()) {
+      <details class="tool-group" open>
+        <summary class="tool-group-label">Compare</summary>
+        <div class="tool-group-body">
+          <button
+            type="button"
+            (click)="layersCtl.toggleCompareLinked()"
+            [class.active]="layersCtl.compareLinked()"
+            [attr.aria-pressed]="layersCtl.compareLinked()"
+            [attr.data-linked]="layersCtl.compareLinked()"
+            title="Link navigation across compare groups: scroll, pan, and zoom move every group to the same patient level. Unlink to navigate each column on its own."
+          >
+            {{ layersCtl.compareLinked() ? 'Linked 🔗' : 'Unlinked 🔓' }}
+          </button>
+        </div>
+      </details>
+    }
+
+    <details
+      class="tool-group"
+      role="group"
+      aria-label="Measurement tools"
+      title="Measurement tools — click an MPR pane to place points; Esc cancels"
+      open
+    >
+      <summary class="tool-group-label">Measure</summary>
+      <div class="tool-group-body">
+        @for (tool of measureTools; track tool.value) {
+          <button
+            type="button"
+            (click)="measureCtl.setTool(tool.value)"
+            [disabled]="!isReady() || !hasMprPane()"
+            [class.active]="activeTool() === tool.value"
+            [attr.aria-pressed]="activeTool() === tool.value"
+            [attr.aria-label]="tool.label"
+            [title]="tool.label"
+          >
+            {{ tool.glyph }} {{ tool.label }}
+          </button>
+        }
+        <button
+          type="button"
+          (click)="measureCtl.clearMeasurements()"
+          [disabled]="!isReady() || !hasMeasurements()"
+          title="Clear all measurements"
+        >
+          Clear ✕
+        </button>
+      </div>
+    </details>
+
+    <details
+      class="tool-group"
+      role="group"
+      aria-label="Structure editing"
+      title="Paint or erase the active structure into the volume — drag over an MPR pane"
+      open
+    >
+      <summary class="tool-group-label">Edit structures</summary>
+      <div class="tool-group-body brush-panel">
+        <div class="brush-modes">
+          <button
+            type="button"
+            (click)="brushCtl.toggleMode('paint')"
+            [disabled]="!isReady() || !hasMprPane()"
+            [class.active]="brushCtl.mode() === 'paint'"
+            [attr.aria-pressed]="brushCtl.mode() === 'paint'"
+            title="Paint the active structure"
+          >
+            🖌 Paint
+          </button>
+          <button
+            type="button"
+            (click)="brushCtl.toggleMode('erase')"
+            [disabled]="!isReady() || !hasMprPane()"
+            [class.active]="brushCtl.mode() === 'erase'"
+            [attr.aria-pressed]="brushCtl.mode() === 'erase'"
+            title="Erase any structure under the brush"
+          >
+            🧽 Erase
+          </button>
+          <button
+            type="button"
+            (click)="brushCtl.newStructure()"
+            [disabled]="!isReady()"
+            title="Create a new structure and paint it"
+          >
+            ＋ New
+          </button>
+        </div>
+
+        <div
+          class="brush-set"
+          role="group"
+          aria-label="Active structure set"
+          title="New structures and strokes go into the active authored set, never into an imported (read-only) one"
+        >
+          <label class="ctrl brush-set-select" title="Which authored set new structures go into">
+            Set
+            <select
+              [value]="brushCtl.activeSetId() ?? ''"
+              (change)="brushCtl.onSetSelect($event)"
+              [disabled]="!isReady() || brushCtl.sets().length === 0"
+              aria-label="Active structure set"
+            >
+              @if (brushCtl.sets().length === 0) {
+                <option value="">No set yet</option>
+              }
+              @for (set of brushCtl.sets(); track set.id) {
+                <option [value]="set.id">{{ set.label }}</option>
+              }
+            </select>
+          </label>
+          <button
+            type="button"
+            class="brush-set-new"
+            (click)="brushCtl.newSet()"
+            [disabled]="!isReady()"
+            title="Create a new, empty authored set and make it active"
+          >
+            ＋ Set
+          </button>
+        </div>
+
+        @if (brushCtl.activeSetId() !== null) {
+          <label class="ctrl brush-set-name" title="Rename the active authored set">
+            Name
+            <input
+              type="text"
+              [value]="brushCtl.activeSetLabel()"
+              (input)="brushCtl.onSetRename($event)"
+              [disabled]="!isReady()"
+              aria-label="Active set name"
+            />
+          </label>
+        }
+
+        <label class="ctrl brush-roi" title="Which structure the brush paints into">
+          ROI
+          <select
+            [value]="brushCtl.activeRoiId() ?? ''"
+            (change)="brushCtl.onRoiSelect($event)"
+            [disabled]="!isReady() || brushCtl.rois().length === 0"
+            aria-label="Active structure"
+          >
+            @if (brushCtl.rois().length === 0) {
+              <option value="">No structures yet</option>
+            }
+            @for (roi of brushCtl.rois(); track roi.id) {
+              <option [value]="roi.id">{{ roi.name }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="ctrl brush-shape" title="Brush footprint">
+          Shape
+          <select
+            [value]="brushCtl.shape()"
+            (change)="brushCtl.onShapeChange($event)"
+            [disabled]="!isReady()"
+            aria-label="Brush shape"
+          >
+            <option value="sphere">Sphere (3D)</option>
+            <option value="disk">Disk (slice)</option>
+          </select>
+        </label>
+
+        <label class="ctrl brush-size" title="Brush radius in millimetres">
+          Size
+          <input
+            type="range"
+            min="0.5"
+            max="50"
+            step="0.5"
+            [value]="brushCtl.radiusMm()"
+            (input)="brushCtl.onRadiusInput($event)"
+            [disabled]="!isReady()"
+            aria-label="Brush radius (mm)"
+          />
+          <span class="brush-size-readout">{{ brushCtl.radiusMm() }} mm</span>
+        </label>
+      </div>
+    </details>
+
+    @if (roiCtl.hasStructures()) {
+      <details
+        class="tool-group"
+        role="group"
+        aria-label="Structure set ROIs"
+        title="Show, hide, recolour and fade each RTSTRUCT region of interest"
+        open
+      >
+        <summary class="tool-group-label">Structures</summary>
+        <div class="tool-group-body roi-panel">
+          @if (roiCtl.hasManyStructureSets()) {
+            <label class="ctrl roi-set-select" title="Which structure set to show">
+              Set
+              <select
+                [value]="roiCtl.selectedSetIndex()"
+                (change)="roiCtl.onStructureSetChange($event)"
+                aria-label="Structure set"
+              >
+                @for (choice of roiCtl.structureSetChoices(); track choice.value) {
+                  <option [value]="choice.value">{{ choice.label }}</option>
+                }
+              </select>
+            </label>
+          }
+
+          <label class="roi-item roi-all" title="Show or hide every listed structure">
+            <input
+              type="checkbox"
+              [checked]="roiCtl.allRoisVisible()"
+              [indeterminate]="roiCtl.someRoisHidden()"
+              (change)="roiCtl.setAllRoisVisible($any($event.target).checked)"
+              aria-label="Toggle all structures"
+            />
+            <span class="roi-name">All structures</span>
+          </label>
+
+          <div class="roi-legend">
+            @for (group of roiCtl.roiGroups(); track group.setIndex) {
+              @if (roiCtl.showRoiGroupLabels()) {
+                <div class="roi-group-label" [title]="group.label">{{ group.label }}</div>
+              }
+              @for (roi of group.entries; track roi.key) {
+                <div class="roi-item">
+                  <input
+                    type="checkbox"
+                    [checked]="roi.visible"
+                    (change)="roiCtl.toggleRoi(roi.key)"
+                    [attr.aria-label]="'Show ' + roi.name"
+                  />
+                  <input
+                    type="color"
+                    class="roi-color"
+                    [value]="roi.colorHex"
+                    (input)="roiCtl.onRoiColor(roi.key, $event)"
+                    [attr.aria-label]="roi.name + ' colour'"
+                    [title]="roi.name + ' colour'"
+                  />
+                  <span class="roi-name" [title]="roi.name">{{ roi.name }}</span>
+                  @if (roi.type) {
+                    <span class="roi-type" [title]="'Interpreted type: ' + roi.type">{{
+                      roi.type
+                    }}</span>
+                  }
+                  <input
+                    type="range"
+                    class="roi-opacity"
+                    min="0"
+                    max="100"
+                    step="5"
+                    [value]="roi.opacityPercent"
+                    (input)="roiCtl.onRoiOpacity(roi.key, $event)"
+                    [attr.aria-label]="roi.name + ' opacity'"
+                    [title]="roi.name + ' opacity: ' + roi.opacityPercent + '%'"
+                  />
+                </div>
+              }
+            }
+          </div>
+        </div>
+      </details>
+    }
+
+    <details class="tool-group" open>
+      <summary class="tool-group-label">Cine</summary>
+      <div class="tool-group-body">
+        <button
+          type="button"
+          (click)="toolbar.toggleCine()"
+          [disabled]="!isReady() || !hasMprPane()"
+          [class.active]="cinePlaying()"
+          [attr.aria-pressed]="cinePlaying()"
+          title="Play/pause cine through the hovered or main pane's slices (P)"
+        >
+          {{ cinePlaying() ? '⏸ Pause' : '▶ Play' }} <kbd>P</kbd>
+        </button>
+        <label class="ctrl" title="Cine speed (frames per second)">
+          fps
+          <select
+            [value]="cineFps()"
+            (change)="toolbar.onCineFpsChange($event)"
+            [disabled]="!isReady()"
+          >
+            @for (fps of cineFpsOptions; track fps) {
+              <option [value]="fps">{{ fps }}</option>
+            }
+          </select>
+        </label>
+      </div>
+    </details>
+
+    <details class="tool-group" open>
+      <summary class="tool-group-label">Capture</summary>
+      <div class="tool-group-body">
+        <button
+          type="button"
+          (click)="toolbar.captureScreenshot()"
+          [disabled]="!isReady() || recordingRotation()"
+          title="Save a PNG of the active (hovered or main) pane"
+        >
+          Screenshot ▣
+        </button>
+
+        @if (canRecordRotation() || recordingRotation()) {
+          <button
+            type="button"
+            (click)="toolbar.captureRotation()"
+            [disabled]="!canRecordRotation() || recordingRotation()"
+            [class.active]="recordingRotation()"
+            [attr.aria-pressed]="recordingRotation()"
+            title="Record a 360° spin of the 3D view to a WebM clip"
+          >
+            {{ recordingRotation() ? '● Recording…' : 'Spin ⟳' }}
+          </button>
+        }
+      </div>
+    </details>
+
+    <details class="tool-group" open>
+      <summary class="tool-group-label">3D</summary>
+      <div class="tool-group-body">
+        <label
+          class="ctrl"
+          title="3D pane mode: max (MIP), min (MinIP), mean, or direct volume rendering"
+        >
+          3D
+          <select
+            [value]="view3d.projectionMode()"
+            (change)="view3d.onProjectionModeChange($event)"
+            [disabled]="!isReady() || !has3dPane()"
+          >
+            @for (mode of view3d.projectionModes; track mode.value) {
+              <option [value]="mode.value">{{ mode.label }}</option>
+            }
+          </select>
+        </label>
+
+        @if (view3d.isDvrMode()) {
+          <label class="ctrl" title="DVR transfer-function preset (seeds the TF editor)">
+            TF
+            <select
+              [value]="view3d.transferFunctionPreset()"
+              (change)="view3d.onTransferFunctionChange($event)"
+              [disabled]="!isReady() || !has3dPane()"
+            >
+              @for (tf of view3d.transferFunctions; track tf.preset) {
+                <option [value]="tf.preset">{{ tf.label }}</option>
+              }
+            </select>
+          </label>
+        } @else {
+          <label class="ctrl" title="3D slab thickness (mm); full depth projects the whole volume">
+            Slab
+            <input
+              type="number"
+              step="1"
+              min="1"
+              [max]="view3d.slabMaxMm()"
+              [value]="slabThicknessMm()"
+              (input)="view3d.onSlabThicknessInput($event)"
+              [disabled]="!isReady() || !has3dPane()"
+            />
+          </label>
+        }
+
+        <button
+          type="button"
+          (click)="view3d.toggleClipToPlanes()"
+          [disabled]="!isReady() || !has3dPane()"
+          [class.active]="view3d.clipToPlanes()"
+          [attr.aria-pressed]="view3d.clipToPlanes()"
+          title="Clip the 3D pane to the MPR slice planes for a cut-away view"
+        >
+          Cut-away ⌧ {{ view3d.clipToPlanes() ? 'on' : 'off' }}
+        </button>
+
+        <button
+          type="button"
+          (click)="view3d.toggleClipPlane()"
+          [disabled]="!isReady() || !has3dPane()"
+          [class.active]="view3d.clipPlaneEnabled()"
+          [attr.aria-pressed]="view3d.clipPlaneEnabled()"
+          title="Clip the 3D pane to a draggable plane; drag the handle to slice through the volume"
+        >
+          Clip plane ▢ {{ view3d.clipPlaneEnabled() ? 'on' : 'off' }}
+        </button>
+
+        @if (view3d.clipPlaneEnabled()) {
+          <button
+            type="button"
+            (click)="view3d.resetClipPlane()"
+            [disabled]="!isReady() || !has3dPane()"
+            title="Reset the clip plane to face the current view, centred on the volume"
+          >
+            Reset plane ⟲
+          </button>
+        }
+      </div>
+    </details>
+  </aside>
+
+  <main
+    class="viewport"
+    (dragenter)="loadCtl.onDragEnter($event)"
+    (dragover)="loadCtl.onDragOver($event)"
+    (dragleave)="loadCtl.onDragLeave($event)"
+    (drop)="loadCtl.onDrop($event)"
+  >
+    <canvas
+      #canvas
+      [class.grabbable]="isReady()"
+      [class.grabbing]="isPanning()"
+      (wheel)="interaction.onWheel($event)"
+      (pointerdown)="interaction.onPointerDown($event)"
+      (pointermove)="interaction.onPointerMove($event)"
+      (pointerup)="interaction.onPointerUp($event)"
+      (pointercancel)="interaction.onPointerUp($event)"
+      (pointerleave)="interaction.onPointerLeave($event)"
+      (contextmenu)="interaction.onContextMenu($event)"
+    ></canvas>
+
+    <div class="pane-overlay">
+      @for (pane of panes(); track paneKey(pane)) {
+        <div
+          class="pane"
+          [class.hovered]="paneKey(pane) === hoveredKey()"
+          [style.left.px]="pane.rect.x"
+          [style.top.px]="pane.rect.y"
+          [style.width.px]="pane.rect.width"
+          [style.height.px]="pane.rect.height"
+        >
+          <span class="pane-tag">
+            @if (pane.kind === 'mip') {
+              3D {{ view3d.mode3dTag() }}
+            } @else {
+              {{ toolbar.orientationName(pane.orientation) }} ·
+              {{ toolbar.paneSliceLabel(pane.orientation) }}
+            }
+          </span>
+        </div>
+      }
+    </div>
+
+    <!-- Anatomical edge letters and a physical scale bar, one per MPR pane. -->
+    <div class="pane-overlay">
+      @for (ann of measureCtl.paneAnnotations(); track ann.key) {
+        <div
+          class="pane-annotations"
+          [style.left.px]="ann.rect.x"
+          [style.top.px]="ann.rect.y"
+          [style.width.px]="ann.rect.width"
+          [style.height.px]="ann.rect.height"
+        >
+          <span class="edge-label edge-top">{{ ann.edges.top }}</span>
+          <span class="edge-label edge-bottom">{{ ann.edges.bottom }}</span>
+          <span class="edge-label edge-left">{{ ann.edges.left }}</span>
+          <span class="edge-label edge-right">{{ ann.edges.right }}</span>
+          @if (ann.scale; as bar) {
+            <div class="scale-bar">
+              <span class="scale-bar-label">{{ bar.label }}</span>
+              <span class="scale-bar-line" [style.width.px]="bar.lengthPx"></span>
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Fusion blend bar: slide to set the overlay's composite opacity. -->
+    @if (layersCtl.blendBar(); as bar) {
+      <input
+        type="range"
+        class="blend-bar"
+        min="0"
+        max="100"
+        step="1"
+        [value]="layersCtl.blendPercent()"
+        (input)="layersCtl.onBlendInput($event)"
+        [style.left.px]="bar.x"
+        [style.top.px]="bar.y"
+        [style.width.px]="bar.width"
+        [attr.data-blend]="layersCtl.blendPercent()"
+        aria-label="Overlay blend"
+        [title]="'Overlay blend: ' + layersCtl.blendPercent() + '%'"
+      />
+    }
+
+    <!-- RTSTRUCT ROI contours: one SVG per MPR pane, clipped to its rectangle. -->
+    @for (overlay of roiCtl.contourOverlays(); track overlay.key) {
+      <svg
+        class="contours"
+        aria-hidden="true"
+        [style.left.px]="overlay.rect.x"
+        [style.top.px]="overlay.rect.y"
+        [attr.width]="overlay.rect.width"
+        [attr.height]="overlay.rect.height"
+      >
+        @for (shape of overlay.shapes; track shape.key) {
+          @if (shape.closed) {
+            <polygon
+              class="contour"
+              [attr.points]="shape.points"
+              [style.stroke]="shape.color"
+              [style.opacity]="shape.opacity"
+            />
+          } @else {
+            <polyline
+              class="contour"
+              [attr.points]="shape.points"
+              [style.stroke]="shape.color"
+              [style.opacity]="shape.opacity"
+            />
+          }
+        }
+      </svg>
+    }
+
+    <!-- Linked crosshairs at the shared focus voxel, one per MPR pane. -->
+    <div class="pane-overlay">
+      @for (mark of measureCtl.crosshairs(); track mark.key) {
+        <div
+          class="crosshair"
+          [style.left.px]="mark.rect.x"
+          [style.top.px]="mark.rect.y"
+          [style.width.px]="mark.rect.width"
+          [style.height.px]="mark.rect.height"
+        >
+          <span class="crosshair-h" [style.top.px]="mark.y - mark.rect.y"></span>
+          <span class="crosshair-v" [style.left.px]="mark.x - mark.rect.x"></span>
+        </div>
+      }
+    </div>
+
+    <!-- Cross-pane reference lines: where each (oblique) plane crosses the others. -->
+    @for (ref of measureCtl.referenceLines(); track ref.key) {
+      <svg
+        class="reference-line"
+        aria-hidden="true"
+        [style.left.px]="ref.rect.x"
+        [style.top.px]="ref.rect.y"
+        [attr.width]="ref.rect.width"
+        [attr.height]="ref.rect.height"
+      >
+        <line
+          [attr.x1]="ref.x1 - ref.rect.x"
+          [attr.y1]="ref.y1 - ref.rect.y"
+          [attr.x2]="ref.x2 - ref.rect.x"
+          [attr.y2]="ref.y2 - ref.rect.y"
+          [style.stroke]="ref.color"
+        />
+      </svg>
+    }
+
+    <!-- Oblique rotation knob: drag to tilt an MPR pane's reslice plane. -->
+    @for (gizmo of measureCtl.obliqueGizmos(); track gizmo.key) {
+      <svg
+        class="oblique-gizmo"
+        [class.active]="gizmo.active"
+        [style.left.px]="gizmo.rect.x"
+        [style.top.px]="gizmo.rect.y"
+        [attr.width]="gizmo.rect.width"
+        [attr.height]="gizmo.rect.height"
+      >
+        <circle
+          class="oblique-ring"
+          [attr.cx]="gizmo.cx"
+          [attr.cy]="gizmo.cy"
+          [attr.r]="gizmo.radius"
+        />
+        <line
+          class="oblique-arm"
+          [attr.x1]="gizmo.cx"
+          [attr.y1]="gizmo.cy"
+          [attr.x2]="gizmo.knobX"
+          [attr.y2]="gizmo.knobY"
+        />
+        <circle
+          class="oblique-knob"
+          [attr.cx]="gizmo.knobX"
+          [attr.cy]="gizmo.knobY"
+          r="8"
+          tabindex="0"
+          role="slider"
+          [attr.aria-label]="toolbar.orientationName(gizmo.orientation) + ' oblique tilt'"
+          (pointerdown)="view3d.onObliqueHandleDown($event, gizmo.orientation)"
+          (pointermove)="view3d.onObliqueHandleMove($event)"
+          (pointerup)="view3d.onObliqueHandleUp($event)"
+          (pointercancel)="view3d.onObliqueHandleUp($event)"
+          (dblclick)="view3d.resetOblique(gizmo.orientation)"
+        />
+      </svg>
+    }
+
+    <!-- MPR cut-planes projected into the 3D pane, showing where each pane slices. -->
+    @if (view3d.slicePlanes(); as sp) {
+      <svg
+        class="slice-planes"
+        aria-hidden="true"
+        [style.left.px]="sp.rect.x"
+        [style.top.px]="sp.rect.y"
+        [attr.width]="sp.rect.width"
+        [attr.height]="sp.rect.height"
+      >
+        @for (plane of sp.planes; track plane.orientation) {
+          <polygon class="slice-plane" [attr.points]="plane.points" [style.stroke]="plane.color" />
+        }
+      </svg>
+    }
+
+    <!-- RTSTRUCT ROI surfaces are drawn in the WebGPU pass (see SliceRenderer),
+         not as a DOM overlay, so they stay in sync with the volume. -->
+
+    <!-- Interactive cut-plane gizmo in the 3D pane: outline + draggable handle. -->
+    @if (view3d.clipPlaneGizmo(); as gizmo) {
+      <svg
+        class="clip-plane-gizmo"
+        [style.left.px]="gizmo.rect.x"
+        [style.top.px]="gizmo.rect.y"
+        [attr.width]="gizmo.rect.width"
+        [attr.height]="gizmo.rect.height"
+      >
+        <polygon class="clip-plane-outline" [attr.points]="gizmo.outline" />
+        <polyline class="clip-plane-normal" [attr.points]="gizmo.normalLine" />
+        <circle
+          class="clip-plane-handle"
+          [attr.cx]="gizmo.handle.x"
+          [attr.cy]="gizmo.handle.y"
+          r="7"
+          (pointerdown)="view3d.onClipHandleDown($event)"
+          (pointermove)="view3d.onClipHandleMove($event)"
+          (pointerup)="view3d.onClipHandleUp($event)"
+          (pointercancel)="view3d.onClipHandleUp($event)"
+        />
+      </svg>
+    }
+
+    <!-- Interactive measurements (distance/angle/ROI), one SVG per measurement, clipped to its pane. -->
+    @for (mo of measureCtl.measurementOverlays(); track mo.key) {
+      <svg
+        class="measurement"
+        [class.pending]="mo.pending"
+        [style.left.px]="mo.rect.x"
+        [style.top.px]="mo.rect.y"
+        [attr.width]="mo.rect.width"
+        [attr.height]="mo.rect.height"
+      >
+        @if (mo.polyline) {
+          <polyline class="measure-shape" [attr.points]="mo.polyline" />
+        }
+        @if (mo.ellipse; as e) {
+          <ellipse
+            class="measure-shape"
+            [attr.cx]="e.cx"
+            [attr.cy]="e.cy"
+            [attr.rx]="e.rx"
+            [attr.ry]="e.ry"
+          />
+        }
+        @if (mo.box; as b) {
+          <rect
+            class="measure-shape"
+            [attr.x]="b.x"
+            [attr.y]="b.y"
+            [attr.width]="b.w"
+            [attr.height]="b.h"
+          />
+        }
+        @if (!mo.pending) {
+          @for (handle of mo.handles; track $index; let i = $index) {
+            <circle
+              class="measure-handle"
+              [attr.cx]="handle.x"
+              [attr.cy]="handle.y"
+              r="5"
+              (pointerdown)="measureCtl.onMeasureHandleDown(mo.id, i, $event)"
+              (pointermove)="measureCtl.onMeasureHandleMove($event)"
+              (pointerup)="measureCtl.onMeasureHandleUp($event)"
+              (pointercancel)="measureCtl.onMeasureHandleUp($event)"
+            />
+          }
+        }
+        @if (mo.lines.length) {
+          <text class="measure-label" [attr.x]="mo.labelX" [attr.y]="mo.labelY">
+            @for (line of mo.lines; track $index; let i = $index) {
+              <tspan [attr.x]="mo.labelX" [attr.dy]="i === 0 ? 0 : 13">{{ line }}</tspan>
+            }
+          </text>
+        }
+      </svg>
+    }
+
+    <!-- Anatomical orientation indicator in the 3D pane corner; rotates with the orbit. -->
+    @if (view3d.axisIndicator(); as axes) {
+      <svg
+        class="axis-indicator"
+        aria-hidden="true"
+        [style.left.px]="axes.left"
+        [style.top.px]="axes.top"
+        [attr.width]="axes.size"
+        [attr.height]="axes.size"
+      >
+        @for (axis of axes.markers; track axis.label) {
+          <line
+            class="axis-spoke"
+            [attr.x1]="axes.center"
+            [attr.y1]="axes.center"
+            [attr.x2]="axis.x"
+            [attr.y2]="axis.y"
+            [style.opacity]="axis.opacity"
+          />
+          <text
+            class="axis-text"
+            [attr.x]="axis.x"
+            [attr.y]="axis.y"
+            [style.opacity]="axis.opacity"
+          >
+            {{ axis.label }}
+          </text>
+        }
+        <circle class="axis-hub" [attr.cx]="axes.center" [attr.cy]="axes.center" r="2" />
+      </svg>
+    }
+
+    <!-- Metadata & raw-tag inspector. A pure read-only overlay; never touches rendering. -->
+    @if (isReady() && infoPanelOpen() && status.metadata(); as meta) {
+      <aside class="info-panel" aria-label="DICOM metadata">
+        <header class="info-header">
+          <strong>Metadata</strong>
+          <button
+            type="button"
+            class="info-close"
+            (click)="toolbar.toggleInfoPanel()"
+            title="Close (I)"
+            aria-label="Close metadata panel"
+          >
+            ✕
+          </button>
+        </header>
+
+        <div class="info-body">
+          @for (group of meta.curated; track group.title) {
+            <section class="info-group">
+              <h3>{{ group.title }}</h3>
+              <dl>
+                @for (field of group.fields; track field.label) {
+                  <div class="info-row">
+                    <dt>{{ field.label }}</dt>
+                    <dd>{{ field.value }}</dd>
+                  </div>
+                }
+              </dl>
+            </section>
+          }
+
+          <section class="info-group">
+            <h3>Raw tags</h3>
+            <input
+              type="search"
+              class="info-search"
+              placeholder="Filter by tag, name, VR, or value…"
+              [value]="rawTagFilter()"
+              (input)="toolbar.onRawTagFilterInput($event)"
+              aria-label="Filter raw tags"
+            />
+            <ul class="raw-tags">
+              @for (tag of status.filteredRawTags(); track tag.tag) {
+                <li class="raw-tag">
+                  <code class="raw-tag-id">{{ tag.tag }}</code>
+                  <span class="raw-tag-name">{{ tag.name ?? '—' }}</span>
+                  <span class="raw-tag-vr">{{ tag.vr ?? '—' }}</span>
+                  <span class="raw-tag-value">{{ tag.value }}</span>
+                </li>
+              } @empty {
+                <li class="raw-tag-empty">No tags match “{{ rawTagFilter() }}”.</li>
+              }
+            </ul>
+          </section>
+        </div>
+      </aside>
+    }
+
+    <!-- DVR transfer-function editor + lighting. Only meaningful in DVR mode; edits
+       re-bake the LUT / repack the shader uniforms live. Never affects MPR panes. -->
+    @if (isReady() && view3d.isDvrMode() && has3dPane()) {
+      <aside class="dvr-panel" aria-label="DVR transfer function and lighting">
+        <header class="info-header">
+          <strong>DVR — transfer function</strong>
+        </header>
+
+        <div class="dvr-body">
+          <!-- Opacity curve. Drag a point to reshape; double-click to add a stop. -->
+          <svg
+            class="tf-editor"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            (pointermove)="view3d.onTfPointerMove($event)"
+            (pointerup)="view3d.onTfPointerUp($event)"
+            (pointercancel)="view3d.onTfPointerUp($event)"
+            (dblclick)="view3d.onTfAddPoint($event)"
+          >
+            <polygon class="tf-area" [attr.points]="view3d.tfEditor().area" />
+            <polyline class="tf-line" [attr.points]="view3d.tfEditor().line" />
+            @for (p of view3d.tfEditor().points; track p.index) {
+              <circle
+                class="tf-point"
+                [class.selected]="p.index === view3d.tfSelected()"
+                [attr.cx]="p.x"
+                [attr.cy]="p.y"
+                r="3"
+                [attr.fill]="p.color"
+                (pointerdown)="view3d.onTfPointerDown($event, p.index)"
+              />
+            }
+          </svg>
+          <div class="tf-axis">
+            <span>{{ view3d.tfEditor().lo }} HU</span>
+            <span>opacity ↑ · drag points · dbl-click to add</span>
+            <span>{{ view3d.tfEditor().hi }} HU</span>
+          </div>
+
+          <div class="dvr-row">
+            <label class="dvr-color" title="Colour of the selected control point">
+              Colour
+              <input
+                type="color"
+                [value]="view3d.tfSelectedColor()"
+                (input)="view3d.onTfColorChange($event)"
+                [disabled]="view3d.tfSelected() === null"
+              />
+            </label>
+            <button
+              type="button"
+              class="dvr-remove"
+              (click)="view3d.onTfRemovePoint()"
+              [disabled]="!view3d.tfCanRemove()"
+              title="Remove the selected control point"
+            >
+              Remove point
+            </button>
+          </div>
+        </div>
+
+        <header class="info-header">
+          <strong>Lighting</strong>
+          <button
+            type="button"
+            class="dvr-toggle"
+            [class.active]="view3d.dvrLighting().enabled"
+            (click)="view3d.toggleShading()"
+            title="Toggle gradient shading on/off"
+          >
+            Shading {{ view3d.dvrLighting().enabled ? 'on' : 'off' }}
+          </button>
+        </header>
+
+        <div class="dvr-body">
+          <label class="dvr-slider" title="Swing the light around the view-up axis">
+            <span>Light ↔</span>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              [value]="view3d.dvrLighting().azimuth"
+              (input)="view3d.onLightingInput('azimuth', $event)"
+              [disabled]="!view3d.dvrLighting().enabled"
+            />
+          </label>
+          <label class="dvr-slider" title="Tilt the light toward the view-up axis">
+            <span>Light ↕</span>
+            <input
+              type="range"
+              min="-90"
+              max="90"
+              step="1"
+              [value]="view3d.dvrLighting().elevation"
+              (input)="view3d.onLightingInput('elevation', $event)"
+              [disabled]="!view3d.dvrLighting().enabled"
+            />
+          </label>
+          <label class="dvr-slider" title="Ambient light floor">
+            <span>Ambient</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              [value]="view3d.dvrLighting().ambient"
+              (input)="view3d.onLightingInput('ambient', $event)"
+              [disabled]="!view3d.dvrLighting().enabled"
+            />
+          </label>
+          <label class="dvr-slider" title="Diffuse (Lambert) strength">
+            <span>Diffuse</span>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.01"
+              [value]="view3d.dvrLighting().diffuse"
+              (input)="view3d.onLightingInput('diffuse', $event)"
+              [disabled]="!view3d.dvrLighting().enabled"
+            />
+          </label>
+          <label class="dvr-slider" title="Specular highlight strength">
+            <span>Specular</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              [value]="view3d.dvrLighting().specular"
+              (input)="view3d.onLightingInput('specular', $event)"
+              [disabled]="!view3d.dvrLighting().enabled"
+            />
+          </label>
+          <label class="dvr-slider" title="Specular exponent (highlight tightness)">
+            <span>Shininess</span>
+            <input
+              type="range"
+              min="1"
+              max="128"
+              step="1"
+              [value]="view3d.dvrLighting().shininess"
+              (input)="view3d.onLightingInput('shininess', $event)"
+              [disabled]="!view3d.dvrLighting().enabled"
+            />
+          </label>
+        </div>
+      </aside>
+    }
+
+    <!-- Keyboard & mouse shortcut help. A centred modal overlay; click outside or ✕/Esc to close. -->
+    @if (helpOpen()) {
+      <div
+        class="help-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard and mouse shortcuts"
+        (click)="toolbar.toggleHelp()"
+      >
+        <aside #helpPanel class="help-panel" tabindex="-1" (click)="$event.stopPropagation()">
+          <header class="info-header">
+            <strong>Keyboard &amp; mouse shortcuts</strong>
+            <button
+              type="button"
+              class="info-close"
+              (click)="toolbar.toggleHelp()"
+              title="Close (?)"
+              aria-label="Close shortcuts help"
+            >
+              ✕
+            </button>
+          </header>
+          <dl class="info-body">
+            @for (shortcut of shortcuts; track shortcut.label) {
+              <div class="info-row">
+                <dt>
+                  <kbd>{{ shortcut.keys }}</kbd>
+                </dt>
+                <dd>{{ shortcut.label }}</dd>
+              </div>
+            }
+          </dl>
+        </aside>
+      </div>
+    }
+
+    @if (isReady() && status.interpolationWarning(); as warning) {
+      <div class="warning" role="status">⚠ {{ warning }}</div>
+    }
+
+    <div
+      class="status"
+      [class.error]="status.statusIsError()"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      {{ status.statusText() }}
+      @if (status.isLoading()) {
+        <span
+          class="progress"
+          role="progressbar"
+          aria-label="Loading DICOM files"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          [attr.aria-valuenow]="status.loadPercent()"
+        >
+          <span class="progress-fill" [style.width.%]="status.loadProgress() * 100"></span>
+        </span>
+      }
+    </div>
+
+    @if (measureCtl.probeText(); as probe) {
+      <div class="probe">{{ probe }}</div>
+    }
+
+    @if (isDraggingFiles()) {
+      <div class="drop-overlay" role="status">
+        <div class="drop-message">
+          <div class="drop-headline">{{ dropHeadline() }}</div>
+          <div class="drop-modifiers">
+            <span class="drop-mod" [class.active]="dropIntent() === 'primary'">Drop · primary</span>
+            <span class="drop-mod" [class.active]="dropIntent() === 'overlay'"
+              >{{ altLabel }} fuse overlay</span
+            >
+            <span class="drop-mod" [class.active]="dropIntent() === 'compare'"
+              >{{ shiftLabel }} compare</span
+            >
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (notice(); as notice) {
+      <div class="notice" role="status">{{ notice }}</div>
+    }
+  </main>
+</div>
+
+<!-- Longitudinal history docked below the workspace; hidden until a patient is
+     imported. Highlights the currently-loaded series' chip (read-only; #173). -->
+<app-history-panel
+  [loadedSeriesUids]="status.loadedSeriesUids()"
+  (loadSeries)="loadCtl.loadSeriesFromPanel($event)"
+/>

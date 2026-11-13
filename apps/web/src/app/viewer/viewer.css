@@ -5,51 +5,1106 @@
 :host {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100%;
+  /* Full-screen viewer: never let transient child overflow (overlays near a
+     pane edge, the toolbar hint) raise a document scrollbar. A scrollbar would
+     steal width/height, re-fire the canvas ResizeObserver, and oscillate. */
+  overflow: hidden;
 }
 
 .toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
-  background: var(--glass-bg-strong);
+  padding: 8px 12px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-sm);
+  flex-wrap: wrap;
 }
 
 .brand {
-  letter-spacing: 0.02em;
+  color: var(--accent);
+  margin-right: 8px;
 }
 
-.not-clinical {
-  padding: 2px 10px;
-  border: 1px solid var(--border);
+button,
+input {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+  font: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+
+button {
+  cursor: pointer;
   border-radius: var(--radius-pill);
-  color: var(--muted);
-  font-size: 12px;
+  padding: 5px 12px;
 }
 
-.empty {
+button:hover:not(:disabled),
+button:focus-visible,
+input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--accent-ring);
+  outline: none;
+}
+
+:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+kbd {
+  font:
+    11px/1 ui-monospace,
+    monospace;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+.ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.ctrl input[type='number'] {
+  width: 84px;
+}
+
+/* Window/level cluster in the top bar: Preset + WL + WW stay on one line and
+   wrap together. Compact number inputs and a capped preset width keep the whole
+   toolbar on a single row at typical widths (≥1024px). */
+.wl-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.wl-group input[type='number'] {
+  width: 60px;
+}
+
+.wl-group select {
+  max-width: 150px;
+}
+
+/* Info/Help pinned to the right edge; the pair is its own flex unit so it wraps
+   together — never leaving a single lonely control on a second row. */
+.toolbar-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex-wrap: nowrap;
+}
+
+.spacer {
   flex: 1;
+  min-width: 12px;
+  overflow: hidden;
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.tool-rail {
+  flex: 0 0 auto;
+  width: 372px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px;
+  overflow-y: auto;
+  /* Never scroll sideways: long ROI names ellipsis-truncate (the min-width:0
+     chain below lets them), so the pane fits its contents at this width. */
+  overflow-x: hidden;
+  border-right: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* Each group is a native <details> so it can be collapsed to keep every
+   group (including 3D) reachable without scrolling at short window heights. */
+.tool-group {
+  flex: 0 0 auto;
+  /* Allow the group (a flex item of the rail) to shrink so its contents — long
+     ROI names in particular — truncate instead of widening the whole pane. */
+  min-width: 0;
+}
+
+.tool-group-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.tool-group-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+  list-style-position: inside;
+  user-select: none;
+}
+
+.tool-group-label:hover,
+.tool-group[open] > .tool-group-label {
+  color: var(--text);
+}
+
+.tool-rail button {
+  width: 100%;
+  text-align: left;
+}
+
+.tool-rail .ctrl {
+  width: 100%;
+  justify-content: space-between;
+}
+
+/* Rail-row range sliders fill the width between their label and value readout. */
+.tool-rail .ctrl input[type='range'] {
+  flex: 1;
+}
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #000;
+  /* Clip the canvas and its absolutely-positioned overlays (pane tags, edge
+     labels, crosshairs, gizmos) to the imaging area — they must never extend
+     past it and scroll the page. */
+  overflow: hidden;
+}
+
+canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* Let pointer drags pan instead of scrolling/zooming the page on touch. */
+  touch-action: none;
+}
+
+canvas.grabbable {
+  cursor: grab;
+}
+
+canvas.grabbing {
+  cursor: grabbing;
+}
+
+/* Pane label/border overlay sits on top of the single GPU canvas. */
+.pane-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pane {
+  position: absolute;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+.pane.hovered {
+  border-color: var(--accent);
+  box-shadow: var(--accent-ring);
+}
+
+.pane-tag {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Linked crosshair: a full-width and full-height line clipped to its pane. */
+.crosshair {
+  position: absolute;
+  overflow: hidden;
+}
+
+.crosshair-h,
+.crosshair-v {
+  position: absolute;
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+.crosshair-h {
+  left: 0;
+  width: 100%;
+  height: 1px;
+}
+
+.crosshair-v {
+  top: 0;
+  width: 1px;
+  height: 100%;
+}
+
+/* Anatomical edge letters + scale bar overlaid on each MPR pane. */
+.pane-annotations {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.edge-label {
+  position: absolute;
+  color: var(--text);
+  font:
+    600 12px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  text-shadow:
+    0 0 3px #000,
+    0 0 3px #000;
+  opacity: 0.85;
+}
+
+.edge-top {
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.edge-bottom {
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.edge-left {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.edge-right {
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Physical ruler in the pane's bottom-right corner: end ticks + a baseline. */
+.scale-bar {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px;
-  text-align: center;
-  color: var(--muted);
+  gap: 3px;
 }
 
-.empty h1 {
-  margin: 0;
+.scale-bar-label {
+  font:
+    600 11px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
   color: var(--text);
-  font-size: 20px;
+  text-shadow:
+    0 0 3px #000,
+    0 0 3px #000;
+  font-variant-numeric: tabular-nums;
+}
+
+.scale-bar-line {
+  display: block;
+  height: 5px;
+  box-sizing: border-box;
+  border: solid var(--text);
+  border-width: 0 1px 2px 1px;
+  filter: drop-shadow(0 0 2px #000);
+}
+
+/* Measurement palette buttons cluster tightly in the toolbar. */
+.measure-palette,
+.cine,
+.view-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Interactive measurements (distance/angle/ROI) drawn over each MPR pane. */
+.measurement {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.measure-shape {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.measurement.pending .measure-shape {
+  stroke-dasharray: 4 3;
+  opacity: 0.85;
+}
+
+/* Draggable endpoint / ROI-corner handles: the only pointer-active overlay bit. */
+.measure-handle {
+  fill: var(--accent);
+  stroke: #000;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.measure-handle:hover {
+  fill: var(--text);
+}
+
+.measure-label {
+  fill: var(--text);
+  font:
+    600 11px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  text-anchor: start;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 3px;
+}
+
+/* RTSTRUCT ROI contours overlaid on an MPR pane, clipped to its rectangle. */
+.contours {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.contour {
+  fill: none;
+  stroke-width: 1.5;
+  /* The stroke colour comes from each ROI's display colour, set inline. */
+  paint-order: stroke;
+}
+
+/* Edit-structures panel: the active authored set's selector, new-set and rename. */
+.brush-set {
+  display: flex;
+  width: 100%;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.brush-set-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.brush-set-select select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.brush-set-new {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.brush-set-name {
+  width: 100%;
+}
+
+.brush-set-name input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Structures panel: per-ROI colour, type, visibility and opacity controls. */
+.roi-panel,
+.layer-panel {
+  flex-direction: column;
+  /* Override the button groups' flex-wrap: a wrapping column container won't
+     stretch its rows to its width, so the ROI list would size to the longest
+     name and overflow. nowrap keeps rows at the pane width, letting names
+     ellipsis-truncate. */
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.roi-set-select {
+  width: 100%;
+}
+
+.roi-set-select select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The scrolling list of ROI rows; the master toggle sits above it. */
+.roi-legend,
+.layer-legend {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.roi-all {
   font-weight: 600;
 }
 
-.empty p {
-  max-width: 46ch;
+/* Per-structure-set heading above its ROI rows when several sets are listed (#259). */
+.roi-group-label {
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 0.78em;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+}
+
+.roi-group-label:first-child {
+  margin-top: 0;
+}
+
+.roi-item,
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.roi-color {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  background: none;
+  cursor: pointer;
+}
+
+.roi-name,
+.layer-name {
+  /* Take content width (truncating when tight) rather than growing, so the
+     opacity slider beside it can fill the row and reach the right edge. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Interpreted type badge (ORGAN / PTV / GTV…); also the layer role badge. */
+.roi-type,
+.layer-role {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.7em;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.12);
+  opacity: 0.85;
+}
+
+.roi-opacity,
+.layer-opacity {
+  /* Fill the free space so the slider reaches the right edge (it was a 64px stub
+     whose thumb stopped well short of it). flex-basis 0 lets the name show fully
+     first, then the slider takes the slack. */
+  flex: 1;
+  min-width: 56px;
+  cursor: pointer;
+}
+
+/* Promote-to-editable action + its post-conversion badge (#271). */
+.roi-edit {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  font-size: 0.72em;
+  white-space: nowrap;
+}
+
+.roi-mask-badge {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.7em;
+  letter-spacing: 0.02em;
+  background: rgba(96, 179, 113, 0.3);
+  opacity: 0.9;
+}
+
+/* In-pane fusion blend bar: positioned over the largest MPR pane. */
+.blend-bar {
+  position: absolute;
+  height: 16px;
   margin: 0;
-  line-height: 1.5;
+  cursor: pointer;
+  pointer-events: auto;
+  accent-color: #4ea1ff;
+  opacity: 0.8;
+}
+
+.blend-bar:hover,
+.blend-bar:focus-visible {
+  opacity: 1;
+}
+
+/* MPR cut-planes projected into the 3D pane, clipped to its rectangle. */
+.slice-planes {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.slice-plane {
+  fill: none;
+  stroke-width: 1.5;
+  opacity: 0.85;
+}
+
+/* Cross-pane reference lines: where another (oblique) plane crosses this pane. */
+.reference-line {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.reference-line line {
+  stroke-width: 1.25;
+  opacity: 0.7;
+  stroke-dasharray: 6 4;
+}
+
+/* Oblique rotation knob drawn over an MPR pane; only the knob is pointer-active. */
+.oblique-gizmo {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+  opacity: 0.55;
+}
+
+.oblique-gizmo.active {
+  opacity: 0.9;
+}
+
+.oblique-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.6;
+}
+
+.oblique-arm {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.oblique-knob {
+  fill: var(--accent);
+  stroke: #000;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.oblique-knob:hover {
+  fill: var(--text);
+}
+
+/* Interactive cut-plane gizmo drawn over the 3D pane, clipped to its rectangle. */
+.clip-plane-gizmo {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.clip-plane-outline {
+  fill: rgba(255, 209, 102, 0.08);
+  stroke: #ffd166;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  opacity: 0.9;
+}
+
+.clip-plane-normal {
+  stroke: #ffd166;
+  stroke-width: 1.5;
+  opacity: 0.9;
+}
+
+/* The only pointer-active part of the gizmo: the handle that translates the plane. */
+.clip-plane-handle {
+  fill: #ffd166;
+  stroke: #000;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.clip-plane-handle:hover {
+  fill: var(--text);
+}
+
+/* Orientation indicator: patient axes drawn over the 3D pane's corner. */
+.axis-indicator {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.axis-spoke {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.axis-hub {
+  fill: var(--accent);
+}
+
+.axis-text {
+  fill: var(--text);
+  font:
+    600 12px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 3px;
+}
+
+/* Top-centred amber pill: the missing-slice interpolation warning and the
+   transient drop notice (e.g. a ⌥/⇧ drop that couldn't fuse) share its styling. */
+.warning,
+.notice {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  padding: 6px 12px;
+  background: rgba(60, 42, 8, 0.55);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid rgba(184, 134, 11, 0.6);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+  color: #ffd479;
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 6px 10px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted);
+  pointer-events: none;
+  max-width: 70%;
+}
+
+.status.error {
+  color: #ff7a7a;
+  border-color: rgba(255, 122, 122, 0.4);
+}
+
+/* Determinate load progress bar shown beneath the status text while parsing. */
+.progress {
+  display: block;
+  margin-top: 6px;
+  width: 220px;
+  max-width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--glass-border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s ease-out;
+}
+
+/* Overlays that centre a single child over the viewport. */
+.drop-overlay,
+.help-overlay {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Drop-target affordance: a dashed inset frame over the viewport while a file
+   drag hovers. Pointer-events stay off so the drag events reach the viewport. */
+.drop-overlay {
+  inset: 12px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: rgba(76, 141, 255, 0.12);
+  pointer-events: none;
+}
+
+/* The glass pills floating over the viewport: the drop hint and the live voxel
+   readout share one frosted card; each adds its own layout below. */
+.drop-message,
+.probe {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+}
+
+.drop-message {
+  padding: 12px 20px;
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+/* The modifier legend under the headline: Drop / ⌥ fuse / ⇧ compare, with the one
+   the held key selects accented so the hint tracks the active modifier. The
+   smaller, muted text sets it below the headline above. */
+.drop-modifiers {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+.drop-mod.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Live voxel readout, anchored opposite the status line. */
+.probe {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The glass card shared by the metadata inspector and the shortcut help. */
+.info-panel,
+.help-panel,
+.dvr-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  overflow: hidden;
+}
+
+/* Metadata & raw-tag inspector: a scrollable panel pinned to the viewport's
+   right edge. Unlike the other overlays it accepts pointer input (scroll/search). */
+.info-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: 340px;
+  max-width: calc(100% - 24px);
+}
+
+.info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.info-close {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.info-body {
+  padding: 8px 12px 12px;
+  overflow-y: auto;
+}
+
+/* Keyboard & mouse shortcut help: a dimmed backdrop with a centred glass card
+   (the card's look is shared with .info-panel above). The backdrop catches
+   clicks to dismiss; the card stops them so it stays open. */
+.help-overlay {
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 24px;
+}
+
+/* The shortcut rows reuse .info-body / .info-row from the metadata panel. */
+.help-panel {
+  width: 420px;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.info-group {
+  margin-top: 12px;
+}
+
+.info-group:first-child {
+  margin-top: 0;
+}
+
+.info-group h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.info-group dl {
+  margin: 0;
+}
+
+.info-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.info-row dt {
+  flex: 0 0 38%;
+  color: var(--muted);
+}
+
+.info-row dd {
+  margin: 0;
+  flex: 1;
+  word-break: break-word;
+}
+
+.info-search {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.raw-tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.raw-tag {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+  border-top: 1px solid var(--glass-border);
+}
+
+.raw-tag-id {
+  flex: none;
+  color: var(--muted);
+}
+
+.raw-tag-vr {
+  flex: 0 0 22px;
+  color: var(--accent);
+}
+
+.raw-tag-name,
+.raw-tag-value {
+  flex: 1;
+  word-break: break-word;
+}
+
+.raw-tag-empty {
+  padding: 6px 0;
+  color: var(--muted);
+}
+
+/* Graceful degradation: drop translucency where it harms legibility or is
+   unsupported, falling back to solid surfaces. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .toolbar,
+  button,
+  input,
+  kbd,
+  .pane-tag,
+  .status,
+  .probe,
+  .info-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--panel);
+  }
+
+  .warning,
+  .notice {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(60, 42, 8, 0.95);
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .toolbar,
+  button,
+  input,
+  kbd,
+  .pane-tag,
+  .status,
+  .probe,
+  .info-panel,
+  .dvr-panel {
+    background: var(--panel);
+  }
+
+  .warning {
+    background: rgba(60, 42, 8, 0.95);
+  }
+}
+
+/* DVR transfer-function + lighting editor: a glass panel pinned to the viewport's
+   left edge, shown only in DVR mode. Drag the curve/sliders; never affects MPR. */
+.dvr-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 280px;
+  max-width: calc(100% - 24px);
+  font-size: 12px;
+}
+
+.dvr-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+/* Opacity curve: a flat box; the polyline/area use a 0..100 viewBox. */
+.tf-editor {
+  width: 100%;
+  height: 110px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  touch-action: none;
+}
+
+.tf-area {
+  fill: rgba(120, 170, 255, 0.18);
+}
+
+.tf-line {
+  fill: none;
+  stroke: var(--accent, #6aa6ff);
+}
+
+.tf-point {
+  stroke: #fff;
+  cursor: grab;
+}
+
+.tf-line,
+.tf-point {
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.tf-point.selected {
+  stroke-width: 2.4;
+}
+
+.tf-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tf-axis span:nth-child(2) {
+  text-align: center;
+}
+
+.dvr-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dvr-color,
+.dvr-slider {
+  color: var(--muted);
+}
+
+.dvr-slider {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: 8px;
 }

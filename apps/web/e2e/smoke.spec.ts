@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { syntheticCtSeries, syntheticPatient } from '@open-rt-studio/testdata';
+import { syntheticCtSeries, syntheticCtValue, syntheticPatient } from '@open-rt-studio/testdata';
 import { expect, test } from '@playwright/test';
 
 import {
@@ -13,6 +13,7 @@ import {
   watchProblems,
 } from './fixtures/app';
 import { toInputFiles } from './fixtures/files';
+import { importFiles, pickSeries } from './fixtures/load';
 
 test.describe('application shell', () => {
   test('the notice gate leads to the viewer', async ({ page }) => {
@@ -29,6 +30,8 @@ test.describe('application shell', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('header.toolbar')).toBeVisible();
     await expect(page.locator('.brand')).toHaveText('Open RT Studio');
+    await expect(page.getByRole('button', { name: /open folder/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /open files/i })).toBeVisible();
     expectNoProblems(problems);
   });
 
@@ -61,6 +64,79 @@ test.describe('application shell', () => {
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('header.toolbar')).toBeVisible();
+  });
+});
+
+test.describe('loading a series', () => {
+  test('a synthetic series loads by file input and the panes come up', async ({ page }) => {
+    const problems = watchProblems(page);
+    await preAcknowledge(page);
+    await page.goto('/');
+    await expect(page.locator('header.toolbar')).toBeVisible();
+
+    // An import only catalogues the series into the history panel. This part
+    // needs no GPU, so it is checked before the skip below.
+    await importFiles(page, syntheticCtSeries(12, 32));
+    await expect(page.locator('.study-tile')).toHaveCount(1, { timeout: 30_000 });
+
+    // Everything below needs a live renderer.
+    await requireWebGpu(page);
+
+    // Pick the CT from the history panel. pickSeries retries until the layout
+    // control enables, which happens only once the device is up, the shader
+    // pipelines are built and a volume is assembled.
+    await pickSeries(page, 'CT');
+    const layout = page.getByRole('button', { name: /layout/i });
+    await expect(layout).toBeEnabled({ timeout: 30_000 });
+    await expect(page.locator('div.status')).not.toHaveClass(/error/);
+    await expect(page.locator('div.status')).toContainText('volume 32 × 32 × 12');
+
+    // Orientation labels render only once the panes are live.
+    await expect(page.getByText(/axial|coronal|sagittal/i).first()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // The render surface exists and is sized.
+    const size = await page
+      .locator('canvas')
+      .first()
+      .evaluate((c: HTMLCanvasElement) => ({ w: c.width, h: c.height }));
+    expect(size.w).toBeGreaterThan(0);
+    expect(size.h).toBeGreaterThan(0);
+
+    // Cycling the layout changes the label and forces every pane to redraw,
+    // which surfaces a pipeline error in any of them.
+    const before = (await layout.innerText()).trim();
+    await layout.click();
+    await expect
+      .poll(async () => (await layout.innerText()).trim(), { timeout: 5_000 })
+      .not.toBe(before);
+
+    await page.waitForTimeout(500);
+    expectNoProblems(problems);
+  });
+
+  test('the probe reads the known value of the synthetic volume', async ({ page }) => {
+    await preAcknowledge(page);
+    await page.goto('/');
+    await requireWebGpu(page);
+
+    const size = 32;
+    await importFiles(page, syntheticCtSeries(12, size));
+    await pickSeries(page, 'CT');
+
+    // Hover the main (axial) pane and compare the readout with the formula
+    // the generator used for that voxel.
+    const pane = page.locator('.pane-overlay .pane').first();
+    const box = (await pane.boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.5);
+    const probe = page.locator('.probe');
+    await expect(probe).toBeVisible();
+    const text = await probe.innerText();
+    const match = /voxel \((\d+), (\d+), (\d+)\) · value (-?\d+) HU/.exec(text);
+    expect(match, `unexpected probe text: ${text}`).not.toBeNull();
+    const [x, , z, value] = match!.slice(1).map(Number);
+    expect(value).toBe(syntheticCtValue(x, z, size));
   });
 });
 
