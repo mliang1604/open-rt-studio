@@ -136,6 +136,8 @@ const MAX_ZOOM = 20;
   styleUrl: './viewer.css',
   host: {
     '(window:keydown.escape)': 'toolbar.onEscapeKey($event)',
+    '(window:keydown.delete)': 'toolbar.onDeleteKey($event)',
+    '(window:keydown.backspace)': 'toolbar.onDeleteKey($event)',
     // Every single-letter and viewport shortcut goes through one handler that reads
     // event.key itself and case-folds it. Angular's per-key bindings (keydown.x)
     // match event.key exactly, so Shift / Caps Lock (reported as 'X') would silently
@@ -450,6 +452,7 @@ export class Viewer {
       activeTool: () => this.activeTool(),
       placeMeasurePoint: (placement, event) => this.measureCtl.placeMeasurePoint(placement, event),
       brushActive: () => this.brushCtl.isActive(),
+      deselectMeasurement: () => this.measure.select(null),
       beginStroke: (placement, event) => this.brushCtl.beginStroke(placement, event),
       extendStroke: (placement, event) => this.brushCtl.extendStroke(placement, event),
       endStroke: () => this.brushCtl.endStroke(),
@@ -512,6 +515,7 @@ export class Viewer {
       hoveredKey: () => this.hoveredKey(),
       cursor: () => this.cursor(),
       activeTool: this.activeTool,
+      leftButtonFree: () => this.brushCtl.mode() === 'off' && !this.cpr.drawing(),
       camera3d: () => this.camera3d(),
       projectionMode: () => this.view3d.projectionMode(),
       slabThicknessMm: () => this.slabThicknessMm(),
@@ -635,6 +639,7 @@ export class Viewer {
       slabThicknessMm: () => this.slabThicknessMm(),
       helpPanel: () => this.shortcutHelp()?.panelElement(),
       putDownTools: () => this.tools.putDown(),
+      deleteSelectedMeasurement: () => this.measureCtl.deleteSelected(),
       toggleHistory: () => this.historyPanel()?.toggleCollapsedFromHotkey(),
     });
 

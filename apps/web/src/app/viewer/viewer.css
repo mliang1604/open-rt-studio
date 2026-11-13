@@ -398,7 +398,25 @@ canvas.movable {
   opacity: 0.85;
 }
 
-/* Draggable endpoint / ROI-corner handles: the only pointer-active overlay bit. */
+.measurement.selected .measure-shape {
+  stroke: var(--text);
+  stroke-width: 2.5;
+}
+
+/* The outline once more, wide and invisible, to press on: selects the
+   measurement and drags it as a whole. Off while another tool has the button. */
+.measure-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+}
+
+.measurement.selectable .measure-hit {
+  pointer-events: stroke;
+  cursor: move;
+}
+
+/* Draggable endpoint / ROI-corner handles, pointer-active like the outline. */
 .measure-handle {
   fill: var(--accent);
   stroke: #000;

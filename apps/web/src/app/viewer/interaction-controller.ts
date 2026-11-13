@@ -73,6 +73,8 @@ export class InteractionController {
     if (!d || !d.isReady()) return;
     const placement = d.placementAt(event);
     if (!placement) return;
+    // A press on a measurement never gets here: its outline takes the event.
+    d.deselectMeasurement();
 
     // Alt+right-drag adjusts window/level over any pane — the standard PACS W/L
     // gesture, moved onto Alt so the plain right-drag is free for zoom. Horizontal

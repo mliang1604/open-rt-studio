@@ -122,6 +122,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     renderer: () => ({ sliceCount: () => 16 }) as unknown as SliceRenderer,
     activeTool: () => 'none',
     brushActive: () => false,
+    deselectMeasurement: () => {},
     crosshairGrabbable: () => false,
     cprDrawing: () => false,
     ...fns,

@@ -357,6 +357,14 @@
         >
           Clear ✕
         </button>
+        <button
+          type="button"
+          (click)="measureCtl.deleteSelected()"
+          [disabled]="!measureCtl.selectedVisible()"
+          title="Delete the selected measurement (Del). Click a measurement to select it."
+        >
+          Delete selected
+        </button>
       </div>
     </details>
 
@@ -1045,6 +1053,8 @@
       <svg
         class="measurement"
         [class.pending]="mo.pending"
+        [class.selected]="!mo.pending && mo.id === measureCtl.selectedId()"
+        [class.selectable]="measureCtl.shapesSelectable()"
         [style.left.px]="mo.rect.x"
         [style.top.px]="mo.rect.y"
         [attr.width]="mo.rect.width"
@@ -1072,6 +1082,25 @@
           />
         }
         @if (!mo.pending) {
+          <!-- The outline again, wide and invisible: what a press lands on to
+               select the measurement and drag it as a whole. -->
+          <g
+            class="measure-hit"
+            (pointerdown)="measureCtl.onMeasureShapeDown(mo.id, $event)"
+            (pointermove)="measureCtl.onMeasureShapeMove($event)"
+            (pointerup)="measureCtl.onMeasureShapeUp($event)"
+            (pointercancel)="measureCtl.onMeasureShapeUp($event)"
+          >
+            @if (mo.polyline) {
+              <polyline [attr.points]="mo.polyline" />
+            }
+            @if (mo.ellipse; as e) {
+              <ellipse [attr.cx]="e.cx" [attr.cy]="e.cy" [attr.rx]="e.rx" [attr.ry]="e.ry" />
+            }
+            @if (mo.box; as b) {
+              <rect [attr.x]="b.x" [attr.y]="b.y" [attr.width]="b.w" [attr.height]="b.h" />
+            }
+          </g>
           @for (handle of mo.handles; track $index; let i = $index) {
             <circle
               class="measure-handle"
