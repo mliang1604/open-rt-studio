@@ -61,6 +61,8 @@ export interface ToolbarInit {
   readonly helpPanel: () => HTMLElement | undefined;
   /** Put down whichever left-button tool is on, for the Escape teardown. */
   readonly putDownTools: () => void;
+  /** Delete the selected measurement if it is on screen; says whether it did. */
+  readonly deleteSelectedMeasurement: () => boolean;
   /** Toggle the study-history panel's collapsed state (the `H` hotkey). */
   readonly toggleHistory: () => void;
 }
@@ -158,7 +160,8 @@ export class ToolbarController {
 
   /**
    * Escape closes the open overlays (help, then metadata), then cancels an
-   * in-progress measurement, then puts down the tool that owns the left button
+   * in-progress measurement, then deselects a measurement, then puts down the
+   * tool that owns the left button
    * (a measurement tool, the brush or the reformat path) — most-modal first.
    */
   onEscapeKey(event: Event): void {
@@ -176,7 +179,17 @@ export class ToolbarController {
       this.measure.cancelPending();
       return;
     }
+    if (this.measure.selectedId() !== null) {
+      this.measure.select(null);
+      return;
+    }
     d.putDownTools();
+  }
+
+  /** Delete or Backspace deletes the selected measurement, outside a text field. */
+  onDeleteKey(event: Event): void {
+    if (isEditableTarget(event.target)) return;
+    if (this.deps!.deleteSelectedMeasurement()) event.preventDefault();
   }
 
   /**

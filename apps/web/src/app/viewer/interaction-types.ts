@@ -218,6 +218,8 @@ export interface InteractionInit {
 
   /** Whether a brush/eraser mode is selected, so a left-drag paints instead of pans. */
   readonly brushActive: () => boolean;
+  /** Select no measurement: a press on a pane that is not on one. */
+  readonly deselectMeasurement: () => void;
   /** Begin a brush stroke at the press point on an MPR pane. */
   readonly beginStroke: (
     placement: Extract<PanePlacement, { kind: 'mpr' }>,

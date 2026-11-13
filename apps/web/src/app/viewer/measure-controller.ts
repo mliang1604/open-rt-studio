@@ -81,6 +81,8 @@ export interface MeasureInit {
   /** Cursor position in CSS pixels relative to the canvas, or null when away. */
   readonly cursor: () => Vec2 | null;
   readonly activeTool: WritableSignal<ToolMode>;
+  /** False while the brush or the reformat path owns the left button on the panes. */
+  readonly leftButtonFree: () => boolean;
   /** 3D-pane pick inputs (for a Shift+click locator on the MIP). */
   readonly camera3d: () => OrbitCamera;
   readonly projectionMode: () => ProjectionMode;
@@ -331,6 +333,74 @@ export class MeasureController {
   /** Remove every placed measurement and any in-progress one. */
   clearMeasurements(): void {
     this.measure.clear();
+  }
+
+  /** The selected measurement's id, or null. */
+  readonly selectedId = this.measure.selectedId;
+
+  /**
+   * Whether a press on a measurement selects it. Not while one is half placed
+   * (its next point may belong on top of another), and not while the brush or
+   * the reformat path owns the left button.
+   */
+  readonly shapesSelectable = computed(
+    () => this.measure.pending() === null && this.deps!.leftButtonFree(),
+  );
+
+  /**
+   * Whether the selected measurement is on screen. A measurement is drawn only
+   * on the slice it was made on, so a selected one can be scrolled out of
+   * sight; delete then leaves it alone.
+   */
+  readonly selectedVisible = computed(() => {
+    const id = this.measure.selectedId();
+    return id !== null && this.measurementOverlays().some((o) => !o.pending && o.id === id);
+  });
+
+  /** Delete the selected measurement, if it is on screen. Returns whether it did. */
+  deleteSelected(): boolean {
+    return this.selectedVisible() && this.measure.removeSelected();
+  }
+
+  /** A press on a measurement's outline: select it and start moving it as a whole. */
+  onMeasureShapeDown(id: number, event: PointerEvent): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.measure.select(id);
+    const point = this.measurementEventPoint(id, event);
+    if (!point) return;
+    (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+    this.measure.beginMove(id, point);
+  }
+
+  /** Carry the moved measurement along with the cursor. */
+  onMeasureShapeMove(event: PointerEvent): void {
+    const id = this.measure.selectedId();
+    if (id === null || !this.measure.isMoving()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = this.measurementEventPoint(id, event);
+    if (point) this.measure.applyMove(point);
+  }
+
+  /** End a whole-measurement move. */
+  onMeasureShapeUp(event: PointerEvent): void {
+    if (!this.measure.isMoving()) return;
+    event.stopPropagation();
+    const target = event.currentTarget as Element;
+    if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    this.measure.endMove();
+  }
+
+  /** The in-plane point under a pointer event, on the pane of the given measurement. */
+  private measurementEventPoint(id: number, event: PointerEvent): PlanePoint | null {
+    const volume = this.deps?.volume();
+    const measurement = this.measure.measurements().find((m) => m.id === id);
+    if (!volume || !measurement) return null;
+    const placement = this.mprPlacement(measurement.orientation);
+    if (!placement) return null;
+    return this.eventPlanePoint(volume, measurement.orientation, placement.rect, event);
   }
 
   /**

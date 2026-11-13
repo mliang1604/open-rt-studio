@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, signal } from '@angular/core';
-import { modalityUnit, Orientation, type Volume } from '@open-rt-studio/dicom';
+import { clamp, modalityUnit, Orientation, type Volume } from '@open-rt-studio/dicom';
 import { type PlanePoint, roiLines, roiStats, type ObliqueRotation } from '@open-rt-studio/render';
 
 /** An interactive measurement tool (the default pan/orbit gesture is handled elsewhere). */
@@ -45,6 +45,30 @@ export interface MeasureDrag {
   readonly pointIndex: number;
 }
 
+/** An in-progress move of a whole measurement, with the point the cursor was last at. */
+interface MeasureMove {
+  readonly id: number;
+  readonly last: PlanePoint;
+}
+
+/**
+ * Shift every point by the same amount, as far as the image allows: the move
+ * is cut short at the edge so the shape keeps its size and stays on the plane
+ * (plane coordinates run from 0 to 1).
+ */
+export function translatePoints(
+  points: readonly PlanePoint[],
+  du: number,
+  dv: number,
+): readonly PlanePoint[] {
+  if (points.length === 0) return points;
+  const us = points.map((p) => p.u);
+  const vs = points.map((p) => p.v);
+  const moveU = clamp(du, Math.min(0, -Math.min(...us)), Math.max(0, 1 - Math.max(...us)));
+  const moveV = clamp(dv, Math.min(0, -Math.min(...vs)), Math.max(0, 1 - Math.max(...vs)));
+  return points.map((p) => ({ u: p.u + moveU, v: p.v + moveV }));
+}
+
 /** An oblique tilt per orientation, indexed by the orientation's numeric value. */
 type PerOrientationOblique = readonly [ObliqueRotation, ObliqueRotation, ObliqueRotation];
 
@@ -78,6 +102,21 @@ export class MeasurementStore {
   private readonly _drag = signal<MeasureDrag | null>(null);
   /** The measurement point being dragged (an endpoint or ROI corner), or null. */
   readonly drag = this._drag.asReadonly();
+
+  private readonly _selectedId = signal<number | null>(null);
+  /** The selected measurement's id, or null. One at most is selected. */
+  readonly selectedId = this._selectedId.asReadonly();
+
+  /** The selected measurement, or null. */
+  readonly selected = computed<Measurement | null>(() => {
+    const id = this._selectedId();
+    return id === null ? null : (this._measurements().find((m) => m.id === id) ?? null);
+  });
+
+  /** The whole-measurement move in progress, or null. */
+  private readonly _move = signal<MeasureMove | null>(null);
+  /** True while a whole measurement is being moved. */
+  readonly isMoving = computed(() => this._move() !== null);
 
   /** Monotonic id source for new measurements. */
   private nextId = 0;
@@ -119,8 +158,59 @@ export class MeasurementStore {
     }
   }
 
-  /** Begin dragging a placed measurement's endpoint or ROI corner. */
+  /** Select a measurement, or pass null to select none. An unknown id selects none. */
+  select(id: number | null): void {
+    const known = id !== null && this._measurements().some((m) => m.id === id);
+    this._selectedId.set(known ? id : null);
+  }
+
+  /** Delete one measurement. Deleting the selected one leaves nothing selected. */
+  remove(id: number): void {
+    this._measurements.update((list) => list.filter((m) => m.id !== id));
+    if (this._selectedId() === id) this._selectedId.set(null);
+    if (this._drag()?.id === id) this._drag.set(null);
+    if (this._move()?.id === id) this._move.set(null);
+  }
+
+  /** Delete the selected measurement. Returns whether there was one. */
+  removeSelected(): boolean {
+    const id = this._selectedId();
+    if (id === null) return false;
+    this.remove(id);
+    return true;
+  }
+
+  /** Begin moving a whole measurement from where the cursor is; selects it. */
+  beginMove(id: number, at: PlanePoint): void {
+    if (!this._measurements().some((m) => m.id === id)) return;
+    this._selectedId.set(id);
+    this._move.set({ id, last: at });
+  }
+
+  /**
+   * Carry the moved measurement along to where the cursor is now. The shape
+   * stops at the edge of the image and picks the cursor up again when it
+   * comes back, because each step is measured from the last cursor position.
+   */
+  applyMove(at: PlanePoint): void {
+    const move = this._move();
+    if (!move) return;
+    const du = at.u - move.last.u;
+    const dv = at.v - move.last.v;
+    this._measurements.update((list) =>
+      list.map((m) => (m.id === move.id ? { ...m, points: translatePoints(m.points, du, dv) } : m)),
+    );
+    this._move.set({ id: move.id, last: at });
+  }
+
+  /** End a whole-measurement move. */
+  endMove(): void {
+    this._move.set(null);
+  }
+
+  /** Begin dragging a placed measurement's endpoint or ROI corner; selects it. */
   beginDrag(id: number, pointIndex: number): void {
+    this._selectedId.set(id);
     this._drag.set({ id, pointIndex });
   }
 
@@ -149,6 +239,9 @@ export class MeasurementStore {
   clear(): void {
     this._measurements.set([]);
     this._pending.set(null);
+    this._selectedId.set(null);
+    this._drag.set(null);
+    this._move.set(null);
   }
 
   /**
