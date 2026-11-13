@@ -33,17 +33,6 @@
     </label>
   }
 
-  @if (status.hasMultipleSeries()) {
-    <label class="ctrl" title="Choose which series in the folder to view">
-      Series
-      <select [value]="status.selectedSeriesUid()" (change)="loadCtl.onSeriesChange($event)">
-        @for (series of status.seriesList(); track series.uid) {
-          <option [value]="series.uid">{{ loadCtl.seriesLabel(series) }}</option>
-        }
-      </select>
-    </label>
-  }
-
   <button
     type="button"
     (click)="toolbar.cycleLayout()"

@@ -639,7 +639,7 @@ export class Viewer {
     });
 
     // Wire the status controller: it derives the banner text, load progress, the
-    // series picker and the metadata inspector feed from the load state.
+    // displayed series and the metadata inspector feed from the load state.
     this.status.init({
       load: () => this.load(),
       gpuError: () => this.gpuError(),

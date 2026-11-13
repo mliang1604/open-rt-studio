@@ -143,13 +143,6 @@ export class LoadController {
     return dropHeadlineText(intent, isSeriesDrag);
   }
 
-  /** Picker label: description (or a fallback) · modality · slice count. */
-  seriesLabel(series: Series): string {
-    const name = series.description || series.modality || `Series ${series.seriesNumber ?? '?'}`;
-    const modality = series.modality ? ` · ${series.modality}` : '';
-    return `${name}${modality} · ${series.imageCount} img`;
-  }
-
   async onFilesSelected(event: Event): Promise<void> {
     const input = event.target;
     if (!(input instanceof HTMLInputElement) || !input.files) return;
@@ -430,15 +423,6 @@ export class LoadController {
       d.notice.set(null);
       this.noticeHandle = null;
     }, NOTICE_MS);
-  }
-
-  /** Switch the displayed series, rebuilding its volume from the parsed slices. */
-  onSeriesChange(event: Event): void {
-    const d = this.deps;
-    if (!d || !(event.target instanceof HTMLSelectElement)) return;
-    const state = d.load();
-    if (state.status !== 'ready' || event.target.value === state.result.selectedUid) return;
-    this.applyVolume(this.loader.selectSeries(state.result, event.target.value));
   }
 
   /**

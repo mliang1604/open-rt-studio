@@ -54,9 +54,9 @@ export interface LoadResult {
   readonly structureSets: readonly StructureSet[];
   /**
    * Every structure set parsed in the load, regardless of which series it
-   * annotates. Retained so {@link VolumeLoader.selectSeries} can re-associate
-   * against a different series without re-parsing; the UI should read
-   * {@link structureSets} for the current selection.
+   * annotates. Retained so a later pick of another series can be associated
+   * with them without re-parsing; the UI should read {@link structureSets} for
+   * the current selection.
    */
   readonly allStructureSets: readonly StructureSet[];
   /** Number of files the user selected. */
@@ -114,17 +114,6 @@ export class VolumeLoader {
   }
 
   /**
-   * Rebuild the result for a different series of an existing load — the picker's
-   * selection — reusing the already-parsed slices and re-associating the
-   * structure sets to the newly-selected series.
-   */
-  selectSeries(result: LoadResult, uid: string): LoadResult {
-    const series = result.series.find((s) => s.uid === uid);
-    if (!series) return result;
-    return this.buildResult(result.series, series, result.allStructureSets, result.fileCount);
-  }
-
-  /**
    * Build a load result for a single catalog {@link Series} — the history
    * panel's on-demand ("lazy") build. The series retains its parsed slices, so
    * the volume is assembled here ({@link buildVolume}) without re-reading files.
@@ -152,17 +141,9 @@ export class VolumeLoader {
     allStructureSets: readonly StructureSet[],
     fileCount: number,
   ): LoadResult {
-    const baseVolume = buildVolume(selected.slices);
-    const layers: Layer[] = [baseImageLayer(selected.uid, baseVolume)];
-    // A same-frame dose grid in the same load joins as a fusion overlay above the
-    // base (the CT + dose case), so dropping the pair shows the wash immediately.
-    // Co-sampling needs both grids' geometry, so a geometry-less series is skipped.
-    if (baseVolume.geometry) {
-      for (const s of doseOverlaySeries(series, selected)) {
-        const overlayVolume = buildVolume(s.slices);
-        if (overlayVolume.geometry) layers.push(overlayImageLayer(s.uid, overlayVolume));
-      }
-    }
+    // One layer: the selected series. Anything else, a dose included, joins the
+    // view only when the user fuses it (mergeLoad).
+    const layers: Layer[] = [baseImageLayer(selected.uid, buildVolume(selected.slices))];
     return {
       series,
       selectedUid: selected.uid,
@@ -173,21 +154,6 @@ export class VolumeLoader {
       sliceCount: selected.slices.length,
     };
   }
-}
-
-/**
- * The series in a load that should sit above `selected` (the base) as fusion
- * overlays: a same-frame-of-reference dose grid (RTDOSE) other than the base —
- * the CT + dose case. Image series are left as selectable series, not forced
- * overlays, so an ordinary multi-series study isn't auto-fused. Pure for testing.
- */
-export function doseOverlaySeries(series: readonly Series[], selected: Series): Series[] {
-  return series.filter(
-    (s) =>
-      s.uid !== selected.uid &&
-      s.modality === 'RTDOSE' &&
-      framesMatch(s.frameOfReferenceUid, selected.frameOfReferenceUid),
-  );
 }
 
 /**
@@ -232,8 +198,8 @@ export function mergeLoad(current: LoadResult, incoming: LoadResult): MergedLoad
   // Re-loading the series that's already the base would stack the image on top of
   // itself — the "double CT in overlays" of issue #160 (e.g. re-picking the same
   // study from Recent, which re-opens the picker for the same folder). Replace
-  // with the freshly built registry instead, so the study — and any same-frame
-  // dose it auto-promotes to an overlay — shows exactly once rather than twice.
+  // with the freshly built registry instead, so the study shows exactly once
+  // rather than twice.
   if (baseLayer(current.layers)?.id === incoming.selectedUid) {
     return { result: incoming, added: false };
   }

@@ -32,7 +32,7 @@ export interface StatusInit {
 /**
  * Owns the read-only status / series / metadata derivations: the status banner
  * text and error flag, the in-flight load progress, the interpolation warning,
- * the series picker list and selection, and the metadata + filtered raw-tag
+ * the displayed series, and the metadata + filtered raw-tag
  * inspector feed. All pure projections of the load state (and the catalog), wired
  * once through {@link init}. Provided at the component so its lifetime tracks the
  * viewer.
@@ -99,7 +99,7 @@ export class StatusController {
     }
   });
 
-  /** Series found in the loaded files, for the picker. Empty until a load succeeds. */
+  /** The series of the displayed load. Empty until a load succeeds. */
   readonly seriesList = computed<readonly Series[]>(() => {
     const state = this.deps!.load();
     return state.status === 'ready' ? state.result.series : [];
@@ -116,9 +116,6 @@ export class StatusController {
     const state = this.deps!.load();
     return state.status === 'ready' ? state.result.layers.map((layer) => layer.id) : [];
   });
-
-  /** Only show the picker when a folder held more than one series. */
-  readonly hasMultipleSeries = computed(() => this.seriesList().length > 1);
 
   /** Captured metadata of the displayed series, or null when none is loaded. */
   readonly metadata = computed<DicomMetadata | null>(() => {
