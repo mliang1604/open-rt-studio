@@ -187,11 +187,17 @@ Found on the way, also present in dicom-workspace:
 ## End-to-end tests in CI
 
 The fusion and oblique tests run in the `End-to-end` job on every pull
-request, with the rest of the suite: 39 tests in 11 spec files. The runner has
-no GPU; Chromium is started with a software WebGPU adapter, and with it the
-tests run for real instead of skipping. What the software adapter cannot do is
-read rendered pixels back, so the one pixel comparison in the suite (the pane
-before and after a device loss) runs only on a machine with a GPU.
+request, with the rest of the suite: 39 tests in 11 spec files at the time of
+the audit. The runner has no GPU; Chromium is started with a software WebGPU
+adapter, and with it the tests run for real instead of skipping.
+
+Correction, 2026-11-13 (#173): when this audit was written those tests passed
+in CI only with the one retry the configuration then allowed. On the runner
+the WebGPU canvas could not present, and in about one test in eight the
+device was lost. A Chromium flag fixed both, the retry is gone, and the one
+pixel comparison in the suite (the pane before and after a device loss), which
+this section used to say could not run on the software adapter, now runs in
+CI.
 
 At the time of the audit `End-to-end` was not a required check. Since #164
 the smoke tests run in their own job, `End-to-end smoke`, which the `main`

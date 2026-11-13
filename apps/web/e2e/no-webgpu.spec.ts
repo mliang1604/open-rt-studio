@@ -137,14 +137,14 @@ test('a lost device can be reinitialized without loading the data again', async 
   // Pane tags show the slice position only while the renderer holds a volume.
   const axialTag = page.locator('.pane-overlay .pane').first();
   await expect(axialTag).toContainText('/ 12');
-  // A software adapter (CI) reads the canvas back as black, so the pixel
-  // comparison below only runs where the capture shows the image.
+  // The pixel comparison below only runs where the capture shows the image.
+  // On the CI runner it was black until the software adapter could present
+  // (#173); the log line says which way a run went.
   const before = await capturedBrightness(page);
   const canReadPixels = before > 20;
-  test.info().annotations.push({
-    type: 'pixel comparison',
-    description: canReadPixels ? 'ran' : 'not possible: the capture is black on this adapter',
-  });
+  const comparison = canReadPixels ? 'ran' : 'not possible: the capture is black on this adapter';
+  test.info().annotations.push({ type: 'pixel comparison', description: comparison });
+  console.log(`Pixel comparison after a device loss: ${comparison}`);
 
   await page.evaluate(() => (window as unknown as { loseDevice: () => void }).loseDevice());
 

@@ -100,6 +100,10 @@ yourself before merging.
 e2e`, and `E2E_SOFTWARE_GPU=1 npm run e2e`, which is how CI runs them. The
   software adapter is slow, and it has exposed real races that a fast GPU
   hides.
+- End-to-end tests are not retried, locally or in CI. If one fails once, find
+  out why; do not re-run until it passes. Chromium's own log is the place to
+  look when the renderer misbehaves only on the runner: `DEBUG=pw:browser`
+  prints it (#173 was found there).
 - `viewer.css` has a size budget (the build warns at 8 kB and fails at 13 kB;
   it is at about 10 kB). New interface goes into its own component with its
   own styles. A child component does not inherit the viewer's button and
