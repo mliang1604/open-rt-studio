@@ -44,13 +44,39 @@ a screenshot and the HTML report. Open a trace with
 
 ## What is here
 
+Shell:
+
 - `src/app/disclaimer`, `src/app/declined`, `acknowledged-guard.ts`,
   `disclaimer-store.ts`: the not-for-clinical-use notice. It must be accepted
   before the viewer route opens; the acknowledgement is kept in
   `localStorage`. Declining leads to a page with no way into the application.
 - `preferences-store.ts`: viewer preferences kept in `localStorage`.
 - `platform.ts`: platform detection for shortcut labels.
-- `src/app/viewer`: the viewer route.
+
+Loading:
+
+- `volume-loader.ts`, `parse-pool.ts`, `parse.worker.ts`: files are parsed in
+  a pool of web workers with progress reporting, then assembled into volumes.
+- `patient-catalog.ts`, `recent-store.ts`: the catalog of everything imported
+  in this session, and the list of recent selections.
+
+Viewer (`src/app/viewer`):
+
+- `viewer.ts`, `viewer.html`, `viewer.css`: the one component that owns the
+  canvas, the toolbar, the tool rail and the pane overlays.
+- Controllers, provided at the component and each owning one concern:
+  `load-controller`, `load-coordinator`, `render-controller`,
+  `interaction-controller`, `toolbar-controller`, `view3d-controller`,
+  `layers-controller`, `measure-controller`, `roi-controller`,
+  `brush-controller`, `capture-controller`, `status-controller`.
+- Stores holding signal state: `layers-store`, `compare-store`,
+  `camera3d-store`, `measurement-store`, `cine-store`,
+  `editable-structures-store`.
+- `history-panel/`: the patient timeline and tree with series chips.
+
+The viewer is one tightly coupled component by design of the code it was
+ported from. Split it only together with the feature work that needs the
+split.
 
 ## How it uses the packages
 
