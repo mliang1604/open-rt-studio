@@ -350,7 +350,7 @@
         @for (tool of measureTools; track tool.value) {
           <button
             type="button"
-            (click)="measureCtl.setTool(tool.value)"
+            (click)="tools.toggleMeasureTool(tool.value)"
             [disabled]="!isReady() || !hasMprPane()"
             [class.active]="activeTool() === tool.value"
             [attr.aria-pressed]="activeTool() === tool.value"
@@ -376,7 +376,7 @@
       <div class="tool-group-body">
         <button
           type="button"
-          (click)="toggleCprDrawing()"
+          (click)="tools.toggleCprDrawing()"
           [disabled]="!isReady() || !hasMprPane()"
           [class.active]="cpr.drawing()"
           [attr.aria-pressed]="cpr.drawing()"
@@ -414,7 +414,7 @@
         <div class="brush-modes">
           <button
             type="button"
-            (click)="brushCtl.toggleMode('paint')"
+            (click)="tools.toggleBrush('paint')"
             [disabled]="!isReady() || !hasMprPane()"
             [class.active]="brushCtl.mode() === 'paint'"
             [attr.aria-pressed]="brushCtl.mode() === 'paint'"
@@ -424,7 +424,7 @@
           </button>
           <button
             type="button"
-            (click)="brushCtl.toggleMode('erase')"
+            (click)="tools.toggleBrush('erase')"
             [disabled]="!isReady() || !hasMprPane()"
             [class.active]="brushCtl.mode() === 'erase'"
             [attr.aria-pressed]="brushCtl.mode() === 'erase'"
@@ -434,7 +434,7 @@
           </button>
           <button
             type="button"
-            (click)="brushCtl.newStructure()"
+            (click)="tools.newStructure()"
             [disabled]="!isReady()"
             title="Create a new structure and paint it"
           >

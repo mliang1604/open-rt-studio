@@ -328,14 +328,6 @@ export class MeasureController {
     ]);
   }
 
-  /** Activate a measurement tool, or toggle it off if it's already active. */
-  setTool(tool: MeasureTool): void {
-    const d = this.deps;
-    if (!d) return;
-    d.activeTool.update((current) => (current === tool ? 'none' : tool));
-    this.measure.cancelPending(); // abandon any half-placed measurement when the tool changes
-  }
-
   /** Remove every placed measurement and any in-progress one. */
   clearMeasurements(): void {
     this.measure.clear();

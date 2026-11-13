@@ -18,7 +18,7 @@ export const SHORTCUTS = [
   { keys: 'V', label: 'Invert the grayscale' },
   { keys: 'H', label: 'Collapse / expand the study history panel' },
   { keys: '?', label: 'Toggle this shortcuts help' },
-  { keys: 'Esc', label: 'Cancel a measurement / close overlays' },
+  { keys: 'Esc', label: 'Close overlays, cancel a measurement, put down the active tool' },
   { keys: 'Drag', label: 'Pan an MPR pane · orbit the 3D pane' },
   { keys: 'Middle-drag / Alt+drag', label: 'Pan the 3D pane (and MPR panes)' },
   { keys: 'Scroll', label: 'Change slice (MPR) · zoom (3D)' },
