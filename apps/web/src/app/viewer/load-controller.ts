@@ -7,7 +7,9 @@ import { describeSelection, RecentStore, type RecentEntry } from '../recent-stor
 import { demoPatient, demoPlanningCt } from '../demo-data';
 import { PatientCatalog } from '../patient-catalog';
 import { PreferencesStore } from '../preferences-store';
+import { isAbortError } from '../parse-pool';
 import { VolumeLoader, type LoadResult } from '../volume-loader';
+import { LoadSequence } from './load-sequence';
 import {
   type Series,
   clamp,
@@ -104,6 +106,8 @@ export interface LoadInit {
 @Injectable()
 export class LoadController {
   private readonly loader = inject(VolumeLoader);
+  /** Which file import is the one in progress; see {@link LoadSequence}. */
+  private readonly loads = new LoadSequence<LoadState>();
   private readonly catalog = inject(PatientCatalog);
   private readonly loadCoordinator = inject(LoadCoordinator);
   private readonly recentStore = inject(RecentStore);
@@ -225,6 +229,13 @@ export class LoadController {
   loadSeriesFromPanel(series: Series, intent: DropIntent = 'primary'): void {
     const d = this.deps;
     if (!d || d.renderer() === null) return; // GPU not ready; nothing to draw into yet
+    // While files are being read the view state is the progress readout, and the
+    // import puts back what was showing when it ends. A pick made now would be
+    // shown for a moment and then lost, so it is refused, with the way out named.
+    if (this.loads.active) {
+      this.flashNotice('Files are still being read. Wait for the import, or cancel it.');
+      return;
+    }
     const previous = d.load();
     const previousResult = previous.status === 'ready' ? previous.result : null;
     let outcome: LoadOutcome;
@@ -252,7 +263,8 @@ export class LoadController {
     this.demoLoading.set(true);
     try {
       const demo = await demoPatient();
-      await this.loadFiles(demo.files, null);
+      // Cancelled, or overtaken by files the user chose meanwhile: stop here.
+      if (!(await this.loadFiles(demo.files, null))) return;
       const planningCt = demoPlanningCt(this.catalog.currentPatient(), demo);
       // A pick is ignored until the renderer exists, and on a slow adapter the
       // import can finish first. Wait for it, so the click is never lost.
@@ -290,25 +302,42 @@ export class LoadController {
     (entry.kind === 'folder' ? folderInput : filesInput).click();
   }
 
+  /**
+   * Import a batch of files. Starting another import while one is parsing
+   * cancels the earlier one; {@link cancelLoad} cancels the one in progress.
+   * Either way the abandoned import stops its workers and changes neither the
+   * catalog nor the view.
+   *
+   * Resolves to false when the import was cancelled or overtaken, so a caller
+   * with a next step (the demo displays a series) knows not to take it.
+   */
   async loadFiles(
     files: readonly File[],
     entry: RecentEntry | null,
     intent: DropIntent = 'primary',
-  ): Promise<void> {
+  ): Promise<boolean> {
     const d = this.deps;
-    if (!d) return;
-    // The load already showing; a same-frame-of-reference series adds atop it.
-    const previous = d.load();
+    if (!d) return false;
+    // What was showing before this run of loads began; a same-frame-of-reference
+    // series adds atop it, and a cancel goes back to it.
+    const { signal, before: previous } = this.loads.begin(d.load());
     d.load.set({ status: 'loading', loaded: 0, total: files.length });
     try {
-      const imported = await this.loader.importFiles(files, (loaded, total) => {
-        // Ignore stragglers from a superseded load (a new load already started).
-        if (d.load().status === 'loading') d.load.set({ status: 'loading', loaded, total });
-      });
+      const imported = await this.loader.importFiles(
+        files,
+        (loaded, total) => {
+          // Ignore stragglers from a cancelled or overtaken load.
+          if (this.loads.isCurrent(signal)) d.load.set({ status: 'loading', loaded, total });
+        },
+        signal,
+      );
+      // Parsed, but cancelled or overtaken in the meantime: drop the result.
+      if (!this.loads.isCurrent(signal)) return false;
+      this.loads.finish(signal);
       if (imported.kind === 'structures') {
         this.addStructureSets(imported.structureSets, previous);
         if (entry) this.recentStore.record(entry);
-        return;
+        return true;
       }
       const { result } = imported;
       // The coordinator runs the whole load policy — held-modifier fusion, the
@@ -323,9 +352,24 @@ export class LoadController {
         confirmPatientSwitch,
       );
       this.applyOutcome(outcome, previous, entry);
+      return true;
     } catch (error) {
+      // A cancelled load has already had the previous state put back, and an
+      // overtaken one must not touch the state of the load that overtook it.
+      if (isAbortError(error) || !this.loads.isCurrent(signal)) return false;
+      this.loads.finish(signal);
       d.load.set({ status: 'error', message: messageOf(error) });
+      return true;
     }
+  }
+
+  /** Cancel the import in progress and go back to what was on screen before it. */
+  cancelLoad(): void {
+    const d = this.deps;
+    const cancelled = this.loads.cancel();
+    if (!d || !cancelled) return;
+    d.load.set(cancelled.before);
+    this.flashNotice('Import cancelled.');
   }
 
   /**

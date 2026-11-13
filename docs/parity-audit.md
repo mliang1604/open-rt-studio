@@ -156,7 +156,7 @@ are not regressions. Each has an issue.
 
 | Issue | What is missing                                                                   | Mentioned in |
 | ----- | --------------------------------------------------------------------------------- | ------------ |
-| #143  | Cancelling a load                                                                 | #20          |
+| #143  | Cancelling a load (added since)                                                   | #20          |
 | #144  | JPEG Lossless and 12-bit JPEG; one unsupported file fails the batch               | #20          |
 | #145  | Selecting, moving and deleting one measurement (added since)                      | #27          |
 | #146  | Cine direction and loop mode (added since)                                        | #28          |
