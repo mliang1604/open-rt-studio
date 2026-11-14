@@ -168,8 +168,8 @@ curl -H "Authorization: Bearer $TOKEN" -o audit.csv \
 ```
 
 In the CSV a value that a spreadsheet would take for a formula is given a
-leading apostrophe. The viewer has no screen for the log yet, and nothing
-clears old records (#213). DIMSE sends and retrievals will be recorded when
+leading apostrophe. The viewer shows the log to an administrator (the server
+card's "Audit log"). Nothing clears old records (#216). DIMSE sends and retrievals will be recorded when
 there is DIMSE (#212).
 
 `SIGTERM` or `SIGINT` (Ctrl+C) stops it: it takes no new connections, answers

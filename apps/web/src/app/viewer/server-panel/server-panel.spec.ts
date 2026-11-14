@@ -14,7 +14,7 @@ import {
 
 import { ActiveDataSource } from '../../data-source/active-data-source';
 import type { DataSource } from '../../data-source/data-source';
-import { connectToServer, ServerSource } from '../../data-source/server-source';
+import { connectToServer, ServerSource, type AuditEntry } from '../../data-source/server-source';
 import {
   fakeServer,
   parseHere,
@@ -49,8 +49,9 @@ async function render(
   reachable = true,
   more: readonly SyntheticFile[] = [],
   accounts?: readonly FakeAccount[],
+  audit?: readonly AuditEntry[],
 ): Promise<Rendered> {
-  const server = fakeServer([...syntheticRtCourse(), ...more], accounts);
+  const server = fakeServer([...syntheticRtCourse(), ...more], accounts, audit);
   const fixture = TestBed.createComponent(ServerPanel);
   const sources = TestBed.inject(ActiveDataSource);
   const said: string[] = [];
@@ -350,6 +351,91 @@ describe('ServerPanel', () => {
       expect(text('.study-patient')).toHaveLength(2);
       // The viewer was not told to change source: it is the server it was reading from.
       expect(said).toEqual([`use ${SERVER}`]);
+    });
+  });
+
+  describe('the audit log (#213)', () => {
+    const ROOT: FakeAccount = {
+      name: 'root',
+      password: 'the administrator’s password',
+      role: 'admin',
+    };
+    const ADA: FakeAccount = {
+      name: 'ada',
+      password: 'correct horse battery staple',
+      role: 'user',
+    };
+    const LOG: AuditEntry[] = [
+      {
+        id: 1,
+        time: '2026-03-01T08:00:00.000Z',
+        until: '2026-03-01T08:00:00.000Z',
+        count: 1,
+        actor: 'ada',
+        origin: 'api',
+        action: 'login',
+        outcome: 'ok',
+        patientId: null,
+        studyUid: null,
+        seriesUid: null,
+        object: null,
+        detail: null,
+      },
+    ];
+    const labels = (host: HTMLElement): string[] =>
+      [...host.querySelectorAll('.server-actions button')].map((one) => one.textContent.trim());
+
+    async function loggedIn(who: FakeAccount) {
+      const rendered = await render(true, [], [ROOT, ADA], LOG);
+      await rendered.click('Connect');
+      for (const [id, value] of [
+        ['server-name', who.name],
+        ['server-password', who.password],
+      ]) {
+        const field = rendered.host.querySelector<HTMLInputElement>(`#${id}`)!;
+        field.value = value;
+        field.dispatchEvent(new Event('input'));
+      }
+      await rendered.click('Log in');
+      return rendered;
+    }
+
+    it('is offered to an administrator, and shown in place of the studies', async () => {
+      const { click, host, text } = await loggedIn(ROOT);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Audit log']);
+      expect(host.querySelector('app-audit-panel')).toBeNull();
+      await click('Audit log');
+      expect(host.querySelector('app-audit-panel')).not.toBeNull();
+      expect(host.querySelector('app-server-browser')).toBeNull();
+      expect(text('td.audit-action')).toEqual(['login']);
+      // The card keeps the room it took for the studies.
+      expect(host.classList.contains('wide')).toBe(true);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies']);
+      await click('Studies');
+      expect(host.querySelector('app-audit-panel')).toBeNull();
+      expect(text('.study-patient')).toHaveLength(2);
+    });
+
+    it('is not offered to a user', async () => {
+      const { host, server } = await loggedIn(ADA);
+      expect(labels(host)).toEqual(['Log out and disconnect']);
+      expect(server.asked.some((path) => path.startsWith('/audit'))).toBe(false);
+    });
+
+    it('is offered on a server without accounts, whose one user is every role', async () => {
+      const { click, host, text } = await render(true, [], undefined, LOG);
+      await click('Connect');
+      expect(labels(host)).toEqual(['Disconnect', 'Audit log']);
+      await click('Audit log');
+      expect(text('td.audit-who')).toEqual(['ada']);
+    });
+
+    it('is left when disconnecting: the next connection begins at the studies', async () => {
+      const { click, host } = await loggedIn(ROOT);
+      await click('Audit log');
+      await click('Log out and disconnect');
+      expect(host.querySelector('app-audit-panel')).toBeNull();
+      expect(host.querySelector('#server-address')).not.toBeNull();
     });
   });
 });

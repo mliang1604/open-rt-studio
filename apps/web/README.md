@@ -156,6 +156,13 @@ Viewer (`src/app/viewer`):
   end-to-end tests (`e2e/server-browser.spec.ts`) run against the real server
   seeded with `syntheticPopulation()`: what a search finds is the server's to
   say.
+- `audit-panel/`: the server's audit log, for an administrator: who did what,
+  the latest first, with the server's filters (account, Patient ID, action,
+  outcome, days), paging, and a button that saves all that fits as CSV. It is
+  reached from the server card ("Audit log"), which offers it only to an
+  account whose role is `admin`, or on a server without accounts. Like a
+  study search, a search of the log is sent when asked for and kept nowhere.
+  `e2e/audit.spec.ts` reads the log of the real server.
 - `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
   the data source and then built. A fetch that takes time shows progress, and
   is abandoned by a later pick, by Cancel or by an import.

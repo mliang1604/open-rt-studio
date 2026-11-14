@@ -1,0 +1,129 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<form class="audit-search" role="search" aria-label="Audit log" (submit)="onSearch($event)">
+  <!-- A label beside its control, not around it: around a select, the label
+       would take the options into the control's name. -->
+  <div class="field">
+    <label for="audit-actor">Account</label>
+    <input
+      id="audit-actor"
+      type="search"
+      spellcheck="false"
+      autocapitalize="none"
+      autocomplete="off"
+      placeholder="Whole name"
+      [value]="actor()"
+      (input)="onText('actor', $event)"
+    />
+  </div>
+  <div class="field">
+    <label for="audit-patient">Patient ID</label>
+    <input
+      id="audit-patient"
+      type="search"
+      spellcheck="false"
+      autocomplete="off"
+      placeholder="Whole"
+      [value]="patientId()"
+      (input)="onText('patientId', $event)"
+    />
+  </div>
+  <div class="field">
+    <label for="audit-action">Action</label>
+    <select id="audit-action" [value]="action()" (change)="onChoice('action', $event)">
+      <option value="">Any</option>
+      @for (one of actions; track one) {
+        <option [value]="one">{{ one }}</option>
+      }
+    </select>
+  </div>
+  <div class="field">
+    <label for="audit-outcome">Outcome</label>
+    <select id="audit-outcome" [value]="outcome()" (change)="onChoice('outcome', $event)">
+      <option value="">Any</option>
+      @for (one of outcomes; track one) {
+        <option [value]="one">{{ one }}</option>
+      }
+    </select>
+  </div>
+  <div class="field">
+    <label for="audit-from">From</label>
+    <input id="audit-from" type="date" [value]="from()" (input)="onText('from', $event)" />
+  </div>
+  <div class="field">
+    <label for="audit-to">To</label>
+    <input id="audit-to" type="date" [value]="to()" (input)="onText('to', $event)" />
+  </div>
+  <div class="audit-buttons">
+    <button type="submit">Search</button>
+    <button type="button" (click)="onClear()">Clear</button>
+    <button
+      type="button"
+      (click)="onExport()"
+      [disabled]="saving()"
+      title="Save every record that fits the search shown, as a CSV file"
+    >
+      {{ saving() ? 'Saving…' : 'Export CSV' }}
+    </button>
+  </div>
+</form>
+
+@if (problem(); as message) {
+  <p class="audit-problem" role="alert">{{ message }}</p>
+}
+
+@if (found(); as list) {
+  @if (list.records.length === 0) {
+    <p class="audit-note" role="status">
+      {{ list.page === 0 ? 'No record matches.' : 'There are no more records.' }}
+    </p>
+  } @else {
+    <div class="audit-scroll">
+      <table [attr.aria-busy]="busy()">
+        <caption>
+          Who did what, the latest first
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">When</th>
+            <th scope="col">Who</th>
+            <th scope="col">Action</th>
+            <th scope="col">Outcome</th>
+            <th scope="col">Patient ID</th>
+            <th scope="col">Of</th>
+            <th scope="col">Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (record of list.records; track record.id) {
+            <tr [class.not-ok]="record.outcome !== 'ok'">
+              <td class="audit-when">
+                {{ moment(record.time) }}
+                @if (repeats(record); as again) {
+                  <span class="audit-repeat">{{ again }}</span>
+                }
+              </td>
+              <td class="audit-who" [class.no-one]="!record.actor">{{ who(record) }}</td>
+              <td class="audit-action">{{ record.action }}</td>
+              <td class="audit-outcome">{{ record.outcome }}</td>
+              <td class="audit-patient">{{ record.patientId || '' }}</td>
+              <td class="audit-target" [title]="target(record).title">{{ target(record).text }}</td>
+              <td class="audit-detail" [title]="record.detail || ''">{{ record.detail || '' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+  <div class="audit-pager">
+    <button type="button" (click)="onPage(-1)" [disabled]="busy() || list.page === 0">
+      Previous
+    </button>
+    <span role="status">{{ busy() ? 'Asking the server…' : 'Page ' + (list.page + 1) }}</span>
+    <button type="button" (click)="onPage(1)" [disabled]="busy() || !list.more">Next</button>
+  </div>
+} @else if (busy()) {
+  <p class="audit-note" role="status">Asking the server…</p>
+}

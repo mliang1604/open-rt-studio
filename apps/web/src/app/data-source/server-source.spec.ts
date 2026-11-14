@@ -17,12 +17,15 @@ import {
 } from '@open-rt-studio/testdata';
 
 import {
+  AUDIT_PER_PAGE,
+  auditFilters,
   connectToServer,
   serverAddress,
   ServerError,
   ServerSource,
   STUDIES_PER_PAGE,
   studyQuery,
+  type AuditEntry,
   type ServerSourceOptions,
 } from './server-source';
 import { FAKE_LOGIN_ATTEMPTS, fakeServer, parseHere, type FakeServer } from './server-testing';
@@ -725,5 +728,106 @@ describe('ServerSource on a server with accounts (#55)', () => {
       `The server at ${HOST} could not be reached.`,
     );
     expect(source.login().kind).toBe('needed');
+  });
+});
+
+describe('the audit log of a server (#213)', () => {
+  const ROOT = { name: 'root', password: 'the administrator’s password', role: 'admin' } as const;
+  const ADA = { name: 'ada', password: 'correct horse battery staple', role: 'user' } as const;
+  const entry = (id: number, actor: string): AuditEntry => ({
+    id,
+    time: new Date(2026, 2, 1, 8, id).toISOString(),
+    until: new Date(2026, 2, 1, 8, id).toISOString(),
+    count: 1,
+    actor,
+    origin: 'api',
+    action: 'study-read',
+    outcome: 'ok',
+    patientId: 'SYN-0001',
+    studyUid: '1.2.3',
+    seriesUid: null,
+    object: null,
+    detail: null,
+  });
+  const LOG = Array.from({ length: AUDIT_PER_PAGE + 2 }, (_, i) =>
+    entry(i + 1, i % 2 === 0 ? 'ada' : 'root'),
+  );
+
+  async function loggedIn(who: { name: string; password: string }, log?: readonly AuditEntry[]) {
+    const server = fakeServer(FILES, [ROOT, ADA], log);
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await source.logIn(who.name, who.password);
+    return { server, source };
+  }
+
+  it('is asked for with what was given, trimmed, and nothing for what was not', () => {
+    expect(Object.fromEntries(auditFilters({}))).toEqual({});
+    expect(
+      Object.fromEntries(
+        auditFilters({ actor: ' ada ', action: 'login', outcome: 'refused', patientId: ' P 1 ' }),
+      ),
+    ).toEqual({ actor: 'ada', action: 'login', outcome: 'refused', patientId: 'P 1' });
+    expect(Object.fromEntries(auditFilters({ actor: '  ', action: '', from: '', to: '' }))).toEqual(
+      {},
+    );
+  });
+
+  it('is asked for by whole days of this computer’s clock', () => {
+    const filters = auditFilters({ from: '2026-03-01', to: '2026-03-31' });
+    expect(filters.get('from')).toBe(new Date(2026, 2, 1).toISOString());
+    // Up to the first moment of the day after the last: the last day is meant whole.
+    expect(filters.get('before')).toBe(new Date(2026, 3, 1).toISOString());
+    // What is no day is left out, not sent for the server to refuse.
+    expect(Object.fromEntries(auditFilters({ from: '01/03/2026', to: 'tomorrow' }))).toEqual({});
+  });
+
+  it('may be read by an administrator, and on a server without accounts; not by a user', async () => {
+    expect((await loggedIn(ROOT, LOG)).source.mayReadAudit()).toBe(true);
+    expect((await loggedIn(ADA, LOG)).source.mayReadAudit()).toBe(false);
+    const open = await connectToServer(ADDRESS, {
+      fetch: fakeServer(FILES, undefined, LOG).fetch,
+      parse: parseHere,
+    });
+    expect(open.mayReadAudit()).toBe(true);
+    // Before a login there is no one, and so no administrator.
+    const waiting = await connectToServer(ADDRESS, {
+      fetch: fakeServer(FILES, [ROOT], LOG).fetch,
+      parse: parseHere,
+    });
+    expect(waiting.mayReadAudit()).toBe(false);
+  });
+
+  it('comes in parts, the latest first', async () => {
+    const { source, server } = await loggedIn(ROOT, LOG);
+    const first = await source.auditLog();
+    expect(first.records).toHaveLength(AUDIT_PER_PAGE);
+    expect(first.records[0].id).toBe(LOG.length);
+    expect(first).toMatchObject({ page: 0, more: true });
+    const second = await source.auditLog({ page: 1 });
+    expect(second.records.map((record) => record.id)).toEqual([2, 1]);
+    expect(second).toMatchObject({ page: 1, more: false });
+    expect(server.asked.at(-1)).toBe(`/audit?limit=${AUDIT_PER_PAGE}&offset=${AUDIT_PER_PAGE}`);
+    const ofAda = await source.auditLog({ actor: 'ada' });
+    expect(new Set(ofAda.records.map((record) => record.actor))).toEqual(new Set(['ada']));
+  });
+
+  it('is exported as a file of all that fits', async () => {
+    const { source, server } = await loggedIn(ROOT, LOG);
+    const blob = await source.auditExport({ actor: 'root' });
+    expect(server.asked.at(-1)).toBe('/audit/export?actor=root&format=csv');
+    const lines = (await blob.text()).trimEnd().split('\r\n');
+    expect(lines).toHaveLength(1 + LOG.length / 2);
+  });
+
+  it('says plainly why it cannot be had', async () => {
+    const user = await loggedIn(ADA, LOG);
+    await expect(user.source.auditLog()).rejects.toThrow(
+      new ServerError('The audit log is for an administrator.', 403),
+    );
+    await expect(user.source.auditExport()).rejects.toThrow('for an administrator');
+    const none = await loggedIn(ROOT);
+    await expect(none.source.auditLog()).rejects.toThrow(
+      new ServerError('This server keeps no audit log: it runs without a data directory.', 404),
+    );
   });
 });

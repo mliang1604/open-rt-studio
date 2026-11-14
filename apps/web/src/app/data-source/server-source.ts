@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { groupSeries } from '@open-rt-studio/dicom';
 
 import { isAbortError, parseFilesInWorkers } from '../parse-pool';
@@ -187,6 +187,92 @@ export function studyQuery(search: StudySearch): string {
   query.set('limit', String(STUDIES_PER_PAGE));
   query.set('offset', String(Math.max(0, search.page ?? 0) * STUDIES_PER_PAGE));
   return query.toString();
+}
+
+/**
+ * What the server's audit log calls the things that are done, for the
+ * filter to offer. A server may know others; they are shown as they come.
+ */
+export const AUDIT_ACTIONS = [
+  ...['login', 'logout', 'password-change', 'patients-list', 'studies-search'],
+  ...['study-read', 'series-read', 'instance-read', 'instance-download', 'instance-upload'],
+  ...['accounts-list', 'account-create', 'account-change', 'account-remove'],
+  ...['job-start', 'job-cancel', 'job-read', 'audit-read', 'audit-export', 'request'],
+] as const;
+/** How a thing that was done can have ended. */
+export const AUDIT_OUTCOMES = ['ok', 'refused', 'not-found', 'rejected', 'failed'] as const;
+/** How many records of the audit log are shown at a time. */
+export const AUDIT_PER_PAGE = 50;
+
+/** A record of a server's audit log: who did what, to what, and how it ended. */
+export interface AuditEntry {
+  readonly id: number;
+  /** When, or when first: ISO 8601. */
+  readonly time: string;
+  /** When last, for a record that counts the same thing several times. */
+  readonly until: string;
+  readonly count: number;
+  /** The account; null when no one was logged in. */
+  readonly actor: string | null;
+  readonly origin: string;
+  readonly action: string;
+  readonly outcome: string;
+  readonly patientId: string | null;
+  readonly studyUid: string | null;
+  readonly seriesUid: string | null;
+  readonly object: string | null;
+  readonly detail: string | null;
+}
+
+/** Which records of the audit log. Every part may be left out; those given are joined by "and". */
+export interface AuditSearch {
+  /** An account's name, whole. */
+  readonly actor?: string;
+  readonly action?: string;
+  readonly outcome?: string;
+  /** A Patient ID, whole. */
+  readonly patientId?: string;
+  /** The first and the last day, `YYYY-MM-DD`, as the days of this computer's clock. */
+  readonly from?: string;
+  readonly to?: string;
+  /** Which part of the list, from 0. */
+  readonly page?: number;
+}
+
+export interface FoundAudit {
+  readonly records: readonly AuditEntry[];
+  readonly page: number;
+  readonly more: boolean;
+}
+
+/** The first moment of a day of this computer's clock, as the server reads moments. */
+function dayStart(day: string | undefined, daysLater = 0): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day?.trim() ?? '');
+  if (!match) return null;
+  const moment = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + daysLater);
+  return Number.isNaN(moment.getTime()) ? null : moment.toISOString();
+}
+
+/**
+ * The filters of an audit search as the server takes them (`GET /audit` and
+ * its export). Exported for its spec.
+ */
+export function auditFilters(search: AuditSearch): URLSearchParams {
+  const query = new URLSearchParams();
+  const text = (name: string, value: string | undefined): void => {
+    const given = value?.trim() ?? '';
+    if (given !== '') query.set(name, given);
+  };
+  text('actor', search.actor);
+  text('action', search.action);
+  text('outcome', search.outcome);
+  text('patientId', search.patientId);
+  const from = dayStart(search.from);
+  if (from) query.set('from', from);
+  // The last day is meant whole: up to the first moment of the day after.
+  const before = dayStart(search.to, 1);
+  if (before) query.set('before', before);
+  return query;
 }
 
 export function serverAddress(typed: string): string {
@@ -415,6 +501,60 @@ export class ServerSource implements DataSource {
       page: Math.max(0, search.page ?? 0),
       more: page.more,
     };
+  }
+
+  /**
+   * Whether the audit log may be asked for: by an administrator, or on a
+   * server without accounts, whose one user is every role.
+   */
+  readonly mayReadAudit = computed(() => {
+    const login = this.loginState();
+    return login.kind === 'none' || (login.kind === 'in' && login.role === 'admin');
+  });
+
+  /**
+   * One part of the server's audit log, the latest first. Like a study
+   * search, it goes to the server as it is and nothing of it is kept here.
+   */
+  async auditLog(search: AuditSearch = {}, signal?: AbortSignal): Promise<FoundAudit> {
+    const page = Math.max(0, search.page ?? 0);
+    const query = auditFilters(search);
+    query.set('limit', String(AUDIT_PER_PAGE));
+    query.set('offset', String(page * AUDIT_PER_PAGE));
+    const found = await this.audited(() => this.json<Page<AuditEntry>>(`/audit?${query}`, signal));
+    return { records: found.items, page, more: found.more };
+  }
+
+  /** Every record that fits a search, the earliest first, as a CSV file. */
+  async auditExport(search: AuditSearch = {}, signal?: AbortSignal): Promise<Blob> {
+    const query = auditFilters(search);
+    query.set('format', 'csv');
+    const response = await this.audited(() => this.ask(`/audit/export?${query}`, signal));
+    try {
+      return await response.blob();
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      throw new ServerError(`The server at ${this.host} stopped answering.`, null, true);
+    }
+  }
+
+  /** Ask for something of the audit log, and say plainly why it cannot be had. */
+  private async audited<T>(ask: () => Promise<T>): Promise<T> {
+    try {
+      return await ask();
+    } catch (error) {
+      if (!(error instanceof ServerError)) throw error;
+      if (error.status === 404) {
+        throw new ServerError(
+          'This server keeps no audit log: it runs without a data directory.',
+          404,
+        );
+      }
+      if (error.status === 403) {
+        throw new ServerError('The audit log is for an administrator.', 403);
+      }
+      throw error;
+    }
   }
 
   /**
