@@ -21,7 +21,8 @@ npm test -w @open-rt-studio/render
 - 3D: raycast shader, direct volume rendering, transfer functions, surfaces,
   curved planar reformat
 - Overlays: colormaps, masks, crosshair, reference lines, pane annotations,
-  axis indicator, contours, ROI overlay, brush, measurements
+  axis indicator, contours (and the cut of a contour stack by a tilted
+  plane), ROI overlay, brush, measurements
 
 ## Rules
 

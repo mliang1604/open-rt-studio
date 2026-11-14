@@ -183,7 +183,7 @@ Found on the way, also present in dicom-workspace:
 | #158  | Code the interface can no longer reach (removed since; import-to-edit is left to #152) |
 | #159  | Initial bundle over its warning budget; `viewer.css` near its limit (both fixed since) |
 | #160  | Accessibility lint for templates was not on (turned on since)                          |
-| #181  | Structure outlines are wrong on a tilted plane (open)                                  |
+| #181  | Structure outlines are wrong on a tilted plane (fixed since)                           |
 
 ## End-to-end tests in CI
 

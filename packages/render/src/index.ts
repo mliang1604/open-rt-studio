@@ -91,6 +91,13 @@ export {
 } from './reference-lines.js';
 export { type PatientPlane, linkedSliceIndex, volumeBounds } from './reslice.js';
 export {
+  type ContourStack,
+  type StackContour,
+  type StackPlane,
+  buildContourStack,
+  cutContourStack,
+} from './contour-stack.js';
+export {
   type ContourPaneOverlay,
   type RoiContourCoords,
   type RoiOverlayPane,

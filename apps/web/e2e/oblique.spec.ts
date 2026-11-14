@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { syntheticCtSeries } from '@open-rt-studio/testdata';
+import { syntheticCtSeries, syntheticThoraxPatient, THORAX_HU } from '@open-rt-studio/testdata';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
@@ -188,5 +188,118 @@ test('a plane tilts about the crosshair: the voxel under it stays', async ({ pag
   await expect(page.locator('.oblique-gizmo.active')).toHaveCount(0);
   expect(await voxelAt(page, far)).not.toBe(tilted);
   expect(await voxelAt(page, cross)).toBe(voxel);
+  expectNoProblems(problems);
+});
+
+/** The outline of one structure on the main pane, by its stroke colour, in page pixels. */
+async function outlineOf(page: Page, stroke: string) {
+  return page
+    .locator('svg.contours')
+    .first()
+    .evaluate((svg, colour) => {
+      const frame = svg.getBoundingClientRect();
+      const points: { x: number; y: number }[] = [];
+      for (const shape of Array.from(svg.querySelectorAll<SVGElement>('.contour'))) {
+        if (shape.style.stroke !== colour) continue;
+        for (const pair of (shape.getAttribute('points') ?? '').trim().split(/\s+/)) {
+          const [x, y] = pair.split(',').map(Number);
+          points.push({ x: frame.left + x, y: frame.top + y });
+        }
+      }
+      const by = (pick: (p: { x: number; y: number }) => number) =>
+        points.reduce((a, b) => (pick(b) < pick(a) ? b : a));
+      const left = by((p) => p.x);
+      const right = by((p) => -p.x);
+      return {
+        left,
+        right,
+        width: right.x - left.x,
+        height: by((p) => -p.y).y - by((p) => p.y).y,
+      };
+    }, stroke);
+}
+
+/** The CT number the probe reads with the pointer at a point. */
+async function valueAt(page: Page, point: Point): Promise<number> {
+  await page.mouse.move(point.x, point.y);
+  const probe = page.locator('.probe');
+  await expect(probe).toContainText('value ');
+  return Number(/value (-?[\d.]+)/.exec((await probe.textContent())!)![1]);
+}
+
+test('structure outlines follow the image on a tilted plane', async ({ page }) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient());
+  await page.getByLabel('Toggle all structures').check();
+
+  // The colours the phantom's structure set gives the body and the right lung.
+  const BODY = 'rgb(0, 200, 90)';
+  const LUNG = 'rgb(70, 150, 255)';
+  const between = (a: number, b: number) => (a + b) / 2;
+  const airOrFat = between(THORAX_HU.air, THORAX_HU.fat);
+  const lungOrMuscle = between(THORAX_HU.lung, THORAX_HU.muscle);
+  const STEP = 8; // pixels to either side of an outline
+
+  /** On both sides of the pane, the image changes tissue where the outlines say it does. */
+  const outlinesMatchImage = async (when: string) => {
+    const body = await outlineOf(page, BODY);
+    expect(await valueAt(page, { x: body.left.x + STEP, y: body.left.y }), when).toBeGreaterThan(
+      airOrFat,
+    );
+    expect(await valueAt(page, { x: body.left.x - STEP, y: body.left.y }), when).toBeLessThan(
+      airOrFat,
+    );
+    expect(await valueAt(page, { x: body.right.x - STEP, y: body.right.y }), when).toBeGreaterThan(
+      airOrFat,
+    );
+    expect(await valueAt(page, { x: body.right.x + STEP, y: body.right.y }), when).toBeLessThan(
+      airOrFat,
+    );
+    const lung = await outlineOf(page, LUNG);
+    expect(await valueAt(page, { x: lung.left.x + STEP, y: lung.left.y }), when).toBeLessThan(
+      lungOrMuscle,
+    );
+    expect(await valueAt(page, { x: lung.left.x - STEP, y: lung.left.y }), when).toBeGreaterThan(
+      lungOrMuscle,
+    );
+    expect(await valueAt(page, { x: lung.right.x - STEP, y: lung.right.y }), when).toBeLessThan(
+      lungOrMuscle,
+    );
+    expect(await valueAt(page, { x: lung.right.x + STEP, y: lung.right.y }), when).toBeGreaterThan(
+      lungOrMuscle,
+    );
+    return { body, lung };
+  };
+
+  const middle = await centreOf(page.locator('.pane-overlay .pane').first());
+  await page.mouse.move(middle.x, middle.y);
+  const flat = await outlinesMatchImage('before any tilt');
+
+  // A few degrees: the plane meets only a few of the contours. The outlines
+  // used to shrink to a line here.
+  await page.mouse.move(middle.x, middle.y);
+  await drag(page, await centreOf(page.locator('.oblique-knob').first()), 0, 6);
+  await expect(page.locator('.oblique-gizmo.active')).toHaveCount(1);
+  const slight = await outlinesMatchImage('tilted a little');
+  expect(slight.body.height).toBeGreaterThan(flat.body.height * 0.95);
+  expect(slight.body.width).toBeGreaterThan(flat.body.width * 0.95);
+  expect(slight.lung.height).toBeGreaterThan(flat.lung.height * 0.9);
+
+  // Further, and about the other axis as well.
+  await page.mouse.move(middle.x, middle.y);
+  await drag(page, await centreOf(page.locator('.oblique-knob').first()), -18, 20);
+  const steep = await outlinesMatchImage('tilted a lot, about both axes');
+  expect(steep.lung.height).toBeGreaterThan(flat.lung.height * 0.9);
+
+  // Reset: the outlines are the untilted ones again.
+  await page.mouse.move(middle.x, middle.y);
+  await page.locator('.oblique-knob').first().dblclick();
+  await expect(page.locator('.oblique-gizmo.active')).toHaveCount(0);
+  expect(await outlineOf(page, BODY)).toEqual(flat.body);
+  expect(await outlineOf(page, LUNG)).toEqual(flat.lung);
   expectNoProblems(problems);
 });
