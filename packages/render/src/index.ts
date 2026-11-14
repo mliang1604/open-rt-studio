@@ -161,3 +161,15 @@ export {
   windowLevelSensitivity,
   windowPresets,
 } from './window-level.js';
+export {
+  type ResampleRun,
+  type ResampleSource,
+  RESAMPLE_PARAMS_SIZE,
+  RESAMPLE_WGSL,
+  SLAB_BYTES,
+  fieldTexels32,
+  planSlabs,
+  resample,
+  resampleOnGpu,
+  resampleParams,
+} from './resample-gpu.js';

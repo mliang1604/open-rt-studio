@@ -217,7 +217,8 @@ export function deformableTransform(given: {
 }
 
 /** An index just outside the grid by rounding is taken as on its edge. */
-const EDGE = 1e-6;
+export const DEFORMATION_EDGE = 1e-6;
+const EDGE = DEFORMATION_EDGE;
 
 /**
  * The vectors of a grid that a position lies between, each with its weight

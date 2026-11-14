@@ -705,6 +705,51 @@ for the deformable one alike. Status: **decided, and
 Michael's to overturn**, most of all refusing a registration within one
 frame of reference, which some systems may write.
 
+## Resampling
+
+Putting one image on another image's grid, through a registration (epic #7).
+The engine is built (#88); nothing on screen uses it yet, and nothing is
+saved from it (#89 to #91).
+
+- **Which way.** Each voxel of the reference grid is given a value: its
+  centre is taken to the source image by the registration, and the source is
+  read there. That is the way an image is drawn over another
+  (`pointToLayer`): from the reference's frame to the source's. A
+  deformation field is used as it is written; none is turned round.
+- **Reading the source.** A place is in the source when it is within its
+  voxels, their outer halves included. `linear` blends the eight voxels
+  about it; `nearest` takes the nearest, for labels, which must not be
+  blended into numbers that are no label. Nothing finer (cubic, windowed
+  sinc) is offered.
+- **Outside.** A voxel whose place is not in the source gets a value the
+  caller names, and so does one where the field has no vector (outside its
+  grid, or between vectors of which one is undefined). They are counted, so
+  that a caller can say how much of a result is not the image.
+- **Two ways, one arithmetic.** `resampleVolume` in `packages/dicom` is the
+  reference: plain arithmetic, tested against analytic answers.
+  `resampleOnGpu` in `packages/render` is a WebGPU compute shader that does
+  the same arithmetic in the same order: it reads single texels and blends
+  them itself (a sampler blends with fewer bits, and differently from one
+  GPU to the next), from 32-bit float textures, with maps between voxel
+  indices worked out in double precision. The two differ by single against
+  double precision: 7 parts in ten million of the image's range at most on
+  the adapters tried, and never in whether a voxel has a value. The
+  end-to-end test `resample-gpu.spec.ts` holds them to 1 part in 100 000.
+- **A part at a time.** The GPU works the result out in slabs of slices of
+  at most 64 MiB, or less where the GPU binds less, and uploads the source in
+  parts of that size. `resample` uses the GPU when there is one and it can,
+  and the reference otherwise (a source too large for a 3-D texture, a GPU
+  that objects), a part at a time so that the page answers in between. The
+  result says which it was, and why not the GPU.
+- **Not there:** the source is one 3-D texture, so an image with a side past
+  the GPU's limit (2048 as a rule) goes to the reference; the reference
+  runs in the page's own thread, not a worker; a result is an image in
+  memory with the source's meaning and the reference's grid
+  (`resampledVolume`), and is not yet labelled as derived anywhere, because
+  it is not yet shown or saved anywhere.
+
+Status: **decided, and Michael's to overturn**.
+
 ## Native tools
 
 A CMake project in `native/` builds small command-line programs on ITK and
