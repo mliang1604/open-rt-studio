@@ -50,10 +50,13 @@ export interface DataSource {
 
   /**
    * Keep an object made here, such as an RT Structure Set that was painted.
-   * For files that is a download; for a server, an upload (#48). Rejects when
-   * it could not be kept.
+   * For files that is a download; for a server, an upload. Resolves with
+   * where it went, and rejects when it could not be kept.
+   *
+   * A save never replaces anything: the object is new each time, with its own
+   * SOP Instance UID, and a source that stores keeps what it already holds.
    */
-  save(object: SavedObject): Promise<void>;
+  save(object: SavedObject): Promise<SaveOutcome>;
 }
 
 /** A patient as a source lists them. */
@@ -121,6 +124,13 @@ export interface SavedObject {
   /** For DICOM, `application/dicom`. */
   readonly mediaType: string;
 }
+
+/** Where a saved object went. */
+export type SaveOutcome =
+  /** Handed to the browser as a download; where it lands is the user's affair. */
+  | { readonly kind: 'downloaded' }
+  /** Kept by the source, which will give it again with the series it belongs to. */
+  | { readonly kind: 'stored'; readonly where: string };
 
 /** Every series the source's current patient has, in timeline order. */
 export function listedSeries(source: DataSource): SeriesSummary[] {

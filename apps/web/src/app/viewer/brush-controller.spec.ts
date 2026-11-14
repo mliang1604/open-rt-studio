@@ -6,6 +6,8 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Orientation, type Volume, labelIndex } from '@open-rt-studio/dicom';
 import { type PaneRect, NO_OBLIQUE } from '@open-rt-studio/render';
+import { DATA_SOURCE, type DataSource, type SaveOutcome } from '../data-source/data-source';
+import { FakeDataSource } from '../data-source/testing';
 import { BrushController, type BrushInit } from './brush-controller';
 import { EditableStructuresStore } from './editable-structures-store';
 import { type PanePlacement } from './pane-placement';
@@ -58,8 +60,25 @@ const AXIAL_MID: Extract<PanePlacement, { kind: 'mpr' }> = {
   group: 0,
 };
 
-function setup(): { brush: BrushController; store: EditableStructuresStore } {
-  TestBed.configureTestingModule({ providers: [EditableStructuresStore, BrushController] });
+interface Notice {
+  readonly message: string;
+  readonly problem: boolean;
+}
+
+/** `source` is where saves go; left out, it is the application's own (opened files). */
+function setup(source?: DataSource): {
+  brush: BrushController;
+  store: EditableStructuresStore;
+  notices: Notice[];
+} {
+  const notices: Notice[] = [];
+  TestBed.configureTestingModule({
+    providers: [
+      EditableStructuresStore,
+      BrushController,
+      ...(source ? [{ provide: DATA_SOURCE, useValue: source }] : []),
+    ],
+  });
   const store = TestBed.inject(EditableStructuresStore);
   store.resetForLoad(makeVolume());
   const brush = TestBed.inject(BrushController);
@@ -78,9 +97,10 @@ function setup(): { brush: BrushController; store: EditableStructuresStore } {
     sliceIndices: signal<PerOrientation>([2, 2, 2]),
     sagittalFlipped: () => false,
     baseSeries: () => null,
+    notify: (message, problem) => notices.push({ message, problem }),
   };
   brush.init(deps);
-  return { brush, store };
+  return { brush, store, notices };
 }
 
 describe('BrushController', () => {
@@ -266,5 +286,86 @@ describe('BrushController', () => {
       if (label.data[labelIndex(label.dims, x, 2, 2)] === roi.id) painted++;
     }
     expect(painted).toBe(label.dims[0]);
+  });
+
+  describe('saving the active set', () => {
+    function withStructure(source: FakeDataSource) {
+      const made = setup(source);
+      made.brush.newSet();
+      made.brush.onSetRename(controlEvent('input', 'Liver'));
+      made.store.createRoi();
+      return made;
+    }
+
+    it('hands the source an RT Structure Set, and says nothing more of a download', async () => {
+      const source = new FakeDataSource();
+      const { brush, notices } = withStructure(source);
+      await brush.exportActiveSet();
+      expect(source.saved).toHaveLength(1);
+      expect(source.saved[0].mediaType).toBe('application/dicom');
+      expect(source.saved[0].filename).toMatch(/^rtstruct-liver-\d{8}-\d{6}\.dcm$/);
+      expect(source.saved[0].bytes.byteLength).toBeGreaterThan(132);
+      // The browser shows a download; a notice would say it twice.
+      expect(notices).toEqual([]);
+      expect(brush.saving()).toBe(false);
+    });
+
+    it('says where a stored set went', async () => {
+      const source = new FakeDataSource();
+      source.saveAnswer = () =>
+        Promise.resolve({ kind: 'stored', where: 'Server at 127.0.0.1:4300' });
+      const { brush, notices } = withStructure(source);
+      await brush.exportActiveSet();
+      expect(notices).toEqual([
+        {
+          message:
+            'Saved “Liver” (Server at 127.0.0.1:4300). It comes with this series the next time it is loaded.',
+          problem: false,
+        },
+      ]);
+    });
+
+    it('waits for the source, and does not send a second copy meanwhile', async () => {
+      const source = new FakeDataSource();
+      let answer!: (outcome: SaveOutcome) => void;
+      source.saveAnswer = () => new Promise((resolve) => (answer = resolve));
+      const { brush, notices } = withStructure(source);
+
+      const first = brush.exportActiveSet();
+      expect(brush.saving()).toBe(true);
+      await brush.exportActiveSet(); // a second click while the first is on its way
+      expect(source.saved).toHaveLength(1);
+
+      answer({ kind: 'stored', where: 'Server at 127.0.0.1:4300' });
+      await first;
+      expect(brush.saving()).toBe(false);
+      expect(notices).toHaveLength(1);
+
+      // Once it is through, another save is another object.
+      const second = brush.exportActiveSet();
+      answer({ kind: 'stored', where: 'Server at 127.0.0.1:4300' });
+      await second;
+      expect(source.saved).toHaveLength(2);
+    });
+
+    it('says that a set was not saved, and why, and can be asked again', async () => {
+      const source = new FakeDataSource();
+      source.saveAnswer = () => Promise.reject(new Error('The server refused: too large.'));
+      const { brush, notices } = withStructure(source);
+      await brush.exportActiveSet();
+      expect(notices).toEqual([
+        { message: '“Liver” was not saved. The server refused: too large.', problem: true },
+      ]);
+      expect(brush.saving()).toBe(false);
+      // What was painted is still here to save again.
+      expect(brush.canExport()).toBe(true);
+    });
+
+    it('does nothing while there is nothing to save', async () => {
+      const source = new FakeDataSource();
+      const { brush } = setup(source);
+      await brush.exportActiveSet();
+      expect(source.saved).toEqual([]);
+    });
   });
 });

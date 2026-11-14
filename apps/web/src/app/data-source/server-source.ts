@@ -11,7 +11,6 @@ import {
   renderSliceThumbnail,
   type SeriesThumbnail,
 } from '../viewer/series-thumbnail';
-import { downloadBlob } from '../viewer/viewer-dom';
 import type {
   DataSource,
   FetchedSeries,
@@ -19,6 +18,7 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SaveOutcome,
   SeriesSummary,
   StudySummary,
 } from './data-source';
@@ -31,6 +31,7 @@ const PAGE = 1000;
 export const PATIENTS_LISTED = 200;
 /** How many files are downloaded at once, unless told otherwise. */
 const PARALLEL = 6;
+const DICOM_MEDIA = 'application/dicom';
 
 /**
  * Modalities whose objects hold no picture. Opened files of these kinds do
@@ -332,11 +333,25 @@ export class ServerSource implements DataSource {
     return { kind: 'image', pixels: renderSliceThumbnail(slices[0]) };
   }
 
-  save(object: SavedObject): Promise<void> {
-    // Until the client can save to the server (#48), an object made here is
-    // a download, as it is for opened files.
-    downloadBlob(new Blob([object.bytes], { type: object.mediaType }), object.filename);
-    return Promise.resolve();
+  /**
+   * Upload a DICOM object made here. The server files it by what its header
+   * says (patient, study, what it refers to), so a structure set drawn on a
+   * series comes back with that series from then on.
+   *
+   * Nothing is replaced. The server is asked to keep what it holds, so if it
+   * already had an object of this SOP Instance UID with other contents, the
+   * save is refused and says so.
+   */
+  async save(object: SavedObject): Promise<SaveOutcome> {
+    if (object.mediaType !== DICOM_MEDIA) {
+      throw new Error('Only DICOM objects can be saved to a server.');
+    }
+    await this.ask('/instances?onDifferent=keep', undefined, {
+      method: 'POST',
+      headers: { 'Content-Type': DICOM_MEDIA },
+      body: object.bytes,
+    });
+    return { kind: 'stored', where: this.label };
   }
 
   /** One stored instance as a file, whole. */
@@ -386,11 +401,14 @@ export class ServerSource implements DataSource {
     return new URL(this.address).host;
   }
 
-  /** GET under the API. Rejects with a {@link ServerError} unless the answer is a success. */
-  private async ask(path: string, signal?: AbortSignal): Promise<Response> {
+  /**
+   * Ask the API: GET, unless `init` says otherwise. Rejects with a
+   * {@link ServerError} unless the answer is a success.
+   */
+  private async ask(path: string, signal?: AbortSignal, init: RequestInit = {}): Promise<Response> {
     let response: Response;
     try {
-      response = await this.fetcher(`${this.address}${API}${path}`, { signal });
+      response = await this.fetcher(`${this.address}${API}${path}`, { ...init, signal });
     } catch (error) {
       if (isAbortError(error)) throw error;
       // A browser gives no reason; these are the two there are.

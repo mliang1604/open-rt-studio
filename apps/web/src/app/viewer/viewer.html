@@ -507,10 +507,20 @@
           type="button"
           class="brush-export"
           (click)="brushCtl.exportActiveSet()"
-          [disabled]="!isReady() || !brushCtl.canExport()"
-          title="Save the active authored set as a DICOM RT Structure Set file"
+          [disabled]="!isReady() || !brushCtl.canExport() || brushCtl.saving()"
+          [title]="
+            serverLabel()
+              ? 'Save the active authored set to the server as a new DICOM RT Structure Set'
+              : 'Save the active authored set as a DICOM RT Structure Set file'
+          "
         >
-          Export RTSTRUCT ⤓
+          @if (brushCtl.saving()) {
+            Saving…
+          } @else if (serverLabel()) {
+            Save to server ⤒
+          } @else {
+            Export RTSTRUCT ⤓
+          }
         </button>
 
         <label class="ctrl brush-roi" title="Which structure the brush paints into">

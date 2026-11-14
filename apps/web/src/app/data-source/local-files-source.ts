@@ -15,6 +15,7 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SaveOutcome,
 } from './data-source';
 
 /**
@@ -65,11 +66,11 @@ export class LocalFilesSource implements DataSource {
     return series ? this.thumbnails.get(series) : { kind: 'icon', modality: null };
   }
 
-  save(object: SavedObject): Promise<void> {
+  save(object: SavedObject): Promise<SaveOutcome> {
     // Done before the promise is made, so the download starts in the same turn
     // as the click that asked for it.
     downloadBlob(new Blob([object.bytes], { type: object.mediaType }), object.filename);
-    return Promise.resolve();
+    return Promise.resolve({ kind: 'downloaded' });
   }
 
   /** Take in series parsed from files, and turn to their patient. */

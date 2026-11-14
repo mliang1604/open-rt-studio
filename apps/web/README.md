@@ -89,7 +89,10 @@ Loading:
   source for opened files, and the default. `server-source.ts` is the source
   for an Open RT Studio server: it lists patients and studies from the
   server's API, downloads a series' files a few at a time with progress and
-  cancellation, and hands them to the worker-pool parser.
+  cancellation, and hands them to the worker-pool parser. Its `save` uploads:
+  a painted structure set goes to the server as a new object ("Save to
+  server" where the files' button says "Export RTSTRUCT"), and comes back
+  with its series from then on.
   `active-data-source.ts` is what `DATA_SOURCE` provides: it passes on to
   whichever of the two is in use. `testing.ts` has a fake source for specs
   (provide it as `DATA_SOURCE` to drive the timeline or the load path without

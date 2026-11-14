@@ -12,6 +12,7 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SaveOutcome,
 } from './data-source';
 import { LocalFilesSource } from './local-files-source';
 
@@ -51,7 +52,7 @@ export class ActiveDataSource implements DataSource {
     return this.chosen().thumbnail(seriesUid);
   }
 
-  save(object: SavedObject): Promise<void> {
+  save(object: SavedObject): Promise<SaveOutcome> {
     return this.chosen().save(object);
   }
 }
