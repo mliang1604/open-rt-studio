@@ -14,9 +14,12 @@ import {
 } from '@open-rt-studio/dicom';
 
 import type { StructureChoice } from '../structure-compare/structure-compare';
+import type { FieldWayBack } from './field-metrics-panel';
 
 import {
   FieldMetricsPanel,
+  consistencyNotes,
+  consistencyRows,
   displacementRows,
   fieldNotes,
   foldingSentence,
@@ -311,5 +314,117 @@ describe('FieldMetricsPanel', () => {
       'No determinant could be worked out',
     );
     expect(host.querySelector('table')).toBeNull();
+  });
+
+  /** A way back that undoes nothing: a place comes back where the field left it. */
+  const STAY: FieldWayBack = {
+    kind: 'one',
+    name: '“Planning to MR, back”',
+    deformable: false,
+    map: (point) => point,
+  };
+
+  it('says nothing of going there and back when no other registration leads back', () => {
+    const { host, measure } = setup(SQUEEZE);
+    measure();
+    expect(host.querySelector('[data-field-consistency]')).toBeNull();
+    expect(host.querySelector('[data-field-consistency-note]')).toBeNull();
+    expect(host.querySelector('[data-field-consistency-several]')).toBeNull();
+  });
+
+  it('measures there and back against the one way back, and says how and what it cannot tell', () => {
+    const { fixture, host, measure, rows } = setup(SQUEEZE);
+    fixture.componentRef.setInput('back', STAY);
+    fixture.detectChanges();
+    measure();
+    expect(host.querySelector('[data-field-consistency] caption')!.textContent.trim()).toBe(
+      'There and back (inverse consistency)',
+    );
+    // Back where the field left it: off by the field's own displacement.
+    expect(rows('data-field-consistency')).toEqual(rows('data-field-displacement'));
+    expect(rows('data-field-consistency')[2]).toEqual(['Largest', '1.00 mm']);
+    const notes = [...host.querySelectorAll('[data-field-consistency-note]')].map((note) =>
+      note.textContent.trim(),
+    );
+    expect(notes).toEqual([
+      'From the place of each vector of the field’s grid: there by this registration, back by “Planning to MR, back”, and how far from where it began.',
+      'The way back is by a matrix, with no deformation of its own: the error is how far the two registrations differ at each place.',
+      'Consistent is not the same as accurate.',
+    ]);
+  });
+
+  it('counts apart the places with no way back, and says so when there are none at all', () => {
+    const half: FieldWayBack = { ...STAY, deformable: true, map: (p) => (p[0] < 0 ? null : p) };
+    const { fixture, host, measure, rows } = setup(SQUEEZE);
+    fixture.componentRef.setInput('back', half);
+    fixture.detectChanges();
+    measure();
+    // The grid's x is −4 … 4, there three quarters of it: the negative four of nine have no way back.
+    expect(host.textContent).toContain(
+      '16 of 36 places could not be taken there and back, and are not in these numbers.',
+    );
+    expect(host.textContent).not.toContain('The way back is by a matrix');
+    expect(rows('data-field-consistency')[2]).toEqual(['Largest', '1.00 mm']);
+
+    // Another way back: the first one's numbers are not shown for it.
+    fixture.componentRef.setInput('back', { ...STAY, map: () => null });
+    fixture.detectChanges();
+    expect(host.querySelector('table')).toBeNull();
+    measure();
+    expect(host.querySelector('[data-field-consistency]')).toBeNull();
+    expect(host.querySelector('[data-field-consistency-note]')!.textContent).toContain(
+      'No place could be taken there and back.',
+    );
+  });
+
+  it('measures there and back inside the structure chosen', () => {
+    const { fixture, host, measure, rows, choose } = setup(FOLD, CHOICES);
+    fixture.componentRef.setInput('back', STAY);
+    fixture.detectChanges();
+    choose('0:1');
+    measure();
+    // Where the field is still, a place comes back where it began.
+    expect(rows('data-field-consistency')[2]).toEqual(['Largest', '0.00 mm']);
+    choose('0:2');
+    measure();
+    expect(rows('data-field-consistency')[2]).toEqual(['Largest', '8.00 mm']);
+    expect(host.textContent).toContain('Consistent is not the same as accurate.');
+  });
+
+  it('picks none of several ways back, and says so', () => {
+    const { fixture, host, measure } = setup(SQUEEZE);
+    fixture.componentRef.setInput('back', { kind: 'several', count: 2 });
+    fixture.detectChanges();
+    measure();
+    expect(host.querySelector('[data-field-consistency]')).toBeNull();
+    expect(host.querySelector('[data-field-consistency-several]')!.textContent).toContain(
+      '2 registrations lead back',
+    );
+  });
+});
+
+describe('going there and back, in words', () => {
+  const back = { kind: 'one', name: '“Back”', deformable: true, map: () => null } as const;
+
+  it('gives the error in mm', () => {
+    expect(
+      consistencyRows({ count: 10, unmappedCount: 0, meanMm: 0.123, p95Mm: 0.456, maxMm: 1.5 }),
+    ).toEqual([
+      { name: 'Mean', value: '0.12 mm' },
+      { name: '95th percentile', value: '0.46 mm' },
+      { name: 'Largest', value: '1.50 mm' },
+    ]);
+  });
+
+  it('never says a number is good', () => {
+    const notes = consistencyNotes(
+      { count: 10, unmappedCount: 2, meanMm: 0, p95Mm: 0, maxMm: 0 },
+      back,
+    );
+    expect(notes).toContain(
+      '2 of 12 places could not be taken there and back, and are not in these numbers.',
+    );
+    expect(notes.at(-1)).toBe('Consistent is not the same as accurate.');
+    expect(notes.join(' ')).not.toMatch(/pass|fail|accept|tolerance|within limits/i);
   });
 });

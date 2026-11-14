@@ -28,9 +28,11 @@ import {
 import {
   baseLayer,
   DEFAULT_OVERLAY_OPACITY,
+  findPlacement,
   invertMat4,
   jacobianDeterminants,
   Orientation,
+  pointToLayer,
   sampleDeformation,
   sampleGridValues,
   transformPoint,
@@ -43,9 +45,12 @@ import {
 import {
   LayersStore,
   fittingFieldScaleMm,
+  isDeformable,
   layerLegend,
+  placementNames,
   type LayerLegendEntry,
 } from './layers-store';
+import type { FieldWayBack } from './field-metrics/field-metrics-panel';
 import { canShareWindow, CompareStore, type GroupNav } from './compare-store';
 import { type LoadState } from './load-controller';
 import { type PanePlacement } from './pane-placement';
@@ -377,6 +382,30 @@ export class LayersController {
   readonly fieldViewDeterminants = computed(() =>
     this.layerStore.fieldViewKind() === 'jacobian' ? this.fieldJacobian() : null,
   );
+
+  /**
+   * The way back from the compared image's frame to the base's, for inverse
+   * consistency (#84): another registration than the one that places the
+   * image through its field. One when exactly one leads back; with several,
+   * none is picked for the user; null when none does, or there is no field.
+   */
+  readonly fieldWayBack = computed<FieldWayBack | null>(() => {
+    const placement = this.selectedOverlay()?.placement;
+    const state = this.deps!.load();
+    if (!placement?.field || state.status !== 'ready') return null;
+    const there = new Set(placement.steps.map((step) => step.sopInstanceUid));
+    const others = state.result.registrations.filter((one) => !there.has(one.sopInstanceUid));
+    const found = findPlacement(placement.layerFrame, placement.baseFrame, others);
+    if (found.kind === 'several') return { kind: 'several', count: found.placements.length };
+    if (found.kind !== 'placed') return null;
+    const back = found.placement;
+    return {
+      kind: 'one',
+      name: placementNames(back),
+      deformable: isDeformable(back),
+      map: (point) => pointToLayer(back, point),
+    };
+  });
 
   /** The grid spacing that fits the overlay: about an eighth of its longest side. */
   private readonly fittingGridMm = computed(() => {

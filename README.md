@@ -98,7 +98,8 @@ by git) if you want files on disk to open.
   field out to see what it adds
 - What a deformation field says of itself: its Jacobian determinant (and
   whether it folds) and how far it moves things, over the whole field or
-  inside a structure
+  inside a structure; and, when another registration leads back, how far a
+  place ends from where it began after going there and back
 - The same as a colour wash over the image, with a legend: how far the field
   moves each place, or its Jacobian determinant, with folds striped; the
   probe reads the value under the cursor

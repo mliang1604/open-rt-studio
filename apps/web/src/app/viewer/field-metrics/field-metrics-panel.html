@@ -64,6 +64,30 @@
   @for (note of notes(); track $index) {
     <p class="note">{{ note }}</p>
   }
+  @if (consistency().length > 0) {
+    <table data-field-consistency>
+      <caption>
+        There and back (inverse consistency)
+      </caption>
+      <tbody>
+        @for (row of consistency(); track row.name) {
+          <tr>
+            <th scope="row">{{ row.name }}</th>
+            <td>{{ row.value }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+  @for (note of consistencyNotes(); track $index) {
+    <p class="note" data-field-consistency-note>{{ note }}</p>
+  }
+  @if (severalBack() > 0) {
+    <p class="note" data-field-consistency-several>
+      {{ severalBack() }} registrations lead back from the compared image to this one. Going there
+      and back is measured when there is one; none is picked here.
+    </p>
+  }
 } @else {
   <button
     type="button"

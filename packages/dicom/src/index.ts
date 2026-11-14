@@ -26,13 +26,16 @@ export {
   readInstanceHeader,
 } from './instance-header.js';
 export {
+  type ConsistencySummary,
   type DisplacementSummary,
   type FieldMetrics,
   type FieldRegion,
   type JacobianSummary,
   fieldMetrics,
   fieldVectorsInRoi,
+  inverseConsistencyErrors,
   jacobianDeterminants,
+  summarizeConsistency,
   summarizeDisplacement,
   summarizeJacobian,
 } from './field-metrics.js';
