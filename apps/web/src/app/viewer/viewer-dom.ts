@@ -29,6 +29,14 @@ export function confirmPatientSwitch(): boolean {
   );
 }
 
+/**
+ * Ask before something painted is deleted. There is no undo for it yet, so the
+ * question says what goes; `false` leaves everything as it is.
+ */
+export function confirmDelete(what: string): boolean {
+  return confirm(`${what} What was painted is removed and cannot be brought back.`);
+}
+
 /** Whether a drag event carries files (vs. dragged text/elements within the page). */
 export function hasFiles(event: DragEvent): boolean {
   const types = event.dataTransfer?.types;

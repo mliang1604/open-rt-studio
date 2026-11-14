@@ -47,7 +47,7 @@ export {
   singleLayout,
   triLayout,
 } from './layout.js';
-export { MASK_LUT_SIZE, maskColorLut } from './mask.js';
+export { MASK_LUT_SIZE, maskColorLut, type MaskColor } from './mask.js';
 export {
   type RoiShape,
   formatValue,

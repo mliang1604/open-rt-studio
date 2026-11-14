@@ -574,108 +574,140 @@
       </div>
     </details>
 
-    @if (roiCtl.hasStructures()) {
+    @if (roiCtl.hasStructures() || structures.sets().length > 0) {
       <details
         class="tool-group"
         role="group"
-        aria-label="Structure set ROIs"
-        title="Show, hide, recolour and fade each RTSTRUCT region of interest"
+        aria-label="Structures"
+        title="Show, hide, recolour and fade each structure; rename or delete a painted one"
         open
       >
         <summary class="tool-group-label">Structures</summary>
         <div class="tool-group-body roi-panel">
-          @if (roiCtl.hasManyStructureSets()) {
-            <label class="ctrl roi-set-select" title="Which structure set to show">
-              Set
-              <select
-                [value]="roiCtl.selectedSetIndex()"
-                (change)="roiCtl.onStructureSetChange($event)"
-                aria-label="Structure set"
-              >
-                @for (choice of roiCtl.structureSetChoices(); track choice.value) {
-                  <option [value]="choice.value">{{ choice.label }}</option>
-                }
-              </select>
-            </label>
-          }
-
-          <label class="roi-item roi-all" title="Show or hide every listed structure">
-            <input
-              type="checkbox"
-              [checked]="roiCtl.allRoisVisible()"
-              [indeterminate]="roiCtl.someRoisHidden()"
-              (change)="roiCtl.setAllRoisVisible($any($event.target).checked)"
-              aria-label="Toggle all structures"
-            />
-            <span class="roi-name">All structures</span>
-          </label>
-
-          <button
-            type="button"
-            (click)="roiCtl.toggleFilled()"
-            [class.active]="roiCtl.filled()"
-            [attr.aria-pressed]="roiCtl.filled()"
-            title="Fill the inside of each structure on the slice views, as well as outlining it"
-          >
-            Fill {{ roiCtl.filled() ? 'on' : 'off' }}
-          </button>
-          <label class="ctrl" title="How opaque the inside of a structure is drawn">
-            Fill opacity
-            <input
-              type="range"
-              min="5"
-              max="100"
-              step="5"
-              [value]="roiCtl.fillOpacityPercent()"
-              (input)="roiCtl.onFillOpacity($event)"
-              [disabled]="!roiCtl.filled()"
-              aria-label="Fill opacity"
-            />
-            {{ roiCtl.fillOpacityPercent() }}%
-          </label>
-
-          <div class="roi-legend">
-            @for (group of roiCtl.roiGroups(); track group.setIndex) {
-              @if (roiCtl.showRoiGroupLabels()) {
-                <div class="roi-group-label" [title]="group.label">{{ group.label }}</div>
-              }
-              @for (roi of group.entries; track roi.key) {
-                <div class="roi-item">
-                  <input
-                    type="checkbox"
-                    [checked]="roi.visible"
-                    (change)="roiCtl.toggleRoi(roi.key)"
-                    [attr.aria-label]="'Show ' + roi.name"
-                  />
-                  <input
-                    type="color"
-                    class="roi-color"
-                    [value]="roi.colorHex"
-                    (input)="roiCtl.onRoiColor(roi.key, $event)"
-                    [attr.aria-label]="roi.name + ' colour'"
-                    [title]="roi.name + ' colour'"
-                  />
-                  <span class="roi-name" [title]="roi.name">{{ roi.name }}</span>
-                  @if (roi.type) {
-                    <span class="roi-type" [title]="'Interpreted type: ' + roi.type">{{
-                      roi.type
-                    }}</span>
+          @if (roiCtl.hasStructures()) {
+            @if (roiCtl.hasManyStructureSets()) {
+              <label class="ctrl roi-set-select" title="Which structure set to show">
+                Set
+                <select
+                  [value]="roiCtl.selectedSetIndex()"
+                  (change)="roiCtl.onStructureSetChange($event)"
+                  aria-label="Structure set"
+                >
+                  @for (choice of roiCtl.structureSetChoices(); track choice.value) {
+                    <option [value]="choice.value">{{ choice.label }}</option>
                   }
-                  <input
-                    type="range"
-                    class="roi-opacity"
-                    min="0"
-                    max="100"
-                    step="5"
-                    [value]="roi.opacityPercent"
-                    (input)="roiCtl.onRoiOpacity(roi.key, $event)"
-                    [attr.aria-label]="roi.name + ' opacity'"
-                    [title]="roi.name + ' opacity: ' + roi.opacityPercent + '%'"
-                  />
-                </div>
-              }
+                </select>
+              </label>
             }
-          </div>
+
+            <label class="roi-item roi-all" title="Show or hide every listed structure">
+              <input
+                type="checkbox"
+                [checked]="roiCtl.allRoisVisible()"
+                [indeterminate]="roiCtl.someRoisHidden()"
+                (change)="roiCtl.setAllRoisVisible($any($event.target).checked)"
+                aria-label="Toggle all structures"
+              />
+              <span class="roi-name">All structures</span>
+            </label>
+
+            <button
+              type="button"
+              (click)="roiCtl.toggleFilled()"
+              [class.active]="roiCtl.filled()"
+              [attr.aria-pressed]="roiCtl.filled()"
+              title="Fill the inside of each structure on the slice views, as well as outlining it"
+            >
+              Fill {{ roiCtl.filled() ? 'on' : 'off' }}
+            </button>
+            <label class="ctrl" title="How opaque the inside of a structure is drawn">
+              Fill opacity
+              <input
+                type="range"
+                min="5"
+                max="100"
+                step="5"
+                [value]="roiCtl.fillOpacityPercent()"
+                (input)="roiCtl.onFillOpacity($event)"
+                [disabled]="!roiCtl.filled()"
+                aria-label="Fill opacity"
+              />
+              {{ roiCtl.fillOpacityPercent() }}%
+            </label>
+
+            <div class="roi-legend">
+              @for (group of roiCtl.roiGroups(); track group.setIndex) {
+                @if (roiCtl.showRoiGroupLabels()) {
+                  <div class="roi-group-label" [title]="group.label">{{ group.label }}</div>
+                }
+                @for (roi of group.entries; track roi.key) {
+                  <div class="roi-item">
+                    <input
+                      type="checkbox"
+                      [checked]="roi.visible"
+                      (change)="roiCtl.toggleRoi(roi.key)"
+                      [attr.aria-label]="'Show ' + roi.name"
+                    />
+                    <input
+                      type="color"
+                      class="roi-color"
+                      [value]="roi.colorHex"
+                      (input)="roiCtl.onRoiColor(roi.key, $event)"
+                      [attr.aria-label]="roi.name + ' colour'"
+                      [title]="roi.name + ' colour'"
+                    />
+                    <span class="roi-name" [title]="roi.name">{{ roi.name }}</span>
+                    @if (roi.type) {
+                      <span class="roi-type" [title]="'Interpreted type: ' + roi.type">{{
+                        roi.type
+                      }}</span>
+                    }
+                    <input
+                      type="range"
+                      class="roi-opacity"
+                      min="0"
+                      max="100"
+                      step="5"
+                      [value]="roi.opacityPercent"
+                      (input)="roiCtl.onRoiOpacity(roi.key, $event)"
+                      [attr.aria-label]="roi.name + ' opacity'"
+                      [title]="roi.name + ' opacity: ' + roi.opacityPercent + '%'"
+                    />
+                    @if (roi.promotable) {
+                      <button
+                        type="button"
+                        class="roi-edit"
+                        (click)="onPromote(group.setIndex, roi.roiNumber)"
+                        [disabled]="roi.promoted || !isReady()"
+                        [attr.aria-label]="'Edit a copy of ' + roi.name"
+                        [title]="
+                          roi.promoted
+                            ? 'A painted copy of this structure has been made; it is listed below'
+                            : 'Make a painted copy of this structure to change with the brush. The imported one is hidden, not changed.'
+                        "
+                      >
+                        ✎
+                      </button>
+                    }
+                  </div>
+                }
+              }
+            </div>
+          }
+          @if (structures.sets().length > 0) {
+            <app-painted-structures
+              [sets]="structures.sets()"
+              [hidden]="structures.hiddenRois()"
+              [opacities]="structures.roiOpacities()"
+              [activeRoiId]="brushCtl.activeRoiId()"
+              (visibleChange)="structures.setRoiVisible($event.id, $event.value)"
+              (opacityChange)="structures.setRoiOpacity($event.id, $event.value)"
+              (colorChange)="structures.recolorRoi($event.id, $event.value)"
+              (renamed)="structures.renameRoi($event.id, $event.value)"
+              (removed)="onPaintedRemove($event)"
+              (setRemoved)="onPaintedSetRemove($event)"
+            />
+          }
         </div>
       </details>
     }

@@ -30,25 +30,31 @@ export interface MaskColor {
   readonly id: number;
   /** Display colour as `[r, g, b]` in 0–255. */
   readonly color: readonly [number, number, number];
+  /**
+   * How much of the mask's opacity this structure is drawn at, 0 to 1: 0 hides
+   * it, 1 (the default) draws it at the mask's full opacity.
+   */
+  readonly alpha?: number;
 }
 
 /**
  * Bake an id→colour table into a `size`-texel RGBA LUT (floats, 0–1), for upload
  * to a 1-D texture the shader samples nearest. Texel `0` is the transparent
  * background (alpha 0); each {@link MaskColor} writes its colour at its id's texel
- * with alpha 1. Ids outside `[1, size)` are skipped (a later id reuse can't paint
+ * with its own alpha (1 unless given). Ids outside `[1, size)` are skipped (a later id reuse can't paint
  * a stale colour, and an id past the table simply doesn't colour). Pure — the GPU
  * upload stays in the renderer.
  */
 export function maskColorLut(rois: readonly MaskColor[], size = MASK_LUT_SIZE): Float32Array {
   const lut = new Float32Array(size * 4); // zeroed → background and any gaps transparent
-  for (const { id, color } of rois) {
+  for (const { id, color, alpha } of rois) {
     if (!Number.isInteger(id) || id < 1 || id >= size) continue;
     const o = id * 4;
     lut[o + 0] = clamp01(color[0] / 255);
     lut[o + 1] = clamp01(color[1] / 255);
     lut[o + 2] = clamp01(color[2] / 255);
-    lut[o + 3] = 1; // opaque; the per-mask composite opacity is applied in the shader
+    // The structure's share of the mask's composite opacity, which the shader applies.
+    lut[o + 3] = alpha === undefined ? 1 : clamp01(alpha);
   }
   return lut;
 }

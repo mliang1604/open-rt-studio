@@ -114,6 +114,10 @@ Viewer (`src/app/viewer`):
   the panel that shows the reformat. The geometry is `packages/render` `cpr.ts`.
 - `gpu-notice/`, `empty-state/`: what the viewport shows when WebGPU is missing
   and before anything is imported.
+- `painted-structures/`: the painted structures in the Structures list, set by
+  set: show, hide, fade, recolour, rename and delete. Imported structures are
+  listed by the viewer itself, above them; the ✎ on an imported one makes a
+  painted copy of it.
 - `metadata-panel/`, `dvr-panel/`, `shortcut-help/`: the cards that float over
   the viewport. They share `panel-card.css`, which repeats the viewer's button
   and input look, because a component's styles do not reach its children.

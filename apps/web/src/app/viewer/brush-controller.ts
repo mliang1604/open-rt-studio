@@ -156,6 +156,38 @@ export class BrushController {
     this.activeRoiId.set(rois.length > 0 ? rois[0].id : null);
   }
 
+  /**
+   * Delete a painted structure. If the brush was painting into it, the brush
+   * moves to the first structure left in the active set, or to none, and with
+   * none left to paint into it stops painting.
+   */
+  removeRoi(id: number): void {
+    this.store.deleteRoi(id);
+    if (this.activeRoiId() === id) this.retarget();
+  }
+
+  /** Delete an authored set and its structures; the brush follows to the set now active. */
+  removeSet(id: number): void {
+    this.store.deleteSet(id);
+    this.retarget();
+  }
+
+  /** Point the brush at a structure that exists: the one it has, else the active set's first. */
+  private retarget(): void {
+    const rois = this.store.activeRois();
+    if (rois.some((roi) => roi.id === this.activeRoiId())) return;
+    this.activeRoiId.set(rois.length > 0 ? rois[0].id : null);
+    if (rois.length === 0 && this.mode() === 'paint') this.deactivate();
+  }
+
+  /** Paint into this structure from now on, making its set the active one. */
+  selectRoi(id: number): void {
+    const set = this.store.sets().find((s) => s.rois.some((roi) => roi.id === id));
+    if (!set) return;
+    this.store.setActiveSet(set.id);
+    this.activeRoiId.set(id);
+  }
+
   /** Rename the active authored set from the toolbar field. */
   onSetRename(event: Event): void {
     if (!(event.target instanceof HTMLInputElement)) return;

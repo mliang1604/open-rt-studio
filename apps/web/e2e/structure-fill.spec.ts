@@ -6,6 +6,7 @@ import { syntheticCtSeries, syntheticThoraxPatient, THORAX } from '@open-rt-stud
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
+import { capturedColour } from './fixtures/capture';
 import { importAndLoad } from './fixtures/load';
 
 // Structures drawn filled: imported ones by choice, painted ones always, both
@@ -134,31 +135,6 @@ test('imported structures can be filled, at a chosen opacity', async ({ page }) 
   await expect(page.locator('path.contour-fill')).toHaveCount(0);
   expectNoProblems(problems);
 });
-
-/** Mean colourfulness (0 to 255) of the PNG the Screenshot button saves: 0 for a grey image. */
-async function capturedColour(page: Page): Promise<number> {
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.getByRole('button', { name: /Screenshot/ }).click(),
-  ]);
-  const chunks: Buffer[] = [];
-  for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);
-  return page.evaluate(async (base64) => {
-    const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
-    const bitmap = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext('2d')!;
-    context.drawImage(bitmap, 0, 0);
-    const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
-    let sum = 0;
-    for (let i = 0; i < pixels.length; i += 4) {
-      sum +=
-        Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) -
-        Math.min(pixels[i], pixels[i + 1], pixels[i + 2]);
-    }
-    return sum / (pixels.length / 4);
-  }, Buffer.concat(chunks).toString('base64'));
-}
 
 test('a painted structure is drawn at the fill opacity', async ({ page }) => {
   const problems = watchProblems(page);

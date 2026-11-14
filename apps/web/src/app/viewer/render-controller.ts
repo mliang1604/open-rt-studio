@@ -177,14 +177,14 @@ export class RenderController {
     }, opts);
     // Upload / re-upload / clear the authored label mask. Reads the store's
     // version (bumped on every paint/erase/delete) so the texture re-uploads when
-    // voxels change, the ROI colours so the LUT tracks recolours, and the fill
-    // opacity — but NOT the window/level or 3D-camera signals, which don't affect
+    // voxels change, the ROI colours, visibility and opacities so the LUT tracks
+    // them, and the fill opacity — but NOT the window/level or 3D-camera signals, which don't affect
     // the mask.
     effect(() => {
       const renderer = d.renderer();
       const label = this.editableStructures.labelVolume();
       const version = this.editableStructures.version();
-      const lut = maskColorLut(this.editableStructures.rois(), MASK_LUT_SIZE);
+      const lut = maskColorLut(this.editableStructures.maskColors(), MASK_LUT_SIZE);
       // Painted structures are drawn at the fill opacity: translucent, so the
       // anatomy stays visible under them. One opacity for the whole mask.
       const opacity = this.roiCtl.fillOpacity();

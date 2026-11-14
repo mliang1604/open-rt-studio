@@ -164,7 +164,7 @@ are not regressions. Each has an issue.
 | #149  | Window/level linking in Compare (added since)                                                                                                 | #26          |
 | #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot (both done since)                                                  | #22          |
 | #151  | Filled display of imported structures (added since, with a fill opacity)                                                                      | #104         |
-| #152  | Rename, recolour and delete for painted structures; listing them under Structures                                                             | #105         |
+| #152  | Rename, recolour and delete for painted structures; listing them under Structures (all added since, and import-to-edit is offered again)      | #105         |
 | #155  | Tree view expansion remembered (added since)                                                                                                  | #33          |
 | #156  | Reopening a recent selection without picking the files again (added since, for a folder or a single file in Chromium browsers)                | #34          |
 | #157  | Probe position in patient millimetres (added since)                                                                                           | #21          |
@@ -176,14 +176,14 @@ contents carry no patient name or ID.
 
 Found on the way, also present in dicom-workspace:
 
-| Issue | What                                                                                   |
-| ----- | -------------------------------------------------------------------------------------- |
-| #153  | The brush stayed armed when a measurement tool was chosen (fixed since)                |
-| #154  | "Set" label covered by the "+ Set" button (fixed since)                                |
-| #158  | Code the interface can no longer reach (removed since; import-to-edit is left to #152) |
-| #159  | Initial bundle over its warning budget; `viewer.css` near its limit (both fixed since) |
-| #160  | Accessibility lint for templates was not on (turned on since)                          |
-| #181  | Structure outlines are wrong on a tilted plane (fixed since)                           |
+| Issue | What                                                                                          |
+| ----- | --------------------------------------------------------------------------------------------- |
+| #153  | The brush stayed armed when a measurement tool was chosen (fixed since)                       |
+| #154  | "Set" label covered by the "+ Set" button (fixed since)                                       |
+| #158  | Code the interface can no longer reach (removed since; import-to-edit is offered again, #152) |
+| #159  | Initial bundle over its warning budget; `viewer.css` near its limit (both fixed since)        |
+| #160  | Accessibility lint for templates was not on (turned on since)                                 |
+| #181  | Structure outlines are wrong on a tilted plane (fixed since)                                  |
 
 ## End-to-end tests in CI
 
