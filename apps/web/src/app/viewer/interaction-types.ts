@@ -160,8 +160,8 @@ export interface InteractionInit {
   readonly layers: () => readonly Layer[];
   /** Whether the side-by-side Compare layout is active. */
   readonly isCompare: () => boolean;
-  /** The overlay the Compare layout shows in its second column, or null. */
-  readonly compareOverlay: () => Layer | null;
+  /** The selected fusion overlay layer, or null. */
+  readonly selectedOverlay: () => Layer | null;
   /** Read a layer's current window/level (the base reads the shared window). */
   readonly layerWindow: (layer: Layer | null) => WindowLevel;
   /** Write a layer's window/level (the base writes the shared window). */

@@ -77,8 +77,8 @@ describe('cantFuseMessage', () => {
     expect(cantFuseMessage('overlay', 'several-registrations')).toMatch(
       /^Can’t fuse: more than one registration/,
     );
-    expect(cantFuseMessage('compare', 'compare-through-registration')).toMatch(
-      /^Can’t compare through a registration yet/,
+    expect(cantFuseMessage('compare', 'several-registrations')).toMatch(
+      /^Can’t compare: more than one registration/,
     );
   });
 });
@@ -258,7 +258,7 @@ describe('planFileLoad — held modifier', () => {
       expect(catalog.adds).toBe(0);
     });
 
-    it('fuses (⌥) a series a registration placed, and refuses to compare (⇧) it', () => {
+    it('fuses (⌥) a series a registration placed, and compares (⇧) it', () => {
       const deps = {
         previous: result('base'),
         result: batch,
@@ -271,10 +271,11 @@ describe('planFileLoad — held modifier', () => {
       });
       const catalog = recordingCatalog();
       expect(planFileLoad(fileDeps({ ...deps, intent: 'compare', catalog }))).toEqual({
-        kind: 'reject',
-        message: cantFuseMessage('compare', 'compare-through-registration'),
+        kind: 'overlay',
+        result: placed,
+        compare: true,
       });
-      expect(catalog.adds).toBe(0);
+      expect(catalog.adds).toBe(1);
     });
   });
 
@@ -424,7 +425,7 @@ describe('planSeriesLoad', () => {
     expect(seen).toEqual([registrations, registrations]);
   });
 
-  it('refuses to compare (⇧) a panel series that a registration placed', async () => {
+  it('compares (⇧) a panel series that a registration placed', async () => {
     const placed = { ...INCOMING, layers: [{ id: 'base' }, { id: 'over', placement: {} }] };
     const outcome = await planSeriesLoad(
       seriesDeps({
@@ -433,10 +434,7 @@ describe('planSeriesLoad', () => {
         merge: () => merged(placed as unknown as LoadResult, true),
       }),
     );
-    expect(outcome).toEqual({
-      kind: 'reject',
-      message: cantFuseMessage('compare', 'compare-through-registration'),
-    });
+    expect(outcome).toEqual({ kind: 'overlay', result: placed, compare: true });
   });
 
   it('fuses a same-frame series as an overlay under ⌥', async () => {

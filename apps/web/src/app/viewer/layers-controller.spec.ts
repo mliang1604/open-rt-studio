@@ -171,23 +171,31 @@ describe('LayersController and an overlay placed by a registration (#76)', () =>
     return found.placement;
   }
 
-  it('is the fusion overlay, and not what Compare shows in its second column', () => {
+  it('is shown by Compare in the base’s planes: the base’s grid, the overlay’s picture and window', () => {
     const { controller, base, overlay, activeGroup } = setup('CT', placement());
     expect(controller.selectedOverlay()).toBe(overlay());
-    expect(controller.compareOverlay()).toBeNull();
-    expect(controller.compareLacksOverlay()).toBe(true);
-    // The second column falls back to the base, as with no overlay at all:
-    // its volume, its window, and nothing to share a window with.
+    expect(controller.compareInBasePlanes()).toBe(true);
+    // Where the second column is, is the base's: its slices and its zoom.
     expect(controller.groupVolume(1)).toBe(base().volume);
+    expect(controller.paneSliceIndex(1, 0)).toBe(controller.paneSliceIndex(0, 0));
+    // What it shows is the overlay: its image and its own window.
+    expect(controller.groupLayer(1)).toBe(overlay());
+    expect(controller.groupLayer(0)).toBe(base());
     activeGroup.set(1);
-    expect(controller.activeWlLayer()).toBe(base());
-    expect(controller.canShareWindow()).toBe(false);
+    expect(controller.activeWlLayer()).toBe(overlay());
+    expect(controller.canShareWindow()).toBe(true);
   });
 
-  it('leaves an overlay in the base’s own frame as Compare had it', () => {
+  it('leaves an overlay in the base’s own frame on its own grid', () => {
     const { controller, overlay } = setup('CT');
-    expect(controller.compareOverlay()).toBe(overlay());
-    expect(controller.compareLacksOverlay()).toBe(false);
+    expect(controller.compareInBasePlanes()).toBe(false);
     expect(controller.groupVolume(1)).toBe(overlay().volume);
+    expect(controller.groupLayer(1)).toBe(overlay());
+  });
+
+  it('shows the base in the second column when there is no overlay', () => {
+    const { controller, base } = setup(null);
+    expect(controller.groupVolume(1)).toBe(base().volume);
+    expect(controller.groupLayer(1)).toBe(base());
   });
 });

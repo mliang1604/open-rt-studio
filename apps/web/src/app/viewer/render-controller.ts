@@ -363,14 +363,16 @@ export class RenderController {
     if (!renderer || !volume) return null;
 
     // The overlay column windows on its own per-layer window/level, falling back
-    // to its volume's default. What these panes are told of the overlay is
-    // for the Compare columns only, so it is the overlay Compare shows.
-    const overlay = this.layersCtl.compareOverlay();
+    // to its volume's default. An overlay that a registration places is drawn
+    // in the base's planes, so its column takes its slices from the base's
+    // grid: no volume of its own is given for that.
+    const overlay = this.layersCtl.selectedOverlay();
+    const inBasePlanes = this.layersCtl.compareInBasePlanes();
     return composePaneViews({
       panes: d.panes(),
       dpr: d.viewport().dpr,
       baseVolume: volume,
-      overlayVolume: overlay?.volume ?? null,
+      overlayVolume: inBasePlanes ? null : (overlay?.volume ?? null),
       sliceIndices: d.sliceIndices(),
       zooms: d.zooms(),
       pans: d.pans(),

@@ -6,6 +6,7 @@ import { Injectable, computed, inject, type Signal, type WritableSignal } from '
 import {
   probeVoxel,
   sampleVolumeAtPatient,
+  type VoxelProbe,
   pickProjection,
   focusSliceIndex,
   paneToPlanePoint,
@@ -18,7 +19,7 @@ import {
   type Vec2,
   type PaneRect,
 } from '@open-rt-studio/render';
-import { Orientation, pointBetweenLayers, type Volume } from '@open-rt-studio/dicom';
+import { Orientation, pointBetweenLayers, type Layer, type Volume } from '@open-rt-studio/dicom';
 import { MeasurementStore, type MeasureTool } from './measurement-store';
 import { placementAt, type PanePlacement } from './pane-placement';
 import { LayersController } from './layers-controller';
@@ -135,20 +136,39 @@ export class MeasureController {
     );
     if (!sample) return null;
 
-    // Read every other visible layer at the probed patient point (e.g. dose Gy
-    // under the CT HU). A layer that doesn't cover the point is dropped. A
-    // layer in another frame of reference is read where its registration puts
-    // the point: the same anatomy, at other coordinates.
+    // A layer in another frame of reference is read where its registration
+    // puts the point: the same anatomy, at other coordinates.
     const layers = this.layersCtl.layers();
     const hovered = layers.find((layer) => layer.volume === hoveredVolume);
+    const readAt = (layer: Layer): VoxelProbe | null =>
+      sampleVolumeAtPatient(
+        layer.volume,
+        pointBetweenLayers(sample.patient, hovered?.placement, layer.placement),
+      );
+
+    // The pane's own image comes first in the readout. In the Compare column
+    // of a registered overlay that is the overlay, though the pane is laid
+    // out on the base's grid: its voxel and its position in its own frame.
+    // Where it does not reach, the column shows nothing, and so does the probe.
+    const shown = this.layersCtl.groupLayer(group);
+    let first = sample;
+    let firstVolume = hoveredVolume;
+    if (shown && shown.volume !== hoveredVolume) {
+      const own = readAt(shown);
+      if (!own) return null;
+      first = own;
+      firstVolume = shown.volume;
+    }
+
+    // Then every other visible layer at the same place (e.g. dose Gy under
+    // the CT HU). A layer that doesn't cover the point is dropped.
     const others = layers
-      .filter((layer) => layer.visible && layer.volume !== hoveredVolume)
+      .filter((layer) => layer.visible && layer.volume !== firstVolume)
       .flatMap((layer) => {
-        const there = pointBetweenLayers(sample.patient, hovered?.placement, layer.placement);
-        const s = sampleVolumeAtPatient(layer.volume, there);
+        const s = readAt(layer);
         return s ? [{ layer, sample: s }] : [];
       });
-    return formatProbe(orientationName(orientation), sample, hoveredVolume, others);
+    return formatProbe(orientationName(orientation), first, firstVolume, others);
   });
 
   /** Wire the controller to the component's view state. Called once. */

@@ -149,6 +149,23 @@ describe('packSliceParams', () => {
     expect(uints[25]).toBe(0); // checkerboard
   });
 
+  it('packs the overlay mode (a u32 at float 25): alone goes before the checkerboard', () => {
+    const overlay = {
+      matrix: base.matrix,
+      windowCenter: 0,
+      windowWidth: 1,
+      opacity: 1,
+      colormap: false,
+      checkerSize: 24,
+    };
+    const mode = (flags: { checkerboard: boolean; alone?: boolean }): number =>
+      new Uint32Array(packSliceParams({ ...base, overlay: { ...overlay, ...flags } }))[25];
+    expect(mode({ checkerboard: false })).toBe(0);
+    expect(mode({ checkerboard: true })).toBe(1);
+    expect(mode({ checkerboard: false, alone: true })).toBe(2);
+    expect(mode({ checkerboard: true, alone: true })).toBe(2);
+  });
+
   it('sets the colormap-the-base flag (float 27) for a standalone colormapped layer', () => {
     expect(new Uint32Array(packSliceParams(base))[27]).toBe(0); // off by default
     const buffer = packSliceParams({ ...base, colormapBase: true });

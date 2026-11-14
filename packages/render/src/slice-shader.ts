@@ -26,7 +26,10 @@ struct Params {
   flipX : u32,              // non-zero mirrors the in-plane horizontal axis
   invert : u32,             // non-zero inverts the windowed gray (display inversion)
   // Filling the mat4x4-alignment padding before overlayToTex (floats 25..27):
-  overlayCheckerboard : u32, // non-zero: alternate base/overlay per checker cell
+  overlayMode : u32,         // 0: blend the overlay over the base by its opacity;
+                             // 1: alternate base/overlay per checker cell;
+                             // 2: the overlay by itself, the base not shown (the
+                             //    Compare column of an overlay placed by a registration)
   checkerSize : f32,         // checker cell size in framebuffer pixels
   colormapBase : u32,        // non-zero: map the windowed BASE value through overlayLut
                              // (the standalone Compare overlay column; no compositing)
@@ -115,6 +118,13 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
     rgb = textureSampleLevel(overlayLut, volSamp, shade, 0.0).rgb;
   }
 
+  // The overlay by itself (mode 2): the pane is the base's plane, and what it
+  // shows of the base is nothing. Where the overlay does not reach stays black.
+  let alone = P.overlayMode == 2u;
+  if (alone) {
+    rgb = vec3<f32>(0.0);
+  }
+
   // Fusion overlay: sample the second volume at the same pane point via its own
   // affine, window it, and blend over the base. A colormap overlay (e.g. a dose
   // wash) maps the windowed value through overlayLut to colour; a grayscale one
@@ -125,7 +135,11 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
     if (all(ocoord >= vec3<f32>(0.0)) && all(ocoord <= vec3<f32>(1.0))) {
       let oraw = textureSampleLevel(overlayTex, volSamp, ocoord, 0.0).r;
       let olo = P.overlayWindowCenter - 0.5 - (P.overlayWindowWidth - 1.0) * 0.5;
-      let og = clamp((oraw - olo) / max(P.overlayWindowWidth - 1.0, 1.0), 0.0, 1.0);
+      var og = clamp((oraw - olo) / max(P.overlayWindowWidth - 1.0, 1.0), 0.0, 1.0);
+      // By itself it is the pane's image, and inverted with the display as one.
+      if (alone && P.invert != 0u) {
+        og = 1.0 - og;
+      }
       var orgb = vec3<f32>(og, og, og);
       // Grayscale overlay contributes fully; a colormap carries a per-value alpha
       // ramp (≈0 at the low end) so low/background dose lets the base show through.
@@ -140,9 +154,14 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
       // strength and base cells show the base, ignoring overlayOpacity. Otherwise
       // it's a uniform opacity blend.
       var amount = P.overlayOpacity * oalpha;
-      if (P.overlayCheckerboard != 0u) {
+      if (P.overlayMode == 1u) {
         let cell = (floor(in.pos.x / P.checkerSize) + floor(in.pos.y / P.checkerSize)) % 2.0;
         amount = oalpha * cell;
+      }
+      // By itself there is nothing behind it to show through: its colour as it
+      // is, as the standalone column draws a colour-mapped layer.
+      if (alone) {
+        amount = 1.0;
       }
       rgb = mix(rgb, orgb, amount);
     }
