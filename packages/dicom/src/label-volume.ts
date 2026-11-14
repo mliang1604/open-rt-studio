@@ -109,7 +109,7 @@ function markDirtyIndex(label: LabelVolume, i: number, dimX: number, dimY: numbe
  * `dicom → render` dependency), so a label volume built from a metadata-less
  * volume still maps patient points the way the reslice does.
  */
-function resolveGeometry(volume: Volume): VolumeGeometry {
+export function resolveGeometry(volume: Pick<Volume, 'spacing' | 'geometry'>): VolumeGeometry {
   if (volume.geometry) return volume.geometry;
   const [sx, sy, sz] = volume.spacing;
   return { iStep: [sx, 0, 0], jStep: [0, sy, 0], kStep: [0, 0, sz], origin: [0, 0, 0] };

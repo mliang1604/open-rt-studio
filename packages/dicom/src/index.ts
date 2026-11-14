@@ -19,6 +19,20 @@ export {
 } from './catalog.js';
 export { type RasterizeResult, rasterizeRoiContours } from './contour-raster.js';
 export {
+  type Affine,
+  type Interpolation,
+  type ResampleGrid,
+  type ResampleOptions,
+  type ResampleThrough,
+  type Resampled,
+  type SliceRange,
+  affineOf,
+  resampleMaps,
+  resampleVolume,
+  resampledVolume,
+  sampleAtIndex,
+} from './resample.js';
+export {
   type InstanceHeader,
   type InstanceHeaderResult,
   type InstanceReference,
@@ -82,6 +96,7 @@ export {
   mapPoint,
   matrixTransform,
   pathMatrix,
+  DEFORMATION_EDGE,
   sampleDeformation,
   sampleGridValues,
   samePath,
