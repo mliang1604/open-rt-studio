@@ -247,8 +247,11 @@ export class LoadController {
     let handle: AccessHandle;
     try {
       handle = await pick();
-    } catch {
-      return; // the dialog was dismissed
+    } catch (error) {
+      // Dismissed: nothing to do. Anything else (the browser would not show
+      // its picker) and the input opens instead, so the button never does nothing.
+      if (!isAbortError(error)) input.click();
+      return;
     }
     await this.loadFromHandle(handle, { label: handle.name, kind: 'folder' });
   }
@@ -263,8 +266,9 @@ export class LoadController {
     let picked: AccessHandle[];
     try {
       picked = await pick();
-    } catch {
-      return; // the dialog was dismissed
+    } catch (error) {
+      if (!isAbortError(error)) input.click(); // as in openFolder
+      return;
     }
     const files = (await Promise.all(picked.map(filesOf))).flat();
     if (files.length === 0) return;

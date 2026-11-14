@@ -200,3 +200,27 @@ test('a set of several files is picked again even where handles exist', async ({
   await expect(studies(page)).toHaveCount(1);
   await expect(recentOptions(page).nth(1)).toHaveText('8 files · pick again');
 });
+
+test('a picker the browser will not show gives way to the file input', async ({ page }) => {
+  await preAcknowledge(page);
+  await instrument(page);
+  await page.addInitScript(() => {
+    const refuse = () => Promise.reject(new DOMException('not allowed here', 'SecurityError'));
+    Object.assign(window, { showDirectoryPicker: refuse, showOpenFilePicker: refuse });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open folder…' }).click();
+  await expect.poll(async () => (await counters(page)).inputClicks).toEqual(['folder']);
+  await page.getByRole('button', { name: 'Open files…' }).click();
+  await expect.poll(async () => (await counters(page)).inputClicks).toEqual(['folder', 'files']);
+
+  // A dialog the user closes is not a failure: nothing else opens.
+  await page.evaluate(() => {
+    const dismissed = () => Promise.reject(new DOMException('dismissed', 'AbortError'));
+    Object.assign(window, { showDirectoryPicker: dismissed, showOpenFilePicker: dismissed });
+  });
+  await page.getByRole('button', { name: 'Open folder…' }).click();
+  await page.getByRole('button', { name: 'Open files…' }).click();
+  await page.waitForTimeout(200);
+  expect((await counters(page)).inputClicks).toEqual(['folder', 'files']);
+});
