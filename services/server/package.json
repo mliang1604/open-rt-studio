@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc -b",
     "start": "node dist/main.js",
+    "account": "node dist/main.js account",
     "pretest": "tsc -b && tsc -p tsconfig.spec.json",
     "test": "vitest run",
     "lint": "eslint ."

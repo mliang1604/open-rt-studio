@@ -4,6 +4,7 @@
 
 import type { Readable } from 'node:stream';
 
+import type { Session } from '../accounts/accounts.js';
 import type { ServerCore } from '../core/core.js';
 
 /** What a route is asked with. */
@@ -13,6 +14,13 @@ export interface RouteRequest {
   readonly query: URLSearchParams;
   /** A request header's value, by its lower-case name. */
   header(name: string): string | undefined;
+  /**
+   * Whose request it is: the session of the token it came with. Null on a
+   * server without accounts, and on a public route asked without a token.
+   */
+  readonly session: Session | null;
+  /** The token the request came with, when it stands for a session. */
+  readonly token: string | null;
   /**
    * The request's body, read whole. Rejects with a 413 {@link HttpError}
    * when it is longer than `maxBytes`.
@@ -59,9 +67,22 @@ export interface RouteDoc {
   >;
 }
 
+/**
+ * Who a route answers, on a server with accounts: anyone (`public`), whoever
+ * is logged in (`user`), or an administrator (`admin`). A server without
+ * accounts has one user, who is all of these.
+ */
+export type RouteAccess = 'public' | 'user' | 'admin';
+
 /** One thing the server answers: a method on a path. */
 export interface Route {
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  /**
+   * `user` when left out: a route is closed to whoever is not logged in
+   * unless it says otherwise, so that a new route cannot be left open by
+   * forgetting to say.
+   */
+  readonly access?: RouteAccess;
   /**
    * The path, matched whole. A part that begins with a colon stands for any
    * one part and names it: `/api/v1/studies/:studyUid/series`.
@@ -120,6 +141,8 @@ export function healthRoute(core: ServerCore): Route {
   return {
     method: 'GET',
     path: '/health',
+    // What watches the server (a container's health check) has no login.
+    access: 'public',
     handle: () => {
       const health = core.health();
       return { status: health.status === 'ok' ? 200 : 503, body: health };

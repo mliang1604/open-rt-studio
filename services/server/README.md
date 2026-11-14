@@ -3,28 +3,93 @@
 The Node server of Open RT Studio: a small PACS. It keeps DICOM instances in
 a file store, knows them through an index that understands how radiotherapy
 objects refer to each other, takes them in through one ingest pipeline, and
-serves them over an HTTP API. DIMSE, login and the rest come with the later
-issues of [the server epic](https://github.com/mliang1604/open-rt-studio/issues/4).
+serves them over an HTTP API to whoever has logged in. DIMSE and the rest
+come with the later issues of
+[the server epic](https://github.com/mliang1604/open-rt-studio/issues/4).
 
 **Not for clinical use.**
 
 ## Run it
 
-From the repository root:
+From the repository root, to try it on this machine with no login:
 
 ```sh
 npm run build -w @open-rt-studio/server
-npm start -w @open-rt-studio/server
+OPEN_RT_STUDIO_AUTH=none npm start -w @open-rt-studio/server
 curl http://127.0.0.1:4300/health
 # {"status":"ok","version":"0.0.0","uptimeSeconds":3,"inFlight":0}
 ```
 
-Started like this it keeps what is uploaded in memory, and says so in its log.
-To keep it, give it a directory:
+Started like this it answers whoever can reach it, which is this machine
+only, and keeps what is uploaded in memory; its log says both. It will not
+start this way on an address other machines can reach.
+
+To keep what is uploaded, and to have accounts, give it a directory and make
+the first account:
 
 ```sh
-OPEN_RT_STUDIO_DATA_DIR=./data npm start -w @open-rt-studio/server
+export OPEN_RT_STUDIO_DATA_DIR=./data
+npm run account -w @open-rt-studio/server -- add ada --admin   # asks for a password
+npm start -w @open-rt-studio/server
 ```
+
+## Accounts
+
+Unless `auth` is `none`, the server answers only requests that come with the
+token of a login. `GET /health`, the API's description and the login itself
+are the exceptions.
+
+- **Accounts are local**: a name, a password and a role, kept in
+  `accounts.sqlite` in the data directory, apart from the index. A password
+  is kept as an scrypt hash with a salt of its own (N = 2^15, r = 8, p = 3)
+  and has at least 12 characters; nothing else is asked of it.
+- **Two roles.** A `user` may browse, fetch, upload and run jobs. An `admin`
+  may also manage accounts. A route is for users unless it says otherwise,
+  so a new route is not left open by forgetting to say.
+- **A login gives a token**, 32 random bytes, told once and kept by the
+  server only as its SHA-256. Send it as `Authorization: Bearer <token>`. It
+  stops working when it is logged out, 12 hours after it was last used, 7
+  days after the login, or when its account is disabled, removed or given
+  another password.
+- **Five wrong passwords in a row lock a name** for 30 seconds, then twice as
+  long for each further one, up to 15 minutes (429 with `Retry-After`). A
+  name the server does not know is treated the same, and a wrong name and a
+  wrong password get the same answer. At most 16 passwords are checked at
+  once; a login beyond that is told to come back in a second.
+- **The last administrator who can log in** cannot be disabled, made a user
+  or removed.
+
+The `account` command works on the data directory, with the server running
+or not. It is how the first administrator is made, and how an account is put
+right when no one can log in to do it:
+
+```sh
+npm run account -w @open-rt-studio/server -- list
+npm run account -w @open-rt-studio/server -- add <name> [--admin]
+npm run account -w @open-rt-studio/server -- password <name>
+npm run account -w @open-rt-studio/server -- role <name> <admin|user>
+npm run account -w @open-rt-studio/server -- disable <name>     # or enable, remove
+```
+
+A password is typed when asked for (twice, unseen), or piped in on standard
+input. It is never an argument, where other processes and the shell's
+history would see it.
+
+| Method and path                 | Who    | Answer                                                           |
+| ------------------------------- | ------ | ---------------------------------------------------------------- |
+| `POST /api/v1/session`          | anyone | Log in with `{"name", "password"}`: the token and the session    |
+| `GET /api/v1/session`           | user   | Who is logged in. On a server without accounts: no one, with 200 |
+| `DELETE /api/v1/session`        | user   | Log out                                                          |
+| `PUT /api/v1/session/password`  | user   | Change your own password, with `{"current", "next"}`             |
+| `GET /api/v1/accounts`          | admin  | Every account                                                    |
+| `POST /api/v1/accounts`         | admin  | Make an account: `{"name", "password", "role"}`                  |
+| `PUT /api/v1/accounts/:name`    | admin  | Change `role`, `disabled` or `password`                          |
+| `DELETE /api/v1/accounts/:name` | admin  | Remove an account                                                |
+
+What is not there yet: HTTPS (#57), so on a network the token and the
+password travel in the clear unless something in front of the server
+encrypts; an audit log of who did what (#56); and logins through an identity
+provider. The log says that someone logged in or failed to, never who.
 
 `SIGTERM` or `SIGINT` (Ctrl+C) stops it: it takes no new connections, answers
 the requests it has, lets the core finish its work, and exits with 0. If the
@@ -40,6 +105,7 @@ code 2).
 | Setting             | Environment variable                 | Default     | Meaning                                                                                                                                                                              |
 | ------------------- | ------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `host`              | `OPEN_RT_STUDIO_HOST`                | `127.0.0.1` | Address to listen on                                                                                                                                                                 |
+| `auth`              | `OPEN_RT_STUDIO_AUTH`                | `accounts`  | `accounts`: only whoever logs in is answered; needs `dataDir`. `none`: no login, and only for an address of this machine                                                             |
 | `port`              | `OPEN_RT_STUDIO_PORT`                | `4300`      | Port to listen on; `0` takes a free one, which the log then names                                                                                                                    |
 | `logLevel`          | `OPEN_RT_STUDIO_LOG_LEVEL`           | `info`      | `debug`, `info`, `warn`, `error` or `silent`                                                                                                                                         |
 | `shutdownTimeoutMs` | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS` | `10000`     | How long a stop waits for requests, and then for the core's work                                                                                                                     |
@@ -52,10 +118,9 @@ code 2).
 { "port": 8080, "logLevel": "warn" }
 ```
 
-The server listens on this machine only by default. **There is no login yet
-(#55): whoever can reach the port can use the server.** Set `host` to
-something else only on a network where that is acceptable; the server logs a
-warning when you do.
+The server listens on this machine only by default, and asks for a login
+(see [Accounts](#accounts)). To listen elsewhere it must have accounts: with
+`auth` set to `none` it refuses to start on any address but this machine's.
 
 ## The API
 
@@ -117,14 +182,16 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   before any route runs, unless the origin is in `allowedOrigins`; then it is
   answered with the headers that let the page read the answer. A caller that
   names no origin is not a page (curl, a script, the desktop application) and
-  is answered as before. There is no "any origin": until there is a login
-  (#55), a page that may call the server may read everything in it, so each
-  origin is listed by name, and the server warns at start when any is.
+  is answered as before. There is no "any origin": each origin is listed by
+  name. On a server with accounts an allowed page still has to log in; on one
+  without, it may read everything, and the server warns at start.
 
-  To use the server from the web application in development:
+  To use the server from the web application in development (the viewer's
+  login screen is not there yet, so without accounts):
 
   ```sh
-  OPEN_RT_STUDIO_ALLOWED_ORIGINS=http://localhost:4200 npm start -w @open-rt-studio/server
+  OPEN_RT_STUDIO_AUTH=none OPEN_RT_STUDIO_ALLOWED_ORIGINS=http://localhost:4200 \
+    npm start -w @open-rt-studio/server
   ```
 
   then, in the viewer, "Connect to a server…" and the server's address.
@@ -160,6 +227,13 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   `importFolder(directory)`. A core made with a store and an index
   (`createCore({ pacs })`) has it as `core.pacs.ingest`, where each call is
   work a shutdown waits for.
+- `src/accounts/`: who may use the server (#55). `password.ts` hashes and
+  checks passwords, `account-store.ts` keeps accounts and sessions in
+  SQLite, and `accounts.ts` is the rest: logins, sessions and their ends,
+  the lock after wrong passwords, the last administrator. The core knows
+  nothing of it: accounts belong to the network host, and an embedded core
+  has none.
+- `src/account-cli.ts`: the `account` command.
 - `src/config.ts`: the settings above, typed and checked.
 - `src/logger.ts`: the log.
 - `src/server.ts`: `startServer(config, logger)`, which makes a core, puts the

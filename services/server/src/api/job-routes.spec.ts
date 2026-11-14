@@ -33,7 +33,7 @@ interface Api {
 async function api(config: Partial<ServerConfig> = {}, kinds = [dummyKind()]): Promise<Api> {
   const lines: string[] = [];
   const server = await startServer(
-    { ...DEFAULT_CONFIG, port: 0, shutdownTimeoutMs: 5_000, ...config },
+    { ...DEFAULT_CONFIG, auth: 'none', port: 0, shutdownTimeoutMs: 5_000, ...config },
     createLogger({ level: 'info', write: (line) => lines.push(line) }),
     { jobKinds: kinds },
   );

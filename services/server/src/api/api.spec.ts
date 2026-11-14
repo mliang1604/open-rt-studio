@@ -47,7 +47,8 @@ async function api(
 ): Promise<Api> {
   const lines: string[] = [];
   const server = await startServer(
-    { ...DEFAULT_CONFIG, port: 0, shutdownTimeoutMs: 2_000, ...config },
+    // The API itself, with no login in front: who may ask is account-routes.spec.ts.
+    { ...DEFAULT_CONFIG, auth: 'none', port: 0, shutdownTimeoutMs: 2_000, ...config },
     createLogger({ level: 'info', write: (line) => lines.push(line) }),
   );
   running.push(server);
@@ -578,6 +579,8 @@ describe('the API description', () => {
           'GET /instances/{sopInstanceUid}/file',
           'POST /instances',
           'GET /openapi.json',
+          // Who is logged in: no one, on a server without accounts.
+          'GET /session',
           'GET /job-kinds',
           'GET /jobs',
           'POST /jobs',
@@ -588,7 +591,7 @@ describe('the API description', () => {
       ].sort(),
     );
     // Nothing is described that is not served.
-    expect(described).toHaveLength(19);
+    expect(described).toHaveLength(20);
   });
 
   it('names every part of a path as a parameter, and only schemas that exist', async () => {

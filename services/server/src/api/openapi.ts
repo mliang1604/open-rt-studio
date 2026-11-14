@@ -17,7 +17,12 @@ export function openApiPath(path: string): string {
  * The API's description as an OpenAPI 3.1 document, made from the routes
  * themselves: a route is described exactly when it is served.
  */
-export function openApiDocument(routes: readonly Route[]): Record<string, unknown> {
+export function openApiDocument(
+  routes: readonly Route[],
+  options: {
+    /** Whether the server has accounts, and its routes ask for a login. */ readonly login?: boolean;
+  } = {},
+): Record<string, unknown> {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const route of routes) {
     if (!route.doc) continue;
@@ -40,6 +45,11 @@ export function openApiDocument(routes: readonly Route[]): Record<string, unknow
     }
     (paths[openApiPath(route.path)] ??= {})[route.method.toLowerCase()] = {
       tags: [doc.tag],
+      // An empty list says the route is open to whoever can reach the server.
+      ...(options.login
+        ? { security: (route.access ?? 'user') === 'public' ? [] : [{ token: [] }] }
+        : {}),
+      ...(options.login && route.access === 'admin' ? { 'x-role': 'admin' } : {}),
       summary: doc.summary,
       ...(doc.description ? { description: doc.description } : {}),
       parameters: (doc.parameters ?? []).map((parameter) => ({
@@ -67,10 +77,16 @@ export function openApiDocument(routes: readonly Route[]): Record<string, unknow
       version: SERVER_VERSION,
       description:
         'Browse, fetch and upload the DICOM instances the server holds. Not for clinical use. ' +
-        'There is no login yet: whoever can reach the server can use this API.',
+        (options.login
+          ? 'Log in with `POST /api/v1/session` and send the token it gives with every request; ' +
+            'a route marked `x-role: admin` is for administrators.'
+          : 'This server has no accounts: whoever can reach it can use this API.'),
       license: { name: 'MPL-2.0', identifier: 'MPL-2.0' },
     },
     paths,
-    components: { schemas: SCHEMAS },
+    components: {
+      schemas: SCHEMAS,
+      ...(options.login ? { securitySchemes: { token: { type: 'http', scheme: 'bearer' } } } : {}),
+    },
   };
 }

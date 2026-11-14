@@ -210,7 +210,7 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   answers with ranges, typed errors and a description: about 400 lines in
   `src/host`, comments included, with no dependency to license-check or keep current, and
   nothing a framework would have made shorter by much. What would change
-  the answer: multipart uploads, login with sessions (#55), or request
+  the answer: multipart uploads or request
   validation growing past what the routes do by hand. A framework such as
   Fastify (MIT) would then replace `src/host`; routes and schemas would
   carry over. Status: **decided, and Michael's to overturn.**
@@ -233,11 +233,53 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   an `Origin` other than the server's own is refused before any route runs,
   unless that origin is in `allowedOrigins` (none by default; no wildcard).
   That is the CORS policy and also what stops a page elsewhere from making
-  the server do something through a plain form or image request. Without a
-  login (#55) an allowed page can read everything, so the list is short and
-  explicit. A server that listens beyond this machine cannot know its own
-  names, so there the `Host` check does not apply; that case waits for
-  accounts.
+  the server do something through a plain form or image request. On a
+  server without accounts an allowed page can read everything, so the list
+  is short and explicit. A server that listens beyond this machine cannot
+  know its own names, so there the `Host` check does not apply; such a server
+  must have accounts.
+- **Who may use the server** (#55). Local accounts, each with a role
+  (`admin` or `user`), in a SQLite file of their own beside the index: the
+  index can move to PostgreSQL (#44) without them, and a copy of the index
+  holds no password hash. Passwords are scrypt hashes from `node:crypto`,
+  with the cost written beside each so it can be raised. What was decided,
+  and why:
+  - **A token in a header, not a cookie.** A login gives 32 random bytes,
+    kept by the server only as their SHA-256 and sent back as
+    `Authorization: Bearer`. The viewer is served from another origin than
+    the server. A browser attaches a cookie to every request to the server,
+    whichever page made it, and does not attach a header a page did not set,
+    so a token in a header cannot be used by another site on the user's
+    behalf, and no CSRF defence is needed. An opaque token and not a signed
+    claim, so that a logout, a disabled account or a changed password ends it
+    at once.
+  - **A session ends** 12 hours after its last use and 7 days after its
+    login. Both are constants in `accounts/accounts.ts`.
+  - **A route is for users unless it says otherwise** (`access` on the
+    route: `public`, `user`, `admin`), and the host checks it before the
+    route runs. Open are the health endpoint, the API's description and the
+    login. The account routes are for administrators.
+  - **Login is asked for by default**, and `auth: none` must be asked for by
+    name. Without accounts the server refuses to start on an address other
+    machines can reach. That mode is for trying the server, for the tests,
+    and it is what the desktop application's standalone mode is: the core
+    has no accounts at all, they belong to the network host.
+  - **The first administrator is made on the machine**, with the `account`
+    command, which reads the password from the terminal or standard input.
+    There is no default account, no password in the configuration, and no
+    setup page that whoever gets there first could use.
+  - **Wrong passwords lock the name**, not the caller's address: 5 in a row,
+    then 30 seconds doubling to 15 minutes. It means someone who knows a
+    name can keep its owner out for as long as they keep trying; an address
+    is easier to change than a name is to guess. Kept in memory, so a
+    restart forgets it.
+  - Not there: HTTPS (#57), an audit log (#56), identity providers. The
+    account store is behind an interface (`AccountStore`) and logins behind
+    another (`Accounts`), which is where a provider would go.
+
+  Status: **decided, and Michael's to overturn**, the default of `auth` most
+  of all: `npm start` with no settings no longer starts a server.
+
 - The file store (#42) names an instance's files by the SHA-256 of its SOP
   Instance UID, so that paths hold no patient identifier and not the UID
   either. It keeps the bytes as an ordinary DICOM file beside a small record
@@ -261,8 +303,8 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   the store, then the index, with the store put back if the index refuses.
   It is idempotent by SOP Instance UID and SHA-256. Different bytes under a
   UID the PACS holds are refused unless the caller asks for a replacement.
-- The server listens on `127.0.0.1` unless it is told otherwise, and warns
-  when it is told otherwise, until there are accounts (#55).
+- The server listens on `127.0.0.1` unless it is told otherwise, and starts
+  elsewhere only with accounts (#55).
 - Logs are JSON lines and carry no patient identifiers: an event is a fixed
   word, a request is logged by its route and not by the address asked for,
   and a field whose name says it identifies a person is written as

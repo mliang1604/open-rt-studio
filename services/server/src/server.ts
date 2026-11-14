@@ -2,13 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { mkdirSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { openSqliteAccountStore } from './accounts/account-store.js';
+import { createAccounts, type Accounts } from './accounts/accounts.js';
+import { accountRoutes, openSessionRoute } from './api/account-routes.js';
 import { apiRoutes } from './api/api-routes.js';
 import { jobRoutes } from './api/job-routes.js';
-import type { ServerConfig } from './config.js';
+import { ConfigError, ENVIRONMENT_VARIABLES, type ServerConfig } from './config.js';
 import { createCore, type ServerCore } from './core/core.js';
 import { createHost, type HostAddress } from './host/host.js';
 import { healthRoute } from './host/routes.js';
@@ -54,6 +58,49 @@ export interface ServerParts {
    * resampling tools register theirs when they exist (M3).
    */
   readonly jobKinds?: readonly JobKind[];
+  /**
+   * The accounts of a server whose `auth` is `accounts`, in place of the ones
+   * kept in the data directory: for a test, which keeps them in memory. The
+   * server closes them when it stops.
+   */
+  readonly accounts?: Accounts;
+}
+
+/** The name of the file in the data directory that holds the accounts and their sessions. */
+export const ACCOUNTS_FILE = 'accounts.sqlite';
+
+/**
+ * Who may use the server, as the configuration asks: its accounts, or null
+ * for a server without a login. Throws {@link ConfigError} for a
+ * configuration that would leave the server open to more than this machine,
+ * or with accounts and nowhere to keep them.
+ */
+export function openAccounts(
+  config: ServerConfig,
+  logger: Logger,
+  given?: Accounts,
+): Accounts | null {
+  if (config.auth === 'none') {
+    if (!LOOPBACK.has(config.host)) {
+      throw new ConfigError(
+        `${ENVIRONMENT_VARIABLES.auth}=none is only for a server that listens on this machine ` +
+          `(${ENVIRONMENT_VARIABLES.host}=127.0.0.1). A server others can reach needs accounts.`,
+      );
+    }
+    return null;
+  }
+  if (given) return given;
+  if (config.dataDir === null) {
+    throw new ConfigError(
+      `Accounts are kept in the data directory: set ${ENVIRONMENT_VARIABLES.dataDir}. ` +
+        `To try the server on this machine without a login, set ${ENVIRONMENT_VARIABLES.auth}=none.`,
+    );
+  }
+  mkdirSync(config.dataDir, { recursive: true });
+  return createAccounts({
+    store: openSqliteAccountStore(join(config.dataDir, ACCOUNTS_FILE)),
+    logger,
+  });
 }
 
 /** The job manager the configuration asks for, and how to clear up after it. */
@@ -82,21 +129,33 @@ export async function startServer(
   logger: Logger,
   parts: ServerParts = {},
 ): Promise<RunningServer> {
+  // First: a configuration that is refused opens nothing.
+  const accounts = openAccounts(config, logger, parts.accounts);
   const pacs = await openPacs(config, logger);
   const { jobs, clear } = await openJobs(config, logger, parts.jobKinds ?? []);
   const core = createCore({ logger, pacs, jobs });
   const jobApi = jobRoutes(jobs);
+  const sessionApi = accounts ? accountRoutes(accounts) : [openSessionRoute()];
   const routes = [
+    ...sessionApi,
     ...jobApi,
     ...apiRoutes(core.pacs!, {
       maxUploadBytes: config.maxUploadBytes,
-      described: [healthRoute(core), ...jobApi],
+      described: [healthRoute(core), ...sessionApi, ...jobApi],
+      login: accounts !== null,
     }),
   ];
-  const host = createHost(core, { ...config, logger, routes });
-  if (config.allowedOrigins.length > 0) {
-    // Pages of these origins can read everything, until there is a login (#55).
-    logger.warn('origins-allowed', { count: config.allowedOrigins.length });
+  const host = createHost(core, { ...config, logger, routes, accounts });
+  if (accounts === null) {
+    // Whoever can reach the port can use the server. Only this machine can.
+    logger.warn('no-login');
+    if (config.allowedOrigins.length > 0) {
+      // And so can the pages of these origins, in a browser on this machine.
+      logger.warn('origins-allowed', { count: config.allowedOrigins.length });
+    }
+  } else if (accounts.list().length === 0) {
+    // No one can log in until an account is made (the `account add` command).
+    logger.warn('no-accounts');
   }
   let address: HostAddress;
   try {
@@ -105,13 +164,10 @@ export async function startServer(
     // Nothing is left open by a server that could not start.
     await core.dispose();
     await clear();
+    accounts?.close();
     throw error;
   }
   logger.info('listening', { host: address.host, port: address.port });
-  if (!LOOPBACK.has(config.host)) {
-    // There are no accounts yet (#55): whoever can reach the port can use it.
-    logger.warn('reachable-without-login', { host: address.host });
-  }
 
   let stopped: Promise<boolean> | null = null;
   return {
@@ -122,6 +178,7 @@ export async function startServer(
         const closure = await host.close();
         const disposal = await core.dispose({ timeoutMs: config.shutdownTimeoutMs });
         await clear();
+        accounts?.close();
         const clean = closure.finished && disposal.finished;
         logger.info('stopped', { clean });
         return clean;

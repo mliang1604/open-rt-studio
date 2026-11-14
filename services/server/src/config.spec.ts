@@ -17,6 +17,19 @@ describe('resolveConfig', () => {
     expect(DEFAULT_CONFIG.host).toBe('127.0.0.1');
   });
 
+  it('asks for a login unless told otherwise, and knows no third way', () => {
+    expect(DEFAULT_CONFIG.auth).toBe('accounts');
+    expect(resolveConfig({ auth: 'none' }).auth).toBe('none');
+    for (const wrong of ['', 'off', 'NONE', true, null]) {
+      expect(() => resolveConfig({ auth: wrong })).toThrow(
+        'The config file\'s "auth" must be one of accounts, none.',
+      );
+    }
+    expect(() => resolveConfig(undefined, { OPEN_RT_STUDIO_AUTH: 'open' })).toThrow(
+      'OPEN_RT_STUDIO_AUTH must be one of accounts, none.',
+    );
+  });
+
   it('takes settings from the file, and leaves the rest at their defaults', () => {
     expect(resolveConfig({ port: 8080, logLevel: 'debug' })).toEqual({
       ...DEFAULT_CONFIG,
@@ -43,6 +56,7 @@ describe('resolveConfig', () => {
     expect(Object.keys(ENVIRONMENT_VARIABLES).sort()).toEqual(Object.keys(DEFAULT_CONFIG).sort());
     const config = resolveConfig(undefined, {
       OPEN_RT_STUDIO_HOST: ' ::1 ',
+      OPEN_RT_STUDIO_AUTH: 'none',
       OPEN_RT_STUDIO_PORT: '0',
       OPEN_RT_STUDIO_LOG_LEVEL: 'silent',
       OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS: '0',
@@ -54,6 +68,7 @@ describe('resolveConfig', () => {
     // Port 0 asks the operating system for a free port; it is a valid setting.
     expect(config).toEqual({
       host: '::1',
+      auth: 'none',
       port: 0,
       logLevel: 'silent',
       shutdownTimeoutMs: 0,
@@ -157,7 +172,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins.',
+        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins.',
       ),
     );
   });

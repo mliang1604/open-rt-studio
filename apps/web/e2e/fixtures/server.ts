@@ -42,6 +42,9 @@ export async function startTestServer(allowedOrigins: readonly string[] = []): P
       env: {
         PATH: process.env['PATH'],
         OPEN_RT_STUDIO_PORT: '0',
+        // No login: the viewer has no login screen yet (#55), and the server
+        // is on this machine only, which is where it allows that.
+        OPEN_RT_STUDIO_AUTH: 'none',
         OPEN_RT_STUDIO_ALLOWED_ORIGINS: allowedOrigins.join(','),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
