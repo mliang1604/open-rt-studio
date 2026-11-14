@@ -91,6 +91,8 @@ export interface LoadInit {
   readonly draggingSeries: WritableSignal<boolean>;
   /** The GPU renderer, or null until ready. */
   readonly renderer: () => SliceRenderer | null;
+  /** Have the renderer give up its volume and draw an empty frame: the view was emptied. */
+  readonly emptyCanvas: () => void;
   /** Switch into the side-by-side Compare layout. */
   readonly setCompareLayout: () => void;
   // Per-load view-reset signals (mutated by applyVolume / clearView).
@@ -705,6 +707,8 @@ export class LoadController {
     d.focusVoxel.set(null);
     this.layersCtl.reset();
     d.load.set({ status: 'idle' });
+    // The state says nothing is loaded; the canvas must too.
+    d.emptyCanvas();
   }
 
   private applyVolume(result: LoadResult): void {
