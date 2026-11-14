@@ -132,6 +132,18 @@ describe('LandmarkPanel', () => {
     expect(host.textContent).not.toMatch(/pass|fail|accept|tolerance/i);
   });
 
+  it('says which frame the errors are in: the base’s, or under a field the compared image’s', () => {
+    const fixed = setup();
+    expect(fixed.host.querySelector('[data-landmark-measured="fixed"]')).not.toBeNull();
+    expect(fixed.host.querySelector('[data-landmark-measured="moving"]')).toBeNull();
+    const moving = setup({ measuredIn: 'moving' });
+    const note = moving.host.querySelector('[data-landmark-measured="moving"]')!;
+    expect(note.textContent).toContain('A deformation field maps one way');
+    expect(note.textContent).toContain('in the compared image’s own frame');
+    expect(note.textContent).toContain('are not drawn in its column');
+    expect(moving.host.querySelector('[data-landmark-measured="fixed"]')).toBeNull();
+  });
+
   it('asks for what its buttons say', () => {
     const { host, labelled, row, said } = setup();
     host.querySelector<HTMLButtonElement>('[data-landmark-place]')!.click();

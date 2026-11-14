@@ -173,13 +173,15 @@ export class RenderController {
       const overlay = this.layersCtl.selectedOverlay();
       const opacity = overlay ? overlay.opacity : 0;
       // An overlay in another frame of reference is read through the
-      // registration that places it: from the base's frame to its own.
+      // registration that places it: from the base's frame to its own, and
+      // through its deformation field when it has one.
       if (renderer) {
         renderer.setOverlay(
           overlay?.volume ?? null,
           opacity,
           overlay?.display,
           overlay?.placement?.baseToLayer,
+          overlay?.placement?.field,
         );
       }
       this.scheduleFrame();

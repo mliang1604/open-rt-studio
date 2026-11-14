@@ -4,11 +4,13 @@
 
 import {
   baseImageLayer,
+  deformableTransform,
   findPlacement,
   overlayImageLayer,
   overlayLayerAwaitingChoice,
   overlayLayerUnplaced,
   transformPoint,
+  type DeformableSpatialRegistration,
   type Layer,
   type LayerPlacement,
   type Volume,
@@ -177,6 +179,131 @@ describe('a choice among several registrations', () => {
     ]);
     expect(rows.map((row) => row.placementChoices)).toEqual([null, null]);
     expect(rows.map((row) => row.placementChosen)).toEqual([null, null]);
+  });
+});
+
+describe('a layer placed through a deformation field (#77)', () => {
+  /** A deformable object in frame `f1` whose field maps into `f2`. */
+  const field: DeformableSpatialRegistration = {
+    sopInstanceUid: 'def-1',
+    registeredFrame: 'f1',
+    patientId: null,
+    label: 'DEFORMABLE',
+    description: 'Planning to MR',
+    registrations: [
+      {
+        item: 0,
+        transform: deformableTransform({
+          id: 'def-1#0',
+          from: 'f1',
+          to: 'f2',
+          grid: {
+            dims: [2, 2, 2],
+            origin: [0, 0, 0],
+            axes: [
+              [1, 0, 0],
+              [0, 1, 0],
+              [0, 0, 1],
+            ],
+            spacing: [10, 10, 10],
+            vectors: new Float32Array(24).fill(1),
+          },
+          post: shiftMatrix(5, 0, 0),
+        }),
+        vectorsTurned: false,
+        comment: null,
+      },
+    ],
+    identityItems: [],
+    unread: [],
+  };
+  const placed = (): LayerPlacement => {
+    const found = findPlacement('f1', 'f2', [field]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    return found.placement;
+  };
+  const layers = (): readonly Layer[] => [
+    baseImageLayer('base', makeVolume('CT')),
+    overlayImageLayer('ov', makeVolume('MR'), placed()),
+  ];
+
+  it('says that the registration is a deformable one', () => {
+    expect(placementText(placed())).toBe(
+      'Placed by deformable registration “Planning to MR” (written base → this image)',
+    );
+  });
+
+  it('has its field on until the user leaves it out, and says so when they do', () => {
+    const store = new LayersStore();
+    const on = store.apply(layers());
+    expect(on[1].placement?.field).toBeDefined();
+    expect(layerLegend(on)[1].deformation).toBe('on');
+    expect(layerLegend(on)[0].deformation).toBeNull();
+
+    store.toggleDeformation('ov');
+    const off = store.apply(layers());
+    expect(off[1].placement?.field).toBeUndefined();
+    // By its matrices alone: the matrix after the field.
+    expect(transformPoint(off[1].placement!.baseToLayer, [1, 2, 3])).toEqual([6, 2, 3]);
+    expect(off[1].visible).toBe(true);
+    const row = layerLegend(off)[1];
+    expect(row.deformation).toBe('off');
+    expect(row.placement).toBe(
+      'Placed by deformable registration “Planning to MR” (written base → this image). Its deformation is left out: placed by its matrices only',
+    );
+
+    store.toggleDeformation('ov');
+    expect(layerLegend(store.apply(layers()))[1].deformation).toBe('on');
+  });
+
+  it('has no switch for a layer a matrix places', () => {
+    const rigid = findPlacement('f1', 'f2', [registrationObject('reg-1', 'f2', 'f1')]);
+    if (rigid.kind !== 'placed') throw new Error(rigid.kind);
+    const row = layerLegend([
+      baseImageLayer('base', makeVolume('CT')),
+      overlayImageLayer('ov', makeVolume('MR'), rigid.placement),
+    ])[1];
+    expect(row.deformation).toBeNull();
+    // Leaving a field out of it changes nothing.
+    const store = new LayersStore();
+    store.toggleDeformation('ov');
+    const same = [
+      baseImageLayer('base', makeVolume('CT')),
+      overlayImageLayer('ov', makeVolume('MR'), rigid.placement),
+    ];
+    expect(store.apply(same)[1].placement).toBe(rigid.placement);
+  });
+
+  it('is one of the choices when a matrix leads there too, and stays the chosen one with its field left out', () => {
+    const found = findPlacement('f1', 'f2', [field, registrationObject('reg-1', 'f2', 'f1')]);
+    if (found.kind !== 'several') throw new Error(found.kind);
+    const index = found.placements.findIndex((one) => one.field);
+    expect(placementChoiceText(found.placements[index])).toMatch(
+      /^“Planning to MR” \(deformable\) \(written base → this image\) · its matrices: translation 5\.0 mm, rotation 0\.0°$/,
+    );
+    const raw = [
+      baseImageLayer('base', makeVolume('CT')),
+      overlayLayerAwaitingChoice('ov', makeVolume('MR'), found.placements),
+    ];
+    const store = new LayersStore();
+    store.choosePlacement('ov', index);
+    expect(layerLegend(store.apply(raw))[1]).toMatchObject({
+      placementChosen: index,
+      deformation: 'on',
+    });
+    store.toggleDeformation('ov');
+    expect(layerLegend(store.apply(raw))[1]).toMatchObject({
+      placementChosen: index,
+      deformation: 'off',
+      visible: true,
+    });
+  });
+
+  it('has its field again after a new base is loaded', () => {
+    const store = new LayersStore();
+    store.toggleDeformation('ov');
+    store.reset();
+    expect(layerLegend(store.apply(layers()))[1].deformation).toBe('on');
   });
 });
 

@@ -8,7 +8,7 @@ import {
   structureSetsForSeries,
   structureSetsOfPatient,
   type Series,
-  type SpatialRegistration,
+  type RegistrationObject,
   type StructureSet,
 } from '@open-rt-studio/dicom';
 
@@ -140,12 +140,12 @@ export class LocalFilesSource implements DataSource {
   }
 
   /** Take in Spatial Registration objects parsed from files. */
-  addRegistrations(objects: readonly SpatialRegistration[]): void {
+  addRegistrations(objects: readonly RegistrationObject[]): void {
     this.catalog.addRegistrations(objects);
   }
 
   /** The registration objects that may be the patient's the source is on. */
-  registrations(): readonly SpatialRegistration[] {
+  registrations(): readonly RegistrationObject[] {
     return registrationsOfPatient(this.catalog.registrations(), this.catalog.currentPatientId());
   }
 

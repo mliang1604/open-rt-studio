@@ -58,6 +58,11 @@ export class LandmarkPanel {
   readonly error = input.required<TargetRegistrationError>();
   /** The registration the errors are of, in words. */
   readonly registration = input.required<string>();
+  /**
+   * The frame the errors are in: the base image's, or for a registration by
+   * a deformation field the compared image's.
+   */
+  readonly measuredIn = input<'fixed' | 'moving'>('fixed');
   readonly placing = input(false);
   /** Whether the landmarks can be saved to a file and read from one. */
   readonly canExchange = input(true);

@@ -80,8 +80,8 @@ describe('the synthetic deformable registration', () => {
         }
       }
     }
-    // The field does something: more than a millimetre somewhere, nothing at the faces.
-    expect(largest).toBeGreaterThan(1);
+    // The field does something: several millimetres somewhere, nothing at the faces.
+    expect(largest).toBeGreaterThan(4);
     expect(Math.hypot(...syntheticDeformationMm(syntheticDeformationGridPoint(0, 3, 1)))).toBe(0);
   });
 
@@ -94,9 +94,8 @@ describe('the synthetic deformable registration', () => {
     ] as const) {
       const mapped = mapPoint(transform, point as Vec3, between)!;
       const expected = syntheticDeformedPoint(point);
-      // Interpolated between vectors 4 mm apart, four of them from foot to
-      // head: within a quarter of a millimetre.
-      mapped.forEach((value, axis) => expect(Math.abs(value - expected[axis])).toBeLessThan(0.25));
+      // Interpolated between vectors 2 mm apart: within 0.15 mm.
+      mapped.forEach((value, axis) => expect(Math.abs(value - expected[axis])).toBeLessThan(0.15));
     }
     expect(mapPoint(transform, [-1, 5, 5], between)).toBeNull();
     expect(mapPoint(transform, [5, 5, 12.5], between)).toBeNull();

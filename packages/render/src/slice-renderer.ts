@@ -10,6 +10,7 @@ import {
   clearDirty,
   type LabelVolume,
   type Mat4,
+  type PlacementField,
 } from '@open-rt-studio/dicom';
 import {
   colormap,
@@ -20,6 +21,9 @@ import {
 } from './colormap.js';
 import type { PaneRect, Vec2 } from './layout.js';
 import {
+  fieldPlaneToTexMatrix,
+  fieldTexBounds,
+  fieldToOverlayTexMatrix,
   isOblique,
   overlayPlaneToTexMatrix,
   patientToTexMatrix,
@@ -46,6 +50,7 @@ import { SURFACE_CAMERA_SIZE, type SurfaceFrame } from './surface-frame.js';
 import { MIP_PARAMS_SIZE, PARAMS_SIZE, packMipParams, packSliceParams } from './slice-params.js';
 import { aspectScale, clampRect } from './pan-zoom.js';
 import {
+  createFieldTexture,
   createLabelTexture,
   createVolumeTexture,
   encodeFrame,
@@ -63,6 +68,13 @@ import type { MipPaneView, MprPaneView, PaneView } from './pane-view.js';
 
 // Public surface kept stable as this module was split into focused siblings;
 // callers continue to import these geometry/packing helpers from './slice-renderer'.
+/** Whether two fields are the same one: both none, or the same grid between the same matrices. */
+function sameField(a: PlacementField | null, b: PlacementField | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return a.grid === b.grid && sameMatrix(a.pre, b.pre) && sameMatrix(a.post, b.post);
+}
+
 /** Whether two registrations place an overlay alike: both none, or the same numbers. */
 function sameMatrix(a: Mat4 | null, b: Mat4 | null): boolean {
   if (a === b) return true;
@@ -154,6 +166,14 @@ export class SliceRenderer {
    * the base's frame into the overlay's. Null when the two share a frame.
    */
   private overlayRegistration: Mat4 | null = null;
+  /**
+   * The deformation field the overlay's registration goes through, with its
+   * texture and the orthogonal panes' matrices into its grid. Null when the
+   * overlay is placed by matrices alone, or by nothing.
+   */
+  private overlayField: PlacementField | null = null;
+  private fieldTexture: GPUTexture | null = null;
+  private fieldMatrices: readonly Float32Array[] | null = null;
   /** Overlay matrices on its OWN bounds, for drawing it standalone (Compare). */
   private overlayOwnMatrices: readonly Float32Array[] | null = null;
   /** Composite opacity of the overlay over the base, 0 when no overlay. */
@@ -287,6 +307,8 @@ export class SliceRenderer {
     // (maskOpacity 0), the same trick the overlay binding uses.
     const maskView = this.maskTexture?.createView() ?? baseView;
     const maskLutView = this.maskLut.createView({ dimension: '1d' });
+    // No field: the base view again, which the shader does not read (fieldOn 0).
+    const fieldView = this.fieldTexture?.createView() ?? baseView;
     const layout = this.pipeline.getBindGroupLayout(0);
     for (const slot of this.slots) {
       slot.bindGroup = sliceBindGroup(this.device, layout, {
@@ -298,6 +320,7 @@ export class SliceRenderer {
         mask: maskView,
         maskSampler: this.maskSampler,
         maskLut: maskLutView,
+        field: fieldView,
       });
     }
   }
@@ -342,6 +365,42 @@ export class SliceRenderer {
     this.overlayOwnMatrices = null;
     this.overlayOpacity = 0;
     this.overlayColormap = false;
+    this.clearField();
+  }
+
+  /** Drop the overlay's deformation field (texture + matrices). */
+  private clearField(): void {
+    this.fieldTexture?.destroy();
+    this.fieldTexture = null;
+    this.overlayField = null;
+    this.fieldMatrices = null;
+  }
+
+  /**
+   * Take the field the overlay's registration goes through, or none. A grid
+   * that is already uploaded is kept; only its matrices are worked out again.
+   * Gives whether the texture changed, and with it the bind groups.
+   */
+  private takeField(field: PlacementField | null): boolean {
+    const before = this.overlayField;
+    if (!field) {
+      if (!before) return false;
+      this.clearField();
+      return true;
+    }
+    const sameGrid = before?.grid === field.grid;
+    if (!sameGrid) {
+      this.fieldTexture?.destroy();
+      this.fieldTexture = createFieldTexture(this.device, field.grid.dims, field.grid.vectors);
+    }
+    this.overlayField = field;
+    const base = this.volume;
+    this.fieldMatrices = base
+      ? [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal].map((orientation) =>
+          fieldPlaneToTexMatrix(base, field, orientation),
+        )
+      : null;
+    return !sameGrid;
   }
 
   /** Drop the label mask (texture + opacity), so the panes draw without it. */
@@ -462,12 +521,19 @@ export class SliceRenderer {
    * from the base's frame to the overlay's (see {@link overlayPlaneToTexMatrix}).
    * It is whoever calls this that knows the two frames and which way the
    * registration goes; the renderer applies the matrix as it is.
+   *
+   * With `field`, the registration goes through a deformation field: the
+   * overlay is read at `post · (q + field(q))`, `q = pre · p`, for each
+   * position `p` of the base's plane. `baseToOverlay` is then the field's
+   * two matrices alone, `post · pre`, as a placement has them. Where the
+   * field says nothing the overlay is not drawn.
    */
   setOverlay(
     volume: Volume | null,
     opacity: number,
     display?: LayerDisplay,
     baseToOverlay?: Mat4 | null,
+    field?: PlacementField | null,
   ): void {
     if (!volume) {
       if (!this.overlayVolume) return;
@@ -488,6 +554,10 @@ export class SliceRenderer {
       if (!sameMatrix(registration, this.overlayRegistration)) {
         this.overlayRegistration = registration;
         this.overlayMatrices = this.registeredOverlayMatrices(volume);
+      }
+      // The same with its field: taken up, changed or let go of.
+      if (!sameField(field ?? null, this.overlayField) && this.takeField(field ?? null)) {
+        this.rebuildMprBindGroups();
       }
       return;
     }
@@ -510,6 +580,7 @@ export class SliceRenderer {
     this.overlayOwnMatrices = [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal].map(
       (orientation) => planeToTexMatrix(volume, orientation),
     );
+    this.takeField(field ?? null);
     this.rebuildMprBindGroups();
   }
 
@@ -706,7 +777,22 @@ export class SliceRenderer {
       mask: view,
       maskSampler: this.maskSampler,
       maskLut: this.maskLut.createView({ dimension: '1d' }),
+      // Not read either: this column draws the overlay on its own grid.
+      field: view,
     });
+  }
+
+  /** What the shader needs of the overlay's deformation field for one pane, or null without one. */
+  private fieldParams(volume: Volume, view: MprPaneView) {
+    const field = this.overlayField;
+    if (!field || !this.overlayVolume || !this.fieldMatrices || !this.fieldTexture) return null;
+    return {
+      toTex: isOblique(view.rotation)
+        ? fieldPlaneToTexMatrix(volume, field, view.orientation, view.rotation)
+        : this.fieldMatrices[view.orientation],
+      toOverlay: fieldToOverlayTexMatrix(this.overlayVolume, field.post),
+      ...fieldTexBounds(field.grid.dims),
+    };
   }
 
   private writeParams(
@@ -762,6 +848,7 @@ export class SliceRenderer {
             // then scale by the pane zoom so the pattern tracks the anatomy (the
             // shader divides framebuffer coords by this).
             checkerSize: (rect.width / Math.max(this.overlayCheckerCells, 1)) * zoom,
+            field: this.fieldParams(volume, view),
           }
         : null;
 

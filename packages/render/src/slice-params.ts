@@ -29,12 +29,16 @@ import { mipStepScale } from './pan-zoom.js';
 // for its mat4x4): overlayToTex mat4x4 (64) + overlayWindowCenter,
 // overlayWindowWidth,overlayOpacity,overlayColormap (16) = 192; then the label-mask
 // block at byte 192 (16-aligned): maskToTex mat4x4 (64) + maskOpacity,maskLutSize
-// (8) + 8 bytes pad = 80. Total 272.
-export const PARAMS_SIZE = 272;
+// (8) + 8 bytes pad = 80, to 272; then the deformation-field block at byte 272
+// (16-aligned): fieldToTex mat4x4 (64) + fieldToOverlay mat4x4 (64) + fieldLow
+// vec3 and fieldOn (16) + fieldHigh vec3 and 4 bytes pad (16) = 160. Total 432.
+export const PARAMS_SIZE = 432;
 /** Float offset of the overlay block (overlayToTex mat4 then window/opacity). */
 const OVERLAY_FLOATS = 28;
 /** Float offset of the label-mask block (maskToTex mat4 then opacity/LUT size). */
 const MASK_FLOATS = 48;
+/** Float offset of the deformation-field block (two mat4, then the bounds and the switch). */
+const FIELD_FLOATS = 68;
 // bytes: patientToTex mat4x4 (64) + eyeSteps, axisU, axisV, forward, modeSlab,
 // tfDomain, clipA, clipC, clipS, light, material, clipFree (12 × vec4 = 192).
 export const MIP_PARAMS_SIZE = 256;
@@ -92,6 +96,20 @@ export interface SliceParams {
     readonly alone?: boolean;
     /** Checkerboard cell size in framebuffer pixels. */
     readonly checkerSize: number;
+    /**
+     * The deformation field the overlay's registration goes through, or
+     * nothing when it is placed by matrices alone (see `fieldPlaneToTexMatrix`,
+     * `fieldToOverlayTexMatrix` and `fieldTexBounds` in reslice.ts).
+     */
+    readonly field?: {
+      /** The pane's (u, v, slicePos) to the field's texture coordinates. */
+      readonly toTex: Float32Array | readonly number[];
+      /** A displacement in mm to the change of the overlay's texture coordinate. */
+      readonly toOverlay: Float32Array | readonly number[];
+      /** The texture coordinates between which the field has vectors. */
+      readonly low: Vec3;
+      readonly high: Vec3;
+    } | null;
   } | null;
   /**
    * The label-mask block, or null when no authored mask is composited. A distinct
@@ -148,6 +166,14 @@ export function packSliceParams(p: SliceParams): ArrayBuffer {
     floats[OVERLAY_FLOATS + 17] = p.overlay.windowWidth; // float 45
     floats[OVERLAY_FLOATS + 18] = p.overlay.opacity; // float 46
     uints[OVERLAY_FLOATS + 19] = p.overlay.colormap ? 1 : 0; // float 47 (u32)
+    const field = p.overlay.field;
+    if (field) {
+      floats.set(field.toTex as ArrayLike<number>, FIELD_FLOATS); // fieldToTex, 68..83
+      floats.set(field.toOverlay as ArrayLike<number>, FIELD_FLOATS + 16); // fieldToOverlay, 84..99
+      floats.set(field.low, FIELD_FLOATS + 32); // fieldLow, 100..102
+      uints[FIELD_FLOATS + 35] = 1; // fieldOn, float 103 (u32)
+      floats.set(field.high, FIELD_FLOATS + 36); // fieldHigh, 104..106
+    }
   }
   if (p.mask) {
     floats.set(p.mask.matrix as ArrayLike<number>, MASK_FLOATS); // maskToTex, 48..63

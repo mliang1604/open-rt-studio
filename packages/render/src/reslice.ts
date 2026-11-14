@@ -18,7 +18,9 @@ import {
   sub,
   transformPoint,
   transformVector,
+  type DeformationGrid,
   type Mat4,
+  type PlacementField,
 } from '@open-rt-studio/dicom';
 import {
   invMul,
@@ -205,6 +207,93 @@ export function overlayPlaneToTexMatrix(
       }
     : inBase;
   return texAffineMatrix(basisToTex(basis, resolveGeometry(overlayVolume), overlayVolume.dims));
+}
+
+/** A deformation grid as something to read by texture coordinates: its first vector, and the step to the next along each index. */
+function gridGeometry(grid: DeformationGrid): VolumeGeometry {
+  return {
+    origin: grid.origin,
+    iStep: scale(grid.axes[0], grid.spacing[0]),
+    jStep: scale(grid.axes[1], grid.spacing[1]),
+    kStep: scale(grid.axes[2], grid.spacing[2]),
+  };
+}
+
+/**
+ * Column-major 4×4 mapping the BASE volume's displayed pane plane into the
+ * texture coordinates of a deformation field's grid, for an overlay that a
+ * registration by a field places (#77). The field is looked up where the
+ * matrix before it (`field.pre`) puts the base's position, as the
+ * registration model has it; a vector of the grid is at the centre of its
+ * texel. Exact, since the plane stays a plane until the field is read.
+ */
+export function fieldPlaneToTexMatrix(
+  baseVolume: Volume,
+  field: PlacementField,
+  orientation: Orientation,
+  rotation?: ObliqueRotation,
+): Float32Array {
+  const baseGeom = resolveGeometry(baseVolume);
+  const inBase = obliqueBasis(
+    planeBasis(orientation, patientBounds(baseGeom, baseVolume.dims)),
+    rotation,
+  );
+  const basis: PlaneBasis = {
+    origin: transformPoint(field.pre, inBase.origin),
+    axisU: transformVector(field.pre, inBase.axisU),
+    axisV: transformVector(field.pre, inBase.axisV),
+    axisS: transformVector(field.pre, inBase.axisS),
+  };
+  return texAffineMatrix(basisToTex(basis, gridGeometry(field.grid), field.grid.dims));
+}
+
+/**
+ * Column-major 4×4 that turns a displacement of the field, in mm, into the
+ * change it makes to the overlay's texture coordinate: through the matrix
+ * after the field (`post`), then into the overlay's grid. A displacement is
+ * not a position, so only the turning and scaling parts take part and the
+ * last column is nothing. With {@link overlayPlaneToTexMatrix} built from
+ * `post · pre`, the overlay is read at
+ *
+ *     overlayToTex · (u, v, slicePos, 1) + this · (displacement, 0)
+ *
+ * which is `post · (q + field(q))` in the overlay's texture coordinates.
+ */
+export function fieldToOverlayTexMatrix(overlayVolume: Volume, post: Mat4): Float32Array {
+  const geom = resolveGeometry(overlayVolume);
+  const column = (axis: Vec3): Vec3 =>
+    perTexel(invMul(geom, transformVector(post, axis)), overlayVolume.dims);
+  const [x, y, z] = [column([1, 0, 0]), column([0, 1, 0]), column([0, 0, 1])];
+  // prettier-ignore
+  return new Float32Array([
+    x[0], x[1], x[2], 0,
+    y[0], y[1], y[2], 0,
+    z[0], z[1], z[2], 0,
+    0, 0, 0, 0,
+  ]);
+}
+
+/**
+ * How near the edge of its grid a field is still read, as a part of the
+ * distance between two vectors. The shader works in 32-bit floats, and a
+ * plane that lies on the grid's first or last vectors must not flicker.
+ */
+export const FIELD_EDGE = 1e-4;
+
+/**
+ * The texture coordinates between which a field has vectors to read between:
+ * from the centre of its first texel to the centre of its last, along each
+ * axis. Outside them the field says nothing, as `sampleDeformation` has it.
+ */
+export function fieldTexBounds(dims: readonly [number, number, number]): {
+  readonly low: Vec3;
+  readonly high: Vec3;
+} {
+  const low = (n: number): number => (0.5 - FIELD_EDGE) / n;
+  return {
+    low: [low(dims[0]), low(dims[1]), low(dims[2])],
+    high: [1 - low(dims[0]), 1 - low(dims[1]), 1 - low(dims[2])],
+  };
 }
 
 /** A pane's displayed plane: its orientation, slice, and optional oblique tilt. */

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import type { LayerPlacement } from './layer-placement.js';
+import { withoutField, type LayerPlacement } from './layer-placement.js';
 import type { DicomMetadata } from './metadata.js';
 
 /** A single parsed DICOM slice, with the bits we need to build a volume. */
@@ -392,7 +392,9 @@ export function overlayLayerUnplaced(id: string, volume: Volume, frames: LayerFr
  * visibility, composite opacity, display transform (grayscale ⇄ colormap) and,
  * for a layer with several placements to choose among, the one that was chosen
  * (by its index), keyed by {@link Layer.id}. A placement made by hand
- * (`byHand`) goes before any other, chosen or from a file. Mirrors the structures panel's override maps — the
+ * (`byHand`) goes before any other, chosen or from a file. A layer listed in
+ * `rigidOnly` whose placement goes through a deformation field is placed by
+ * that placement's matrices alone. Mirrors the structures panel's override maps — the
  * loaded layers stay immutable and the panel layers its edits on top, so a reload
  * starts clean. A layer with no override is returned unchanged (same reference).
  */
@@ -403,13 +405,17 @@ export function applyLayerOverrides(
   displays: ReadonlyMap<string, LayerDisplay>,
   chosen: ReadonlyMap<string, number> = new Map(),
   byHand: ReadonlyMap<string, LayerPlacement> = new Map(),
+  rigidOnly: ReadonlySet<string> = new Set(),
 ): Layer[] {
   return layers.map((layer) => {
     const opacity = opacities.get(layer.id);
     const display = displays.get(layer.id);
     // A layer that awaits a choice, or a placement by hand, is drawn once it
     // has one, and placed by it.
-    const placement = byHand.get(layer.id) ?? layer.placementChoices?.[chosen.get(layer.id) ?? -1];
+    const given = byHand.get(layer.id) ?? layer.placementChoices?.[chosen.get(layer.id) ?? -1];
+    // With its field left out, a placement is another placement.
+    const current = given ?? layer.placement;
+    const placement = current?.field && rigidOnly.has(layer.id) ? withoutField(current) : given;
     const visible = !hidden.has(layer.id) && (layer.visible || placement !== undefined);
     if (
       opacity === undefined &&

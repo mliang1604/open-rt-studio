@@ -5,12 +5,13 @@
 /// <reference lib="webworker" />
 
 import {
+  parseDeformableRegistration,
   parseFileAsync,
   parseSpatialRegistration,
   parseStructureSet,
   UnsupportedDicomError,
   type Slice,
-  type SpatialRegistration,
+  type RegistrationObject,
   type StructureSet,
 } from '@open-rt-studio/dicom';
 
@@ -33,7 +34,9 @@ export interface ParseRequest {
  * back, not copied. `structureSets` holds the file's RTSTRUCT when it is one
  * (its contour points carry no pixel buffers, so they are cloned, not
  * transferred); empty otherwise. `registrations` likewise holds the file's
- * Spatial Registration object when it is one.
+ * Spatial Registration object when it is one, or its Deformable Spatial
+ * Registration object, whose grids of vectors are transferred back like
+ * pixels.
  */
 export type ParseResponse =
   | {
@@ -41,7 +44,7 @@ export type ParseResponse =
       readonly ok: true;
       readonly slices: Slice[];
       readonly structureSets: StructureSet[];
-      readonly registrations: SpatialRegistration[];
+      readonly registrations: RegistrationObject[];
     }
   | {
       readonly id: number;
@@ -65,16 +68,22 @@ addEventListener('message', async (event: MessageEvent<ParseRequest>) => {
     const slices = await parseFileAsync(name, buffer);
     const structureSet = slices.length === 0 ? parseStructureSet(name, buffer) : null;
     const structureSets = structureSet ? [structureSet] : [];
-    // Neither an image nor a structure set: a registration object, perhaps.
+    // Neither an image nor a structure set: a registration object, perhaps,
+    // by a matrix or by a deformation field.
     const registration =
-      slices.length === 0 && !structureSet ? parseSpatialRegistration(buffer) : null;
+      slices.length === 0 && !structureSet
+        ? (parseSpatialRegistration(buffer) ?? parseDeformableRegistration(buffer))
+        : null;
     const registrations = registration ? [registration] : [];
-    // Transfer each frame's pixel buffer back instead of cloning it.
-    const transfer = slices.map((slice) => slice.pixels.buffer);
-    postMessage(
-      { id, ok: true, slices, structureSets, registrations } satisfies ParseResponse,
-      transfer,
-    );
+    // Transfer each frame's pixel buffer back instead of cloning it, and each
+    // deformation grid's vectors: a window on the file's own bytes, or a copy.
+    const transfer = new Set<ArrayBufferLike>(slices.map((slice) => slice.pixels.buffer));
+    for (const { transform } of registration?.registrations ?? []) {
+      if (transform.kind === 'deformable') transfer.add(transform.grid.vectors.buffer);
+    }
+    postMessage({ id, ok: true, slices, structureSets, registrations } satisfies ParseResponse, [
+      ...transfer,
+    ] as Transferable[]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const reason = error instanceof UnsupportedDicomError ? error.reason : message;

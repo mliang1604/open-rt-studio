@@ -72,6 +72,12 @@ export interface LayerLegendEntry {
   readonly canRegisterByHand: boolean;
   /** The registration being made by hand for the layer, or null. */
   readonly byHand: ByHand | null;
+  /**
+   * For a layer whose registration goes through a deformation field: whether
+   * the field is applied (`on`) or left out, so that only the registration's
+   * matrices place the layer (`off`). Null for any other layer.
+   */
+  readonly deformation: 'on' | 'off' | null;
 }
 
 /**
@@ -110,10 +116,28 @@ export function placementText(placement: LayerPlacement): string {
     const [step] = steps;
     if (step.byHand) return 'Placed by hand';
     const written = step.inverted ? 'this image → base' : 'base → this image';
-    return `Placed by registration “${registrationName(step)}” (written ${written})`;
+    const kind = step.deformable ? 'deformable registration' : 'registration';
+    return `Placed by ${kind} “${registrationName(step)}” (written ${written})${fieldLeftOut(placement)}`;
   }
-  const names = steps.map((step) => `“${registrationName(step)}”`).join(', then ');
-  return `Placed by ${steps.length} registrations in a row: ${names}`;
+  const names = steps.map(stepName).join(', then ');
+  return `Placed by ${steps.length} registrations in a row: ${names}${fieldLeftOut(placement)}`;
+}
+
+/** A step's name, and that it is by a deformation field when it is. */
+function stepName(step: PlacementStep): string {
+  return `“${registrationName(step)}”${step.deformable ? ' (deformable)' : ''}`;
+}
+
+/** Whether a placement has a registration by a deformation field among its steps. */
+export function isDeformable(placement: LayerPlacement): boolean {
+  return placement.steps.some((step) => step.deformable);
+}
+
+/** What is said of a deformable registration whose field is left out. */
+function fieldLeftOut(placement: LayerPlacement): string {
+  return isDeformable(placement) && !placement.field
+    ? '. Its deformation is left out: placed by its matrices only'
+    : '';
 }
 
 /**
@@ -126,13 +150,15 @@ export function placementText(placement: LayerPlacement): string {
  */
 export function placementChoiceText(placement: LayerPlacement): string {
   const { steps } = placement;
-  const names = steps.map((step) => `“${registrationName(step)}”`).join(', then ');
+  const names = steps.map(stepName).join(', then ');
   const written =
     steps.length === 1
       ? ` (written ${steps[0].inverted ? 'this image → base' : 'base → this image'})`
       : '';
   const { shiftMm, turnDeg } = placementSize(placement);
-  return `${names}${written} · translation ${shiftMm.toFixed(1)} mm, rotation ${turnDeg.toFixed(1)}°`;
+  // For a deformable registration these are of its matrices, not of its field.
+  const of = isDeformable(placement) ? 'its matrices: ' : '';
+  return `${names}${written} · ${of}translation ${shiftMm.toFixed(1)} mm, rotation ${turnDeg.toFixed(1)}°`;
 }
 
 /**
@@ -158,15 +184,29 @@ export function layerLegend(
       displayValue: layer.display.kind === 'grayscale' ? 'grayscale' : layer.display.name,
       placement: layer.placement && !choices ? placementText(layer.placement) : null,
       placementChoices: choices?.map(placementChoiceText) ?? null,
-      placementChosen:
-        layer.placement && choices?.includes(layer.placement)
-          ? choices.indexOf(layer.placement)
-          : null,
+      // A placement with its field left out is another object of the same steps.
+      placementChosen: chosenAmong(choices, layer.placement),
       unplaced: !!layer.frames && !layer.placement,
       canRegisterByHand: layer.role === 'overlay' && layerFrames(layer) !== null,
       byHand: hand,
+      deformation:
+        layer.placement && isDeformable(layer.placement)
+          ? layer.placement.field
+            ? 'on'
+            : 'off'
+          : null,
     };
   });
+}
+
+/** Which of a layer's choices places it, or null when none of them does. */
+function chosenAmong(
+  choices: readonly LayerPlacement[] | undefined,
+  placement: LayerPlacement | undefined,
+): number | null {
+  if (!choices || !placement) return null;
+  const index = choices.findIndex((one) => one === placement || one.steps === placement.steps);
+  return index < 0 ? null : index;
 }
 
 /**
@@ -220,6 +260,23 @@ export class LayersStore {
    * the user discards them. They are in the viewer only until they are saved.
    */
   private readonly _byHand = signal<ReadonlyMap<string, ByHand>>(new Map());
+
+  /**
+   * The layers whose registration goes through a deformation field that is
+   * left out for now (#77): they are placed by the registration's matrices
+   * alone, to see what the field adds.
+   */
+  private readonly _rigidOnly = signal<ReadonlySet<string>>(new Set());
+
+  /** Leave a layer's deformation field out, or put it back. */
+  toggleDeformation(id: string): void {
+    this._rigidOnly.update((set) => {
+      const next = new Set(set);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   /** The registrations being made by hand, by layer id. */
   readonly byHand = this._byHand.asReadonly();
@@ -286,6 +343,7 @@ export class LayersStore {
       this._displays(),
       this._placements(),
       byHand,
+      this._rigidOnly(),
     );
   }
 
@@ -423,6 +481,7 @@ export class LayersStore {
     this._placements.set(new Map());
     this._byHand.set(new Map());
     this._byHandDrag.set(null);
+    this._rigidOnly.set(new Set());
     this.checkerboardEnabled.set(false);
   }
 }

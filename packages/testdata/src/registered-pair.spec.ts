@@ -92,7 +92,7 @@ describe('the synthetic registered pair', () => {
     ];
     for (const [x, y, z] of voxels) {
       // The CT's voxel is at its index, in mm. Where is that in the MR's frame?
-      const inMrFrame = pointBetweenLayers([x, y, z], undefined, found.placement);
+      const inMrFrame = pointBetweenLayers([x, y, z], undefined, found.placement)!;
       expect(valueAt(mr, inMrFrame), `CT voxel ${x}, ${y}, ${z}`).toBe(
         registeredMrValueAtCtVoxel(x, y, z),
       );

@@ -148,11 +148,11 @@ export class MeasureController {
     // puts the point: the same anatomy, at other coordinates.
     const layers = this.layersCtl.layers();
     const hovered = layers.find((layer) => layer.volume === hoveredVolume);
-    const readAt = (layer: Layer): VoxelProbe | null =>
-      sampleVolumeAtPatient(
-        layer.volume,
-        pointBetweenLayers(sample.patient, hovered?.placement, layer.placement),
-      );
+    const readAt = (layer: Layer): VoxelProbe | null => {
+      // Where a deformation field says nothing the layer is not drawn, and not read.
+      const at = pointBetweenLayers(sample.patient, hovered?.placement, layer.placement);
+      return at ? sampleVolumeAtPatient(layer.volume, at) : null;
+    };
 
     // The pane's own image comes first in the readout. In the Compare column
     // of a registered overlay that is the overlay, though the pane is laid

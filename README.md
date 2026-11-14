@@ -93,6 +93,9 @@ by git) if you want files on disk to open.
 - Fusion and Compare of a series from another frame of reference through a
   rigid DICOM Spatial Registration, opened from files beside it or kept on
   the server, with a choice when several registrations connect the two
+- The same through a DICOM Deformable Spatial Registration: the second
+  series read through the deformation field, with a switch that leaves the
+  field out to see what it adds
 - Rigid registration by hand: shift and turn one series over another by
   dragging it in any plane or with numbers, see the fused picture follow,
   and save the result as a DICOM Spatial Registration object

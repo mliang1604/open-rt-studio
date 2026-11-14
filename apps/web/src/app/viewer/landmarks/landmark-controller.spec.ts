@@ -5,6 +5,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
+  IDENTITY_MAT4,
   Orientation,
   baseImageLayer,
   manualPlacement,
@@ -268,6 +269,84 @@ describe('LandmarkController: the error', () => {
     expect(rows[0].distanceMm).toBeCloseTo(2, 6);
     expect(rows[1].distanceMm).toBeNull();
     expect(rows[2].distanceMm).toBeCloseTo(2, 6);
+  });
+});
+
+describe('LandmarkController: under a deformation field (#77)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  // The field moves every place of the base's frame by 2 mm along x before
+  // the true registration's move: over the whole grid of the two images.
+  const fieldPlacement = (): Layer => {
+    const placement = manualPlacement(FIXED_FRAME, MOVING_FRAME, TRUE);
+    const vectors = new Float32Array(3 * 3 * 3 * 3);
+    for (let at = 0; at < vectors.length; at += 3) vectors[at] = 2;
+    return overlayImageLayer('mr', volume('MR', [100, 200, 300]), {
+      ...placement,
+      steps: [{ ...placement.steps[0], byHand: false, deformable: true }],
+      field: {
+        pre: IDENTITY_MAT4,
+        grid: {
+          dims: [3, 3, 3],
+          origin: [0, 0, 0],
+          axes: [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          spacing: [5, 5, 5],
+          vectors,
+        },
+        post: placement.baseToLayer,
+      },
+    });
+  };
+
+  it('keeps the compared image’s point where the field puts the place that was clicked', () => {
+    const { controller, placing, overlay } = setup();
+    overlay.set(fieldPlacement());
+    placing();
+    controller.place(BASE_PANE, at(35, 45));
+    controller.place(OTHER_PANE, at(155, 45));
+    const [one] = controller.landmarks();
+    near(one.fixed, [3, 4, 5]);
+    // The base's (3, 4, 5), moved 2 mm along x, then into the other frame.
+    near(one.moving, [105, 204, 305]);
+    expect(controller.measuredIn()).toBe('moving');
+    expect(controller.error().meanMm).toBeCloseTo(0, 5);
+  });
+
+  it('measures in the compared image’s frame: from its point to where the base’s is put', () => {
+    const { controller, placing, overlay, store } = setup();
+    overlay.set(fieldPlacement());
+    placing();
+    controller.place(BASE_PANE, at(35, 45));
+    controller.place(OTHER_PANE, at(155, 45));
+    // The compared image's point is moved 3 mm towards the head in its own frame.
+    const { id } = controller.landmarks()[0];
+    store.setPoint(id, 'moving', [105, 204, 308]);
+    const [row] = controller.rows();
+    expect(row.distanceMm).toBeCloseTo(3, 5);
+    // registration(fixed) − moving.
+    near(row.error, [0, 0, -3]);
+  });
+
+  it('draws no marker it cannot place, and has no number where the field does not reach', () => {
+    const { controller, placing, overlay, store } = setup();
+    overlay.set(fieldPlacement());
+    placing();
+    controller.place(BASE_PANE, at(35, 45));
+    controller.place(OTHER_PANE, at(155, 45));
+    // The base's column shows its point; the other column has no way back to
+    // the base's planes for the compared image's point.
+    expect(controller.markers().map((one) => one.side)).toEqual(['fixed']);
+    // The grid ends at 10 mm. A point of the base past it is not mapped, and
+    // its landmark has no number.
+    const { id } = controller.landmarks()[0];
+    store.setPoint(id, 'fixed', [10.4, 0, 0]);
+    expect(controller.error().unmapped).toEqual(['L1']);
+    expect(controller.error().count).toBe(0);
+    expect(controller.rows()[0].distanceMm).toBeNull();
   });
 });
 

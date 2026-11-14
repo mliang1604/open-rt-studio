@@ -136,6 +136,60 @@ export function writeLut1d(
   );
 }
 
+/** Floats to a texel of a field's texture: a displacement and whether there is one. */
+const FIELD_CHANNELS = 4;
+
+/**
+ * The texels of a deformation field's texture: for each vector its three
+ * parts in mm as half floats, and 1 in the fourth channel. A vector that is
+ * undefined (NaN) is written as nothing with 0 in the fourth channel, so that
+ * read between texels the fourth channel is below 1 wherever an undefined
+ * vector has a part in what is read. Half floats keep a displacement of up to
+ * 64 mm to within 0.03 mm, and a smaller one more finely.
+ */
+export function fieldTexels(vectors: Float32Array): Uint16Array {
+  const count = vectors.length / 3;
+  const texels = new Uint16Array(count * FIELD_CHANNELS);
+  const one = f32ToF16(1);
+  for (let i = 0; i < count; i++) {
+    const [x, y, z] = [vectors[i * 3], vectors[i * 3 + 1], vectors[i * 3 + 2]];
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) continue; // left as zeros
+    texels[i * 4] = f32ToF16(x);
+    texels[i * 4 + 1] = f32ToF16(y);
+    texels[i * 4 + 2] = f32ToF16(z);
+    texels[i * 4 + 3] = one;
+  }
+  return texels;
+}
+
+/** Allocate an `rgba16float` 3D texture for a deformation field's grid and upload its vectors. */
+export function createFieldTexture(
+  device: GPUDevice,
+  dims: readonly [number, number, number],
+  vectors: Float32Array,
+): GPUTexture {
+  const [width, height, depth] = dims;
+  const limit = device.limits.maxTextureDimension3D;
+  if (width > limit || height > limit || depth > limit) {
+    throw new Error(
+      `Deformation field ${width}×${height}×${depth} exceeds this GPU's 3D texture limit of ${limit}.`,
+    );
+  }
+  const texture = device.createTexture({
+    dimension: '3d',
+    size: { width, height, depthOrArrayLayers: depth },
+    format: 'rgba16float',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture(
+    { texture },
+    fieldTexels(vectors),
+    { bytesPerRow: width * FIELD_CHANNELS * BYTES_PER_HALF, rowsPerImage: height },
+    { width, height, depthOrArrayLayers: depth },
+  );
+  return texture;
+}
+
 /** The views/buffer an MPR slice pane binds: base + overlay + mask textures, LUTs, params. */
 export interface SliceBindResources {
   readonly sampler: GPUSampler;
@@ -149,11 +203,16 @@ export interface SliceBindResources {
   readonly maskSampler: GPUSampler;
   /** The id→colour mask LUT (binding 7). */
   readonly maskLut: GPUTextureView;
+  /**
+   * The deformation field of the overlay's registration (binding 8). The base
+   * view when there is none; the shader does not read it then.
+   */
+  readonly field: GPUTextureView;
 }
 
 /**
  * The MPR slice bind group (base 0, sampler 1, params 2, overlay 3, colormap LUT 4,
- * mask texture 5, nearest mask sampler 6, mask LUT 7).
+ * mask texture 5, nearest mask sampler 6, mask LUT 7, deformation field 8).
  */
 export function sliceBindGroup(
   device: GPUDevice,
@@ -171,6 +230,7 @@ export function sliceBindGroup(
       { binding: 5, resource: r.mask },
       { binding: 6, resource: r.maskSampler },
       { binding: 7, resource: r.maskLut },
+      { binding: 8, resource: r.field },
     ],
   });
 }

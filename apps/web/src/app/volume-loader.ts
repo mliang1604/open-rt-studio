@@ -16,7 +16,7 @@ import {
   overlayLayerAwaitingChoice,
   overlayLayerUnplaced,
   type Layer,
-  type SpatialRegistration,
+  type RegistrationObject,
   type StructureSet,
   VolumeBuildError,
 } from '@open-rt-studio/dicom';
@@ -41,9 +41,9 @@ export type FileImport = (
   | {
       readonly kind: 'structures';
       readonly structureSets: readonly StructureSet[];
-      readonly registrations: readonly SpatialRegistration[];
+      readonly registrations: readonly RegistrationObject[];
     }
-  | { readonly kind: 'registrations'; readonly registrations: readonly SpatialRegistration[] }
+  | { readonly kind: 'registrations'; readonly registrations: readonly RegistrationObject[] }
   | { readonly kind: 'nothing' }
 ) & { readonly skipped: readonly SkippedFile[] };
 
@@ -81,7 +81,7 @@ export interface LoadResult {
    * the batch of files, or those the source gave with the series. What may
    * place a series of another frame of reference over this one.
    */
-  readonly registrations: readonly SpatialRegistration[];
+  readonly registrations: readonly RegistrationObject[];
   /** Number of files the user selected. */
   readonly fileCount: number;
   /** Number of image slices the selected series contributed. */
@@ -149,7 +149,7 @@ export class VolumeLoader {
   private buildFromSlices(
     slices: Parameters<typeof groupSeries>[0],
     structureSets: readonly StructureSet[],
-    registrations: readonly SpatialRegistration[],
+    registrations: readonly RegistrationObject[],
     fileCount: number,
   ): LoadResult {
     const series = groupSeries(slices);
@@ -173,7 +173,7 @@ export class VolumeLoader {
   loadSeries(
     series: Series,
     allStructureSets: readonly StructureSet[] = [],
-    registrations: readonly SpatialRegistration[] = [],
+    registrations: readonly RegistrationObject[] = [],
   ): LoadResult {
     return this.buildResult(
       [series],
@@ -192,7 +192,7 @@ export class VolumeLoader {
   merge(
     current: LoadResult,
     incoming: LoadResult,
-    registrations: readonly SpatialRegistration[] = [],
+    registrations: readonly RegistrationObject[] = [],
   ): MergedLoad {
     return mergeLoad(current, incoming, registrations);
   }
@@ -201,7 +201,7 @@ export class VolumeLoader {
     series: readonly Series[],
     selected: Series,
     allStructureSets: readonly StructureSet[],
-    registrations: readonly SpatialRegistration[],
+    registrations: readonly RegistrationObject[],
     fileCount: number,
   ): LoadResult {
     // One layer: the selected series. Anything else, a dose included, joins the
@@ -271,7 +271,7 @@ export interface MergedLoad {
 export function mergeLoad(
   current: LoadResult,
   incoming: LoadResult,
-  registrations: readonly SpatialRegistration[] = [],
+  registrations: readonly RegistrationObject[] = [],
 ): MergedLoad {
   const baseFrame = selectedSeries(current)?.frameOfReferenceUid ?? null;
   const layerFrame = selectedSeries(incoming)?.frameOfReferenceUid ?? null;
