@@ -16,6 +16,7 @@ import {
   type BlendBar,
   type Vec2,
   linkedSliceIndex,
+  sliceCountFor,
   windowPresets,
   type WindowLevel,
   type WindowPreset,
@@ -270,6 +271,17 @@ export class LayersController {
       if (!base || !target) return master;
       return linkedSliceIndex(base, target, orientation, master, d.obliques()[orientation]);
     });
+  }
+
+  /**
+   * The slice a pane shows, as its tag has it: "7 / 12", of the column the
+   * pane is in. A Compare column that navigates by itself, or is laid out on
+   * another grid than the base's, has a slice and a count of its own (#230).
+   */
+  paneSliceLabel(group: number, orientation: Orientation): string {
+    const volume = this.groupVolume(group);
+    const count = volume ? sliceCountFor(volume, orientation) : 0;
+    return count > 0 ? `${this.paneSliceIndex(group, orientation) + 1} / ${count}` : '–';
   }
 
   /** The zoom a pane uses: shared while linked, the group's own when unlinked. */
