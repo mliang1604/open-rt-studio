@@ -100,7 +100,8 @@ Loading:
   the catalog.
 - `patient-catalog.ts`, `recent-store.ts`: the catalog of everything imported
   in this session (what the local source holds), and the list of recent
-  selections.
+  selections. The catalog keeps every patient whose files were opened, and is
+  on one of them at a time; they stay until the page is reloaded.
 - `file-access.ts`, `recent-handles.ts`: where the browser has the File System
   Access API (Chromium), Open folder and Open files use its pickers, and the
   handle of a folder or of a single file is kept in IndexedDB. Choosing that
@@ -129,7 +130,10 @@ Viewer (`src/app/viewer`):
   canvas. An overlay added to the viewport shows in captures once its selector
   is in the list at the top of `capture-overlays.ts`.
 - `history-panel/`: the patient timeline and tree with series chips. It
-  shows what the data source lists and asks the source for each preview. The
+  shows what the data source lists and asks the source for each preview.
+  With files of more than one patient open, the patient's name on its bar is
+  a selector to turn to another; the viewer asks first when a series is
+  showing, and empties the viewport. The
   chip of an image series says how many structure sets come with it ("RS 2"),
   which is how a save to the server shows on the timeline.
 - `server-panel/`: the card for connecting to a server. It is opened from

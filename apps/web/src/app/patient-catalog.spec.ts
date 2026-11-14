@@ -82,6 +82,40 @@ describe('PatientCatalog', () => {
     expect(catalog.currentPatient()?.patientId).toBe('p2');
   });
 
+  it('stays with the patient on screen when an import brings their files among others', () => {
+    const catalog = new PatientCatalog();
+    catalog.add([series('a', { patientId: 'p1' })]);
+    catalog.add([series('b', { patientId: 'p2' }), series('c', { patientId: 'p1' })]);
+
+    expect([...catalog.patients().keys()]).toEqual(['p1', 'p2']);
+    expect(catalog.currentPatientId()).toBe('p1');
+  });
+
+  it('turns to the first by Patient ID of a batch that holds two, whatever order they came in', () => {
+    const catalog = new PatientCatalog();
+    catalog.add([series('a', { patientId: 'p2' }), series('b', { patientId: 'p1' })]);
+    // As the patients are listed.
+    expect([...catalog.patients().keys()]).toEqual(['p1', 'p2']);
+    expect(catalog.currentPatientId()).toBe('p1');
+
+    // Likewise when the batch leaves the patient on screen for two others.
+    catalog.add([series('c', { patientId: 'p4' }), series('d', { patientId: 'p3' })]);
+    expect(catalog.currentPatientId()).toBe('p3');
+  });
+
+  it('turns to a patient it holds, and stays for one it does not', () => {
+    const catalog = new PatientCatalog();
+    catalog.add([series('a', { patientId: 'p1' })]);
+    catalog.add([series('b', { patientId: 'p2' })]);
+
+    expect(catalog.select('p1')).toBe(true);
+    expect(catalog.currentPatient()?.patientId).toBe('p1');
+    // The other patient is still held, to turn back to.
+    expect(catalog.patients().has('p2')).toBe(true);
+    expect(catalog.select('p9')).toBe(false);
+    expect(catalog.currentPatientId()).toBe('p1');
+  });
+
   it('builds no volumes, retaining each series slices', () => {
     const catalog = new PatientCatalog();
     catalog.add([series('a')]);

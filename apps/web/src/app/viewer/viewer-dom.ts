@@ -17,15 +17,28 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 /**
- * Ask whether to switch the catalog to the just-imported patient, discarding the
- * one currently loaded. The viewer holds one patient at a time, so a different-
- * patient import is a deliberate switch rather than a silent mix; `false` cancels
- * and leaves the current view untouched.
+ * Ask whether to turn the viewer to the patient of the files just opened,
+ * while a series of another patient is showing. The view is of one patient at
+ * a time, so this is a deliberate switch and not a silent mix; `false` cancels
+ * the import and leaves the view as it was. The patient that is left stays
+ * open, to be turned back to in the history bar.
  */
 export function confirmPatientSwitch(): boolean {
   return confirm(
-    'These files belong to a different patient. Switch to them and clear the ' +
-      'current patient from the viewer?',
+    'These files belong to another patient. Turn to that patient and empty the ' +
+      'viewer? The patient open now stays in the patient list.',
+  );
+}
+
+/**
+ * Ask before the viewer is emptied to turn to another patient: what is on
+ * screen is not theirs, and what was painted or measured on it and not
+ * exported is lost.
+ */
+export function confirmLeavePatient(to: string): boolean {
+  return confirm(
+    `Turn to ${to} and empty the viewer? Anything painted or measured here that ` +
+      'was not exported is lost.',
   );
 }
 

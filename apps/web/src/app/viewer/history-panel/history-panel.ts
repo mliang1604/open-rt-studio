@@ -13,7 +13,12 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { formatDicomDate } from '@open-rt-studio/dicom';
-import { DATA_SOURCE, type SeriesSummary, type StudySummary } from '../../data-source/data-source';
+import {
+  DATA_SOURCE,
+  type PatientSummary,
+  type SeriesSummary,
+  type StudySummary,
+} from '../../data-source/data-source';
 import { PreferencesStore, type HistoryView } from '../../preferences-store';
 import type { SeriesThumbnail } from '../series-thumbnail';
 import { SeriesChip } from './series-chip';
@@ -87,6 +92,16 @@ export class HistoryPanel {
   /** Asks for the card where a server is connected to and its patients are chosen. */
   readonly openServer = output<void>();
 
+  /**
+   * The patients to choose among from the bar: those whose files are open.
+   * With fewer than two there is nothing to choose, and the bar names the
+   * patient in plain text. The panel does not know where they come from.
+   */
+  readonly patients = input<readonly PatientSummary[]>([]);
+
+  /** Asks to turn to another of {@link patients}, by key. The viewer may refuse. */
+  readonly choosePatient = output<string>();
+
   /** The focused patient's studies along the timeline (ascending); empty when none. */
   protected readonly studies = computed<readonly StudySummary[]>(
     () => this.source.currentPatient()?.studies ?? [],
@@ -114,6 +129,26 @@ export class HistoryPanel {
     if (!patient) return '';
     return patient.name?.trim() || patient.patientId || 'Unknown patient';
   });
+
+  /** The key of the patient the timeline is of, for the selector. */
+  protected readonly patientKey = computed(() => this.source.currentPatient()?.key ?? '');
+
+  /** A patient as the selector names them: the name, and the ID when there are both. */
+  protected optionLabel(patient: PatientSummary): string {
+    return patientOptionLabel(patient);
+  }
+
+  /**
+   * Another patient was chosen in the selector. The viewer decides: it asks
+   * before it empties what is showing. So the selector is put back to the
+   * patient the timeline is of, and follows only when the timeline does.
+   */
+  protected onChoosePatient(event: Event): void {
+    if (!(event.target instanceof HTMLSelectElement)) return;
+    const key = event.target.value;
+    event.target.value = this.patientKey();
+    if (key !== this.patientKey()) this.choosePatient.emit(key);
+  }
 
   /** Whether the panel is collapsed to its header bar. Restored from preferences. */
   protected readonly collapsed = signal(this.preferences.preferences().historyCollapsed);
@@ -244,4 +279,12 @@ export function seriesCountLabel(count: number): string {
 /** Pluralised study-count summary for the tree root, e.g. `1 study` / `3 studies`. */
 export function studyCountLabel(count: number): string {
   return `${count} ${count === 1 ? 'study' : 'studies'}`;
+}
+
+/** A patient in a list to choose from: `NAME (ID)`, or whichever of the two there is. */
+export function patientOptionLabel(patient: PatientSummary): string {
+  const name = patient.name?.trim() ?? '';
+  const id = patient.patientId.trim();
+  if (name && id) return `${name} (${id})`;
+  return name || id || 'Unknown patient';
 }

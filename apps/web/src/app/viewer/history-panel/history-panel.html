@@ -15,7 +15,22 @@
     History <kbd>H</kbd>
     <span class="history-count">{{ studies().length }}</span>
   </button>
-  @if (patientLabel(); as label) {
+  @if (patients().length > 1) {
+    <!-- Several patients are open: the one the timeline is of, and the way to another. -->
+    <select
+      class="history-patient history-patient-select"
+      aria-label="Patient"
+      title="The patient shown. Choose another to turn to them"
+      [value]="patientKey()"
+      (change)="onChoosePatient($event)"
+    >
+      @for (patient of patients(); track patient.key) {
+        <option [value]="patient.key" [selected]="patient.key === patientKey()">
+          {{ optionLabel(patient) }}
+        </option>
+      }
+    </select>
+  } @else if (patientLabel(); as label) {
     <span class="history-patient" [title]="label">{{ label }}</span>
   }
   @if (server(); as from) {

@@ -14,6 +14,7 @@ export {
   addSeriesToCatalog,
   catalogSeries,
   importKeepsOnePatient,
+  importLeavesPatient,
   initialImportSeries,
 } from './catalog.js';
 export { type RasterizeResult, rasterizeRoiContours } from './contour-raster.js';

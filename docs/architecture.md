@@ -137,6 +137,20 @@ also builds on its own to `dist/` for consumers outside the workspace.
   takes an `AbortSignal` and may report progress; a source that answers at
   once reports none, and the viewer then shows none. Importing files is not
   in the interface: only the local source does it.
+- **Several patients can be open; the view is of one** (#35). Opening files
+  adds their patients to the catalog and takes none away. The timeline, the
+  previews and every series the local source gives are of the patient it is
+  on, so a view cannot be put together from two patients: a series of another
+  open patient is refused by the source, not only left off the timeline.
+  Turning to another patient, in the history bar's selector or by opening
+  files that hold nothing of the patient on screen, empties the viewport, and
+  asks first when a series is showing. Files that do hold something of the
+  patient on screen leave the viewer where it is, and any other patients in
+  them join the list. A batch of several patients with no one on screen opens
+  on the first by Patient ID, the order of the list. Two limits: an open
+  patient cannot be closed short of reloading the page, and structure sets
+  are kept in one list and joined to a series by UID (frame of reference or
+  referenced series), not by patient.
 - **A server is browsed by its studies** (#37). The browser lists studies,
   each with its patient, because that is what can be searched by date and
   modality as well as by name and ID, and what the server already answers

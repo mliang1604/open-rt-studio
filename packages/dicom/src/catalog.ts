@@ -186,6 +186,22 @@ export function importKeepsOnePatient(
 }
 
 /**
+ * Whether importing `series` takes the viewer away from the patient it is on:
+ * there is a current patient, and the batch holds nothing of theirs. Such an
+ * import is confirmed first, because what is on screen is then another
+ * patient's. A batch that holds the current patient among others leaves the
+ * viewer where it is; the others join the catalog to be turned to later.
+ */
+export function importLeavesPatient(
+  currentPatientId: string | null,
+  series: readonly Series[],
+): boolean {
+  if (currentPatientId === null) return false;
+  const ids = importPatientIds(series);
+  return ids.length > 0 && !ids.includes(currentPatientId);
+}
+
+/**
  * Modalities that carry no primary image and so must never open as the base
  * series: the RT ancillary objects (dose grid, structure set, plan, treatment
  * record) and the secondary / derived objects (registration, segmentation,

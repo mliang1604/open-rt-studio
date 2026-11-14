@@ -8,6 +8,7 @@ import { baseImageLayer, Orientation, type Series, type Volume } from '@open-rt-
 import { NO_OBLIQUE, type SliceRenderer } from '@open-rt-studio/render';
 
 import { ActiveDataSource } from '../data-source/active-data-source';
+import { LocalFilesSource } from '../data-source/local-files-source';
 import { DATA_SOURCE } from '../data-source/data-source';
 import { FakeDataSource, fakePatient } from '../data-source/testing';
 import { mergeLoad, VolumeLoader, type FileImport, type LoadResult } from '../volume-loader';
@@ -429,5 +430,114 @@ describe('changing the data source', () => {
     expect(load()).toEqual({ status: 'idle' });
     expect(canvas.at(-1)).toBe('empty');
     await picking;
+  });
+
+  describe('with files of two patients open', () => {
+    /** A parsed series of a patient, with nothing in it: enough to list and to build. */
+    const of = (patientId: string, uid: string): Series =>
+      ({
+        uid,
+        seriesNumber: 1,
+        description: null,
+        modality: 'CT',
+        studyUid: `${uid}.0`,
+        studyDate: '20260105',
+        studyTime: null,
+        studyDescription: null,
+        patientId,
+        patientName: `${patientId}^SYNTHETIC`,
+        frameOfReferenceUid: null,
+        imageCount: 1,
+        slices: [],
+      }) as unknown as Series;
+
+    function twoPatients() {
+      const made = onActive();
+      const files = TestBed.inject(LocalFilesSource);
+      files.add([of('P1', '1.1'), of('P2', '2.1')]);
+      const asked: string[] = [];
+      return {
+        ...made,
+        files,
+        asked,
+        /** Answers the question that is put before a displayed series is given up. */
+        confirm: (answer: boolean) => (to: string) => {
+          asked.push(to);
+          return answer;
+        },
+      };
+    }
+
+    it('lists both, and is on the first', () => {
+      const { files } = twoPatients();
+      expect(files.patients().map((patient) => patient.key)).toEqual(['P1', 'P2']);
+      expect(files.currentPatient()?.key).toBe('P1');
+    });
+
+    it('turns to the other patient without asking while nothing is showing', () => {
+      const { controller, files, confirm, asked, load } = twoPatients();
+      expect(controller.switchPatient('P2', confirm(false))).toBe(true);
+      expect(asked).toEqual([]);
+      expect(files.currentPatient()?.key).toBe('P2');
+      expect(files.currentPatient()?.studies.flatMap((study) => study.series)).toHaveLength(1);
+      expect(load()).toEqual({ status: 'idle' });
+    });
+
+    it('asks before it gives up a displayed series, and empties the viewport when told to', async () => {
+      const { controller, files, confirm, asked, shown, load } = twoPatients();
+      await controller.loadSeriesFromPanel('1.1');
+      expect(shown()).toBe('1.1');
+
+      // Refused: nothing changes.
+      expect(controller.switchPatient('P2', confirm(false))).toBe(false);
+      expect(asked).toEqual(['P2^SYNTHETIC']);
+      expect(files.currentPatient()?.key).toBe('P1');
+      expect(shown()).toBe('1.1');
+
+      // Agreed: the other patient's timeline, and nothing of the first on screen.
+      expect(controller.switchPatient('P2', confirm(true))).toBe(true);
+      expect(files.currentPatient()?.key).toBe('P2');
+      expect(load()).toEqual({ status: 'idle' });
+      // The first patient is still open, to turn back to.
+      expect(files.patients().map((patient) => patient.key)).toEqual(['P1', 'P2']);
+      expect(controller.switchPatient('P1', confirm(true))).toBe(true);
+      await controller.loadSeriesFromPanel('1.1');
+      expect(shown()).toBe('1.1');
+    });
+
+    it('cannot show a series of the patient it is not on', async () => {
+      const { controller, shown, load } = twoPatients();
+      // The timeline is of P1: a UID of P2 is not on it.
+      await controller.loadSeriesFromPanel('1.1');
+      // A chip dragged from somewhere it should not be: its UID is another patient's.
+      await controller.onDrop({
+        preventDefault: () => undefined,
+        altKey: true,
+        shiftKey: false,
+        dataTransfer: { getData: (type: string) => (type === SERIES_DND_MIME ? '2.1' : '') },
+      } as unknown as DragEvent);
+      expect(shown()).toBe('1.1');
+      const state = load();
+      expect(state.status === 'ready' ? state.result.layers.map((layer) => layer.id) : []).toEqual([
+        '1.1',
+      ]);
+    });
+
+    it('does nothing for the patient it is on, or for one that is not open', async () => {
+      const { controller, files, confirm, asked, shown } = twoPatients();
+      await controller.loadSeriesFromPanel('1.1');
+      expect(controller.switchPatient('P1', confirm(true))).toBe(true);
+      expect(controller.switchPatient('P9', confirm(true))).toBe(false);
+      expect(asked).toEqual([]);
+      expect(shown()).toBe('1.1');
+      expect(files.currentPatient()?.key).toBe('P1');
+    });
+
+    it('does nothing while the viewer reads from a server', () => {
+      const { controller, other, files, confirm } = twoPatients();
+      controller.useSource(other);
+      expect(controller.switchPatient('P2', confirm(true))).toBe(false);
+      expect(files.currentPatient()?.key).toBe('P1');
+    });
   });
 });

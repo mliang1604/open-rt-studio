@@ -293,6 +293,13 @@ export class Viewer {
   protected readonly serverLabel = computed(() =>
     this.sources.isFiles() ? null : this.sources.source().label,
   );
+  /**
+   * The patients to switch between from the history bar: those whose files
+   * are open. A server's patients are found in its study browser instead.
+   */
+  protected readonly openPatients = computed(() =>
+    this.sources.isFiles() ? this.sources.patients() : [],
+  );
   /** The modal help panel, so the toolbar controller can move focus into it on open. */
   private readonly shortcutHelp = viewChild(ShortcutHelp);
   /** The shortcuts listed in the help overlay, in display order. */

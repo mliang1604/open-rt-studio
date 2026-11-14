@@ -41,6 +41,7 @@ import { RoiController } from './roi-controller';
 import { EditableStructuresStore } from './editable-structures-store';
 import { LoadCoordinator, type DropIntent, type LoadOutcome } from './load-coordinator';
 import {
+  confirmLeavePatient,
   confirmPatientSwitch,
   dropHeadlineText,
   dropIntentOf,
@@ -177,6 +178,30 @@ export class LoadController {
     this.picks.cancel();
     this.clearView();
     this.sources.use(source);
+  }
+
+  /**
+   * Turn the timeline to another of the patients whose files are open (#35).
+   * The viewer shows one patient at a time: what is on screen, or on its way
+   * there, is another patient's from then on, so it is emptied first. When a
+   * series is showing, that is asked first, since what was painted or
+   * measured on it goes with it; refused, nothing changes.
+   *
+   * Says whether the timeline is now on that patient.
+   */
+  switchPatient(key: string, confirm: (to: string) => boolean = confirmLeavePatient): boolean {
+    const d = this.deps;
+    if (!d || !this.sources.isFiles()) return false;
+    if (key === this.files.currentPatientId()) return true;
+    const patient = this.files.patients().find((one) => one.key === key);
+    if (!patient) return false;
+    const to = patient.name?.trim() || patient.patientId || 'the other patient';
+    if (d.load().status === 'ready' && !confirm(to)) return false;
+    this.loads.cancel();
+    this.picks.cancel();
+    this.clearView();
+    this.files.selectPatient(key);
+    return true;
   }
 
   /** The drop-overlay headline for the modifier held and the drag's kind. */
@@ -639,6 +664,12 @@ export class LoadController {
         if (outcome.cleared) this.clearView();
         else d.load.set(previous.status === 'ready' ? previous : { status: 'idle' });
         if (entry) this.recentStore.record(entry);
+        // More than one patient is open now: say so, and where to turn to another.
+        if (this.files.patients().length > 1) {
+          this.flashNotice(
+            `${this.files.patients().length} patients are open. Choose one in the history bar.`,
+          );
+        }
         return;
       case 'reject':
         d.load.set(previous); // leave what was showing untouched
