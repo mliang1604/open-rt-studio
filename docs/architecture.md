@@ -156,6 +156,18 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   treats the record's rename as the step that stores an instance. The layout
   has a version, written in the store directory. See
   [the server's README](../services/server/README.md#the-file-store).
+- The index (#43) is an interface with no database in it and a SQLite
+  implementation on **`node:sqlite`, the SQLite that is part of Node**. That
+  adds no dependency and no native module to rebuild for Electron. Node
+  documents the module as a release candidate from v24.15, which is this
+  repository's minimum; whether the Node inside the chosen Electron version
+  has it is to be checked in #64. If it does not, the alternative is
+  `better-sqlite3` (MIT), behind the same interface. Status: **decided for
+  the server, to be confirmed for the desktop application.**
+- RT relationships are rows of one `reference` table: from an instance, by a
+  named relation, to the UID of an instance, a series or a frame of
+  reference. The target has no foreign key, because objects arrive in any
+  order. See [the server's README](../services/server/README.md#the-index).
 - The server listens on `127.0.0.1` unless it is told otherwise, and warns
   when it is told otherwise, until there are accounts (#55).
 - Logs are JSON lines and carry no patient identifiers: an event is a fixed

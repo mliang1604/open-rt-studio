@@ -44,6 +44,39 @@ export {
   type Logger,
   type LoggerOptions,
 } from './logger.js';
+export {
+  APPLICATION_ID,
+  IndexVersionError,
+  LATEST_VERSION,
+  MIGRATIONS,
+  type Migration,
+} from './pacs-index/migrations.js';
+export {
+  IndexConflictError,
+  InvalidQueryError,
+  RELATIONS,
+  type IndexConflict,
+  type IndexCounts,
+  type InstanceEntry,
+  type InstanceQuery,
+  type InstanceRecord,
+  type PacsIndex,
+  type Page,
+  type PatientQuery,
+  type PatientRecord,
+  type Reference,
+  type RelatedToSeries,
+  type Relation,
+  type SeriesQuery,
+  type SeriesRecord,
+  type StudyQuery,
+  type StudyRecord,
+} from './pacs-index/pacs-index.js';
+export {
+  InvalidEntryError,
+  openSqliteIndex,
+  type SqliteIndexOptions,
+} from './pacs-index/sqlite-index.js';
 export { startServer, type RunningServer } from './server.js';
 export {
   EmptyInstanceError,
