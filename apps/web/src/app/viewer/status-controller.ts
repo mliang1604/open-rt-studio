@@ -11,7 +11,7 @@ import {
   type Layer,
   type Volume,
 } from '@open-rt-studio/dicom';
-import { PatientCatalog } from '../patient-catalog';
+import { DATA_SOURCE } from '../data-source/data-source';
 import { type LoadState } from './load-controller';
 import { filterRawTags, loadingText, missingSliceWarning } from './viewer-format';
 
@@ -39,7 +39,7 @@ export interface StatusInit {
  */
 @Injectable()
 export class StatusController {
-  private readonly catalog = inject(PatientCatalog);
+  private readonly source = inject(DATA_SOURCE);
   private deps: StatusInit | null = null;
 
   /** Wire the controller to the component's load + filter state. Called once. */
@@ -53,7 +53,7 @@ export class StatusController {
   );
 
   /** True once anything has been imported into the catalog in this session. */
-  readonly hasCatalog = computed(() => this.catalog.currentPatient() !== null);
+  readonly hasCatalog = computed(() => this.source.currentPatient() !== null);
 
   /** True while a load is in flight, gating the progress bar. */
   readonly isLoading = computed(() => this.deps!.load().status === 'loading');
@@ -83,7 +83,7 @@ export class StatusController {
       case 'idle':
         // After an import nothing auto-loads (#241): point the user at the history
         // panel; before any import, prompt them to open files.
-        return this.catalog.currentPatient()
+        return this.source.currentPatient()
           ? 'Pick a series from the history below to view it.'
           : 'Open a DICOM folder or files to begin.';
       case 'loading':

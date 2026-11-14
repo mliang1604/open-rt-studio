@@ -10,11 +10,12 @@ import {
   input,
   output,
   signal,
+  type WritableSignal,
 } from '@angular/core';
-import { type StudyRecord, formatDicomDate, type Series } from '@open-rt-studio/dicom';
-import { PatientCatalog } from '../../patient-catalog';
+import { formatDicomDate } from '@open-rt-studio/dicom';
+import { DATA_SOURCE, type SeriesSummary, type StudySummary } from '../../data-source/data-source';
 import { PreferencesStore, type HistoryView } from '../../preferences-store';
-import { SeriesThumbnailCache, type SeriesThumbnail } from '../series-thumbnail';
+import type { SeriesThumbnail } from '../series-thumbnail';
 import { SeriesChip } from './series-chip';
 
 /**
@@ -32,12 +33,14 @@ import { SeriesChip } from './series-chip';
  * The collapsed flag, the chosen view, the tree's expansion and the last-opened study all persist via
  * {@link PreferencesStore} so the panel restores across sessions.
  *
- * It reflects the {@link PatientCatalog} and highlights the chip of every
- * {@link loadedSeriesUids currently-loaded series} (base + any fusion overlays).
- * Clicking or dragging a chip to the viewport asks to load that series, surfaced
- * via {@link loadSeries} for the viewer to build the volume and route through the
- * load path (#173). The single patient root is shaped so multi-patient catalogs
- * are a natural extension. Hidden entirely when the catalog holds no studies.
+ * It shows what the {@link DATA_SOURCE} lists for its current patient, and
+ * knows nothing of where that comes from: opened files or a server. It
+ * highlights the chip of every {@link loadedSeriesUids currently-loaded series}
+ * (base + any fusion overlays). Clicking or dragging a chip to the viewport
+ * asks to load that series, surfaced via {@link loadSeries} for the viewer to
+ * fetch it and route it through the load path (#173). The single patient root
+ * is shaped so multi-patient catalogs are a natural extension. Hidden entirely
+ * when the source has no studies to show.
  */
 @Component({
   selector: 'app-history-panel',
@@ -52,10 +55,13 @@ import { SeriesChip } from './series-chip';
   },
 })
 export class HistoryPanel {
-  private readonly catalog = inject(PatientCatalog);
+  private readonly source = inject(DATA_SOURCE);
   private readonly preferences = inject(PreferencesStore);
-  /** Per-series preview cache; deduped by UID, so stable across imports. */
-  private readonly thumbnails = new SeriesThumbnailCache();
+  /**
+   * Previews by series UID, each asked of the source once. A signal each,
+   * because a source that has to fetch one answers later.
+   */
+  private readonly thumbnails = new Map<string, WritableSignal<SeriesThumbnail>>();
 
   /**
    * UIDs of the series currently composited in the viewport (the base and any
@@ -65,11 +71,11 @@ export class HistoryPanel {
   readonly loadedSeriesUids = input<readonly string[]>([]);
 
   /** Asks the viewer to load the given series (chip click / key / drop). */
-  readonly loadSeries = output<Series>();
+  readonly loadSeries = output<SeriesSummary>();
 
   /** The focused patient's studies along the timeline (ascending); empty when none. */
-  protected readonly studies = computed<readonly StudyRecord[]>(
-    () => this.catalog.currentPatient()?.studies ?? [],
+  protected readonly studies = computed<readonly StudySummary[]>(
+    () => this.source.currentPatient()?.studies ?? [],
   );
 
   /** Whether there's anything to show; the panel hides entirely otherwise. */
@@ -79,18 +85,18 @@ export class HistoryPanel {
   private readonly loadedSet = computed(() => new Set(this.loadedSeriesUids()));
 
   /** Whether a series is one of those currently composited (drives its highlight). */
-  protected isLoaded(series: Series): boolean {
+  protected isLoaded(series: SeriesSummary): boolean {
     return this.loadedSet().has(series.uid);
   }
 
   /** A chip asked to be loaded: forward it to the viewer's load path. */
-  protected onLoadSeries(series: Series): void {
+  protected onLoadSeries(series: SeriesSummary): void {
     this.loadSeries.emit(series);
   }
 
   /** A short label for the focused patient (name, else id), shown in the header. */
   protected readonly patientLabel = computed(() => {
-    const patient = this.catalog.currentPatient();
+    const patient = this.source.currentPatient();
     if (!patient) return '';
     return patient.name?.trim() || patient.patientId || 'Unknown patient';
   });
@@ -153,22 +159,41 @@ export class HistoryPanel {
   }
 
   /** Whether a given study is the currently-open accordion tile. */
-  protected isOpen(study: StudyRecord): boolean {
+  protected isOpen(study: StudySummary): boolean {
     return study.studyUid === this.openStudyUid();
   }
 
-  /** The series' cached preview (computed lazily on first reveal). */
-  protected thumbnailFor(series: Series): SeriesThumbnail {
-    return this.thumbnails.get(series);
+  /**
+   * The series' preview, asked of the source when its chip is first shown.
+   * Until a source that answers later has answered, and if it fails, the chip
+   * shows the modality's icon.
+   */
+  protected thumbnailFor(series: SeriesSummary): SeriesThumbnail {
+    let held = this.thumbnails.get(series.uid);
+    if (!held) {
+      const answer = this.source.thumbnail(series.uid);
+      if (answer instanceof Promise) {
+        const later = signal<SeriesThumbnail>({ kind: 'icon', modality: series.modality });
+        answer.then(
+          (thumbnail) => later.set(thumbnail),
+          () => undefined,
+        );
+        held = later;
+      } else {
+        held = signal(answer);
+      }
+      this.thumbnails.set(series.uid, held);
+    }
+    return held();
   }
 
   /** Human date for a study tile (e.g. `2024-03-18`), or `Undated`. */
-  protected dateLabel(study: StudyRecord): string {
+  protected dateLabel(study: StudySummary): string {
     return formatStudyDate(study.date);
   }
 
   /** Pluralised series-count summary for a study tile. */
-  protected countLabel(study: StudyRecord): string {
+  protected countLabel(study: StudySummary): string {
     return seriesCountLabel(study.series.length);
   }
 

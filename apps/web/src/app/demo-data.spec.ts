@@ -2,23 +2,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import type { PatientRecord, Series } from '@open-rt-studio/dicom';
-
+import type { PatientHistory, SeriesSummary } from './data-source/data-source';
 import { demoPatient, demoPlanningCt, type DemoPatient } from './demo-data';
 
-const series = (modality: string): Series => ({ modality }) as Series;
+const series = (modality: string): SeriesSummary => ({ modality }) as SeriesSummary;
 
 function patient(
   patientId: string,
   studies: { date: string; modalities: string[] }[],
-): PatientRecord {
+): PatientHistory {
   return {
+    key: patientId,
     patientId,
     name: null,
     studies: studies.map((s, i) => ({
       studyUid: String(i),
       date: s.date,
-      time: null,
       description: null,
       modalities: s.modalities,
       series: s.modalities.map(series),

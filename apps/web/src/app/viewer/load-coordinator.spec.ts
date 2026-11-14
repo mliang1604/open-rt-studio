@@ -175,12 +175,14 @@ describe('planFileLoad — held modifier', () => {
   });
 });
 
+const FETCHED = { uid: 'incoming' } as Series;
+
 function seriesDeps(overrides: Partial<SeriesLoadDeps>): SeriesLoadDeps {
   return {
     previous: null,
-    series: { uid: 'incoming' } as Series,
+    seriesUid: 'incoming',
     intent: 'primary',
-    knownStructureSets: [],
+    fetchSeries: () => Promise.resolve({ series: FETCHED, structureSets: [] }),
     loadSeries: () => INCOMING,
     merge: (_c, incoming) => ({ result: incoming, added: false }),
     ...overrides,
@@ -188,45 +190,41 @@ function seriesDeps(overrides: Partial<SeriesLoadDeps>): SeriesLoadDeps {
 }
 
 describe('planSeriesLoad', () => {
-  it('is a no-op for an already-shown series under a held modifier, without re-parsing', () => {
-    const outcome = planSeriesLoad(
+  it('is a no-op for an already-shown series under a held modifier, without fetching it', async () => {
+    const outcome = await planSeriesLoad(
       seriesDeps({
         previous: result('shown'),
-        series: { uid: 'shown' } as Series,
+        seriesUid: 'shown',
         intent: 'overlay',
-        loadSeries: () => {
-          throw new Error('must not re-parse an already-shown series');
+        fetchSeries: () => {
+          throw new Error('must not fetch an already-shown series');
         },
       }),
     );
     expect(outcome).toEqual({ kind: 'noop', compare: false });
   });
 
-  it('reloads (replaces) the current base when it is re-picked as primary (#241)', () => {
-    const outcome = planSeriesLoad(
-      seriesDeps({ previous: result('shown'), series: { uid: 'shown' } as Series }),
+  it('reloads (replaces) the current base when it is re-picked as primary (#241)', async () => {
+    const outcome = await planSeriesLoad(
+      seriesDeps({ previous: result('shown'), seriesUid: 'shown' }),
     );
     expect(outcome).toEqual({ kind: 'replace', result: INCOMING });
   });
 
-  it('still opens the compare columns (⇧) for an already-shown series', () => {
-    const outcome = planSeriesLoad(
-      seriesDeps({
-        previous: result('shown'),
-        series: { uid: 'shown' } as Series,
-        intent: 'compare',
-      }),
+  it('still opens the compare columns (⇧) for an already-shown series', async () => {
+    const outcome = await planSeriesLoad(
+      seriesDeps({ previous: result('shown'), seriesUid: 'shown', intent: 'compare' }),
     );
     expect(outcome).toEqual({ kind: 'noop', compare: true });
   });
 
-  it('replaces the view for a plain (primary) pick', () => {
-    const outcome = planSeriesLoad(seriesDeps({ previous: result('base') }));
+  it('replaces the view for a plain (primary) pick', async () => {
+    const outcome = await planSeriesLoad(seriesDeps({ previous: result('base') }));
     expect(outcome).toEqual({ kind: 'replace', result: INCOMING });
   });
 
-  it('replaces (unloads others) on a plain pick even when a same-frame fuse is possible (#241)', () => {
-    const outcome = planSeriesLoad(
+  it('replaces (unloads others) on a plain pick even when a same-frame fuse is possible (#241)', async () => {
+    const outcome = await planSeriesLoad(
       seriesDeps({
         previous: result('base'),
         merge: () => {
@@ -237,16 +235,36 @@ describe('planSeriesLoad', () => {
     expect(outcome).toEqual({ kind: 'replace', result: INCOMING });
   });
 
-  it('passes the retained structure sets to the parser even with nothing displayed (#241)', () => {
-    // The regression fix: an RTSTRUCT imported ingest-only is retained on the
-    // catalog and threaded in here, so a primary pick re-associates it by frame
-    // of reference even though `previous` is null (nothing was on screen).
-    const retained = [{ name: 'rtstruct' }] as unknown as SeriesLoadDeps['knownStructureSets'];
+  it('asks the source for the series by its UID, and builds what the source gave', async () => {
+    const asked: string[] = [];
+    let built: unknown = 'unset';
+    await planSeriesLoad(
+      seriesDeps({
+        seriesUid: '1.2.3',
+        fetchSeries: (uid) => {
+          asked.push(uid);
+          return Promise.resolve({ series: FETCHED, structureSets: [] });
+        },
+        loadSeries: (series) => {
+          built = series;
+          return INCOMING;
+        },
+      }),
+    );
+    expect(asked).toEqual(['1.2.3']);
+    expect(built).toBe(FETCHED);
+  });
+
+  it('passes the structure sets the source holds to the loader even with nothing displayed (#241)', async () => {
+    // The regression fix: an RTSTRUCT imported ingest-only is retained by the
+    // source and comes with the series, so a primary pick re-associates it by
+    // frame of reference even though `previous` is null (nothing was on screen).
+    const retained = [{ name: 'rtstruct' }] as unknown as LoadResult['allStructureSets'];
     let knownSeen: unknown = 'unset';
-    planSeriesLoad(
+    await planSeriesLoad(
       seriesDeps({
         previous: null,
-        knownStructureSets: retained,
+        fetchSeries: () => Promise.resolve({ series: FETCHED, structureSets: retained }),
         loadSeries: (_s, known) => {
           knownSeen = known;
           return INCOMING;
@@ -256,8 +274,8 @@ describe('planSeriesLoad', () => {
     expect(knownSeen).toBe(retained);
   });
 
-  it('fuses a same-frame series as an overlay under ⌥', () => {
-    const outcome = planSeriesLoad(
+  it('fuses a same-frame series as an overlay under ⌥', async () => {
+    const outcome = await planSeriesLoad(
       seriesDeps({
         previous: result('base'),
         intent: 'overlay',
@@ -267,8 +285,8 @@ describe('planSeriesLoad', () => {
     expect(outcome).toEqual({ kind: 'overlay', result: INCOMING, compare: false });
   });
 
-  it('rejects a held-modifier panel load that cannot fuse', () => {
-    const outcome = planSeriesLoad(
+  it('rejects a held-modifier panel load that cannot fuse', async () => {
+    const outcome = await planSeriesLoad(
       seriesDeps({
         previous: result('base'),
         intent: 'overlay',
@@ -276,5 +294,20 @@ describe('planSeriesLoad', () => {
       }),
     );
     expect(outcome).toEqual({ kind: 'reject', message: cantFuseMessage('overlay') });
+  });
+
+  it('fails when the source cannot give the series, or it cannot be built', async () => {
+    await expect(
+      planSeriesLoad(seriesDeps({ fetchSeries: () => Promise.reject(new Error('gone')) })),
+    ).rejects.toThrow('gone');
+    await expect(
+      planSeriesLoad(
+        seriesDeps({
+          loadSeries: () => {
+            throw new Error('no slices');
+          },
+        }),
+      ),
+    ).rejects.toThrow('no slices');
   });
 });

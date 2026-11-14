@@ -12,8 +12,8 @@ import {
   type VoxelIndex,
 } from '@open-rt-studio/render';
 import { EditableStructuresStore } from './editable-structures-store';
+import { DATA_SOURCE } from '../data-source/data-source';
 import { authoredSetRtStruct } from './structure-set-export';
-import { downloadBlob } from './viewer-dom';
 import { type PanePlacement } from './pane-placement';
 import {
   type PerOrientation,
@@ -61,6 +61,7 @@ export interface BrushInit {
 @Injectable()
 export class BrushController {
   private readonly store = inject(EditableStructuresStore);
+  private readonly source = inject(DATA_SOURCE);
   private deps: BrushInit | null = null;
 
   /** Brush radius in patient millimetres; bound to the toolbar size slider. */
@@ -230,7 +231,8 @@ export class BrushController {
       this.deps?.baseSeries() ?? null,
       new Date(),
     );
-    downloadBlob(new Blob([bytes], { type: 'application/dicom' }), filename);
+    // Where it goes is the data source's to say: for opened files, a download.
+    void this.source.save({ bytes, filename, mediaType: 'application/dicom' });
   }
 
   /**

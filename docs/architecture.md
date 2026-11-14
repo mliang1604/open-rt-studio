@@ -119,6 +119,18 @@ also builds on its own to `dist/` for consumers outside the workspace.
   sagittal, oblique, 3D) samples it in the fragment shader.
 - The CPU-side probe (cursor to voxel) is the inverse of the reslice done in
   the slice shader. The two must always implement the same geometry.
+- **Where patient data comes from is behind one interface** (#36),
+  `DataSource` in `apps/web/src/app/data-source`. The timeline, the status
+  line and the load path read the injected `DATA_SOURCE` and do not know
+  whether it is files the user opened (`LocalFilesSource`, the default) or a
+  server (#47). A source **lists as signals** (its patients; the current
+  patient with studies and series) and **fetches as promises** (a series
+  ready to build into a volume, a preview, a save). The list is on screen all
+  the time, so it is state; with signals the local source stays synchronous
+  and behaves exactly as before. Fetching can be slow and can fail, so it
+  takes an `AbortSignal` and may report progress; a source that answers at
+  once reports none, and the viewer then shows none. Importing files is not
+  in the interface: only the local source does it.
 
 ## Desktop
 
