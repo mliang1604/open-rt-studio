@@ -272,6 +272,25 @@ describe('the history panel on a data source', () => {
       expect(asked).toEqual(['k2']);
     });
 
+    it('offers to close the patient while it is told who is open, with one patient or several', async () => {
+      const { fixture, host } = await render(withPatient());
+      const button = (): HTMLButtonElement | null => host.querySelector('button.history-close');
+      // No list of open patients: the timeline is a server's, and its patients are not closed here.
+      expect(button()).toBeNull();
+
+      fixture.componentRef.setInput('patients', [first]);
+      await fixture.whenStable();
+      expect(button()?.textContent.trim()).toBe('Close patient');
+      let asked = 0;
+      fixture.componentInstance.closePatient.subscribe(() => (asked += 1));
+      button()!.click();
+      expect(asked).toBe(1);
+
+      fixture.componentRef.setInput('patients', [first, second]);
+      await fixture.whenStable();
+      expect(button()).not.toBeNull();
+    });
+
     it('keeps the selector on the bar when the panel is folded', async () => {
       const { fixture, host, click } = await render(withPatient());
       fixture.componentRef.setInput('patients', [first, second]);

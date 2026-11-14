@@ -31,7 +31,13 @@ export async function seriesChip(page: Page, modality: string): Promise<Locator>
   const tile = page.locator('.study-tile').first();
   await expect(tile).toBeVisible({ timeout: 30_000 });
   // Open the (single synthetic) study if its series strip isn't showing yet.
-  if ((await page.locator('.series-strip').count()) === 0) await tile.click();
+  if ((await page.locator('.series-strip').count()) === 0) {
+    await tile.click();
+    // Wait for the strip the click opens. Asked again before it is drawn (the
+    // software adapter is slow), this would find no strip, click the tile a
+    // second time and shut it.
+    await expect(page.locator('.series-strip').first()).toBeVisible();
+  }
   return page
     .locator('app-series-chip')
     .filter({ has: page.locator('.chip-modality', { hasText: new RegExp(`^${modality}$`) }) })

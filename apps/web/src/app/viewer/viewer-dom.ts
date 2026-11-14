@@ -43,6 +43,18 @@ export function confirmLeavePatient(to: string): boolean {
 }
 
 /**
+ * Ask before a patient is closed while a series of theirs is showing: the
+ * viewer is emptied, and what was painted or measured and not exported is
+ * lost.
+ */
+export function confirmClosePatient(who: string): boolean {
+  return confirm(
+    `Close ${who} and empty the viewer? Anything painted or measured here that ` +
+      'was not exported is lost. The files on this computer are not touched.',
+  );
+}
+
+/**
  * Ask before something painted is deleted. There is no undo for it yet, so the
  * question says what goes; `false` leaves everything as it is.
  */

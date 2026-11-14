@@ -5,7 +5,13 @@
 import { syntheticCtSeries, syntheticThoraxPatient } from '@open-rt-studio/testdata';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
+import {
+  answerNext,
+  expectNoProblems,
+  preAcknowledge,
+  requireWebGpu,
+  watchProblems,
+} from './fixtures/app';
 import { capturedColour } from './fixtures/capture';
 import { importAndLoad } from './fixtures/load';
 
@@ -18,16 +24,6 @@ async function setValue(input: Locator, value: string | number): Promise<void> {
     (element as HTMLInputElement).value = String(v);
     element.dispatchEvent(new Event('input', { bubbles: true }));
   }, value);
-}
-
-/** Answer the next confirmation, and say what it asked. */
-function answerNext(page: Page, accept: boolean): Promise<string> {
-  return new Promise((resolve) => {
-    page.once('dialog', (dialog) => {
-      resolve(dialog.message());
-      void (accept ? dialog.accept() : dialog.dismiss());
-    });
-  });
 }
 
 const painted = (page: Page) => page.locator('app-painted-structures');

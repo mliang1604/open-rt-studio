@@ -162,6 +162,66 @@ describe('PatientCatalog', () => {
     expect(catalog.currentPatient()).toBeNull();
   });
 
+  describe('close()', () => {
+    function threePatients(): PatientCatalog {
+      const catalog = new PatientCatalog();
+      catalog.add([
+        series('a', { patientId: 'p1' }),
+        series('b', { patientId: 'p2' }),
+        series('c', { patientId: 'p3' }),
+      ]);
+      catalog.addStructureSets([
+        structureSet('rs.dcm', { patientId: 'p1' }),
+        structureSet('rs.dcm', { patientId: 'p2' }),
+        structureSet('rs.dcm', { patientId: 'p3' }),
+      ]);
+      return catalog;
+    }
+
+    it('lets go of the patient, their series and their structure sets, and of no one else’s', () => {
+      const catalog = threePatients();
+      catalog.select('p2');
+      expect(catalog.close('p3')).toBe(true);
+      expect([...catalog.patients().keys()]).toEqual(['p1', 'p2']);
+      expect(catalog.seriesByUid('c')).toBeUndefined();
+      expect(catalog.structureSets().map((set) => set.patientId)).toEqual(['p1', 'p2']);
+      // The patient it was on is still the one.
+      expect(catalog.currentPatientId()).toBe('p2');
+    });
+
+    it('turns to the first patient left when the one it was on is closed, and to none after the last', () => {
+      const catalog = threePatients();
+      catalog.select('p2');
+      catalog.close('p2');
+      expect(catalog.currentPatientId()).toBe('p1');
+      catalog.close('p1');
+      expect(catalog.currentPatientId()).toBe('p3');
+      catalog.close('p3');
+      expect(catalog.currentPatientId()).toBeNull();
+      expect(catalog.currentPatient()).toBeNull();
+      expect(catalog.patients().size).toBe(0);
+      expect(catalog.structureSets()).toEqual([]);
+    });
+
+    it('says false for a patient it does not hold, and changes nothing', () => {
+      const catalog = threePatients();
+      expect(catalog.close('p9')).toBe(false);
+      expect(catalog.patients().size).toBe(3);
+      expect(catalog.structureSets()).toHaveLength(3);
+    });
+
+    it('takes the sets that name no patient with the patient who has no ID', () => {
+      const catalog = new PatientCatalog();
+      catalog.add([series('a', { patientId: null }), series('b', { patientId: 'p1' })]);
+      catalog.addStructureSets([
+        structureSet('unnamed.dcm', { patientId: null }),
+        structureSet('p1.dcm', { patientId: 'p1' }),
+      ]);
+      catalog.close('');
+      expect(catalog.structureSets().map((set) => set.name)).toEqual(['p1.dcm']);
+    });
+  });
+
   it('retains structure sets across imports so a later pick can re-associate them (#241)', () => {
     const catalog = new PatientCatalog();
     catalog.addStructureSets([structureSet('rt-a')]);
@@ -199,6 +259,14 @@ describe('mergeStructureSets', () => {
     const aAgain = structureSet('a', { frameOfReferenceUid: 'for-1' });
     const merged = mergeStructureSets([a], [aAgain, b]);
     expect(merged.map((s) => s.name)).toEqual(['a', 'b']);
+  });
+
+  it('keeps the sets of two patients apart, though name, frame and series are the same', () => {
+    const one = structureSet('rs.dcm', { patientId: 'p1' });
+    const other = structureSet('rs.dcm', { patientId: 'p2' });
+    expect(mergeStructureSets([one], [other, structureSet('rs.dcm', { patientId: 'p1' })])).toEqual(
+      [one, other],
+    );
   });
 
   it('treats same-name sets with different frames of reference as distinct', () => {

@@ -136,6 +136,13 @@ export interface StructureSet {
    * frame of reference is absent or unmatched. Empty when none are declared.
    */
   readonly referencedSeriesUids: readonly string[];
+  /**
+   * Patient ID (0010,0020) of the file the set was read from; null when the
+   * file gives none. Left out for a set that was made in the viewer and has
+   * not been through a file. A set that names one patient is never joined to
+   * a series that names another, whatever their UIDs say.
+   */
+  readonly patientId?: string | null;
   /** The regions of interest, joined across the three RTSTRUCT sequences. */
   readonly rois: readonly Roi[];
 }

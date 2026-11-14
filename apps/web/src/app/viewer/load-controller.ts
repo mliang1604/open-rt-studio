@@ -41,6 +41,7 @@ import { RoiController } from './roi-controller';
 import { EditableStructuresStore } from './editable-structures-store';
 import { LoadCoordinator, type DropIntent, type LoadOutcome } from './load-coordinator';
 import {
+  confirmClosePatient,
   confirmLeavePatient,
   confirmPatientSwitch,
   dropHeadlineText,
@@ -201,6 +202,31 @@ export class LoadController {
     this.picks.cancel();
     this.clearView();
     this.files.selectPatient(key);
+    return true;
+  }
+
+  /**
+   * Close the patient the timeline is of (#208): their series, structure sets
+   * and previews are let go of, and the timeline turns to the first patient
+   * that is left, or the viewer goes back to its empty state. What is on
+   * screen is theirs, so the viewport is emptied; when a series is showing
+   * that is asked first, and refused, nothing changes. For opened files only:
+   * a server's patients are not this viewer's to close.
+   *
+   * Says whether the patient was closed.
+   */
+  closePatient(confirm: (who: string) => boolean = confirmClosePatient): boolean {
+    const d = this.deps;
+    if (!d || !this.sources.isFiles()) return false;
+    const patient = this.files.currentPatient();
+    if (!patient) return false;
+    const who = patient.name?.trim() || patient.patientId || 'this patient';
+    if (d.load().status === 'ready' && !confirm(who)) return false;
+    this.loads.cancel();
+    this.picks.cancel();
+    this.clearView();
+    this.files.closePatient(patient.key);
+    this.flashNotice(`Closed ${who}.`);
     return true;
   }
 

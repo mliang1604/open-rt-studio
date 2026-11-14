@@ -3,16 +3,28 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
+  frameOfReferenceUid,
+  seriesUid,
+  syntheticCtSeries,
   SYNTHETIC_PATIENT,
   SYNTHETIC_RT_COURSE,
   syntheticRtCourse,
+  syntheticRtStruct,
+  SYNTHETIC_STUDY,
+  type SyntheticStudy,
   syntheticThoraxPatient,
   THORAX_PATIENT,
 } from '@open-rt-studio/testdata';
 import { expect, test, type Page } from '@playwright/test';
 
-import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
-import { importFiles, pickSeries } from './fixtures/load';
+import {
+  answerNext,
+  expectNoProblems,
+  preAcknowledge,
+  requireWebGpu,
+  watchProblems,
+} from './fixtures/app';
+import { importFiles, pickSeries, seriesChip } from './fixtures/load';
 
 // Files of several patients open at once (#35): both are listed, the viewer
 // is of one, and turning to the other empties it first.
@@ -24,16 +36,6 @@ const COURSE = syntheticRtCourse();
 const COURSE_CT = new RegExp(`volume \\d+ × \\d+ × ${SYNTHETIC_RT_COURSE.ctSlices}\\.`);
 
 const label = (patient: { name: string; id: string }): string => `${patient.name} (${patient.id})`;
-
-/** Answer the next question the page asks, and say what it asked. */
-function answerNext(page: Page, accept: boolean): Promise<string> {
-  return new Promise((resolve) => {
-    page.once('dialog', (dialog) => {
-      resolve(dialog.message());
-      void (accept ? dialog.accept() : dialog.dismiss());
-    });
-  });
-}
 
 async function open(page: Page): Promise<void> {
   await preAcknowledge(page);
@@ -151,4 +153,83 @@ test('opening another patient keeps the first, and asks before it turns to the n
   await importFiles(page, COURSE);
   await expect.poll(async () => (await offered(page)).on).toBe(label(SYNTHETIC_PATIENT));
   expect((await offered(page)).options).toHaveLength(2);
+});
+
+// Closing (#208): the patient leaves the list, and what was on screen with them.
+test('a patient can be closed, down to the empty state', async ({ page }) => {
+  await open(page);
+  await importFiles(page, [...THORAX, ...COURSE]);
+  const close = page.getByRole('button', { name: 'Close patient' });
+  await pickSeries(page, 'CT');
+  await expect(page.locator('div.status')).toContainText(COURSE_CT);
+
+  // A series of theirs is showing, so it asks. Refused: nothing changes.
+  let asked = answerNext(page, false);
+  await close.click();
+  expect(await asked).toContain(`Close ${SYNTHETIC_PATIENT.name} and empty the viewer?`);
+  await expect(page.locator('div.status')).toContainText(COURSE_CT);
+  expect((await offered(page)).options).toHaveLength(2);
+
+  // Agreed: the other patient is the one left, named in plain text, and the panes are empty.
+  asked = answerNext(page, true);
+  await close.click();
+  await asked;
+  await expect(selector(page)).toHaveCount(0);
+  await expect(page.locator('.history-patient')).toHaveText(THORAX_PATIENT.name);
+  await expect(page.locator('.notice')).toContainText(`Closed ${SYNTHETIC_PATIENT.name}.`);
+  await expect(page.locator('div.status')).not.toContainText('volume');
+  await expect(page.locator('.pane-tag').first()).toHaveText(/Axial · –/);
+  await expect(page.locator('.study-tile').first()).toContainText('Synthetic thorax planning');
+
+  // Nothing is showing, so the last one closes without a question, and the viewer is as it began.
+  await close.click();
+  await expect(page.locator('app-history-panel')).toBeHidden();
+  await expect(page.locator('app-empty-state')).toBeVisible();
+
+  // Their files open them again.
+  await importFiles(page, COURSE);
+  await expect(page.locator('.history-patient')).toHaveText(SYNTHETIC_PATIENT.name);
+  await pickSeries(page, 'CT');
+  await expect(page.locator('div.status')).toContainText(COURSE_CT);
+});
+
+// One study exported under two names shares every UID. A structure set says
+// whose it is, and is not drawn on the series of anyone else (#208).
+test('a structure set of one open patient does not join a series of another', async ({ page }) => {
+  const pseudonym = { id: 'SYN-0099', name: 'SYNTHETIC^PSEUDONYM' };
+  const relabelled: SyntheticStudy = { ...SYNTHETIC_STUDY, patient: pseudonym };
+  // The same frame of reference, since the study is the same one.
+  expect(frameOfReferenceUid(relabelled)).toBe(frameOfReferenceUid(SYNTHETIC_STUDY));
+  const theirOwn: SyntheticStudy = { ...SYNTHETIC_STUDY, index: 9, patient: pseudonym };
+  const ct = seriesUid(SYNTHETIC_STUDY, 1);
+
+  await open(page);
+  await importFiles(page, [
+    // The first patient: a CT, and a set of two structures drawn on it.
+    ...syntheticCtSeries(12, 32),
+    syntheticRtStruct(12, 2, { referencedSeriesUid: ct }),
+    // The second: a set of three in the same frame, naming the same CT, and a CT of their own.
+    syntheticRtStruct(12, 3, { study: relabelled, referencedSeriesUid: ct }),
+    ...syntheticCtSeries(12, 32, { study: theirOwn }),
+  ]);
+  expect((await offered(page)).on).toBe(label(SYNTHETIC_PATIENT));
+
+  // The first patient's CT comes with one set, of two structures.
+  const chip = await seriesChip(page, 'CT');
+  await expect(chip.locator('.chip-sets [aria-hidden]')).toHaveText('RS 1');
+  await pickSeries(page, 'CT');
+  await expect(page.locator('.roi-legend .roi-item')).toHaveCount(2);
+
+  // The second patient's CT is in another frame, and comes with none.
+  const asked = answerNext(page, true);
+  await selector(page).selectOption({ label: label(pseudonym) });
+  await asked;
+  await expect.poll(async () => (await offered(page)).on).toBe(label(pseudonym));
+  const theirs = await seriesChip(page, 'CT');
+  // The chip is there, and says nothing of structure sets.
+  await expect(theirs).toContainText('12 img');
+  await expect(theirs.locator('.chip-sets')).toHaveCount(0);
+  await pickSeries(page, 'CT');
+  await expect(page.locator('div.status')).toContainText('volume 32 × 32 × 12');
+  await expect(page.locator('.roi-legend .roi-item')).toHaveCount(0);
 });

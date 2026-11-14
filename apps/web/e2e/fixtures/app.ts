@@ -78,3 +78,17 @@ export function expectNoProblems(problems: PageProblems): void {
   expect(problems.pageErrors, `uncaught errors:\n${problems.pageErrors.join('\n')}`).toEqual([]);
   expect(problems.gpuErrors, `WebGPU errors:\n${problems.gpuErrors.join('\n')}`).toEqual([]);
 }
+
+/**
+ * Answer the next question the page asks (a `confirm`), and say what it asked.
+ * Call it before the step that asks: a question nobody is waiting for is
+ * dismissed by Playwright, which is a refusal.
+ */
+export function answerNext(page: Page, accept: boolean): Promise<string> {
+  return new Promise((resolve) => {
+    page.once('dialog', (dialog) => {
+      resolve(dialog.message());
+      void (accept ? dialog.accept() : dialog.dismiss());
+    });
+  });
+}

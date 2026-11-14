@@ -102,6 +102,9 @@ export class HistoryPanel {
   /** Asks to turn to another of {@link patients}, by key. The viewer may refuse. */
   readonly choosePatient = output<string>();
 
+  /** Asks to close the patient the timeline is of. Offered while {@link patients} are given. */
+  readonly closePatient = output<void>();
+
   /** The focused patient's studies along the timeline (ascending); empty when none. */
   protected readonly studies = computed<readonly StudySummary[]>(
     () => this.source.currentPatient()?.studies ?? [],

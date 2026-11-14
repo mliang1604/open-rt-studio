@@ -101,7 +101,8 @@ Loading:
 - `patient-catalog.ts`, `recent-store.ts`: the catalog of everything imported
   in this session (what the local source holds), and the list of recent
   selections. The catalog keeps every patient whose files were opened, and is
-  on one of them at a time; they stay until the page is reloaded.
+  on one of them at a time; a patient stays until closed ("Close patient" on
+  the history bar) or the page is reloaded.
 - `file-access.ts`, `recent-handles.ts`: where the browser has the File System
   Access API (Chromium), Open folder and Open files use its pickers, and the
   handle of a folder or of a single file is kept in IndexedDB. Choosing that

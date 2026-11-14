@@ -17,6 +17,7 @@ import type { DataSource, PatientSummary } from '../../data-source/data-source';
 import { connectToServer, ServerSource } from '../../data-source/server-source';
 import { PreferencesStore } from '../../preferences-store';
 import { ServerBrowser } from '../server-browser/server-browser';
+import { confirmLeavePatient } from '../viewer-dom';
 
 /** The address a server listens on unless it was told otherwise. */
 export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
@@ -52,6 +53,11 @@ export class ServerPanel {
 
   /** How a server is reached; a spec gives its own. */
   readonly connector = input<(address: string) => Promise<ServerSource>>(connectToServer);
+
+  /** Whether a series is on screen, which turning to another patient would take away. */
+  readonly showing = input(false);
+  /** Asks before a displayed series is given up for another patient; a spec gives its own. */
+  readonly confirmLeave = input<(to: string) => boolean>(confirmLeavePatient);
 
   /** Asks the viewer to read from this source; null is the opened files. */
   readonly use = output<DataSource | null>();
@@ -99,8 +105,15 @@ export class ServerPanel {
   protected async onPatient(patient: PatientSummary): Promise<void> {
     const server = this.server();
     if (!server || this.busy()) return;
+    const leaves = patient.key !== this.chosenKey();
+    // As the selector for opened files does (#35): what is on screen is not the
+    // other patient's, and what was painted or measured on it goes with it.
+    if (leaves && this.showing()) {
+      const to = patient.name?.trim() || patient.patientId || 'the other patient';
+      if (!this.confirmLeave()(to)) return;
+    }
     await this.attempt(async () => {
-      if (patient.key !== this.chosenKey()) this.leavePatient.emit();
+      if (leaves) this.leavePatient.emit();
       await server.selectPatient(patient);
       this.closed.emit();
     });
