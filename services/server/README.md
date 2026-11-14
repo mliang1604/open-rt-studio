@@ -186,13 +186,15 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   name. On a server with accounts an allowed page still has to log in; on one
   without, it may read everything, and the server warns at start.
 
-  To use the server from the web application in development (the viewer's
-  login screen is not there yet, so without accounts):
+  To use the server from the web application in development:
 
   ```sh
   OPEN_RT_STUDIO_AUTH=none OPEN_RT_STUDIO_ALLOWED_ORIGINS=http://localhost:4200 \
     npm start -w @open-rt-studio/server
   ```
+
+  With accounts (a data directory and no `AUTH=none`), the viewer asks for a
+  name and a password when it connects.
 
   then, in the viewer, "Connect to a server…" and the server's address.
 

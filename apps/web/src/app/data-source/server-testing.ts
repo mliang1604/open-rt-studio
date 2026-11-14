@@ -53,9 +53,33 @@ export interface FakeServer {
   readonly uploads: { readonly mediaType: string; readonly status: number }[];
   /** From now on, uploads fail as they do when the network is gone. */
   loseUploads(): void;
+  /** End every login, as the server does for one that was not used for too long. */
+  endSessions(): void;
+  /** The tokens of the logins in force. */
+  readonly tokens: () => string[];
 }
 
-export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
+/** An account of a stand-in server that has them. */
+export interface FakeAccount {
+  readonly name: string;
+  readonly password: string;
+  readonly role: 'admin' | 'user';
+}
+
+/** How many wrong passwords in a row lock a name on the stand-in, as on the server. */
+export const FAKE_LOGIN_ATTEMPTS = 5;
+
+/**
+ * A stand-in server. With `accounts` it wants a login, as the real one does
+ * by default: a token from `POST /session`, sent with everything else.
+ */
+export function fakeServer(
+  files: readonly SyntheticFile[],
+  accounts?: readonly FakeAccount[],
+): FakeServer {
+  const sessions = new Map<string, FakeAccount>();
+  const failures = new Map<string, number>();
+  let issued = 0;
   const held: Held[] = files.map((file) => {
     const read = readInstanceHeader(file.bytes);
     if (!read.ok) throw new Error(`not DICOM: ${file.name}`);
@@ -84,6 +108,8 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
     asked,
     uploads: [],
     loseUploads: () => (uploadsLost = true),
+    endSessions: () => sessions.clear(),
+    tokens: () => [...sessions.keys()],
     pageSize: 1000,
     mostAtOnce: () => most,
     loseNetworkAfter: (count) => (lostAfter = count),
@@ -98,6 +124,56 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
       const signal = init?.signal ?? undefined;
       const aborted = () => new DOMException('The fetch was abandoned.', 'AbortError');
       if (signal?.aborted) throw aborted();
+
+      // Who is asking, as the real server works it out.
+      const sent = new Headers(init?.headers).get('Authorization') ?? '';
+      const token = /^Bearer (.+)$/.exec(sent)?.[1] ?? null;
+      const who = token === null ? undefined : sessions.get(token);
+      if (path === '/session') {
+        const method = init?.method ?? 'GET';
+        if (!accounts) {
+          return method === 'GET' ? json({ account: null, expiresAt: null }) : json({}, 405);
+        }
+        if (method === 'POST') {
+          const { name, password } = JSON.parse(String(init?.body)) as Record<string, string>;
+          const key = name.trim().toLowerCase();
+          if ((failures.get(key) ?? 0) >= FAKE_LOGIN_ATTEMPTS) {
+            return new Response(
+              JSON.stringify({ error: 'too-many-attempts', message: 'Too many wrong passwords.' }),
+              { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '30' } },
+            );
+          }
+          const account = accounts.find((one) => one.name === key && one.password === password);
+          if (!account) {
+            failures.set(key, (failures.get(key) ?? 0) + 1);
+            return json(
+              { error: 'bad-credentials', message: 'The name or the password is not right.' },
+              401,
+            );
+          }
+          failures.delete(key);
+          const made = `token-${++issued}-${account.name}`;
+          sessions.set(made, account);
+          return json({
+            token: made,
+            account: { name: account.name, role: account.role, disabled: false, createdAt: '' },
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          });
+        }
+        if (who && method === 'DELETE') {
+          sessions.delete(token!);
+          return new Response(null, { status: 204 });
+        }
+        if (who && method === 'GET') {
+          return json({
+            account: { name: who.name, role: who.role, disabled: false, createdAt: '' },
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          });
+        }
+      }
+      if (accounts && !who) {
+        return json({ error: 'unauthenticated', message: 'Log in to use this server.' }, 401);
+      }
 
       const page = <T>(items: readonly T[]): Response => {
         const limit = Math.min(Number(url.searchParams.get('limit') ?? 100), server.pageSize);

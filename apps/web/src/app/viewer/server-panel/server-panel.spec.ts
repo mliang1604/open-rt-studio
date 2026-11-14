@@ -15,7 +15,12 @@ import {
 import { ActiveDataSource } from '../../data-source/active-data-source';
 import type { DataSource } from '../../data-source/data-source';
 import { connectToServer, ServerSource } from '../../data-source/server-source';
-import { fakeServer, parseHere, type FakeServer } from '../../data-source/server-testing';
+import {
+  fakeServer,
+  parseHere,
+  type FakeAccount,
+  type FakeServer,
+} from '../../data-source/server-testing';
 import { PreferencesStore } from '../../preferences-store';
 import { studyDateLabel } from '../server-browser/server-browser';
 import { DEFAULT_SERVER_ADDRESS, ServerPanel } from './server-panel';
@@ -40,8 +45,12 @@ const OTHERS_FILES = syntheticPopulation().filter((file) =>
   new TextDecoder('latin1').decode(file.bytes).includes(OTHER.id),
 );
 
-async function render(reachable = true, more: readonly SyntheticFile[] = []): Promise<Rendered> {
-  const server = fakeServer([...syntheticRtCourse(), ...more]);
+async function render(
+  reachable = true,
+  more: readonly SyntheticFile[] = [],
+  accounts?: readonly FakeAccount[],
+): Promise<Rendered> {
+  const server = fakeServer([...syntheticRtCourse(), ...more], accounts);
   const fixture = TestBed.createComponent(ServerPanel);
   const sources = TestBed.inject(ActiveDataSource);
   const said: string[] = [];
@@ -228,5 +237,119 @@ describe('ServerPanel', () => {
     await fixture.whenStable();
     await click(SYNTHETIC_STUDY.patient.name);
     expect(source.currentPatient()?.key).toBe(study.patient.key);
+  });
+
+  describe('on a server with accounts (#55)', () => {
+    const ADA: FakeAccount = {
+      name: 'ada',
+      password: 'correct horse battery staple',
+      role: 'user',
+    };
+    const SERVER = 'Server at 127.0.0.1:4300';
+
+    async function asked() {
+      const rendered = await render(true, [], [ADA]);
+      await rendered.click('Connect');
+      const field = (id: string): HTMLInputElement => rendered.host.querySelector(`#${id}`)!;
+      const fill = (name: string, password: string): void => {
+        for (const [id, value] of [
+          ['server-name', name],
+          ['server-password', password],
+        ]) {
+          field(id).value = value;
+          field(id).dispatchEvent(new Event('input'));
+        }
+      };
+      return { ...rendered, field, fill };
+    }
+
+    it('asks for a name and a password before it shows anything of the server', async () => {
+      const { said, text, host, field, server } = await asked();
+      expect(text('.server-state')).toEqual([`${SERVER} asks for a login.`]);
+      expect(host.querySelector('app-server-browser')).toBeNull();
+      // Not in use yet: the viewer was told nothing, and reads from where it did.
+      expect(said).toEqual([]);
+      expect(TestBed.inject(ActiveDataSource).isFiles()).toBe(true);
+      expect(host.classList.contains('wide')).toBe(false);
+      expect(server.asked).toEqual(['/session']);
+      // The browser's own help for passwords applies, and the field does not show what is typed.
+      expect(field('server-password').type).toBe('password');
+      expect(field('server-password').autocomplete).toBe('current-password');
+      expect(field('server-name').autocomplete).toBe('username');
+    });
+
+    it('logs in, and from then on is as any connected server, with who is logged in', async () => {
+      const { said, text, click, fill, host, field } = await asked();
+      fill(ADA.name, ADA.password);
+      await click('Log in');
+      expect(said).toEqual([`use ${SERVER}`]);
+      expect(text('.server-state')).toEqual([`Connected: ${SERVER}, as ada.`]);
+      expect(text('.study-patient')).toHaveLength(2);
+      expect(host.classList.contains('wide')).toBe(true);
+      expect(field('server-password')).toBeNull();
+    });
+
+    it('says when the name or the password is not right, and does not keep what was typed', async () => {
+      const { said, text, click, fill, field } = await asked();
+      fill(ADA.name, 'not the password');
+      await click('Log in');
+      expect(text('.server-problem')).toEqual(['The name or the password is not right.']);
+      expect(said).toEqual([]);
+      // The name stays to be corrected; the password is typed again.
+      expect(field('server-name').value).toBe('ada');
+      expect(field('server-password').value).toBe('');
+      expect(document.activeElement).toBe(field('server-password'));
+    });
+
+    it('asks nothing of the server for a login with nothing in it', async () => {
+      const { text, click, fill, server } = await asked();
+      const before = server.asked.length;
+      fill('  ', '');
+      await click('Log in');
+      expect(text('.server-problem')).toEqual(['Give your name and your password.']);
+      expect(server.asked).toHaveLength(before);
+    });
+
+    it('goes back to the address for another server', async () => {
+      const { text, click, host, said } = await asked();
+      await click('Another server');
+      expect(host.querySelector('#server-address')).not.toBeNull();
+      expect(host.querySelector('#server-password')).toBeNull();
+      expect(text('.server-state')).toEqual([]);
+      expect(said).toEqual([]);
+    });
+
+    it('logs out on disconnecting', async () => {
+      const { said, click, fill, server } = await asked();
+      fill(ADA.name, ADA.password);
+      await click('Log in');
+      expect(server.tokens()).toHaveLength(1);
+      await click('Log out and disconnect');
+      expect(server.tokens()).toEqual([]);
+      expect(said).toEqual([`use ${SERVER}`, 'use files']);
+    });
+
+    it('asks again when the login has ended, and goes on with the same server', async () => {
+      const { said, text, click, fill, server, host } = await asked();
+      fill(ADA.name, ADA.password);
+      await click('Log in');
+      server.endSessions();
+      // The next thing asked of the server finds out.
+      await click('Search');
+      expect(text('.server-state')).toEqual([
+        `Your login at ${SERVER} has ended. Log in again to go on.`,
+      ]);
+      expect(host.querySelector('app-server-browser')).toBeNull();
+      // Disconnect is offered here, not another server: this one is in use.
+      expect([...host.querySelectorAll('button')].map((one) => one.textContent.trim())).toContain(
+        'Disconnect',
+      );
+      fill(ADA.name, ADA.password);
+      await click('Log in');
+      expect(text('.server-state')).toEqual([`Connected: ${SERVER}, as ada.`]);
+      expect(text('.study-patient')).toHaveLength(2);
+      // The viewer was not told to change source: it is the server it was reading from.
+      expect(said).toEqual([`use ${SERVER}`]);
+    });
   });
 });

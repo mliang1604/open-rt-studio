@@ -32,7 +32,9 @@ drives the application in Chromium. Useful variations:
 - `e2e/server.spec.ts` loads from a real server. Its fixture
   (`e2e/fixtures/server.ts`) builds `services/server` and starts it on a free
   port, in memory, allowing the page's origin; nothing has to be started by
-  hand.
+  hand. It runs without a login unless it is given an account, as
+  `e2e/server-login.spec.ts` does: then the account is made with the server's
+  `account` command and the server asks for a login, as it does by default.
 
 Test inputs come from `@open-rt-studio/testdata` and exist only in memory;
 `e2e/fixtures/files.ts` turns them into file-input payloads.
@@ -140,8 +142,13 @@ Viewer (`src/app/viewer`):
 - `server-panel/`: the card for connecting to a server. It is opened from
   the empty state or from the history bar, not from the toolbar, which has no
   room left at 1280 pixels. Nothing is contacted until Connect is pressed;
-  the address is remembered, and is not connected to by itself. Connected,
-  it holds the study browser.
+  the address is remembered, and is not connected to by itself. A server
+  with accounts is asked for nothing until the user has logged in: the card
+  shows a name and a password field, and the source (`ServerSource.logIn`)
+  keeps the token in memory only, so reloading the page logs out. The
+  password field is emptied after every try. When a login ends while the
+  server is in use, the card asks for it again and the viewer keeps what it
+  shows. Connected, it holds the study browser.
 - `server-browser/`: the studies on the server, to search (patient name,
   Patient ID, study dates, modality), to order and to page through, twenty at
   a time. Choosing a study turns the timeline to its patient. A search is

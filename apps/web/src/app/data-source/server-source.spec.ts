@@ -25,7 +25,7 @@ import {
   studyQuery,
   type ServerSourceOptions,
 } from './server-source';
-import { fakeServer, parseHere, type FakeServer } from './server-testing';
+import { FAKE_LOGIN_ATTEMPTS, fakeServer, parseHere, type FakeServer } from './server-testing';
 
 const ADDRESS = 'http://127.0.0.1:4300';
 const FILES = syntheticRtCourse();
@@ -167,7 +167,9 @@ describe('ServerSource', () => {
     ]);
     expect(source.morePatients()).toBe(false);
     expect(source.currentPatient()).toBeNull();
-    expect(server.asked).toEqual(['/patients?limit=200']);
+    // First who the viewer is to the server: no one, and no one need be.
+    expect(server.asked).toEqual(['/session', '/patients?limit=200']);
+    expect(source.login()).toEqual({ kind: 'none' });
   });
 
   it('shows a patient’s studies oldest first, with the series that hold pictures', async () => {
@@ -544,5 +546,154 @@ describe('ServerSource', () => {
       expect((lost as ServerError).message).toContain('could not be reached');
       expect(server.uploads).toEqual([]);
     });
+  });
+});
+
+describe('ServerSource on a server with accounts (#55)', () => {
+  const ADA = { name: 'ada', password: 'correct horse battery staple', role: 'user' } as const;
+  const HOST = '127.0.0.1:4300';
+
+  async function reached(): Promise<Made> {
+    const server = fakeServer(FILES, [ADA]);
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    return { server, source };
+  }
+
+  async function loggedIn(): Promise<Made> {
+    const made = await reached();
+    await made.source.logIn(ADA.name, ADA.password);
+    return made;
+  }
+
+  const dicom = (bytes: ArrayBuffer) => ({
+    bytes,
+    filename: 'rtstruct.dcm',
+    mediaType: 'application/dicom',
+  });
+
+  it('is told that a login is wanted, and asks for nothing more until there is one', async () => {
+    const { source, server } = await reached();
+    expect(source.login()).toEqual({ kind: 'needed', ended: false });
+    expect(server.asked).toEqual(['/session']);
+    expect(source.patients()).toEqual([]);
+    await expect(source.findStudies()).rejects.toThrow(`The server at ${HOST} asks for a login.`);
+    expect(source.login()).toEqual({ kind: 'needed', ended: false });
+  });
+
+  it('logs in, lists the patients, and sends the login with everything it asks', async () => {
+    const { source, server } = await loggedIn();
+    expect(source.login()).toEqual({ kind: 'in', name: 'ada', role: 'user' });
+    expect(source.patients().map((patient) => patient.patientId)).toEqual([
+      SYNTHETIC_STUDY.patient.id,
+    ]);
+    // Listing, searching, a patient's timeline, a series and a save: each is answered.
+    expect((await source.findStudies()).studies).toHaveLength(2);
+    await source.selectPatient('1');
+    const ct = source
+      .currentPatient()!
+      .studies.flatMap((study) => study.series)
+      .find((series) => series.modality === 'CT')!;
+    expect((await source.fetchSeries(ct.uid)).series.uid).toBe(ct.uid);
+    expect((await source.save(dicom(authored('Painted while logged in')))).kind).toBe('stored');
+    expect(server.uploads).toEqual([{ mediaType: 'application/dicom', status: 201 }]);
+  });
+
+  it('says so when the name or the password is not right, and is not logged in', async () => {
+    const { source, server } = await reached();
+    await expect(source.logIn(ADA.name, 'not the password')).rejects.toThrow(
+      new ServerError('The name or the password is not right.', 401),
+    );
+    await expect(source.logIn('nobody', ADA.password)).rejects.toThrow(
+      'The name or the password is not right.',
+    );
+    expect(source.login()).toEqual({ kind: 'needed', ended: false });
+    expect(server.tokens()).toEqual([]);
+  });
+
+  it('says how long to wait when the name is locked', async () => {
+    const { source } = await reached();
+    for (let i = 0; i < FAKE_LOGIN_ATTEMPTS; i++) {
+      await expect(source.logIn(ADA.name, 'wrong')).rejects.toThrow('not right');
+    }
+    await expect(source.logIn(ADA.name, ADA.password)).rejects.toThrow(
+      'Too many wrong passwords for this name. Try again in 30 seconds.',
+    );
+  });
+
+  it('keeps the login in memory, and neither it nor the password in the browser', async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    const { server } = await loggedIn();
+    const [token] = server.tokens();
+    const kept = JSON.stringify([{ ...localStorage }, { ...sessionStorage }, document.cookie]);
+    expect(kept).not.toContain(token);
+    expect(kept).not.toContain(ADA.password);
+  });
+
+  it('notices a login that has ended, and goes on after another', async () => {
+    const { source, server } = await loggedIn();
+    await source.selectPatient('1');
+    server.endSessions();
+    await expect(source.findStudies()).rejects.toThrow(
+      `Your login at ${HOST} has ended. Choose "Server…" to log in again.`,
+    );
+    expect(source.login()).toEqual({ kind: 'needed', ended: true });
+    // What was listed stays on screen; only asking for more is refused.
+    expect(source.currentPatient()).not.toBeNull();
+
+    await source.logIn(ADA.name, ADA.password);
+    expect(source.login().kind).toBe('in');
+    expect((await source.findStudies()).studies).toHaveLength(2);
+  });
+
+  it('logs out: the server ends the login, and the viewer has forgotten it', async () => {
+    const { source, server } = await loggedIn();
+    expect(server.tokens()).toHaveLength(1);
+    await source.logOut();
+    expect(server.tokens()).toEqual([]);
+    expect(source.login()).toEqual({ kind: 'needed', ended: false });
+    await expect(source.findStudies()).rejects.toThrow('asks for a login');
+    // Asked twice, it does nothing the second time.
+    const asked = server.asked.length;
+    await source.logOut();
+    expect(server.asked).toHaveLength(asked);
+  });
+
+  it('forgets the login even when the server cannot be told', async () => {
+    const server = fakeServer(FILES, [ADA]);
+    let reachable = true;
+    const source = await connectToServer(ADDRESS, {
+      fetch: (input, init) =>
+        reachable ? server.fetch(input, init) : Promise.reject(new TypeError('Failed to fetch')),
+      parse: parseHere,
+    });
+    await source.logIn(ADA.name, ADA.password);
+    reachable = false;
+    await source.logOut();
+    expect(source.login()).toEqual({ kind: 'needed', ended: false });
+  });
+
+  it('takes a server that does not know the question for one without accounts', async () => {
+    const server = fakeServer(FILES);
+    const source = await connectToServer(ADDRESS, {
+      fetch: (input, init) =>
+        String(input).endsWith('/session')
+          ? Promise.resolve(new Response('{"error":"not-found"}', { status: 404 }))
+          : server.fetch(input, init),
+      parse: parseHere,
+    });
+    expect(source.login()).toEqual({ kind: 'none' });
+    expect(source.patients()).toHaveLength(1);
+  });
+
+  it('says when the server cannot be reached to log in', async () => {
+    const { source } = await reached();
+    const lost = new ServerSource(ADDRESS, {
+      fetch: () => Promise.reject(new TypeError('Failed to fetch')),
+    });
+    await expect(lost.logIn(ADA.name, ADA.password)).rejects.toThrow(
+      `The server at ${HOST} could not be reached.`,
+    );
+    expect(source.login().kind).toBe('needed');
   });
 });
