@@ -225,6 +225,11 @@ export class LayersController {
     this.layerStore.choosePlacement(id, Number((event.target as HTMLSelectElement).value));
   }
 
+  /** Layers-panel switch: apply a layer's deformation field, or leave it out. */
+  toggleDeformation(id: string): void {
+    this.layerStore.toggleDeformation(id);
+  }
+
   /** Layers-panel display selector: grayscale or a named colormap for the layer. */
   onLayerDisplay(id: string, event: Event): void {
     const value = (event.target as HTMLSelectElement).value;

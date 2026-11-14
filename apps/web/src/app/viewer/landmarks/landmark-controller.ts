@@ -12,6 +12,8 @@ import {
   parseLandmarks,
   patientToVoxel,
   pointBetweenLayers,
+  pointToLayer,
+  targetRegistrationErrorFromFixed,
   targetRegistrationErrorOfMatrix,
   writeLandmarks,
   type Layer,
@@ -133,17 +135,32 @@ export class LandmarkController {
       : 'No registration: both images are in one frame of reference';
   });
 
-  /** The target registration error of that registration at the landmarks. */
-  readonly error = computed<TargetRegistrationError>(() =>
-    targetRegistrationErrorOfMatrix(this.landmarks(), this.movingToFixed()),
+  /**
+   * The frame the errors are measured in. A registration by a matrix takes
+   * the compared image's point into the base's frame. One by a deformation
+   * field goes one way only, from the base's frame: the base's point is
+   * taken into the compared image's frame, and the error is there.
+   */
+  readonly measuredIn = computed<'fixed' | 'moving'>(() =>
+    this.moving()?.placement?.field ? 'moving' : 'fixed',
   );
+
+  /** The target registration error of the registration in use at some landmarks. */
+  private errorOf(landmarks: readonly Landmark[]): TargetRegistrationError {
+    const placement = this.moving()?.placement;
+    return placement?.field
+      ? targetRegistrationErrorFromFixed(landmarks, (fixed) => pointToLayer(placement, fixed))
+      : targetRegistrationErrorOfMatrix(landmarks, this.movingToFixed());
+  }
+
+  /** The target registration error of that registration at the landmarks. */
+  readonly error = computed<TargetRegistrationError>(() => this.errorOf(this.landmarks()));
 
   /** The landmarks as the panel lists them, each with its error when it has one. */
   readonly rows = computed<LandmarkRow[]>(() => {
-    const matrix = this.movingToFixed();
     return this.landmarks().map((one) => {
       // Each by itself, so that a row's number is its own landmark's whatever its name.
-      const found = targetRegistrationErrorOfMatrix([one], matrix).landmarks.at(0);
+      const found = this.errorOf([one]).landmarks.at(0);
       return {
         id: one.id,
         name: one.name,
@@ -200,9 +217,9 @@ export class LandmarkController {
    * A point read in a pane, as the landmark keeps it. A fixed point is kept
    * as read. A moving point is kept in the moving image's own frame: read in
    * a column laid out on the base's planes, it goes through the registration
-   * to there.
+   * to there. Null where the registration does not map the point.
    */
-  private kept(pane: MprPane, point: Vec3): Vec3 {
+  private kept(pane: MprPane, point: Vec3): Vec3 | null {
     const moving = this.moving();
     if (this.sideOf(pane) === 'fixed' || !moving) return point;
     const readOn = this.layersCtl.groupVolume(pane.group);
@@ -211,8 +228,11 @@ export class LandmarkController {
       : pointBetweenLayers(point, undefined, moving.placement);
   }
 
-  /** Where a kept point is in the frame of the volume a pane is laid out on. */
-  private drawnIn(pane: MprPane, side: LandmarkSide, point: Vec3): Vec3 {
+  /**
+   * Where a kept point is in the frame of the volume a pane is laid out on.
+   * Null where the registration does not lead back there.
+   */
+  private drawnIn(pane: MprPane, side: LandmarkSide, point: Vec3): Vec3 | null {
     const moving = this.moving();
     if (side === 'fixed' || !moving) return point;
     const readOn = this.layersCtl.groupVolume(pane.group);
@@ -236,7 +256,8 @@ export class LandmarkController {
       this.store.placing.set(wasPlacing);
       this.store.pair.set(pair);
     }
-    this.store.place(this.sideOf(pane), this.kept(pane, point));
+    const kept = this.kept(pane, point);
+    if (kept) this.store.place(this.sideOf(pane), kept);
   }
 
   /** Move a landmark's point to where the pointer is on the pane its marker is in. */
@@ -255,7 +276,8 @@ export class LandmarkController {
     if (!pane || this.sideOf(pane) !== side) return;
     const bounds = d.canvasBounds();
     const point = this.pointAt(pane, clientX - bounds.left, clientY - bounds.top);
-    if (point) this.store.setPoint(id, side, this.kept(pane, point));
+    const kept = point ? this.kept(pane, point) : null;
+    if (kept) this.store.setPoint(id, side, kept);
   }
 
   /** The landmarks' points that lie on the slices on screen, each where it is in its pane. */
@@ -276,7 +298,8 @@ export class LandmarkController {
       for (const one of landmarks) {
         const kept = one[side];
         if (!kept) continue;
-        const voxel = voxelOf(volume, this.drawnIn(pane, side, kept));
+        const drawn = this.drawnIn(pane, side, kept);
+        const voxel = drawn ? voxelOf(volume, drawn) : null;
         if (!voxel || focusSliceIndex(volume, orientation, voxel, oblique) !== slice) continue;
         const at = focusPanePoint(
           volume,

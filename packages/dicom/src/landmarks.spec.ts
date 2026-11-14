@@ -7,6 +7,7 @@ import {
   LandmarkFileError,
   parseLandmarks,
   targetRegistrationError,
+  targetRegistrationErrorFromFixed,
   targetRegistrationErrorOfMatrix,
   writeLandmarks,
   type LandmarkPair,
@@ -129,6 +130,41 @@ describe('target registration error', () => {
       maxMm: null,
       meanError: null,
     });
+  });
+});
+
+describe('target registration error of a registration from the fixed frame', () => {
+  it('is measured in the moving frame: from the moving point to where the fixed one is put', () => {
+    // A field would go this way; here a plain shift of 10 mm along x does.
+    const fixedToMoving = (fixed: Vec3): Vec3 => [fixed[0] + 10, fixed[1], fixed[2]];
+    const found = targetRegistrationErrorFromFixed(
+      [
+        { name: 'a', fixed: [1, 2, 3], moving: [11, 2, 3] },
+        { name: 'b', fixed: [0, 0, 0], moving: [10, 4, -3] },
+        { name: 'half', fixed: [0, 0, 0], moving: null },
+      ],
+      fixedToMoving,
+    );
+    expect(found.count).toBe(2);
+    expect(found.incomplete).toEqual(['half']);
+    near(found.landmarks[0].mapped, [11, 2, 3]);
+    near(found.landmarks[0].error, [0, 0, 0]);
+    // registration(fixed) − moving = (10, 0, 0) − (10, 4, −3).
+    near(found.landmarks[1].error, [0, -4, 3]);
+    expect(found.landmarks[1].distanceMm).toBeCloseTo(5, 9);
+    expect(found.meanMm).toBeCloseTo(2.5, 9);
+  });
+
+  it('leaves out a landmark whose fixed point the registration does not map', () => {
+    const found = targetRegistrationErrorFromFixed(
+      [
+        { name: 'inside', fixed: [1, 0, 0], moving: [1, 0, 0] },
+        { name: 'outside', fixed: [99, 0, 0], moving: [99, 0, 0] },
+      ],
+      (fixed) => (fixed[0] > 50 ? null : fixed),
+    );
+    expect(found.count).toBe(1);
+    expect(found.unmapped).toEqual(['outside']);
   });
 });
 

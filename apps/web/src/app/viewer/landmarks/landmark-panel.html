@@ -110,11 +110,21 @@
       </tbody>
     </table>
     <p class="note" data-landmark-registration>{{ registration() }}.</p>
-    <p class="note">
-      Each error is from the landmark’s place in the base image to where the registration puts its
-      place in the compared image: its length, and how far along the patient’s left (L), back (P)
-      and head (S).
-    </p>
+    @if (measuredIn() === 'fixed') {
+      <p class="note" data-landmark-measured="fixed">
+        Each error is from the landmark’s place in the base image to where the registration puts its
+        place in the compared image: its length, and how far along the patient’s left (L), back (P)
+        and head (S).
+      </p>
+    } @else {
+      <p class="note" data-landmark-measured="moving">
+        A deformation field maps one way, from the base image. So each error is from the landmark’s
+        place in the compared image to where the registration puts its place in the base image, in
+        the compared image’s own frame: its length, and how far along that image’s left (L), back
+        (P) and head (S). The compared image’s points are not drawn in its column: where they are
+        there is not known without turning the field round.
+      </p>
+    }
     <p class="note" data-landmark-note>{{ note() }}</p>
   } @else {
     <p class="note">No landmark has both its points yet.</p>

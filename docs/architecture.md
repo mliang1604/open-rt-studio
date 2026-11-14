@@ -589,10 +589,48 @@ of reference over a series of another, as a fusion overlay.
   the pane's middle, where one takes hold of an image: while dragging by
   hand is on, a press on it moves the image too.
 
+**A registration by a deformation field in the viewer** (part of #77) places
+an image like one by a matrix, with these differences.
+
+- **One way only.** A field maps from the frame its object is in to its
+  source frame, and is not turned round. So it places an image of the source
+  frame over a base of the object's frame, and not the other way: with the
+  two images swapped, nothing places the overlay, and it can be registered
+  by hand. A way through two fields is no placement.
+- The placement carries the field between its two matrices
+  (`LayerPlacement.field`), and its matrices alone (`baseToLayer`, `post ·
+pre`), which is what the registration is with nothing deformed. A point is
+  mapped through the whole of it by `pointToLayer`. `pointToBase` gives
+  nothing for it.
+- **The shader and the probe read the field the same way.** The field is a
+  3D texture of four half floats to a vector: the displacement in mm, and 1
+  where it is defined. For each position of the base's plane the shader
+  looks the field up where the matrix before it puts the position
+  (`fieldPlaneToTexMatrix`), reads the displacement between texels, and adds
+  it to the overlay's texture coordinate through the matrix after the field
+  (`fieldToOverlayTexMatrix`). The probe does the same with
+  `sampleDeformation`. Where the field has no vector to go by (outside its
+  grid, or beside an undefined vector) the overlay is not drawn, and the
+  probe reads nothing of it. Half floats keep a displacement of up to 64 mm
+  to within 0.03 mm, which is how far the picture may be from the probe.
+- **Deformation on or off.** The layers panel says that the registration is a
+  deformable one, and has a switch that leaves the field out: the image is
+  then placed by the registration's matrices alone, and the panel says so.
+  Nothing else is changed by it, and it is not remembered for the next
+  image.
+- **Landmarks.** The error at a landmark needs the compared image's point
+  taken into the base's frame, which a field does not give. Under a field
+  the base's point is taken into the compared image's frame instead, and the
+  error is there (`targetRegistrationErrorFromFixed`); the panel says so. The
+  compared image's points are not drawn in its Compare column, since where
+  they are in the base's planes is not known without turning the field
+  round.
+- A deformable registration cannot be the start of a registration by hand
+  other than by its matrices, and is not written by the viewer.
+
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), for the matrix object and
-for the deformable one alike. The viewer does not take in a deformable
-object yet: applying one is #77. Status: **decided, and
+for the deformable one alike. Status: **decided, and
 Michael's to overturn**, most of all refusing a registration within one
 frame of reference, which some systems may write.
 

@@ -93,6 +93,7 @@ export {
   LandmarkFileError,
   parseLandmarks,
   targetRegistrationError,
+  targetRegistrationErrorFromFixed,
   targetRegistrationErrorOfMatrix,
   writeLandmarks,
 } from './landmarks.js';
@@ -110,12 +111,17 @@ export {
 export { type Series, groupSeries, largestSeries, middleSlice } from './series.js';
 export {
   type LayerPlacement,
+  type PlacementField,
   type PlacementSearch,
   type PlacementStep,
+  type RegistrationObject,
   findPlacement,
   placementSize,
   pointBetweenLayers,
+  pointToBase,
+  pointToLayer,
   registrationsOfPatient,
+  withoutField,
 } from './layer-placement.js';
 export {
   type DeformableItemProblem,

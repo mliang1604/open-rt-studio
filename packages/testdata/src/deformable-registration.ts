@@ -40,10 +40,10 @@ const DEFORMABLE_SERIES_INDEX = 31;
 
 type Triple = readonly [number, number, number];
 
-/** A vector every 4 mm. */
-const SPACING: Triple = [4, 4, 4];
+/** A vector every 2 mm. */
+const SPACING: Triple = [2, 2, 2];
 /** From the middle of the CT's first voxel to just past its last, each way. */
-const DIMS: Triple = [PAIR.size / 4 + 1, PAIR.size / 4 + 1, PAIR.count / 4 + 1];
+const DIMS: Triple = [PAIR.size / 2 + 1, PAIR.size / 2 + 1, PAIR.count / 2 + 1];
 const ORIGIN: Triple = [0, 0, 0];
 /** How far the grid reaches along each axis, in mm. */
 const EXTENT: Triple = [
@@ -51,8 +51,12 @@ const EXTENT: Triple = [
   (DIMS[1] - 1) * SPACING[1],
   (DIMS[2] - 1) * SPACING[2],
 ];
-/** The most the field moves a point along each axis, in mm. */
-const AMPLITUDE: Triple = [1.5, -1, 0.5];
+/**
+ * The most the field moves a point along each axis, in mm: several voxels in
+ * the plane, so that it is seen, and little enough that the field folds
+ * nothing over (its steepest change is 0.4 mm in a millimetre).
+ */
+const AMPLITUDE: Triple = [4, -3, 1];
 
 /** What {@link syntheticDeformableRegistration} writes. */
 export const SYNTHETIC_DEFORMATION = {

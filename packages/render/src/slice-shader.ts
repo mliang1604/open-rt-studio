@@ -51,6 +51,18 @@ struct Params {
   maskToTex : mat4x4<f32>,
   maskOpacity : f32,
   maskLutSize : f32,        // texel count of maskLut, to map an id to its LUT coord
+  // Deformation field of the registration that places the overlay (fieldOn 0:
+  // none). fieldToTex maps the SAME pane (u, v, slicePos) into the field's grid;
+  // what is read there is a displacement in mm, which fieldToOverlay turns into
+  // a change of the overlay's texture coordinate. The field has vectors between
+  // fieldLow and fieldHigh (the centres of its first and last texels); outside
+  // them it says nothing and the overlay is not drawn. mat4x4 alignment lands
+  // this block at byte 272.
+  fieldToTex : mat4x4<f32>,
+  fieldToOverlay : mat4x4<f32>,
+  fieldLow : vec3<f32>,
+  fieldOn : u32,
+  fieldHigh : vec3<f32>,
 };
 
 @group(0) @binding(0) var volTex : texture_3d<f32>;
@@ -61,6 +73,7 @@ struct Params {
 @group(0) @binding(5) var maskTex : texture_3d<f32>;    // label ids (r16float)
 @group(0) @binding(6) var maskSamp : sampler;           // nearest, for label ids
 @group(0) @binding(7) var maskLut : texture_1d<f32>;    // id -> RGBA display colour
+@group(0) @binding(8) var fieldTex : texture_3d<f32>;   // displacement xyz in mm, a: 1 where defined
 
 struct VSOut {
   @builtin(position) pos : vec4<f32>,
@@ -131,8 +144,19 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
   // uses the value directly. Outside the overlay's grid (or opacity 0) the base
   // shows through unchanged.
   if (P.overlayOpacity > 0.0) {
-    let ocoord = (P.overlayToTex * vec4<f32>(u, plane.y, P.slicePos, 1.0)).xyz;
-    if (all(ocoord >= vec3<f32>(0.0)) && all(ocoord <= vec3<f32>(1.0))) {
+    var ocoord = (P.overlayToTex * vec4<f32>(u, plane.y, P.slicePos, 1.0)).xyz;
+    // A registration by a deformation field: the overlay is read where the
+    // field moves the point to. Where the field has no vector to go by (outside
+    // its grid, or beside an undefined vector) the overlay is not drawn. The
+    // probe does the same on the CPU (pointToLayer / sampleDeformation).
+    var mapped = true;
+    if (P.fieldOn != 0u) {
+      let fcoord = (P.fieldToTex * vec4<f32>(u, plane.y, P.slicePos, 1.0)).xyz;
+      let moved = textureSampleLevel(fieldTex, volSamp, clamp(fcoord, P.fieldLow, P.fieldHigh), 0.0);
+      mapped = all(fcoord >= P.fieldLow) && all(fcoord <= P.fieldHigh) && moved.a > 0.999;
+      ocoord = ocoord + (P.fieldToOverlay * vec4<f32>(moved.xyz, 0.0)).xyz;
+    }
+    if (mapped && all(ocoord >= vec3<f32>(0.0)) && all(ocoord <= vec3<f32>(1.0))) {
       let oraw = textureSampleLevel(overlayTex, volSamp, ocoord, 0.0).r;
       let olo = P.overlayWindowCenter - 0.5 - (P.overlayWindowWidth - 1.0) * 0.5;
       var og = clamp((oraw - olo) / max(P.overlayWindowWidth - 1.0, 1.0), 0.0, 1.0);

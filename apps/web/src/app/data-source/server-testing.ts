@@ -7,12 +7,13 @@
 
 import {
   parseFileAsync,
+  parseDeformableRegistration,
   parseSpatialRegistration,
   parseStructureSet,
   readInstanceHeader,
   type InstanceHeader,
   type Slice,
-  type SpatialRegistration,
+  type RegistrationObject,
   type StructureSet,
 } from '@open-rt-studio/dicom';
 import type { SyntheticFile } from '@open-rt-studio/testdata';
@@ -24,14 +25,17 @@ import type { AuditEntry } from './server-source';
 export async function parseHere(files: readonly File[]): Promise<ParsedFiles> {
   const slices: Slice[] = [];
   const structureSets: StructureSet[] = [];
-  const registrations: SpatialRegistration[] = [];
+  const registrations: RegistrationObject[] = [];
   for (const file of files) {
     const buffer = await file.arrayBuffer();
     const parsed = await parseFileAsync(file.name, buffer);
     slices.push(...parsed);
     const set = parsed.length === 0 ? parseStructureSet(file.name, buffer) : null;
     if (set) structureSets.push(set);
-    const registration = parsed.length === 0 && !set ? parseSpatialRegistration(buffer) : null;
+    const registration =
+      parsed.length === 0 && !set
+        ? (parseSpatialRegistration(buffer) ?? parseDeformableRegistration(buffer))
+        : null;
     if (registration) registrations.push(registration);
   }
   return { slices, structureSets, registrations, skipped: [] };

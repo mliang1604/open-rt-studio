@@ -304,6 +304,20 @@
                   </div>
                 }
               }
+              @if (layer.deformation; as deformation) {
+                <!-- A registration by a deformation field: with the field, or
+                     by its matrices alone, to see what the field adds. -->
+                <button
+                  type="button"
+                  class="layer-note"
+                  (click)="layersCtl.toggleDeformation(layer.id)"
+                  [attr.aria-pressed]="deformation === 'on'"
+                  [attr.data-deformation]="layer.id"
+                  title="Apply the registration’s deformation field, or leave it out and place the image by the registration’s matrices alone"
+                >
+                  Deformation {{ deformation }}
+                </button>
+              }
               @if (layer.unplaced) {
                 <!-- Nothing says where this image is over the base, and no
                      place is guessed: it is drawn once the user gives it one. -->
@@ -432,6 +446,7 @@
             [rows]="landmarks.rows()"
             [error]="landmarks.error()"
             [registration]="landmarks.registration()"
+            [measuredIn]="landmarks.measuredIn()"
             [placing]="landmarks.placing()"
             [canExchange]="landmarks.canExchange()"
             (placingToggled)="landmarks.togglePlacing(); tools.landmarkPlacingChanged()"

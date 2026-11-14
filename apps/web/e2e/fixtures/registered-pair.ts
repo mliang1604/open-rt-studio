@@ -56,3 +56,35 @@ export async function probeAt(
   const [x, y, z, ct] = match!.slice(1, 5).map(Number);
   return { voxel: [x, y, z], ct, mr: match![5] === undefined ? null : Number(match![5]) };
 }
+
+/** The axial pane: the first, and the large one. */
+export const axialPane = (page: Page): Locator => page.locator('.pane-overlay .pane').first();
+const axial = axialPane;
+
+/** Where the centre of a voxel of the CT is in the axial pane (its image is a centred square). */
+export async function voxelPoint(
+  page: Page,
+  x: number,
+  y: number,
+): Promise<{ x: number; y: number }> {
+  const box = (await axial(page).boundingBox())!;
+  const side = Math.min(box.width, box.height);
+  const voxel = side / PAIR.size;
+  return {
+    x: box.x + (box.width - side) / 2 + (x + 0.5) * voxel,
+    y: box.y + (box.height - side) / 2 + (y + 0.5) * voxel,
+  };
+}
+
+/** What the probe reads at the centre of a voxel of the CT's axial slice on screen. */
+export async function probeAtVoxel(
+  page: Page,
+  x: number,
+  y: number,
+): Promise<{ voxel: [number, number, number]; ct: number; mr: number | null }> {
+  const box = (await axial(page).boundingBox())!;
+  const point = await voxelPoint(page, x, y);
+  const read = await probeAt(page, (point.x - box.x) / box.width, (point.y - box.y) / box.height);
+  expect(read.voxel.slice(0, 2)).toEqual([x, y]);
+  return read;
+}

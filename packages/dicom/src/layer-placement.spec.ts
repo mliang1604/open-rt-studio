@@ -2,15 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import type { DeformableSpatialRegistration } from './deformable-registration.js';
 import {
   findPlacement,
   placementSize,
   pointBetweenLayers,
+  pointToBase,
+  pointToLayer,
   registrationsOfPatient,
+  withoutField,
 } from './layer-placement.js';
-import { rigidMat4, transformPoint, type Mat4 } from './mat4.js';
+import { IDENTITY_MAT4, multiplyMat4, rigidMat4, transformPoint, type Mat4 } from './mat4.js';
 import { manualPlacement } from './rigid-params.js';
-import { matrixTransform } from './registration.js';
+import { deformableTransform, matrixTransform, type DeformationGrid } from './registration.js';
 import type { SpatialRegistration } from './spatial-registration.js';
 import {
   applyLayerOverrides,
@@ -157,15 +161,163 @@ describe('a point of one layer in another', () => {
   it('goes from the base into a placed layer, and back', () => {
     const inFollowUp: Vec3 = [10, 20, 30];
     const inPlanning = transformPoint(followUpToPlanning, inFollowUp);
-    close(pointBetweenLayers(inPlanning, null, followUp), inFollowUp);
-    close(pointBetweenLayers(inFollowUp, followUp, null), inPlanning);
+    close(pointBetweenLayers(inPlanning, null, followUp)!, inFollowUp);
+    close(pointBetweenLayers(inFollowUp, followUp, null)!, inPlanning);
   });
 
   it('goes from one placed layer to another through the base', () => {
     const inMr: Vec3 = [-4, 5, 6];
     const inPlanning = transformPoint(mrToPlanning, inMr);
-    const inFollowUp = pointBetweenLayers(inMr, mr, followUp);
+    const inFollowUp = pointBetweenLayers(inMr, mr, followUp)!;
     close(transformPoint(followUpToPlanning, inFollowUp), inPlanning);
+  });
+});
+
+describe('placing a layer by a deformation field', () => {
+  // A field over a cube of 40 mm from the origin of the planning frame, a
+  // vector every 10 mm. Its displacement goes with the place, so that what is
+  // read between its vectors is known exactly.
+  const moved = ([x, y, z]: Vec3): Vec3 => [1 + 0.1 * x, -2 + 0.05 * y, 0.02 * z * x];
+  const grid: DeformationGrid = {
+    dims: [5, 5, 5],
+    origin: [0, 0, 0],
+    axes: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    spacing: [10, 10, 10],
+    vectors: Float32Array.from(
+      Array.from({ length: 125 }, (_, n) =>
+        moved([(n % 5) * 10, (Math.floor(n / 5) % 5) * 10, Math.floor(n / 25) * 10]),
+      ).flat(),
+    ),
+  };
+  const post = rigidMat4([0, 0, 1], 10, [100, -50, 30]);
+  /** A deformable object in the planning frame whose field maps into the MR's. */
+  const FIELD: DeformableSpatialRegistration = {
+    sopInstanceUid: '9.7',
+    registeredFrame: PLANNING,
+    patientId: 'SYN-0001',
+    label: 'DEFORMABLE',
+    description: 'Planning to MR',
+    registrations: [
+      {
+        item: 0,
+        transform: deformableTransform({ id: '9.7#0', from: PLANNING, to: MR, grid, post }),
+        vectorsTurned: false,
+        comment: null,
+      },
+    ],
+    identityItems: [],
+    unread: [],
+  };
+  const through = (p: Vec3): Vec3 => {
+    const d = moved(p);
+    return transformPoint(post, [p[0] + d[0], p[1] + d[1], p[2] + d[2]]);
+  };
+  const near = (actual: Vec3 | null, expected: Vec3): void => {
+    expect(actual).not.toBeNull();
+    actual!.forEach((value, i) => expect(value, `coordinate ${i}`).toBeCloseTo(expected[i], 4));
+  };
+
+  it('places an image of the field’s source frame over a base of the object’s frame', () => {
+    const found = findPlacement(PLANNING, MR, [FIELD]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    const { placement } = found;
+    expect(placement.steps).toEqual([
+      {
+        sopInstanceUid: '9.7',
+        label: 'DEFORMABLE',
+        description: 'Planning to MR',
+        writtenFrom: PLANNING,
+        writtenTo: MR,
+        inverted: false,
+        deformable: true,
+      },
+    ]);
+    expect(placement.field).toEqual({ pre: IDENTITY_MAT4, grid, post });
+    // Its matrices alone: what it is with nothing deformed.
+    placement.baseToLayer.forEach((value, i) => expect(value).toBeCloseTo(post[i], 12));
+    for (const p of [
+      [0, 0, 0],
+      [10, 20, 30],
+      [15, 25, 35],
+      [40, 40, 40],
+    ] as Vec3[]) {
+      near(pointToLayer(placement, p), through(p));
+    }
+    // Outside the field's grid a point is not mapped; by the matrices alone it is.
+    expect(pointToLayer(placement, [41, 0, 0])).toBeNull();
+    near(pointToLayer(withoutField(placement), [41, 0, 0]), transformPoint(post, [41, 0, 0]));
+  });
+
+  it('does not place the other way round: a field is not inverted', () => {
+    expect(findPlacement(MR, PLANNING, [FIELD])).toEqual({ kind: 'none' });
+  });
+
+  it('has no way back to the base for a point of the layer', () => {
+    const found = findPlacement(PLANNING, MR, [FIELD]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    expect(pointToBase(found.placement, through([10, 20, 30]))).toBeNull();
+    expect(pointBetweenLayers(through([10, 20, 30]), found.placement, null)).toBeNull();
+    near(pointBetweenLayers([10, 20, 30], null, found.placement), through([10, 20, 30]));
+    expect(pointBetweenLayers([99, 0, 0], null, found.placement)).toBeNull();
+    // With the field left out it is a matrix, and goes both ways.
+    const rigid = withoutField(found.placement);
+    expect(rigid.field).toBeUndefined();
+    near(pointToBase(rigid, transformPoint(post, [1, 2, 3])), [1, 2, 3]);
+    expect(withoutField(rigid)).toBe(rigid);
+  });
+
+  it('takes a matrix before the field and one after it into the field’s own', () => {
+    // The follow-up CT is the base: its rigid registration leads to the
+    // planning frame (inverted), and the field from there to the MR.
+    const found = findPlacement(FOLLOW_UP, MR, [REG, FIELD]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    const { placement } = found;
+    expect(
+      placement.steps.map((step) => [step.sopInstanceUid, step.inverted, step.deformable]),
+    ).toEqual([
+      ['9.1', false, undefined],
+      ['9.7', false, true],
+    ]);
+    placement.field!.pre.forEach((value, i) =>
+      expect(value).toBeCloseTo(followUpToPlanning[i], 12),
+    );
+    const inFollowUp: Vec3 = [3, 4, 5];
+    const inPlanning = transformPoint(followUpToPlanning, inFollowUp);
+    near(pointToLayer(placement, inFollowUp), through(inPlanning));
+    multiplyMat4(post, followUpToPlanning).forEach((value, i) =>
+      expect(placement.baseToLayer[i]).toBeCloseTo(value, 12),
+    );
+  });
+
+  it('is one of several ways when a matrix leads there too, and none is picked', () => {
+    const rigid = object('9.8', MR, PLANNING, rigidMat4([0, 0, 1], 0, [1, 2, 3]));
+    const found = findPlacement(PLANNING, MR, [FIELD, rigid]);
+    if (found.kind !== 'several') throw new Error(found.kind);
+    expect(found.placements.map((one) => !!one.field).sort()).toEqual([false, true]);
+  });
+
+  it('is no placement through two fields', () => {
+    const second: DeformableSpatialRegistration = {
+      ...FIELD,
+      sopInstanceUid: '9.9',
+      registeredFrame: MR,
+      registrations: [
+        {
+          ...FIELD.registrations[0],
+          transform: deformableTransform({ id: '9.9#0', from: MR, to: ALONE, grid }),
+        },
+      ],
+    };
+    expect(findPlacement(PLANNING, ALONE, [FIELD, second])).toEqual({ kind: 'none' });
+  });
+
+  it('is kept from another patient like any registration', () => {
+    const other = { ...FIELD, sopInstanceUid: '9.10', patientId: 'OTHER' };
+    expect(registrationsOfPatient([FIELD, other, REG], 'SYN-0001')).toEqual([FIELD, REG]);
   });
 });
 

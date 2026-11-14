@@ -5,13 +5,17 @@
 import {
   IDENTITY_MAT4,
   Orientation,
+  type DeformationGrid,
   type Mat4,
+  type PlacementField,
   type Vec3,
   type Volume,
   type VolumeGeometry,
   dot,
   invertMat4,
+  multiplyMat4,
   rigidMat4,
+  sampleDeformation,
   sub,
   transformPoint,
 } from '@open-rt-studio/dicom';
@@ -24,6 +28,10 @@ import {
   linkedSliceIndex,
   NO_OBLIQUE,
   orientTowardRay,
+  FIELD_EDGE,
+  fieldPlaneToTexMatrix,
+  fieldTexBounds,
+  fieldToOverlayTexMatrix,
   overlayPlaneToTexMatrix,
   planeCoordsAt,
   planeExtentMm,
@@ -214,6 +222,168 @@ describe('overlayPlaneToTexMatrix through a registration (#76)', () => {
     expect(applyMat4(back, 0.5, 0.5, 0.5)[0] - applyMat4(plain, 0.5, 0.5, 0.5)[0]).toBeCloseTo(
       -0.625,
     );
+  });
+});
+
+describe('an overlay read through a deformation field (#77)', () => {
+  // The base and the overlay of the registration tests above, and between
+  // them a field: laid out in a frame that the matrix before it turns the
+  // base's into, and followed by a matrix into the overlay's frame.
+  const base = makeVolume([8, 6, 4], {
+    iStep: [2, 0, 0],
+    jStep: [0, 2, 0],
+    kStep: [0, 0, 3],
+    origin: [-7, -5, -4],
+  });
+  const overlay = makeVolume([5, 7, 6], {
+    iStep: [1.5, 0, 0],
+    jStep: [0, 1.5, 0],
+    kStep: [0, 0, 2],
+    origin: [20, 30, 40],
+  });
+  const pre: Mat4 = rigidMat4([0, 0, 1], 10, [3, -2, 1]);
+  const post: Mat4 = rigidMat4([1, 2, -1], 25, [24, 33, 44]);
+  // A grid that is turned in its frame and wide enough for the whole base.
+  const dims = [7, 6, 5] as const;
+  const grid: DeformationGrid = {
+    dims,
+    origin: [30, -30, -20],
+    axes: [
+      [0, 1, 0],
+      [-1, 0, 0],
+      [0, 0, 1],
+    ],
+    spacing: [12, 12, 10],
+    vectors: new Float32Array(dims[0] * dims[1] * dims[2] * 3),
+  };
+  // A displacement that goes with the grid's indices one by one and by their
+  // products: read between the vectors, it is this exactly.
+  const moved = (i: number, j: number, k: number): Vec3 => [
+    1 + 0.5 * i - 0.1 * j * k,
+    -2 + 0.25 * j + 0.05 * i * k,
+    0.5 - 0.4 * k + 0.02 * i * j,
+  ];
+  for (let k = 0, at = 0; k < dims[2]; k++) {
+    for (let j = 0; j < dims[1]; j++) {
+      for (let i = 0; i < dims[0]; i++, at += 3) grid.vectors.set(moved(i, j, k), at);
+    }
+  }
+  const field: PlacementField = { pre, grid, post };
+  const baseToOverlay = multiplyMat4(post, pre);
+
+  /** The patient position a texture coordinate of a volume is at. */
+  function patientAt(volume: Volume, tex: readonly number[]): Vec3 {
+    const { iStep, jStep, kStep, origin } = volume.geometry!;
+    const index = [0, 1, 2].map((axis) => tex[axis] * volume.dims[axis] - 0.5);
+    return [0, 1, 2].map(
+      (c) => origin[c] + index[0] * iStep[c] + index[1] * jStep[c] + index[2] * kStep[c],
+    ) as unknown as Vec3;
+  }
+  /** The grid index of a position of the field's frame. */
+  function gridIndex(q: Vec3): Vec3 {
+    const d = [q[0] - grid.origin[0], q[1] - grid.origin[1], q[2] - grid.origin[2]];
+    return grid.axes.map(
+      (axis, n) => (d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) / grid.spacing[n],
+    ) as unknown as Vec3;
+  }
+
+  const panePoints: [number, number, number][] = [
+    [0, 0, 0],
+    [0.5, 0.5, 0.5],
+    [1, 0, 0.25],
+    [0.2, 0.9, 1],
+  ];
+  const tilted: ObliqueRotation = { tiltU: 0.3, tiltV: -0.2 };
+
+  it.each([
+    ['axial', Orientation.Axial, undefined],
+    ['coronal', Orientation.Coronal, undefined],
+    ['sagittal', Orientation.Sagittal, undefined],
+    ['an oblique plane', Orientation.Axial, tilted],
+  ] as const)(
+    'looks the field up where the matrix before it puts each point of the pane: %s',
+    (_name, orientation, rotation) => {
+      const baseMatrix = overlayPlaneToTexMatrix(base, base, orientation, rotation);
+      const toField = fieldPlaneToTexMatrix(base, field, orientation, rotation);
+      for (const [u, v, slicePos] of panePoints) {
+        const inBase = patientAt(base, applyMat4(baseMatrix, u, v, slicePos));
+        const expected = gridIndex(transformPoint(pre, inBase));
+        // A vector is at the centre of its texel: index = coordinate × size − ½.
+        const tex = applyMat4(toField, u, v, slicePos);
+        tex.forEach((value, axis) =>
+          expect(value * dims[axis] - 0.5, `index ${axis}`).toBeCloseTo(expected[axis], 4),
+        );
+      }
+    },
+  );
+
+  it.each([
+    ['axial', Orientation.Axial, undefined],
+    ['coronal', Orientation.Coronal, undefined],
+    ['sagittal', Orientation.Sagittal, undefined],
+    ['an oblique plane', Orientation.Axial, tilted],
+  ] as const)(
+    'reads the overlay where the field moves each point of the pane to: %s',
+    (_name, orientation, rotation) => {
+      // What the shader does, with the field's vector taken from the formula
+      // the grid was filled by: the texture gives the same between its texels.
+      const baseMatrix = overlayPlaneToTexMatrix(base, base, orientation, rotation);
+      const toField = fieldPlaneToTexMatrix(base, field, orientation, rotation);
+      const toOverlay = overlayPlaneToTexMatrix(
+        base,
+        overlay,
+        orientation,
+        rotation,
+        baseToOverlay,
+      );
+      const displaced = fieldToOverlayTexMatrix(overlay, post);
+      let read = 0;
+      for (const [u, v, slicePos] of panePoints) {
+        const tex = applyMat4(toField, u, v, slicePos);
+        const [i, j, k] = tex.map((value, axis) => value * dims[axis] - 0.5);
+        const d = moved(i, j, k);
+        const plain = applyMat4(toOverlay, u, v, slicePos);
+        const shifted = plain.map(
+          (value, c) =>
+            value + displaced[c] * d[0] + displaced[4 + c] * d[1] + displaced[8 + c] * d[2],
+        );
+        // What the registration model says of the same point of the base.
+        const inBase = patientAt(base, applyMat4(baseMatrix, u, v, slicePos));
+        const q = transformPoint(pre, inBase);
+        const fromGrid = sampleDeformation(grid, q);
+        expect(fromGrid, 'the grid reaches every point of the base').not.toBeNull();
+        fromGrid!.forEach((value, c) => expect(value).toBeCloseTo(d[c], 3));
+        const expected = transformPoint(post, [q[0] + d[0], q[1] + d[1], q[2] + d[2]]);
+        patientAt(overlay, shifted).forEach((value, c) =>
+          expect(value, `coordinate ${c}`).toBeCloseTo(expected[c], 3),
+        );
+        read += 1;
+      }
+      expect(read).toBe(panePoints.length);
+    },
+  );
+
+  it('turns a displacement, and does not move it: nothing for no displacement', () => {
+    const displaced = fieldToOverlayTexMatrix(overlay, post);
+    expectVec([...displaced.slice(12)], [0, 0, 0, 0]);
+    expect([displaced[3], displaced[7], displaced[11]]).toEqual([0, 0, 0]);
+    // With no matrix after the field, a millimetre along x is two thirds of a
+    // texel of the overlay along x: its columns are 1.5 mm apart, and there are five.
+    const plain = fieldToOverlayTexMatrix(overlay, IDENTITY_MAT4);
+    expectVec([...plain.slice(0, 3)], [1 / 1.5 / 5, 0, 0]);
+    expectVec([...plain.slice(8, 11)], [0, 0, 1 / 2 / 6]);
+  });
+
+  it('has vectors to read between from the centre of its first texel to the centre of its last', () => {
+    const { low, high } = fieldTexBounds([4, 10, 2]);
+    low.forEach((value, axis) => {
+      const size = [4, 10, 2][axis];
+      // Just outside the centre of the first texel, and not as far as its edge.
+      expect(value).toBeLessThan(0.5 / size);
+      expect(value).toBeGreaterThan(0.499 / size);
+      expect(high[axis]).toBeCloseTo(1 - value, 12);
+    });
+    expect(FIELD_EDGE).toBeLessThan(1e-3);
   });
 });
 

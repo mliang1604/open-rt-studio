@@ -13,7 +13,14 @@ import { expect, test, type Download, type Locator, type Page } from '@playwrigh
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
 import { fuseChipByDrag, importFiles } from './fixtures/load';
-import { chipOf, probeAt, showCt } from './fixtures/registered-pair';
+import {
+  axialPane as axial,
+  chipOf,
+  probeAt,
+  probeAtVoxel,
+  showCt,
+  voxelPoint,
+} from './fixtures/registered-pair';
 
 // A registration made by hand (#78). The synthetic pair is a CT and an MR in
 // two frames of reference, opened here without their registration. Begun by
@@ -31,29 +38,6 @@ async function bytesOf(download: Download): Promise<Uint8Array> {
 const form = (page: Page): Locator => page.locator('app-manual-registration');
 const shift = (page: Page, axis: number): Locator => form(page).locator(`[data-shift="${axis}"]`);
 const turn = (page: Page, axis: number): Locator => form(page).locator(`[data-turn="${axis}"]`);
-
-/** The axial pane: the first, and the large one. */
-const axial = (page: Page): Locator => page.locator('.pane-overlay .pane').first();
-
-/** Where the centre of a voxel of the CT is in the axial pane (its image is a centred square). */
-async function voxelPoint(page: Page, x: number, y: number): Promise<{ x: number; y: number }> {
-  const box = (await axial(page).boundingBox())!;
-  const side = Math.min(box.width, box.height);
-  const voxel = side / PAIR.size;
-  return {
-    x: box.x + (box.width - side) / 2 + (x + 0.5) * voxel,
-    y: box.y + (box.height - side) / 2 + (y + 0.5) * voxel,
-  };
-}
-
-/** What the probe reads at the centre of a voxel of the CT's axial slice on screen. */
-async function probeAtVoxel(page: Page, x: number, y: number) {
-  const box = (await axial(page).boundingBox())!;
-  const point = await voxelPoint(page, x, y);
-  const read = await probeAt(page, (point.x - box.x) / box.width, (point.y - box.y) / box.height);
-  expect(read.voxel.slice(0, 2)).toEqual([x, y]);
-  return read;
-}
 
 /** Press at one place, go to another in a few moves, and let go. */
 async function drag(

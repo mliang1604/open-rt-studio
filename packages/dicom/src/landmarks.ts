@@ -144,6 +144,30 @@ export function targetRegistrationErrorOfMatrix(
   return targetRegistrationError(landmarks, (moving) => transformPoint(movingToFixed, moving));
 }
 
+/**
+ * The target registration error of a registration that goes the other way:
+ * `fixedToMoving` takes a point of the fixed image's frame to the moving
+ * image's, as a deformation field does, which is not turned round. The
+ * error at a landmark is then from its point of the moving image to where
+ * the registration puts its point of the fixed image,
+ *
+ *     error = registration(fixed) − moving
+ *
+ * **in the moving image's frame**: `mapped` and `error` are there, and the
+ * directions of an error are that image's left, back and head. Its length
+ * is a distance in mm all the same, though not the same number as the error
+ * measured in the fixed frame where the registration stretches or turns.
+ */
+export function targetRegistrationErrorFromFixed(
+  landmarks: readonly LandmarkPair[],
+  fixedToMoving: (fixed: Vec3) => Vec3 | null,
+): TargetRegistrationError {
+  return targetRegistrationError(
+    landmarks.map(({ name, fixed, moving }) => ({ name, fixed: moving, moving: fixed })),
+    fixedToMoving,
+  );
+}
+
 // The file landmarks are kept in: JSON, so that it can be read without this
 // program.
 //

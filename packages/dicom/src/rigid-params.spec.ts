@@ -256,8 +256,8 @@ describe('the placement of a layer by a registration set by hand', () => {
   it('reads the layer where the registration says the base’s point is', () => {
     const inMoving: Vec3 = [12, 18, 33];
     const inFixed = transformPoint(movingToFixed, inMoving);
-    close(pointBetweenLayers(inFixed, undefined, placement), inMoving);
-    close(pointBetweenLayers(inMoving, placement, undefined), inFixed);
+    close(pointBetweenLayers(inFixed, undefined, placement)!, inMoving);
+    close(pointBetweenLayers(inMoving, placement, undefined)!, inFixed);
   });
 
   it('says that it is by hand, written from the layer’s frame to the base’s', () => {

@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { InjectionToken, inject, type Signal } from '@angular/core';
-import type { Series, SpatialRegistration, StructureSet } from '@open-rt-studio/dicom';
+import type { Series, RegistrationObject, StructureSet } from '@open-rt-studio/dicom';
 
 import type { LoadProgress } from '../parse-pool';
 import type { SeriesThumbnail } from '../viewer/series-thumbnail';
@@ -127,7 +127,7 @@ export interface FetchedSeries {
    * over one of another frame, or one of another frame over it. A source
    * that does not give them yet gives none.
    */
-  readonly registrations: readonly SpatialRegistration[];
+  readonly registrations: readonly RegistrationObject[];
 }
 
 /** An object made in the viewer, as the bytes of a file. */
