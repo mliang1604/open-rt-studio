@@ -359,7 +359,12 @@ export class ToolbarController {
 
   /** Save a PNG of the active pane; the export plumbing lives in the capture controller. */
   captureScreenshot(): void {
-    this.capture.screenshot();
+    this.capture.screenshot('pane');
+  }
+
+  /** Save a PNG of every pane as laid out. */
+  captureLayout(): void {
+    this.capture.screenshot('layout');
   }
 
   /** Record a 360° spin of the 3D pane to WebM; orchestrated by the capture controller. */

@@ -308,10 +308,14 @@ export class RenderController {
     }
   }
 
-  /** Present a ready set of views immediately (the rotation-capture path). */
+  /**
+   * Present a ready set of views immediately (the capture path), with the ROI
+   * surfaces, as a scheduled frame draws them: a capture shows what the screen
+   * shows.
+   */
   present(views: PaneView[]): void {
     this.pendingViews = views;
-    this.deps?.renderer()?.renderPanes(views);
+    this.deps?.renderer()?.renderPanes(views, this.surfaceFrame());
   }
 
   /** Compose the current frame and schedule its submission (the render effect's body). */

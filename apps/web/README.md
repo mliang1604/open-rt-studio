@@ -40,7 +40,10 @@ available, so it never fails for lack of hardware. The required smoke job
 sets `E2E_REQUIRE_WEBGPU=1`, which turns that skip into a failure, so the
 check cannot pass with its tests skipped. Tests check the DOM and
 watch the console for WebGPU validation errors (`watchProblems`) instead of
-reading pixels back, which is not reliable in a headless browser.
+reading pixels back, which is not reliable in a headless browser. The
+exceptions read a saved PNG: `no-webgpu.spec.ts` (brightness before and after
+a device loss) and `capture.spec.ts` (the overlays, which the page draws on a
+2-D canvas).
 
 The software adapter needs three Chromium flags together (`playwright.config.ts`):
 `--use-webgpu-adapter=swiftshader`, `--use-angle=swiftshader` and
@@ -91,6 +94,13 @@ Viewer (`src/app/viewer`):
 - Stores holding signal state: `layers-store`, `compare-store`,
   `camera3d-store`, `measurement-store`, `cine-store`,
   `editable-structures-store`.
+- `capture-controller.ts`, `capture-overlays.ts`: PNG of a pane or of all
+  panes, and the spin video of the 3D pane. What is drawn over the canvas
+  (measurements, contours, crosshair, letters, scale bars, tags) is page
+  content, so a capture with overlays turns those elements into one SVG picture,
+  from their positions and computed styles, and draws it over the copy of the
+  canvas. An overlay added to the viewport shows in captures once its selector
+  is in the list at the top of `capture-overlays.ts`.
 - `history-panel/`: the patient timeline and tree with series chips.
 - `cpr/`: the curved planar reformat tool: the path store, the controller
   that maps between panes and the patient, the overlay that draws the path and
