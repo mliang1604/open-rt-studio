@@ -45,6 +45,7 @@ import { CompareStore } from './compare-store';
 import { LoadCoordinator, type DropIntent } from './load-coordinator';
 import { pickCaptureTarget } from './capture';
 import { CaptureController, type ScreenshotTarget } from './capture-controller';
+import { overlaysSvg } from './capture-overlays';
 import { InteractionController } from './interaction-controller';
 import { View3dController } from './view3d-controller';
 import { LoadController, type LoadState } from './load-controller';
@@ -155,7 +156,7 @@ const MAX_ZOOM = 20;
 })
 export class Viewer {
   /** Owns the screenshot / rotation-capture export domain; wired in the constructor. */
-  private readonly capture = inject(CaptureController);
+  protected readonly capture = inject(CaptureController);
   /** Owns the canvas pointer/drag/wheel state machine; wired in the constructor. */
   protected readonly interaction = inject(InteractionController);
   /** Owns the 3D-pane editing gestures (TF / clip / oblique / slab); wired in the constructor. */
@@ -385,6 +386,12 @@ export class Viewer {
       canvas: () => this.canvasRef().nativeElement,
       isReady: () => this.isReady(),
       screenshotTarget: () => this.screenshotTarget(),
+      overlaySvg: () =>
+        overlaysSvg(this.canvasRef().nativeElement.parentElement!, this.canvasRef().nativeElement),
+      rotationRect: () => {
+        const pane = this.panes().find((p) => p.kind === 'mip');
+        return pane ? scaleRect(pane.rect, this.viewport().dpr) : null;
+      },
       canRecordRotation: () => this.canRecordRotation(),
       composeViews: () => this.render.composeViews(),
       presentViews: (views) => this.render.present(views),

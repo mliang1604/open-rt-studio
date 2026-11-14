@@ -85,6 +85,8 @@ function setup(overrides: Partial<CaptureInit> = {}): Harness {
     canvas: () => canvas,
     isReady: () => true,
     screenshotTarget: () => ({ rect: { x: 0, y: 0, width: 10, height: 10 }, tag: 'axial' }),
+    overlaySvg: () => null,
+    rotationRect: () => null,
     canRecordRotation: () => true,
     composeViews: () => views,
     presentViews,
@@ -176,5 +178,188 @@ describe('CaptureController', () => {
     controller.screenshot();
     runAllFrames();
     expect(download).not.toHaveBeenCalled();
+  });
+
+  describe('with a 2-D canvas to draw on', () => {
+    /** A stand-in for the 2-D canvases the controller makes: records what is drawn. */
+    interface FakeCanvas {
+      width: number;
+      height: number;
+      readonly draws: unknown[][];
+      readonly captureStream: ReturnType<typeof vi.fn>;
+    }
+    let made: FakeCanvas[] = [];
+    const trackStop = vi.fn();
+
+    beforeEach(() => {
+      made = [];
+      const createElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+        if (tag !== 'canvas') return createElement(tag);
+        const draws: unknown[][] = [];
+        const fake = {
+          width: 0,
+          height: 0,
+          draws,
+          getContext: () => ({ drawImage: (...args: unknown[]) => draws.push(args) }),
+          toBlob: (done: (blob: Blob) => void) => done(new Blob(['png'])),
+          captureStream: vi.fn(() => ({ getTracks: () => [{ stop: trackStop }] })),
+        };
+        made.push(fake);
+        return fake as unknown as HTMLElement;
+      });
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    /** The WebGPU canvas: 800 by 600 device pixels. */
+    const gpuCanvas = () =>
+      ({
+        width: 800,
+        height: 600,
+        captureStream: vi.fn(() => ({ getTracks: () => [{ stop: trackStop }] })),
+      }) as unknown as HTMLCanvasElement;
+    const PANE = { x: 400, y: 0, width: 400, height: 300 };
+    /** Let the promise chain after a rasterize settle. */
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('saves the active pane, cropped from the frame just rendered', async () => {
+      const canvas = gpuCanvas();
+      const overlaySvg = vi.fn(() => '<svg/>');
+      const { controller, download, presentViews } = setup({
+        canvas: () => canvas,
+        screenshotTarget: () => ({ rect: PANE, tag: 'coronal' }),
+        overlaySvg,
+      });
+      controller.toggleOverlays(); // off
+      expect(controller.includeOverlays()).toBe(false);
+
+      controller.screenshot();
+      runAllFrames();
+      await settle();
+
+      // Drawn through the viewer's own frame path, so structure surfaces are in it.
+      expect(presentViews).toHaveBeenCalledOnce();
+      expect(made).toHaveLength(1);
+      expect([made[0].width, made[0].height]).toEqual([400, 300]);
+      expect(made[0].draws).toEqual([[canvas, 400, 0, 400, 300, 0, 0, 400, 300]]);
+      expect(overlaySvg).not.toHaveBeenCalled();
+      expect(download).toHaveBeenCalledOnce();
+      expect(download.mock.calls[0][1]).toBe('ct-chest-coronal-20260620-090503.png');
+    });
+
+    it('includes the overlays by default, drawn over the same crop', async () => {
+      const canvas = gpuCanvas();
+      const picture = { the: 'overlay picture' } as unknown as CanvasImageSource;
+      const rasterize = vi.fn(() => Promise.resolve(picture));
+      const { controller, download } = setup({
+        canvas: () => canvas,
+        screenshotTarget: () => ({ rect: PANE, tag: 'coronal' }),
+        overlaySvg: () => '<svg id="overlays"/>',
+        rasterize,
+      });
+      expect(controller.includeOverlays()).toBe(true);
+
+      controller.screenshot();
+      runAllFrames();
+      expect(download).not.toHaveBeenCalled(); // waits for the picture
+      await settle();
+
+      expect(rasterize).toHaveBeenCalledWith('<svg id="overlays"/>');
+      expect(made[0].draws).toEqual([
+        [canvas, 400, 0, 400, 300, 0, 0, 400, 300],
+        [picture, 400, 0, 400, 300, 0, 0, 400, 300],
+      ]);
+      expect(download).toHaveBeenCalledOnce();
+    });
+
+    it('saves the whole layout: the whole canvas, named for it', async () => {
+      const canvas = gpuCanvas();
+      const screenshotTarget = vi.fn(() => ({ rect: PANE, tag: 'coronal' }));
+      const picture = {} as CanvasImageSource;
+      const { controller, download } = setup({
+        canvas: () => canvas,
+        screenshotTarget,
+        overlaySvg: () => '<svg/>',
+        rasterize: () => Promise.resolve(picture),
+      });
+
+      controller.screenshot('layout');
+      runAllFrames();
+      await settle();
+
+      expect(screenshotTarget).not.toHaveBeenCalled();
+      expect([made[0].width, made[0].height]).toEqual([800, 600]);
+      expect(made[0].draws).toEqual([
+        [canvas, 0, 0, 800, 600, 0, 0, 800, 600],
+        [picture, 0, 0, 800, 600, 0, 0, 800, 600],
+      ]);
+      expect(download.mock.calls[0][1]).toBe('ct-chest-layout-20260620-090503.png');
+    });
+
+    it('still saves the image when the overlays cannot be drawn', async () => {
+      for (const rasterize of [
+        () => Promise.resolve(null),
+        () => Promise.reject(new Error('cannot decode')),
+      ]) {
+        made = [];
+        const canvas = gpuCanvas();
+        const { controller, download } = setup({
+          canvas: () => canvas,
+          overlaySvg: () => '<svg/>',
+          rasterize,
+        });
+        controller.screenshot();
+        runAllFrames();
+        await settle();
+        expect(made[0].draws).toHaveLength(1);
+        expect(download).toHaveBeenCalledOnce();
+        TestBed.resetTestingModule();
+      }
+    });
+
+    it('saves the image alone when there is nothing over it', async () => {
+      const rasterize = vi.fn();
+      const { controller, download } = setup({
+        canvas: gpuCanvas,
+        overlaySvg: () => null,
+        rasterize,
+      });
+      controller.screenshot();
+      runAllFrames();
+      await settle();
+      expect(rasterize).not.toHaveBeenCalled();
+      expect(download).toHaveBeenCalledOnce();
+    });
+
+    it('records the spin from the 3D pane only, copying it each frame', () => {
+      const canvas = gpuCanvas();
+      const { controller, download } = setup({ canvas: () => canvas, rotationRect: () => PANE });
+
+      controller.recordRotation();
+
+      // A canvas of the pane's size is what the recorder samples, not the WebGPU canvas.
+      expect(made).toHaveLength(1);
+      expect([made[0].width, made[0].height]).toEqual([400, 300]);
+      expect(made[0].captureStream).toHaveBeenCalledOnce();
+      expect(canvas.captureStream).not.toHaveBeenCalled();
+
+      runNextFrame();
+      runNextFrame();
+      expect(made[0].draws).toHaveLength(2);
+      expect(made[0].draws[0]).toEqual([canvas, 400, 0, 400, 300, 0, 0, 400, 300]);
+
+      runAllFrames();
+      expect(made[0].draws).toHaveLength(ROTATION_FRAMES);
+      expect(download).toHaveBeenCalledOnce();
+    });
+
+    it('records the whole canvas when the 3D pane cannot be measured', () => {
+      const canvas = gpuCanvas();
+      const { controller } = setup({ canvas: () => canvas, rotationRect: () => null });
+      controller.recordRotation();
+      expect(made).toHaveLength(0);
+      expect(canvas.captureStream).toHaveBeenCalledOnce();
+    });
   });
 });

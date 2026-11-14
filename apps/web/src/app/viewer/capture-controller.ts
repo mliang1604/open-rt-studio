@@ -11,6 +11,10 @@ import {
   timestampSlug,
   type CaptureNaming,
 } from './capture';
+import { rasterizeSvg } from './capture-overlays';
+
+/** What a PNG shows: the active pane, or every pane as laid out. */
+export type ScreenshotScope = 'pane' | 'layout';
 
 /** WebM containers tried, most-preferred first, for the 3D rotation capture. */
 const VIDEO_MIME_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'] as const;
@@ -42,11 +46,23 @@ export interface CaptureInit {
   readonly isReady: () => boolean;
   /** The screenshot's target pane (device-pixel crop rect + view tag), or null. */
   readonly screenshotTarget: () => ScreenshotTarget | null;
+  /**
+   * What is drawn above the canvas right now, as an SVG picture the size of
+   * the canvas (see `capture-overlays.ts`), or null when there is nothing.
+   */
+  readonly overlaySvg: () => string | null;
+  /** Turn that SVG into something a 2-D canvas can draw. Default: an image element. */
+  readonly rasterize?: (svg: string) => Promise<CanvasImageSource | null>;
+  /** The 3D pane's device-pixel region of the canvas, or null when there is none. */
+  readonly rotationRect: () => PaneRect | null;
   /** Whether a 3D rotation capture is currently possible (3D pane shown). */
   readonly canRecordRotation: () => boolean;
   /** Recompute the pane views to draw for the current state (null until ready). */
   readonly composeViews: () => PaneView[] | null;
-  /** Adopt `views` as the next frame to present, keeping a scheduled render in sync. */
+  /**
+   * Draw `views` now, as a scheduled frame would (structure surfaces included),
+   * and adopt them as the frame a scheduled render presents next.
+   */
   readonly presentViews: (views: PaneView[]) => void;
   /** The orbit camera signal; the spin steps and then restores its azimuth. */
   readonly camera: WritableSignal<OrbitCamera>;
@@ -83,6 +99,19 @@ export class CaptureController {
   /** True while a 3D rotation capture is recording; disables the export controls. */
   readonly recordingRotation = this.recording.asReadonly();
 
+  /**
+   * Whether a PNG includes what is drawn above the image: measurements,
+   * contours, the crosshair, reference lines, orientation letters, scale bars,
+   * the axis indicator and pane tags. On, a capture shows what the screen shows;
+   * off, it is the image alone.
+   */
+  readonly includeOverlays = signal(true);
+
+  /** Switch the overlays in captures on or off. */
+  toggleOverlays(): void {
+    this.includeOverlays.update((on) => !on);
+  }
+
   /** Handle of the in-flight rotation-capture animation frame, or null when idle. */
   private handle: number | null = null;
   /** The active rotation-capture recorder, or null when not recording. */
@@ -101,30 +130,49 @@ export class CaptureController {
   }
 
   /**
-   * Save a PNG of the active pane (the hovered one, else the main pane). The canvas
-   * is re-rendered and the pane's device-pixel region snapshotted in the same frame
-   * — before the next `getCurrentTexture()` recycles the WebGPU drawing buffer —
-   * then cropped onto a 2-D canvas and downloaded.
+   * Save a PNG of the active pane (the hovered one, else the main pane), or of
+   * the whole layout. The canvas is re-rendered and the region snapshotted in the
+   * same frame — before the next `getCurrentTexture()` recycles the WebGPU drawing
+   * buffer — then cropped onto a 2-D canvas. With {@link includeOverlays} on,
+   * the overlays are taken in that frame too and drawn over the crop before
+   * the download.
    */
-  screenshot(): void {
+  screenshot(scope: ScreenshotScope = 'pane'): void {
     const deps = this.deps;
     if (!deps) return;
     const renderer = deps.renderer();
     if (!renderer || !deps.isReady()) return;
-    const target = deps.screenshotTarget();
+    const canvas = deps.canvas();
+    const target: ScreenshotTarget | null =
+      scope === 'layout'
+        ? { rect: { x: 0, y: 0, width: canvas.width, height: canvas.height }, tag: 'layout' }
+        : deps.screenshotTarget();
     if (!target) return;
     const views = deps.composeViews();
     if (!views) return;
-    const canvas = deps.canvas();
     const filename = this.captureName(deps, target.tag, 'png');
+    const withOverlays = this.includeOverlays();
 
     requestAnimationFrame(() => {
-      renderer.renderPanes(views);
+      deps.presentViews(views); // draws at once, structure surfaces included
       const region = cropCanvas(canvas, target.rect);
       if (!region) return;
-      region.toBlob((blob) => {
-        if (blob) deps.download(blob, filename);
-      }, 'image/png');
+      const save = () =>
+        region.toBlob((blob) => {
+          if (blob) deps.download(blob, filename);
+        }, 'image/png');
+      const svg = withOverlays ? deps.overlaySvg() : null;
+      if (!svg) {
+        save();
+        return;
+      }
+      // The picture is the size of the canvas, so the same crop lines it up.
+      void (deps.rasterize ?? rasterizeSvg)(svg)
+        .then((picture) => {
+          if (picture) drawCropped(region, picture, target.rect);
+        })
+        .catch(() => undefined) // an image without overlays beats no image
+        .then(save);
     });
   }
 
@@ -144,7 +192,12 @@ export class CaptureController {
     if (!renderer || !mimeType || !deps.canRecordRotation() || this.recording()) return;
 
     const canvas = deps.canvas();
-    const stream = canvas.captureStream(ROTATION_FPS);
+    // Record the 3D pane, not the canvas: in the 4-pane layout the canvas also
+    // holds the three MPR panes. Each frame is copied to a canvas of the pane's
+    // size and that one is recorded. Without a 2-D context (or a 3D pane to
+    // measure) the whole canvas is recorded, as it used to be.
+    const pane = paneRecorder(canvas, deps.rotationRect());
+    const stream = (pane?.target ?? canvas).captureStream(ROTATION_FPS);
     const recorder = new MediaRecorder(stream, { mimeType });
     this.recorder = recorder;
     const chunks: Blob[] = [];
@@ -175,7 +228,10 @@ export class CaptureController {
       }
       deps.camera.update((camera) => ({ ...camera, azimuth: azimuths[frame] }));
       const views = deps.composeViews();
-      if (views) deps.presentViews(views);
+      if (views) {
+        deps.presentViews(views); // draws at once, so the copy sees this frame
+        pane?.copy();
+      }
       frame++;
       this.handle = requestAnimationFrame(step);
     };
@@ -201,6 +257,47 @@ export class CaptureController {
   private captureName(deps: CaptureInit, view: string, extension: string): string {
     return captureFilename(deps.naming(), view, extension, timestampSlug(deps.now()));
   }
+}
+
+/**
+ * A 2-D canvas the size of `rect` and a way to copy that region of `source`
+ * onto it, for recording one pane of the canvas. Null when there is no region
+ * or no 2-D context.
+ */
+function paneRecorder(
+  source: HTMLCanvasElement,
+  rect: PaneRect | null,
+): { readonly target: HTMLCanvasElement; readonly copy: () => void } | null {
+  if (!rect) return null;
+  const width = Math.round(rect.width);
+  const height = Math.round(rect.height);
+  if (width < 1 || height < 1) return null;
+  const target = document.createElement('canvas');
+  target.width = width;
+  target.height = height;
+  const ctx = target.getContext('2d');
+  if (!ctx) return null;
+  const x = Math.round(rect.x);
+  const y = Math.round(rect.y);
+  return { target, copy: () => ctx.drawImage(source, x, y, width, height, 0, 0, width, height) };
+}
+
+/** Draw the region `rect` of a canvas-sized picture over a crop of that region. */
+function drawCropped(crop: HTMLCanvasElement, picture: CanvasImageSource, rect: PaneRect): void {
+  const ctx = crop.getContext('2d');
+  if (!ctx) return;
+  const { width, height } = crop;
+  ctx.drawImage(
+    picture,
+    Math.round(rect.x),
+    Math.round(rect.y),
+    width,
+    height,
+    0,
+    0,
+    width,
+    height,
+  );
 }
 
 /**

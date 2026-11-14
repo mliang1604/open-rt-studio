@@ -703,6 +703,23 @@
         >
           Screenshot ▣
         </button>
+        <button
+          type="button"
+          (click)="toolbar.captureLayout()"
+          [disabled]="!isReady() || recordingRotation()"
+          title="Save a PNG of all the panes as they are arranged"
+        >
+          All panes ▦
+        </button>
+        <button
+          type="button"
+          (click)="capture.toggleOverlays()"
+          [class.active]="capture.includeOverlays()"
+          [attr.aria-pressed]="capture.includeOverlays()"
+          title="Include what is drawn over the image in a PNG: measurements, contours, crosshair, reference lines, orientation letters, scale bars and pane tags"
+        >
+          Overlays {{ capture.includeOverlays() ? 'on' : 'off' }}
+        </button>
 
         @if (canRecordRotation() || recordingRotation()) {
           <button
@@ -711,7 +728,7 @@
             [disabled]="!canRecordRotation() || recordingRotation()"
             [class.active]="recordingRotation()"
             [attr.aria-pressed]="recordingRotation()"
-            title="Record a 360° spin of the 3D view to a WebM clip"
+            title="Record a 360° spin of the 3D pane to a WebM clip"
           >
             {{ recordingRotation() ? '● Recording…' : 'Spin ⟳' }}
           </button>
