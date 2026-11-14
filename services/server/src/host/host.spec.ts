@@ -340,6 +340,173 @@ describe('a server that listens on this machine only', () => {
   );
 });
 
+describe('requests from web pages', () => {
+  const PAGE = 'http://localhost:4200';
+
+  interface Answer {
+    readonly status: number;
+    readonly headers: Record<string, string | string[] | undefined>;
+    readonly body: string;
+  }
+
+  /** A request as a browser would send it for a page: with the page's origin. */
+  function ask(
+    url: string,
+    path: string,
+    headers: Record<string, string>,
+    method = 'GET',
+  ): Promise<Answer> {
+    return new Promise((resolve, reject) => {
+      const request = httpRequest(`${url}${path}`, { method, headers }, (response) => {
+        let body = '';
+        response.setEncoding('utf8').on('data', (chunk: string) => (body += chunk));
+        response.on('end', () =>
+          resolve({ status: response.statusCode ?? 0, headers: response.headers, body }),
+        );
+      });
+      request.on('error', reject);
+      request.end();
+    });
+  }
+
+  /** A route that counts how often it was reached. */
+  function counted(method: Route['method'] = 'POST'): { route: Route; reached: () => number } {
+    let reached = 0;
+    return {
+      route: {
+        method,
+        path: '/things/:id',
+        handle: () => {
+          reached++;
+          return { status: 200, body: { done: true } };
+        },
+      },
+      reached: () => reached,
+    };
+  }
+
+  it('answers a caller that names no origin: it is not a page', async () => {
+    const { url } = await start({ allowedOrigins: [PAGE] });
+    const answer = await ask(url, '/health', {});
+    expect(answer.status).toBe(200);
+    expect(answer.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('answers its own pages, without saying anything about other origins', async () => {
+    const { url } = await start();
+    const answer = await ask(url, '/health', { Origin: url });
+    expect(answer.status).toBe(200);
+    expect(answer.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it.each(['http://attacker.example', 'null', 'http://localhost:4201', 'https://localhost:4200'])(
+    'refuses a page of %s, which was not allowed, before any route is reached',
+    async (origin) => {
+      const things = counted();
+      const { url, log } = await start({ routes: [things.route], allowedOrigins: [PAGE] });
+      // A form on any page can send this without asking first.
+      const posted = await ask(url, '/things/1', { Origin: origin }, 'POST');
+      expect(posted.status).toBe(403);
+      expect(JSON.parse(posted.body)).toMatchObject({ error: 'forbidden-origin' });
+      expect(posted.headers['access-control-allow-origin']).toBeUndefined();
+      expect(things.reached()).toBe(0);
+      expect((await ask(url, '/health', { Origin: origin })).status).toBe(403);
+      // And is not told that it may.
+      const asked = await ask(
+        url,
+        '/things/1',
+        { Origin: origin, 'Access-Control-Request-Method': 'POST' },
+        'OPTIONS',
+      );
+      expect(asked.status).toBe(403);
+      await vi.waitFor(() => expect(log()).toHaveLength(3));
+      expect(log()[0]).toMatchObject({ route: 'forbidden-origin', status: 403 });
+      expect(JSON.stringify(log())).not.toContain('attacker');
+    },
+  );
+
+  it('refuses every other origin when none is allowed, which is how it starts', async () => {
+    const things = counted();
+    const { url } = await start({ routes: [things.route] });
+    expect((await ask(url, '/things/1', { Origin: PAGE }, 'POST')).status).toBe(403);
+    expect(things.reached()).toBe(0);
+  });
+
+  it('answers a page of an allowed origin, and lets it read the answer', async () => {
+    const things = counted('GET');
+    const { url } = await start({ routes: [things.route], allowedOrigins: [PAGE] });
+    for (const origin of [PAGE, 'HTTP://LOCALHOST:4200']) {
+      const answer = await ask(url, '/things/1', { Origin: origin });
+      expect(answer.status).toBe(200);
+      expect(answer.headers['access-control-allow-origin']).toBe(PAGE);
+      expect(answer.headers['access-control-expose-headers']).toContain('ETag');
+      expect(answer.headers['vary']).toBe('Origin');
+      // No cookies, no login: nothing is sent "with credentials".
+      expect(answer.headers['access-control-allow-credentials']).toBeUndefined();
+    }
+    expect(things.reached()).toBe(2);
+    // An error is readable too, or the page could not say what went wrong.
+    const missing = await ask(url, '/nothing', { Origin: PAGE });
+    expect(missing.status).toBe(404);
+    expect(missing.headers['access-control-allow-origin']).toBe(PAGE);
+  });
+
+  it('tells an allowed page, when it asks first, what it may send', async () => {
+    const posts = counted('POST');
+    const gets = counted('GET');
+    const { url, log } = await start({ routes: [posts.route, gets.route], allowedOrigins: [PAGE] });
+    const asked = await ask(
+      url,
+      '/things/1',
+      {
+        Origin: PAGE,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+      },
+      'OPTIONS',
+    );
+    expect(asked.status).toBe(204);
+    expect(asked.body).toBe('');
+    expect(asked.headers['access-control-allow-origin']).toBe(PAGE);
+    expect(asked.headers['access-control-allow-methods']).toBe('POST, GET');
+    expect(asked.headers['access-control-allow-headers']).toBe(
+      'Content-Type, Range, If-None-Match',
+    );
+    expect(asked.headers['access-control-max-age']).toBe('600');
+    expect(asked.headers['access-control-allow-private-network']).toBeUndefined();
+    // Asking is not doing.
+    expect(posts.reached() + gets.reached()).toBe(0);
+    await vi.waitFor(() => expect(log()).toHaveLength(1));
+    expect(log()[0]).toMatchObject({ route: 'preflight', status: 204 });
+
+    // Chrome asks more of a public page that calls a server on this machine.
+    const fromPublic = await ask(
+      url,
+      '/things/1',
+      {
+        Origin: PAGE,
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Private-Network': 'true',
+      },
+      'OPTIONS',
+    );
+    expect(fromPublic.headers['access-control-allow-private-network']).toBe('true');
+
+    expect(
+      (
+        await ask(
+          url,
+          '/nothing',
+          { Origin: PAGE, 'Access-Control-Request-Method': 'GET' },
+          'OPTIONS',
+        )
+      ).status,
+    ).toBe(404);
+    // OPTIONS that is not such a question is a method the address does not take.
+    expect((await ask(url, '/things/1', { Origin: PAGE }, 'OPTIONS')).status).toBe(405);
+  });
+});
+
 describe('closing the host', () => {
   it('lets a request in flight be answered, and takes no new connection', async () => {
     const slow = slowRoute();

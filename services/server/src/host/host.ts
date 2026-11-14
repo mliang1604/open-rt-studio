@@ -25,6 +25,11 @@ export interface HostOptions {
   readonly logger?: Logger;
   /** Routes besides the health endpoint. */
   readonly routes?: readonly Route[];
+  /**
+   * The web origins, besides the server's own, whose pages may call the
+   * server from a browser. None by default.
+   */
+  readonly allowedOrigins?: readonly string[];
 }
 
 /** Where the host listens. */
@@ -65,6 +70,11 @@ const JSON_TYPE = 'application/json; charset=utf-8';
 const LOOPBACK_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', 'localhost']);
 
+/** What a page of an allowed origin may send besides the plain headers. */
+const CORS_REQUEST_HEADERS = 'Content-Type, Range, If-None-Match';
+/** What such a page may read of an answer besides the plain headers. */
+const CORS_EXPOSED_HEADERS = 'ETag, Content-Range, Accept-Ranges, Content-Length, Location';
+
 /** The host of a `Host` header without its port: `[::1]:4300` gives `[::1]`. */
 function hostName(header: string | undefined): string {
   return (header ?? '').trim().toLowerCase().replace(/:\d+$/, '');
@@ -80,6 +90,7 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
    * such a request still carries the page's name in `Host`, and is refused.
    */
   const loopbackOnly = LOOPBACK_ADDRESSES.has(options.host);
+  const allowedOrigins = new Set(options.allowedOrigins ?? []);
   let inFlight = 0;
   let closing: Promise<HostClosure> | null = null;
   /** Called each time a request is answered while a close is waiting. */
@@ -157,6 +168,31 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
       );
       return 'forbidden-host';
     }
+    // A browser names the page a request comes from. Without that name the
+    // caller is not a page (a script, the desktop application), and passes.
+    // With it, the page must be the server's own or one that was allowed:
+    // a page elsewhere must not get the server to do anything, read or not.
+    const origin = request.headers.origin?.toLowerCase();
+    if (origin !== undefined) {
+      const own = origin.replace(/^https?:\/\//, '') === request.headers.host?.toLowerCase();
+      if (!own && !allowedOrigins.has(origin)) {
+        await fail(
+          response,
+          new HttpError(
+            403,
+            'forbidden-origin',
+            'This server does not answer pages of that origin.',
+          ),
+        );
+        return 'forbidden-origin';
+      }
+      if (!own) {
+        response.setHeader('Access-Control-Allow-Origin', origin);
+        response.setHeader('Access-Control-Expose-Headers', CORS_EXPOSED_HEADERS);
+      }
+    }
+    // The answer depends on who asked: a cache must not give one page's to another.
+    if (allowedOrigins.size > 0) response.setHeader('Vary', 'Origin');
     let url: URL;
     try {
       url = new URL(request.url ?? '', 'http://host');
@@ -171,6 +207,25 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
     if (onPath.length === 0) {
       await fail(response, new HttpError(404, 'not-found', 'There is nothing at this address.'));
       return 'unmatched';
+    }
+    // A browser asking, before the real request, whether it may send it.
+    if (
+      request.method === 'OPTIONS' &&
+      origin !== undefined &&
+      request.headers['access-control-request-method'] !== undefined
+    ) {
+      begin(response, 204, {
+        'Access-Control-Allow-Methods': onPath.map(({ route }) => route.method).join(', '),
+        'Access-Control-Allow-Headers': CORS_REQUEST_HEADERS,
+        'Access-Control-Max-Age': '600',
+        // Chrome asks this of a public page that calls a server on a private
+        // network or on this machine.
+        ...(request.headers['access-control-request-private-network'] === 'true'
+          ? { 'Access-Control-Allow-Private-Network': 'true' }
+          : {}),
+      });
+      response.end();
+      return 'preflight';
     }
     const match = onPath.find(({ route }) => route.method === request.method);
     if (!match) {

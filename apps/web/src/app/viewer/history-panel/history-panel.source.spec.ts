@@ -143,4 +143,27 @@ describe('the history panel on a data source', () => {
     await click('.tree-row-study');
     expect(text('.chip-label')).toEqual(['Planning CT', 'Series 20']);
   });
+
+  it('asks for the server card from its bar, and says when the history comes from a server', async () => {
+    const { fixture, host, text } = await render(withPatient());
+    let asked = 0;
+    fixture.componentInstance.openServer.subscribe(() => asked++);
+    const button = host.querySelector<HTMLButtonElement>('.history-source')!;
+    expect(button.textContent.trim()).toBe('Server…');
+    expect(button.classList.contains('active')).toBe(false);
+    expect(text('.history-from')).toEqual([]);
+    button.click();
+    expect(asked).toBe(1);
+
+    fixture.componentRef.setInput('server', 'Server at 127.0.0.1:4300');
+    await fixture.whenStable();
+    expect(text('.history-from')).toEqual(['Server at 127.0.0.1:4300']);
+    expect(button.classList.contains('active')).toBe(true);
+
+    // Still there when the panel is folded to its bar.
+    host.querySelector<HTMLButtonElement>('.history-toggle')!.click();
+    await fixture.whenStable();
+    expect(host.querySelector('.history-source')).not.toBeNull();
+    expect(host.querySelector('.history-views')).toBeNull();
+  });
 });

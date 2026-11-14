@@ -65,6 +65,8 @@ import { ToolbarController, LAYOUT_MODES } from './toolbar-controller';
 import { StatusController } from './status-controller';
 import { RangeFill } from './range-fill';
 import { HistoryPanel } from './history-panel/history-panel';
+import { ServerPanel } from './server-panel/server-panel';
+import { ActiveDataSource } from '../data-source/active-data-source';
 import { placePanes, placementAt, type PanePlacement } from './pane-placement';
 import { confirmDelete, downloadBlob, dropHeadlineText } from './viewer-dom';
 import { paneKeyOf } from './pane-placement';
@@ -119,6 +121,7 @@ const MAX_ZOOM = 20;
     ShortcutHelp,
     ImportReportCard,
     PaintedStructures,
+    ServerPanel,
   ],
   providers: [
     MeasurementStore,
@@ -283,6 +286,13 @@ export class Viewer {
 
   /** Whether the keyboard-shortcut help overlay is open. */
   protected readonly helpOpen = signal(false);
+  /** Whether the card for connecting to a server is open. */
+  protected readonly serverPanelOpen = signal(false);
+  private readonly sources = inject(ActiveDataSource);
+  /** What to call the server in use; null while the viewer reads opened files. */
+  protected readonly serverLabel = computed(() =>
+    this.sources.isFiles() ? null : this.sources.source().label,
+  );
   /** The modal help panel, so the toolbar controller can move focus into it on open. */
   private readonly shortcutHelp = viewChild(ShortcutHelp);
   /** The shortcuts listed in the help overlay, in display order. */

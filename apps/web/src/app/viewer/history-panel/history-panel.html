@@ -18,6 +18,19 @@
   @if (patientLabel(); as label) {
     <span class="history-patient" [title]="label">{{ label }}</span>
   }
+  @if (server(); as from) {
+    <span class="history-from">{{ from }}</span>
+  }
+  <button
+    type="button"
+    class="history-source"
+    [class.active]="server() !== null"
+    (click)="openServer.emit()"
+    aria-haspopup="dialog"
+    title="Read from an Open RT Studio server instead of opened files, or go back to files"
+  >
+    Server…
+  </button>
   @if (!collapsed()) {
     <div class="history-views" role="group" aria-label="History layout">
       <button

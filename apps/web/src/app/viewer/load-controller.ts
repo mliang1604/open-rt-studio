@@ -12,7 +12,8 @@ import {
   filesOf,
   type AccessHandle,
 } from '../file-access';
-import { DATA_SOURCE, listedSeries } from '../data-source/data-source';
+import { ActiveDataSource } from '../data-source/active-data-source';
+import { DATA_SOURCE, listedSeries, type DataSource } from '../data-source/data-source';
 import { LocalFilesSource } from '../data-source/local-files-source';
 import { demoPatient, demoPlanningCt } from '../demo-data';
 import { PreferencesStore } from '../preferences-store';
@@ -69,6 +70,8 @@ export type LoadState =
 
 /** How long a transient drop notice stays up before it auto-clears. */
 const NOTICE_MS = 3600;
+/** How long a notice of something that went wrong stays up: it takes longer to read. */
+const ERROR_NOTICE_MS = 9000;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -124,6 +127,7 @@ export class LoadController {
    */
   private readonly picks = new LoadSequence<LoadState>();
   private readonly source = inject(DATA_SOURCE);
+  private readonly sources = inject(ActiveDataSource);
   private readonly files = inject(LocalFilesSource);
   private readonly loadCoordinator = inject(LoadCoordinator);
   private readonly recentStore = inject(RecentStore);
@@ -157,6 +161,20 @@ export class LoadController {
   /** Wire the controller to the component's load state and view callbacks. Called once. */
   init(deps: LoadInit): void {
     this.deps = deps;
+  }
+
+  /**
+   * Read from another data source from now on: a server the user connected
+   * to, or null for the opened files. What is on screen came from the source
+   * that is left, so the viewport is emptied, and whatever was being loaded
+   * is abandoned. Asking for the source already in use changes nothing.
+   */
+  useSource(source: DataSource | null): void {
+    if ((source ?? this.files) === this.sources.source()) return;
+    this.loads.cancel();
+    this.picks.cancel();
+    this.clearView();
+    this.sources.use(source);
   }
 
   /** The drop-overlay headline for the modifier held and the drag's kind. */
@@ -345,7 +363,13 @@ export class LoadController {
       // Cancelled or overtaken: whoever did that has seen to the view.
       if (isAbortError(error) || !this.picks.isCurrent(signal)) return;
       this.picks.finish(signal);
-      d.load.set({ status: 'error', message: messageOf(error) });
+      if (previous.status === 'ready') {
+        // A series that cannot be had does not take the displayed one with it.
+        d.load.set(previous);
+        this.flashNotice(messageOf(error), ERROR_NOTICE_MS);
+      } else {
+        d.load.set({ status: 'error', message: messageOf(error) });
+      }
       return;
     }
     // Fetched, but cancelled or overtaken in the meantime: drop it.
@@ -465,6 +489,8 @@ export class LoadController {
   ): Promise<boolean> {
     const d = this.deps;
     if (!d) return false;
+    // Files are what the user now asks to see: a server is left for them.
+    this.useSource(null);
     // A series still being fetched gives way: the import is the later request,
     // and what the fetch covered up is what the import goes back to.
     const fetching = this.picks.cancel();
@@ -630,7 +656,7 @@ export class LoadController {
   }
 
   /** Flash a transient notice over the viewport, replacing any still showing. */
-  private flashNotice(message: string): void {
+  private flashNotice(message: string, ms = NOTICE_MS): void {
     const d = this.deps;
     if (!d) return;
     d.notice.set(message);
@@ -638,7 +664,7 @@ export class LoadController {
     this.noticeHandle = setTimeout(() => {
       d.notice.set(null);
       this.noticeHandle = null;
-    }, NOTICE_MS);
+    }, ms);
   }
 
   /**
@@ -648,6 +674,15 @@ export class LoadController {
    */
   private addLayer(result: LoadResult): void {
     this.deps!.load.set({ status: 'ready', result });
+  }
+
+  /**
+   * The timeline is turning to another patient of the same source: what is
+   * on screen, or on its way there, is not theirs.
+   */
+  leavePatient(): void {
+    this.picks.cancel();
+    this.clearView();
   }
 
   /**

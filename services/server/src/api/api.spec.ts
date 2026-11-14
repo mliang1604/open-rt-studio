@@ -457,6 +457,69 @@ describe('parseRange', () => {
   );
 });
 
+describe('a web page on another origin', () => {
+  const PAGE = 'http://localhost:4200';
+
+  it('can browse, fetch a part of a file and upload once its origin is allowed', async () => {
+    const made = await api({ allowedOrigins: [PAGE] }, COURSE_FILES);
+    expect(made.log()).toContainEqual(
+      expect.objectContaining({ level: 'warn', event: 'origins-allowed', count: 1 }),
+    );
+    const [slice] = COURSE_FILES;
+
+    const listed = await made.get('/patients', { Origin: PAGE });
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get('access-control-allow-origin')).toBe(PAGE);
+
+    const part = await made.get(`/instances/${uidOf(slice)}/file`, {
+      Origin: PAGE,
+      Range: 'bytes=128-131',
+    });
+    expect(part.status).toBe(206);
+    expect(part.headers.get('access-control-allow-origin')).toBe(PAGE);
+    // The page may read the headers it needs to make sense of the part.
+    const exposed = part.headers.get('access-control-expose-headers')!;
+    for (const header of ['ETag', 'Content-Range', 'Content-Length']) {
+      expect(exposed).toContain(header);
+    }
+
+    const asked = await fetch(`${made.url}/instances`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: PAGE,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+      },
+    });
+    expect(asked.status).toBe(204);
+    expect(asked.headers.get('access-control-allow-methods')).toBe('POST');
+    expect(asked.headers.get('access-control-allow-headers')).toContain('Content-Type');
+  });
+
+  it('gets nothing while its origin is not allowed, which is how the server starts', async () => {
+    const made = await api({}, COURSE_FILES);
+    const [slice] = COURSE_FILES;
+    for (const path of [
+      '/patients',
+      '/counts',
+      `/instances/${uidOf(slice)}/file`,
+      '/openapi.json',
+    ]) {
+      const response = await made.get(path, { Origin: PAGE });
+      expect(response.status, path).toBe(403);
+      expect(await response.json()).toMatchObject({ error: 'forbidden-origin' });
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    }
+    const upload = await fetch(`${made.url}/instances`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/dicom', Origin: PAGE },
+      body: slice.bytes,
+    });
+    expect(upload.status).toBe(403);
+    expect(await made.json('/counts')).toMatchObject({ instances: COURSE.instances });
+  });
+});
+
 // The issue's "done when": the API description is published with the server.
 describe('the API description', () => {
   it('is served, and describes every route the server answers', async () => {

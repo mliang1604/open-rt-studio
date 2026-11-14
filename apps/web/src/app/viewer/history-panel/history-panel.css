@@ -84,10 +84,38 @@
   white-space: nowrap;
 }
 
-/* Timeline ⇄ tree segmented toggle, pushed to the right of the header bar. */
+/* Where the history comes from, when that is a server. */
+.history-from {
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Opens the server card. Pushed to the right, with the layout toggle after it. */
+.history-source {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.history-source:hover,
+.history-source:focus-visible,
+.history-source.active {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Timeline ⇄ tree segmented toggle, at the right end of the header bar. */
 .history-views {
   display: inline-flex;
-  margin-left: auto;
   flex: 0 0 auto;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);

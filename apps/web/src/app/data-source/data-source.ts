@@ -7,12 +7,12 @@ import type { Series, StructureSet } from '@open-rt-studio/dicom';
 
 import type { LoadProgress } from '../parse-pool';
 import type { SeriesThumbnail } from '../viewer/series-thumbnail';
-import { LocalFilesSource } from './local-files-source';
+import { ActiveDataSource } from './active-data-source';
 
 /**
  * Where patient data comes from. The timeline, the status line and the load
  * path know this interface and nothing of what is behind it: files the user
- * opened (`LocalFilesSource`), or a server (#47).
+ * opened (`LocalFilesSource`), or a server (`ServerSource`).
  *
  * **What a source lists is signals; what it fetches is promises.** The list
  * is on screen all the time and changes under the viewer (an import, a
@@ -128,11 +128,10 @@ export function listedSeries(source: DataSource): SeriesSummary[] {
 }
 
 /**
- * The source the viewer reads from. Files the user opens, unless something
- * else is provided: a spec provides a fake, and the server client (#47) will
- * provide its own.
+ * The source the viewer reads from: the {@link ActiveDataSource}, which is the
+ * opened files until the user connects to a server. A spec provides a fake.
  */
 export const DATA_SOURCE = new InjectionToken<DataSource>('DataSource', {
   providedIn: 'root',
-  factory: () => inject(LocalFilesSource),
+  factory: () => inject(ActiveDataSource),
 });

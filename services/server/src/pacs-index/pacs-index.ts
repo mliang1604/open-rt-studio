@@ -177,7 +177,11 @@ export interface InstanceQuery extends Page {
 
 /** The radiotherapy objects that belong to an image series, and the series that share its frame. */
 export interface RelatedToSeries {
-  /** RTSTRUCT instances drawn on the series. */
+  /**
+   * RTSTRUCT instances that name the series, or the frame of reference the
+   * series is in. Contours are in a frame, so a structure set drawn on a CT
+   * is listed for an MR in the same frame too.
+   */
   readonly structureSets: readonly InstanceRecord[];
   /** RTPLAN instances planned on those structure sets. */
   readonly plans: readonly InstanceRecord[];

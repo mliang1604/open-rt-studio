@@ -529,7 +529,18 @@ export async function openSqliteIndex(
       const series = toSeries(row);
       const frame = series.frameOfReferenceUid;
 
-      const structureSets = referring(['structure-set.series'], [seriesInstanceUid]);
+      // A structure set belongs to the series it names, and to every series
+      // in the frame of reference it names: its contours are in that frame.
+      // Some name only the frame. This is the viewer's own rule
+      // (`structureSetsForSeries` in packages/dicom).
+      const drawn = new Map<string, InstanceRecord>();
+      for (const structureSet of [
+        ...referring(['structure-set.series'], [seriesInstanceUid]),
+        ...(frame === null ? [] : referring(['structure-set.frame'], [frame])),
+      ]) {
+        drawn.set(structureSet.sopInstanceUid, structureSet);
+      }
+      const structureSets = [...drawn.values()];
       const plans = referring(['plan.structure-set'], uidsOf(structureSets));
       // A dose is found through its plan or through its structure set; once either way.
       const doses = new Map<string, InstanceRecord>();

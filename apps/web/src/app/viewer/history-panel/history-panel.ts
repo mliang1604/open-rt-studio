@@ -73,6 +73,16 @@ export class HistoryPanel {
   /** Asks the viewer to load the given series (chip click / key / drop). */
   readonly loadSeries = output<SeriesSummary>();
 
+  /**
+   * What to call the server this history comes from; null when it comes from
+   * opened files. Shown beside the patient, so that it is plain where what is
+   * on screen came from.
+   */
+  readonly server = input<string | null>(null);
+
+  /** Asks for the card where a server is connected to and its patients are chosen. */
+  readonly openServer = output<void>();
+
   /** The focused patient's studies along the timeline (ascending); empty when none. */
   protected readonly studies = computed<readonly StudySummary[]>(
     () => this.source.currentPatient()?.studies ?? [],
