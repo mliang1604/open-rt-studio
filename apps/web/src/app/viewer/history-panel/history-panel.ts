@@ -52,6 +52,10 @@ import { SeriesChip } from './series-chip';
     // No patient, no panel: the host is removed from layout when there's nothing
     // to show (`:host([hidden])` forces display:none over the host's flex).
     '[hidden]': '!hasCatalog()',
+    // Hidden from the moment it is created. A binding is first applied at the
+    // first change detection, which comes a task after the viewer is created;
+    // without this the bar was on screen, empty, for that moment.
+    hidden: '',
   },
 })
 export class HistoryPanel {

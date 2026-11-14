@@ -166,4 +166,16 @@ describe('the history panel on a data source', () => {
     expect(host.querySelector('.history-source')).not.toBeNull();
     expect(host.querySelector('.history-views')).toBeNull();
   });
+
+  it('is hidden as soon as it is created, before the first change detection', async () => {
+    TestBed.configureTestingModule({
+      providers: [{ provide: DATA_SOURCE, useValue: withPatient() }],
+    });
+    const fixture = TestBed.createComponent(HistoryPanel);
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.hasAttribute('hidden')).toBe(true);
+
+    await fixture.whenStable();
+    expect(host.hasAttribute('hidden')).toBe(false);
+  });
 });
