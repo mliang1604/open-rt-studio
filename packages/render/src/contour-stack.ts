@@ -519,9 +519,25 @@ function contourInBand(
   return pieces.filter((points) => points.length >= 2).map((points) => ({ points, closed: false }));
 }
 
-function slabOutline(stack: ContourStack, slicePos: number): ContourPolyline[] {
+/** The cut of a stack nearer to the contours' planes, in the parts it is made of. */
+interface SlabCut {
+  /** Contours that lie in one band whole. */
+  readonly loops: (readonly PlanePoint[])[];
+  /** Pieces of closed contours, each ending on a face of its band at both ends. */
+  readonly pieces: (readonly PlanePoint[])[];
+  /** Pieces of open contours: lines, not part of any boundary. */
+  readonly strays: (readonly PlanePoint[])[];
+  /**
+   * The steps: on each face, the pairs of points between which the structure
+   * is on one side only. A pair can be one place twice (no step to draw), and
+   * is still listed: it says which two pieces meet there.
+   */
+  readonly steps: [PlanePoint, PlanePoint][];
+}
+
+function slabCut(stack: ContourStack, slicePos: number): SlabCut {
   const { extrusion } = stack;
-  const outlines: ContourPolyline[] = [];
+  const cut: SlabCut = { loops: [], pieces: [], strays: [], steps: [] };
   const faces = new Map<number, PlanePoint[]>();
   const faceList = (index: number): PlanePoint[] => {
     let list = faces.get(index);
@@ -549,16 +565,17 @@ function slabOutline(stack: ContourStack, slicePos: number): ContourPolyline[] {
         const t = rise / by.slicePos;
         return { u: p.u + t * by.u, v: p.v + t * by.v, t };
       });
-      outlines.push(
-        ...contourInBand(
-          carried,
-          c.closed,
-          lo,
-          hi,
-          faceList(plane.lowFace),
-          faceList(plane.highFace),
-        ),
+      const parts = contourInBand(
+        carried,
+        c.closed,
+        lo,
+        hi,
+        faceList(plane.lowFace),
+        faceList(plane.highFace),
       );
+      for (const part of parts) {
+        (part.closed ? cut.loops : c.closed ? cut.pieces : cut.strays).push(part.points);
+      }
     }
   }
 
@@ -571,11 +588,92 @@ function slabOutline(stack: ContourStack, slicePos: number): ContourPolyline[] {
     if (points.length < 2) continue;
     const { axis } = spreadAxis(points);
     points.sort((p, q) => p[axis] - q[axis]);
-    for (let i = 0; i + 1 < points.length; i += 2) {
-      const a = points[i];
-      const b = points[i + 1];
-      if (Math.hypot(b.u - a.u, b.v - a.v) > TINY) outlines.push({ points: [a, b], closed: false });
+    for (let i = 0; i + 1 < points.length; i += 2) cut.steps.push([points[i], points[i + 1]]);
+  }
+  return cut;
+}
+
+function slabOutline(stack: ContourStack, slicePos: number): ContourPolyline[] {
+  const { loops, pieces, strays, steps } = slabCut(stack, slicePos);
+  return [
+    ...loops.map((points) => ({ points, closed: true })),
+    ...[...pieces, ...strays].map((points) => ({ points, closed: false })),
+    ...steps
+      .filter(([a, b]) => Math.hypot(b.u - a.u, b.v - a.v) > TINY)
+      .map((points) => ({ points, closed: false })),
+  ];
+}
+
+/**
+ * The closed rings the pieces and steps of a cut make. Every end of a piece is
+ * a point on a face, and every such point is in exactly one step, so following
+ * piece, step, piece, step comes back to where it began.
+ */
+function slabRings(stack: ContourStack, slicePos: number): (readonly PlanePoint[])[] {
+  const { loops, pieces, steps } = slabCut(stack, slicePos);
+  const ends = new Map<PlanePoint, { piece: number; atStart: boolean }>();
+  pieces.forEach((points, piece) => {
+    ends.set(points[0], { piece, atStart: true });
+    ends.set(points[points.length - 1], { piece, atStart: false });
+  });
+  const across = new Map<PlanePoint, PlanePoint>();
+  for (const [a, b] of steps) {
+    across.set(a, b);
+    across.set(b, a);
+  }
+
+  const rings = [...loops];
+  const used = pieces.map(() => false);
+  for (let first = 0; first < pieces.length; first++) {
+    if (used[first]) continue;
+    const ring: PlanePoint[] = [];
+    let next: { piece: number; atStart: boolean } | undefined = { piece: first, atStart: true };
+    while (next && !used[next.piece]) {
+      used[next.piece] = true;
+      const points = next.atStart ? pieces[next.piece] : [...pieces[next.piece]].reverse();
+      ring.push(...points);
+      const far = across.get(points[points.length - 1]);
+      next = far ? ends.get(far) : undefined;
+    }
+    if (ring.length >= 3) rings.push(ring);
+  }
+  return rings;
+}
+
+/** A ring cut to the pane's rectangle, edge by edge. Empty when none of it is inside. */
+function ringInsidePane(ring: readonly PlanePoint[]): PlanePoint[] {
+  let points = ring.slice();
+  for (const axis of ['u', 'v'] as const) {
+    for (const bound of [0, 1]) {
+      const inside = (p: PlanePoint): boolean => (bound === 0 ? p[axis] >= 0 : p[axis] <= 1);
+      const out: PlanePoint[] = [];
+      for (let i = 0; i < points.length; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % points.length];
+        if (inside(a)) out.push(a);
+        if (inside(a) !== inside(b)) {
+          const t = (bound - a[axis]) / (b[axis] - a[axis]);
+          out.push({ u: a.u + t * (b.u - a.u), v: a.v + t * (b.v - a.v) });
+        }
+      }
+      points = out;
+      if (points.length < 3) return [];
     }
   }
-  return outlines;
+  return points;
+}
+
+/**
+ * The structure's inside on the pane's plane at `slicePos`, as closed rings to
+ * fill by the even-odd rule (a ring inside another is a hole), cut to the
+ * pane's rectangle. The rings bound the same region {@link cutContourStack}
+ * outlines.
+ */
+export function fillContourStack(stack: ContourStack, slicePos: number): PlanePoint[][] {
+  const rings = stack.crossing
+    ? chordOutline(stack, slicePos)
+        .filter((line) => line.closed)
+        .map((line) => [...line.points])
+    : slabRings(stack, slicePos);
+  return rings.map(ringInsidePane).filter((ring) => ring.length >= 3);
 }

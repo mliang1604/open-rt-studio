@@ -554,6 +554,20 @@
           />
           <span class="brush-size-readout">{{ brushCtl.radiusMm() }} mm</span>
         </label>
+
+        <label class="ctrl" title="How opaque painted structures are drawn over the image">
+          Fill opacity
+          <input
+            type="range"
+            min="5"
+            max="100"
+            step="5"
+            [value]="roiCtl.fillOpacityPercent()"
+            (input)="roiCtl.onFillOpacity($event)"
+            aria-label="Painted structure fill opacity"
+          />
+          {{ roiCtl.fillOpacityPercent() }}%
+        </label>
       </div>
     </details>
 
@@ -591,6 +605,30 @@
               aria-label="Toggle all structures"
             />
             <span class="roi-name">All structures</span>
+          </label>
+
+          <button
+            type="button"
+            (click)="roiCtl.toggleFilled()"
+            [class.active]="roiCtl.filled()"
+            [attr.aria-pressed]="roiCtl.filled()"
+            title="Fill the inside of each structure on the slice views, as well as outlining it"
+          >
+            Fill {{ roiCtl.filled() ? 'on' : 'off' }}
+          </button>
+          <label class="ctrl" title="How opaque the inside of a structure is drawn">
+            Fill opacity
+            <input
+              type="range"
+              min="5"
+              max="100"
+              step="5"
+              [value]="roiCtl.fillOpacityPercent()"
+              (input)="roiCtl.onFillOpacity($event)"
+              [disabled]="!roiCtl.filled()"
+              aria-label="Fill opacity"
+            />
+            {{ roiCtl.fillOpacityPercent() }}%
           </label>
 
           <div class="roi-legend">
@@ -927,6 +965,18 @@
         [attr.width]="overlay.rect.width"
         [attr.height]="overlay.rect.height"
       >
+        <!-- The insides first, so every outline is drawn over every fill. -->
+        @for (fill of overlay.fills ?? []; track fill.key) {
+          <path
+            class="contour-fill"
+            fill-rule="evenodd"
+            stroke="none"
+            [attr.d]="fill.d"
+            [style.fill]="fill.color"
+            [style.opacity]="fill.opacity"
+            [style.fill-opacity]="roiCtl.fillOpacity()"
+          />
+        }
         @for (shape of overlay.shapes; track shape.key) {
           @if (shape.closed) {
             <polygon

@@ -62,6 +62,11 @@ export interface RoiInit {
  * state and the derived overlays. Provided at the component so its lifetime
  * tracks the viewer.
  */
+/** The fill opacity a session starts with. */
+export const DEFAULT_FILL_OPACITY = 0.3;
+/** The least the fill opacity slider goes to: at nothing a painted structure cannot be seen. */
+export const MIN_FILL_PERCENT = 5;
+
 @Injectable()
 export class RoiController {
   private deps: RoiInit | null = null;
@@ -79,6 +84,17 @@ export class RoiController {
   readonly roiOpacities = signal<ReadonlyMap<string, number>>(new Map());
   /** Which structure set the panel/overlays show: a set index, or -1 for all. */
   readonly selectedSetIndex = signal<number>(-1);
+  /** Whether imported structures are filled on the slice views, as well as outlined. */
+  readonly filled = signal(false);
+  /**
+   * How opaque the inside of a structure is drawn, in `[0, 1]`: the fill of an
+   * imported structure while {@link filled} is on, and a painted structure
+   * always, since its fill is all there is to see of it. A display setting,
+   * kept across loads.
+   */
+  readonly fillOpacity = signal(DEFAULT_FILL_OPACITY);
+  /** {@link fillOpacity} as a whole percentage, for the slider and its readout. */
+  readonly fillOpacityPercent = computed(() => Math.round(this.fillOpacity() * 100));
 
   /** Wire the controller to the component's load + view state. Called once. */
   init(deps: RoiInit): void {
@@ -181,6 +197,7 @@ export class RoiController {
       opacities: this.roiOpacities(),
       selectedSet: this.selectedSetIndex(),
       decimateTolerance: CONTOUR_DECIMATE_UV,
+      fill: this.filled(),
     });
   });
 
@@ -232,6 +249,18 @@ export class RoiController {
   onRoiOpacity(key: string, event: Event): void {
     const percent = Number((event.target as HTMLInputElement).value);
     this.roiOpacities.update((map) => new Map(map).set(key, clamp(percent, 0, 100) / 100));
+  }
+
+  /** Fill imported structures on the slice views, or only outline them. */
+  toggleFilled(): void {
+    this.filled.update((on) => !on);
+  }
+
+  /** Set the fill opacity (whole percent) from a slider. */
+  onFillOpacity(event: Event): void {
+    const percent = Number((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(percent)) return;
+    this.fillOpacity.set(clamp(percent, MIN_FILL_PERCENT, 100) / 100);
   }
 
   /** Switch which structure set the panel and overlays show (-1 for all). */

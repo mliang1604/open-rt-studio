@@ -96,8 +96,10 @@ export {
   type StackPlane,
   buildContourStack,
   cutContourStack,
+  fillContourStack,
 } from './contour-stack.js';
 export {
+  type ContourFill,
   type ContourPaneOverlay,
   type RoiContourCoords,
   type RoiOverlayPane,
