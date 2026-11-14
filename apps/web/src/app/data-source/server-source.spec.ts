@@ -549,6 +549,36 @@ describe('ServerSource', () => {
   });
 });
 
+describe('a server that cannot be reached', () => {
+  const unreachable = { fetch: () => Promise.reject(new TypeError('Failed to fetch')) };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('may be one whose certificate the browser does not trust, when its address is https', async () => {
+    await expect(connectToServer('https://pacs.example.org', unreachable)).rejects.toThrow(
+      'The server at pacs.example.org could not be reached. It may not be running, or it may not allow this page (its allowedOrigins setting). Or this browser does not trust its certificate.',
+    );
+  });
+
+  it('may be an http address that a page served over https may not call', async () => {
+    vi.stubGlobal('location', { protocol: 'https:' });
+    await expect(connectToServer('http://pacs.example.org:4300', unreachable)).rejects.toThrow(
+      /Or it is an http address, which a page served over https may not call: give its https address\.$/,
+    );
+    // This machine is the exception a browser makes.
+    for (const here of ['http://127.0.0.1:4300', 'http://localhost:4300', 'http://[::1]:4300']) {
+      await expect(connectToServer(here, unreachable)).rejects.toThrow(
+        /allowedOrigins setting\)\.$/,
+      );
+    }
+  });
+
+  it('is told plainly otherwise', async () => {
+    await expect(connectToServer('http://pacs.example.org:4300', unreachable)).rejects.toThrow(
+      /allowedOrigins setting\)\.$/,
+    );
+  });
+});
+
 describe('ServerSource on a server with accounts (#55)', () => {
   const ADA = { name: 'ada', password: 'correct horse battery staple', role: 'user' } as const;
   const HOST = '127.0.0.1:4300';

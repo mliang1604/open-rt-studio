@@ -86,10 +86,11 @@ history would see it.
 | `PUT /api/v1/accounts/:name`    | admin  | Change `role`, `disabled` or `password`                          |
 | `DELETE /api/v1/accounts/:name` | admin  | Remove an account                                                |
 
-What is not there yet: HTTPS (#57), so on a network the token and the
-password travel in the clear unless something in front of the server
-encrypts; and logins through an identity provider. The application log says
-that someone logged in or failed to, never who; who is in the audit log.
+What is not there yet: logins through an identity provider. The application
+log says that someone logged in or failed to, never who; who is in the audit
+log. On a network, give the server a certificate or put it behind something
+that encrypts ([HTTPS](#https)): otherwise the password and the token cross
+it as they are.
 
 ## The audit log
 
@@ -175,6 +176,85 @@ there is DIMSE (#212).
 the requests it has, lets the core finish its work, and exits with 0. If the
 shutdown timeout runs out first, what is left is cut off and it exits with 1.
 
+## HTTPS
+
+Two ways, and for a server that others reach, one of them:
+
+**The server's own.** Give it a certificate and its key, and it speaks HTTPS
+and nothing else on its port, TLS 1.2 or later:
+
+```sh
+export OPEN_RT_STUDIO_TLS_CERT=/etc/open-rt-studio/fullchain.pem
+export OPEN_RT_STUDIO_TLS_KEY=/etc/open-rt-studio/privkey.pem
+```
+
+The certificate is checked when the server starts, and what is wrong with it
+is said then, with exit code 2, rather than met by a client as a connection
+that fails:
+
+- a file that cannot be read, or is not a certificate or a key in PEM;
+- a key protected by a passphrase (not taken);
+- a key that is not the certificate's;
+- a certificate that has expired, or is not valid yet, with the day.
+
+A certificate with fewer than 30 days left is warned of in the log
+(`certificate-expires-soon`, with the days). The files are read once: after
+renewing a certificate, restart the server. The server sends no
+`Strict-Transport-Security` header: a browser applies it to the whole host
+name, and so to anything else served from that name on another port.
+
+**A reverse proxy in front.** Leave the server on `127.0.0.1` speaking HTTP,
+and let nginx, Caddy or the like hold the certificate. Three things to get
+right:
+
+1. **The `Host` the server sees must be its own.** A server on `127.0.0.1`
+   answers only requests addressed to this machine (403 `forbidden-host`
+   otherwise). nginx sends the upstream's address by default; Caddy passes
+   the public name on and has to be told.
+2. **Allow the public origin.** The viewer's page then comes from another
+   origin than the one the server believes it has, so list it:
+   `OPEN_RT_STUDIO_ALLOWED_ORIGINS=https://pacs.example.org`.
+3. **Let uploads through unbuffered**, and as large as `maxUploadBytes`.
+
+These two are starting points and have not been run as part of this
+project's tests:
+
+```nginx
+server {
+  listen 443 ssl;
+  server_name pacs.example.org;
+  ssl_certificate     /etc/letsencrypt/live/pacs.example.org/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/pacs.example.org/privkey.pem;
+
+  client_max_body_size 512m;        # the server's maxUploadBytes
+  location / {
+    proxy_pass http://127.0.0.1:4300;   # Host becomes 127.0.0.1:4300
+    proxy_request_buffering off;
+    proxy_buffering off;
+  }
+}
+```
+
+```
+pacs.example.org {
+  reverse_proxy 127.0.0.1:4300 {
+    header_up Host {upstream_hostport}
+  }
+}
+```
+
+A server that listens beyond this machine with no certificate warns at start
+(`no-tls`): it cannot know whether something in front of it encrypts.
+
+From the viewer: a page served over HTTPS (the GitHub Pages demo) may call a
+plain `http` server only on this machine. Any other server needs an `https`
+address, and a certificate the browser trusts; a self-signed one has to be
+trusted in the browser first, or the viewer can only say that the server
+could not be reached.
+
+Not there: TLS for DIMSE (with #49), a certificate re-read without a
+restart, client certificates.
+
 ## Settings
 
 Every setting has a default. A JSON file named by `OPEN_RT_STUDIO_CONFIG` can
@@ -193,6 +273,8 @@ code 2).
 | `maxUploadBytes`    | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`    | `536870912` | The largest instance an upload may hold                                                                                                                                              |
 | `jobConcurrency`    | `OPEN_RT_STUDIO_JOB_CONCURRENCY`     | `1`         | How many jobs run at once; the rest wait their turn                                                                                                                                  |
 | `allowedOrigins`    | `OPEN_RT_STUDIO_ALLOWED_ORIGINS`     | none        | The web origins whose pages may use the server from a browser, such as `http://localhost:4200`. A list in the file; separated by commas in the environment. No patterns and no "any" |
+| `tlsCert`           | `OPEN_RT_STUDIO_TLS_CERT`            | none        | File with the server's certificate (PEM, any intermediates after it). With `tlsKey`, the server speaks HTTPS; see [HTTPS](#https)                                                    |
+| `tlsKey`            | `OPEN_RT_STUDIO_TLS_KEY`             | none        | File with the certificate's private key (PEM, no passphrase)                                                                                                                         |
 
 ```json
 { "port": 8080, "logLevel": "warn" }

@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { mkdirSync } from 'node:fs';
+import { createPrivateKey, X509Certificate, type KeyObject } from 'node:crypto';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +23,7 @@ import { healthRoute } from './host/routes.js';
 import { createJobManager } from './jobs/job-manager.js';
 import { openSqliteJobStore } from './jobs/job-store.js';
 import type { JobKind } from './jobs/job.js';
-import type { Logger } from './logger.js';
+import type { LogFields, Logger } from './logger.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
 import { openFileStore } from './store/file-store.js';
 import { createMemoryStore } from './store/memory-store.js';
@@ -31,6 +32,8 @@ import { createMemoryStore } from './store/memory-store.js';
 export interface RunningServer {
   readonly core: ServerCore;
   readonly address: HostAddress;
+  /** Whether it speaks HTTPS. */
+  readonly tls: boolean;
   /**
    * Stop cleanly: no new connections, the requests in flight answered, then
    * the core's work finished. True when nothing had to be cut off or
@@ -111,6 +114,71 @@ export function openAccounts(
   });
 }
 
+/** A certificate that ends within this many days is warned about at start. */
+export const CERTIFICATE_WARNING_DAYS = 30;
+const DAY_MS = 86_400_000;
+
+/**
+ * The certificate and key the configuration names, read and checked; null
+ * for a server that speaks HTTP. Throws {@link ConfigError} for what a
+ * client would otherwise meet as a failed connection with no reason given:
+ * a file that cannot be read or is not what it should be, a key that is not
+ * the certificate's, a certificate whose time has not come or has passed.
+ * The error names the setting, never the file's contents.
+ */
+export function openTls(
+  config: ServerConfig,
+  logger: Logger,
+  now: () => number = Date.now,
+): { readonly cert: string; readonly key: string } | null {
+  if (config.tlsCert === null || config.tlsKey === null) return null;
+  const read = (path: string, setting: string): string => {
+    try {
+      return readFileSync(path, 'utf8');
+    } catch {
+      throw new ConfigError(`The file ${setting} names could not be read.`);
+    }
+  };
+  const cert = read(config.tlsCert, ENVIRONMENT_VARIABLES.tlsCert);
+  const key = read(config.tlsKey, ENVIRONMENT_VARIABLES.tlsKey);
+  let certificate: X509Certificate;
+  try {
+    // The first in the file is the server's own; any after it lead to its authority.
+    certificate = new X509Certificate(cert);
+  } catch {
+    throw new ConfigError(
+      `The file ${ENVIRONMENT_VARIABLES.tlsCert} names is not a certificate in PEM.`,
+    );
+  }
+  let privateKey: KeyObject;
+  try {
+    privateKey = createPrivateKey(key);
+  } catch {
+    throw new ConfigError(
+      `The file ${ENVIRONMENT_VARIABLES.tlsKey} names is not a private key in PEM, ` +
+        'or is protected by a passphrase, which the server does not take.',
+    );
+  }
+  if (!certificate.checkPrivateKey(privateKey)) {
+    throw new ConfigError('The certificate and the key do not belong together.');
+  }
+  const from = Date.parse(certificate.validFrom);
+  const to = Date.parse(certificate.validTo);
+  const day = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+  if (now() < from) {
+    throw new ConfigError(`The certificate is not valid until ${day(from)}.`);
+  }
+  if (now() > to) {
+    throw new ConfigError(`The certificate expired on ${day(to)}.`);
+  }
+  const daysLeft = Math.floor((to - now()) / DAY_MS);
+  if (daysLeft < CERTIFICATE_WARNING_DAYS) {
+    // The server reads the certificate when it starts: a new one needs a restart.
+    logger.warn('certificate-expires-soon', { days: daysLeft });
+  }
+  return { cert, key };
+}
+
 /** The name of the file in the data directory that holds the audit log. */
 export const AUDIT_FILE = 'audit.sqlite';
 
@@ -124,6 +192,38 @@ export function openAudit(dataDir: string | null, given?: AuditLog): AuditLog | 
   if (dataDir === null) return null;
   mkdirSync(dataDir, { recursive: true });
   return createAuditLog({ store: openSqliteAuditStore(join(dataDir, AUDIT_FILE)) });
+}
+
+/**
+ * What a server warns of as it starts, as events for its log: each a way it
+ * is more open, or less use, than it might be meant to be.
+ */
+export function startWarnings(
+  config: ServerConfig,
+  state: {
+    /** How many accounts there are; null on a server without a login. */
+    readonly accounts: number | null;
+    readonly tls: boolean;
+  },
+): { readonly event: string; readonly fields?: LogFields }[] {
+  const warnings: { event: string; fields?: LogFields }[] = [];
+  if (state.accounts === null) {
+    // Whoever can reach the port can use the server. Only this machine can.
+    warnings.push({ event: 'no-login' });
+    if (config.allowedOrigins.length > 0) {
+      // And so can the pages of these origins, in a browser on this machine.
+      warnings.push({ event: 'origins-allowed', fields: { count: config.allowedOrigins.length } });
+    }
+  } else if (state.accounts === 0) {
+    // No one can log in until an account is made (the `account add` command).
+    warnings.push({ event: 'no-accounts' });
+  }
+  if (!state.tls && !LOOPBACK.has(config.host)) {
+    // Passwords and tokens cross the network as they are, unless what stands
+    // in front of the server (a reverse proxy) encrypts.
+    warnings.push({ event: 'no-tls' });
+  }
+  return warnings;
 }
 
 /** The job manager the configuration asks for, and how to clear up after it. */
@@ -153,6 +253,7 @@ export async function startServer(
   parts: ServerParts = {},
 ): Promise<RunningServer> {
   // First: a configuration that is refused opens nothing.
+  const tls = openTls(config, logger);
   const accounts = openAccounts(config, logger, parts.accounts);
   const audit = openAudit(config.dataDir, parts.audit);
   const pacs = await openPacs(config, logger);
@@ -172,18 +273,12 @@ export async function startServer(
       audit: audit !== null,
     }),
   ];
-  const host = createHost(core, { ...config, logger, routes, accounts, audit });
-  if (accounts === null) {
-    // Whoever can reach the port can use the server. Only this machine can.
-    logger.warn('no-login');
-    if (config.allowedOrigins.length > 0) {
-      // And so can the pages of these origins, in a browser on this machine.
-      logger.warn('origins-allowed', { count: config.allowedOrigins.length });
-    }
-  } else if (accounts.list().length === 0) {
-    // No one can log in until an account is made (the `account add` command).
-    logger.warn('no-accounts');
-  }
+  const host = createHost(core, { ...config, logger, routes, accounts, audit, tls });
+  const warnings = startWarnings(config, {
+    accounts: accounts ? accounts.list().length : null,
+    tls: tls !== null,
+  });
+  for (const warning of warnings) logger.warn(warning.event, warning.fields);
   let address: HostAddress;
   try {
     address = await host.listen();
@@ -195,12 +290,13 @@ export async function startServer(
     audit?.close();
     throw error;
   }
-  logger.info('listening', { host: address.host, port: address.port });
+  logger.info('listening', { host: address.host, port: address.port, tls: tls !== null });
 
   let stopped: Promise<boolean> | null = null;
   return {
     core,
     address,
+    tls: tls !== null,
     stop() {
       stopped ??= (async () => {
         const closure = await host.close();

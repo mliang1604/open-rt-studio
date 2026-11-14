@@ -42,6 +42,14 @@ export interface ServerConfig {
    * such a page still has to log in; on one without, it may read everything.
    */
   readonly allowedOrigins: readonly string[];
+  /**
+   * The file that holds the server's certificate, in PEM, with any
+   * certificates between it and its authority after it. With this and
+   * `tlsKey` the server speaks HTTPS; with neither, HTTP.
+   */
+  readonly tlsCert: string | null;
+  /** The file that holds the certificate's private key, in PEM, with no passphrase. */
+  readonly tlsKey: string | null;
 }
 
 export const AUTH_MODES = ['accounts', 'none'] as const;
@@ -57,6 +65,8 @@ export const DEFAULT_CONFIG: ServerConfig = {
   maxUploadBytes: 512 * 1024 * 1024,
   jobConcurrency: 1,
   allowedOrigins: [],
+  tlsCert: null,
+  tlsKey: null,
 };
 
 /** The environment variable naming a JSON config file. */
@@ -73,6 +83,8 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   maxUploadBytes: 'OPEN_RT_STUDIO_MAX_UPLOAD_BYTES',
   jobConcurrency: 'OPEN_RT_STUDIO_JOB_CONCURRENCY',
   allowedOrigins: 'OPEN_RT_STUDIO_ALLOWED_ORIGINS',
+  tlsCert: 'OPEN_RT_STUDIO_TLS_CERT',
+  tlsKey: 'OPEN_RT_STUDIO_TLS_KEY',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -84,6 +96,11 @@ type Environment = Readonly<Record<string, string | undefined>>;
 
 /** A checked value, or what is wrong with it (the end of a sentence). */
 type Checked<T> = { readonly value: T } | { readonly wrong: string };
+
+const fileOrNone = (value: unknown): Checked<string | null> =>
+  value === null || (typeof value === 'string' && value.trim() !== '')
+    ? { value: value === null ? null : value.trim() }
+    : { wrong: 'must be the path of a file, or null' };
 
 /** Check one value, from wherever it came, and return it typed. */
 const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<ServerConfig[K]> } =
@@ -138,6 +155,8 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       }
       return { value: origins };
     },
+    tlsCert: fileOrNone,
+    tlsKey: fileOrNone,
   };
 
 /** Whether a text is a web origin as a browser writes one in an `Origin` header. */
@@ -208,7 +227,14 @@ export function resolveConfig(file: unknown, environment: Environment = {}): Ser
     const value = NUMERIC.has(key) ? (/^\s*\d+\s*$/.test(text) ? Number(text) : NaN) : text;
     assign(key, value, variable);
   }
-  return config as unknown as ServerConfig;
+  const resolved = config as unknown as ServerConfig;
+  if ((resolved.tlsCert === null) !== (resolved.tlsKey === null)) {
+    throw new ConfigError(
+      `HTTPS takes a certificate and its key: set both ${ENVIRONMENT_VARIABLES.tlsCert} and ` +
+        `${ENVIRONMENT_VARIABLES.tlsKey}, or neither.`,
+    );
+  }
+  return resolved;
 }
 
 /**

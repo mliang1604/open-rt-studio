@@ -2,7 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import {
+  createServer,
+  type IncomingMessage,
+  type RequestListener,
+  type ServerResponse,
+} from 'node:http';
+import { createServer as createTlsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { pipeline } from 'node:stream/promises';
 
@@ -40,6 +46,11 @@ export interface HostOptions {
    * answered: for a server that only this machine can reach, and tests.
    */
   readonly accounts?: Accounts | null;
+  /**
+   * A certificate and its key, in PEM: with them the host speaks HTTPS, and
+   * nothing else, on its port. Without, HTTP.
+   */
+  readonly tls?: { readonly cert: string; readonly key: string } | null;
   /**
    * Where it is written who did what. With one, a request to a route that
    * does not say `audit: false` is recorded before it is answered, and is
@@ -380,7 +391,7 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
     return route.path;
   };
 
-  const server = createServer((request, response) => {
+  const listener: RequestListener = (request, response) => {
     const began = performance.now();
     inFlight++;
     let counted = true;
@@ -408,7 +419,15 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
           ms: Math.round(performance.now() - began),
         });
       });
-  });
+  };
+  // With a certificate: HTTPS only, TLS 1.2 or later. The versions before
+  // are broken, and nothing that talks to this server needs them.
+  const server = options.tls
+    ? createTlsServer(
+        { cert: options.tls.cert, key: options.tls.key, minVersion: 'TLSv1.2' },
+        listener,
+      )
+    : createServer(listener);
 
   return {
     routes,
