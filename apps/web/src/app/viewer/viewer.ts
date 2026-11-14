@@ -522,6 +522,7 @@ export class Viewer {
       dropIntent: this.dropIntent,
       draggingSeries: this.draggingSeries,
       renderer: () => this.renderer(),
+      emptyCanvas: () => this.render.emptyCanvas(),
       setCompareLayout: () => this.layoutMode.set(LayoutMode.Compare),
       sliceIndices: this.sliceIndices,
       zooms: this.zooms,

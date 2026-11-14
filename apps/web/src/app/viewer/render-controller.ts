@@ -315,6 +315,24 @@ export class RenderController {
     this.deps?.renderer()?.renderPanes(views, this.surfaceFrame());
   }
 
+  /**
+   * The view has been emptied (Unload, another patient, another source): the
+   * renderer gives up the volume it held, and the next frame is an empty one.
+   * The render effect cannot do this. It draws only when there is a volume,
+   * so without this the last picture stays on the canvas, under whatever the
+   * timeline names next. It is asked for outright, and not worked out from
+   * the load state, because the state passes through "nothing loaded" within
+   * one turn when files are opened over a server's series, which an effect
+   * never sees.
+   */
+  emptyCanvas(): void {
+    const renderer = this.deps?.renderer();
+    if (!renderer) return;
+    renderer.clearVolume();
+    this.pendingViews = [];
+    this.scheduleFrame();
+  }
+
   /** Compose the current frame and schedule its submission (the render effect's body). */
   renderFrame(): void {
     const views = this.composeViews();

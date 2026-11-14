@@ -384,6 +384,25 @@ export class SliceRenderer {
     }
   }
 
+  /**
+   * Give up the displayed volume, with its fusion overlay, its label mask and
+   * its structure surfaces. From then on there is nothing to draw:
+   * {@link renderPanes} clears the canvas and {@link sliceCount} is 0, until
+   * the next {@link setVolume}. Without this an unloaded image stays on the
+   * canvas, because nothing ever draws over the last frame. Idempotent.
+   */
+  clearVolume(): void {
+    this.texture?.destroy();
+    this.texture = null;
+    this.clearOverlay();
+    this.clearMask();
+    this.volume = null;
+    this.matrices = [];
+    for (const slot of this.slots) slot.bindGroup = null;
+    this.mipSlot.bindGroup = null;
+    this.surfaceVertexCount = 0;
+  }
+
   /** Replace the displayed volume, (re)allocating the GPU texture and bind groups. */
   setVolume(volume: Volume): void {
     this.texture?.destroy();
@@ -501,10 +520,17 @@ export class SliceRenderer {
     );
   }
 
-  /** Draw the given panes (MPR slices and/or the 3D MIP), then the ROI surfaces. */
+  /**
+   * Draw the given panes (MPR slices and/or the 3D MIP), then the ROI surfaces.
+   * With no volume there is nothing to draw, and the frame is an empty one:
+   * the canvas is cleared, so that what was drawn last does not stay on it.
+   */
   renderPanes(panes: readonly PaneView[], surface?: SurfaceFrame | null): void {
     const volume = this.volume;
-    if (!volume) return;
+    if (!volume) {
+      encodeFrame(this.device, this.gpu.context.getCurrentTexture().createView(), [], null);
+      return;
+    }
 
     const canvas = this.gpu.canvas;
     const draws: PaneDraw[] = [];

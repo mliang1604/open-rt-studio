@@ -63,6 +63,8 @@ interface Made {
   readonly notice: WritableSignal<string | null>;
   /** Every status the view went through, in order. */
   readonly statuses: string[];
+  /** What the canvas was given, in order: a volume to draw, or the order to draw nothing. */
+  readonly canvas: ('volume' | 'empty')[];
   /** The UID of the series on screen, or null. */
   readonly shown: () => string | null;
   /** An import the spec finishes by hand: resolve it with what the files held. */
@@ -75,6 +77,7 @@ function viewState(): {
   readonly load: WritableSignal<LoadState>;
   readonly notice: WritableSignal<string | null>;
   readonly statuses: string[];
+  readonly canvas: ('volume' | 'empty')[];
 } {
   const load = signal<LoadState>({ status: 'idle' });
   const statuses: string[] = [];
@@ -84,7 +87,12 @@ function viewState(): {
     set(state);
   };
   const notice = signal<string | null>(null);
-  const renderer = { setVolume: () => undefined, sliceCount: () => 4 } as unknown as SliceRenderer;
+  // What the canvas was last given: a volume to draw, or the order to draw nothing.
+  const canvas: ('volume' | 'empty')[] = [];
+  const renderer = {
+    setVolume: () => void canvas.push('volume'),
+    sliceCount: () => 4,
+  } as unknown as SliceRenderer;
   const init: LoadInit = {
     load,
     notice,
@@ -92,6 +100,7 @@ function viewState(): {
     dropIntent: signal<DropIntent>('primary'),
     draggingSeries: signal(false),
     renderer: () => renderer,
+    emptyCanvas: () => void canvas.push('empty'),
     setCompareLayout: () => undefined,
     sliceIndices: signal<PerOrientation>([0, 0, 0]),
     zooms: signal<PerOrientation>([1, 1, 1]),
@@ -108,7 +117,7 @@ function viewState(): {
     focusVoxel: signal<readonly [number, number, number] | null>(null),
     activeCompareGroup: signal(0),
   };
-  return { init, load, notice, statuses };
+  return { init, load, notice, statuses, canvas };
 }
 
 function setup(): Made {
@@ -129,7 +138,7 @@ function setup(): Made {
     ],
   });
   const controller = TestBed.inject(LoadController);
-  const { init, load, notice, statuses } = viewState();
+  const { init, load, notice, statuses, canvas } = viewState();
   controller.init(init);
   return {
     controller,
@@ -137,6 +146,7 @@ function setup(): Made {
     load,
     notice,
     statuses,
+    canvas,
     imports,
     shown: () => {
       const state = load();
@@ -196,7 +206,7 @@ describe('picking a series from a data source', () => {
   });
 
   it('goes back to what was showing when a fetch is cancelled', async () => {
-    const { controller, source, load, shown, notice } = setup();
+    const { controller, source, load, shown, notice, canvas } = setup();
     await controller.loadSeriesFromPanel('1.1.1');
     source.holdFetches = true;
     const picking = controller.loadSeriesFromPanel('1.2.1');
@@ -210,6 +220,8 @@ describe('picking a series from a data source', () => {
     expect(notice()).toBe('Loading cancelled.');
     await picking;
     expect(shown()).toBe('1.1.1');
+    // The canvas kept the first series all along: the renderer was never told to let it go.
+    expect(canvas).toEqual(['volume']);
     // Nothing is left to cancel.
     notice.set(null);
     controller.cancelLoad();
@@ -299,6 +311,20 @@ describe('picking a series from a data source', () => {
   });
 });
 
+describe('emptying the viewport (#205)', () => {
+  it('empties the canvas with the state on Unload, and draws again on the next pick', async () => {
+    const { controller, load, shown, canvas } = setup();
+    await controller.loadSeriesFromPanel('1.1.1');
+    expect(canvas).toEqual(['volume']);
+    controller.clearView();
+    expect(load()).toEqual({ status: 'idle' });
+    expect(canvas).toEqual(['volume', 'empty']);
+    await controller.loadSeriesFromPanel('1.2.1');
+    expect(shown()).toBe('1.2.1');
+    expect(canvas).toEqual(['volume', 'empty', 'volume']);
+  });
+});
+
 describe('changing the data source', () => {
   beforeEach(() => localStorage.clear());
 
@@ -324,7 +350,7 @@ describe('changing the data source', () => {
     });
     const sources = TestBed.inject(ActiveDataSource);
     const controller = TestBed.inject(LoadController);
-    const { init, load, notice, statuses } = viewState();
+    const { init, load, notice, statuses, canvas } = viewState();
     controller.init(init);
     return {
       controller,
@@ -334,6 +360,7 @@ describe('changing the data source', () => {
       load,
       notice,
       statuses,
+      canvas,
       imports,
       shown: () => {
         const state = load();
@@ -343,11 +370,12 @@ describe('changing the data source', () => {
   }
 
   it('empties the viewport when the source changes, and abandons what was being fetched', async () => {
-    const { controller, other, sources, shown, load } = onActive();
+    const { controller, other, sources, shown, load, canvas } = onActive();
     controller.useSource(other);
     expect(sources.source()).toBe(other);
     await controller.loadSeriesFromPanel('1.1.1');
     expect(shown()).toBe('1.1.1');
+    expect(canvas.at(-1)).toBe('volume');
 
     other.holdFetches = true;
     const picking = controller.loadSeriesFromPanel('1.2.1');
@@ -356,24 +384,32 @@ describe('changing the data source', () => {
     expect(other.fetches[1].options.signal!.aborted).toBe(true);
     expect(sources.isFiles()).toBe(true);
     expect(load()).toEqual({ status: 'idle' });
+    // The picture of what was left is taken off the canvas (#205).
+    expect(canvas.at(-1)).toBe('empty');
     await picking;
     expect(load()).toEqual({ status: 'idle' });
+    expect(canvas.at(-1)).toBe('empty');
   });
 
   it('leaves the view alone when asked for the source already in use', async () => {
-    const { controller, other, shown } = onActive();
+    const { controller, other, shown, canvas } = onActive();
     controller.useSource(other);
     await controller.loadSeriesFromPanel('1.1.1');
     controller.useSource(other);
     expect(shown()).toBe('1.1.1');
+    expect(canvas.at(-1)).toBe('volume');
   });
 
   it('goes back to the opened files when files are imported', async () => {
-    const { controller, other, sources, shown, imports, load } = onActive();
+    const { controller, other, sources, shown, imports, load, canvas } = onActive();
     controller.useSource(other);
     await controller.loadSeriesFromPanel('1.1.1');
     const importing = controller.loadFiles([new File([], 'a.dcm')], null);
     expect(sources.isFiles()).toBe(true);
+    // At once, and not when the files have been read: while they are, the state
+    // is "loading", and the server's series must not be what is looked at.
+    expect(load().status).toBe('loading');
+    expect(canvas.at(-1)).toBe('empty');
     imports[0]({ kind: 'nothing', skipped: [] });
     await importing;
     // What was on screen came from the server; it is not put back.
@@ -382,7 +418,7 @@ describe('changing the data source', () => {
   });
 
   it('empties the viewport and abandons a fetch when the timeline turns to another patient', async () => {
-    const { controller, other, load } = onActive();
+    const { controller, other, load, canvas } = onActive();
     controller.useSource(other);
     await controller.loadSeriesFromPanel('1.1.1');
     other.holdFetches = true;
@@ -391,6 +427,7 @@ describe('changing the data source', () => {
     controller.leavePatient();
     expect(other.fetches[1].options.signal!.aborted).toBe(true);
     expect(load()).toEqual({ status: 'idle' });
+    expect(canvas.at(-1)).toBe('empty');
     await picking;
   });
 });
