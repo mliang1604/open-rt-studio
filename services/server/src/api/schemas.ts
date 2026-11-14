@@ -46,6 +46,10 @@ const instance = {
   studyInstanceUid: uid,
   modality: text,
   number: nullableInteger,
+  frames: {
+    ...nullableInteger,
+    description: 'Number of Frames: the images in the one file. Null when the file does not say.',
+  },
   size: { ...count, description: 'Bytes of the stored file.' },
   sha256: { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'Of the stored file.' },
 };
@@ -110,7 +114,12 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     number: nullableInteger,
     description: nullableText,
     frameOfReferenceUid: nullableUid,
-    instances: count,
+    instances: { ...count, description: 'How many files the series holds.' },
+    images: {
+      ...count,
+      description:
+        'How many images those files hold: the frames of each, or one where a file does not say.',
+    },
     structureSets: {
       ...count,
       description:

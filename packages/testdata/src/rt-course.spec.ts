@@ -65,6 +65,8 @@ describe('syntheticRtCourse', () => {
     expect(byModality('RTSTRUCT').map((h) => h.sopInstanceUid)).toEqual([COURSE.structureSet]);
     expect(byModality('RTPLAN').map((h) => h.sopInstanceUid)).toEqual([COURSE.plan]);
     expect(byModality('RTDOSE').map((h) => h.sopInstanceUid)).toEqual([COURSE.dose]);
+    // The dose is one file with a plane for each CT slice.
+    expect(byModality('RTDOSE').map((h) => h.frames)).toEqual([COURSE.ctSlices]);
     expect(byModality('REG').map((h) => h.sopInstanceUid)).toEqual([COURSE.registration]);
   });
 
@@ -159,6 +161,8 @@ describe('readInstanceHeader on the synthetic generators', () => {
         frameOfReferenceUid: COURSE.planningFrame,
       },
       instanceNumber: 2,
+      // A slice in a file of its own says nothing of frames.
+      frames: null,
       references: [],
     });
   });

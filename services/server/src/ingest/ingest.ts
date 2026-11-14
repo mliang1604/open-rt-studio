@@ -109,6 +109,7 @@ export function indexEntry(
       uid: header.sopInstanceUid,
       sopClassUid: header.sopClassUid,
       number: header.instanceNumber,
+      frames: header.frames,
       size: stored.size,
       sha256: stored.sha256,
     },
@@ -180,7 +181,12 @@ export function createIngest({ store, index, logger = SILENT_LOGGER }: IngestPar
 
     if (held?.sha256 === sha256) {
       const indexed = await index.getInstance(uid);
-      if (indexed?.sha256 === sha256) return { outcome: 'unchanged', sopInstanceUid: uid };
+      if (indexed?.sha256 === sha256) {
+        // The same bytes, read by a newer reader: an index made before the
+        // number of frames was kept learns it when the file comes again.
+        if (indexed.frames !== entry.instance.frames) await index.putInstance(entry);
+        return { outcome: 'unchanged', sopInstanceUid: uid };
+      }
       // The bytes are here and the index does not have them: what a crash
       // between the two writes leaves. Finish the job.
       try {

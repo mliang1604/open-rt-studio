@@ -139,6 +139,18 @@ describe('ServerSource', () => {
     expect(followUp.series.map((series) => series.modality)).toEqual(['CT']);
   });
 
+  it('counts the images of each series as the opened files do: the planes of a dose, not its one file', async () => {
+    const { source } = await withPatient();
+    const opened = groupSeries((await parseHere(FILES.map(asFile))).slices);
+    const listed = source.currentPatient()!.studies.flatMap((study) => study.series);
+    expect(listed.length).toBeGreaterThan(2);
+    for (const series of listed) {
+      const local = opened.find((one) => one.uid === series.uid)!;
+      expect(series.imageCount, series.modality ?? '').toBe(local.imageCount);
+    }
+    expect(listed.find((series) => series.modality === 'RTDOSE')!.imageCount).toBeGreaterThan(1);
+  });
+
   it('keeps to the patient asked for last', async () => {
     const { source } = await connected();
     const first = source.selectPatient('1');

@@ -194,6 +194,7 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
             description: one.description,
             frameOfReferenceUid: one.frameOfReferenceUid,
             instances: seriesOf(one.uid).length,
+            images: seriesOf(one.uid).reduce((sum, file) => sum + (file.header.frames ?? 1), 0),
             structureSets: structureSetsOf(one.uid).length,
           })),
         );

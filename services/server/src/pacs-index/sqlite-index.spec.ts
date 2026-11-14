@@ -76,6 +76,11 @@ const tables = (db: DatabaseSync): string[] =>
     }[]
   ).map((row) => row.name);
 
+const withFrames = (e: InstanceEntry, frames: number): InstanceEntry => ({
+  ...e,
+  instance: { ...e.instance, frames },
+});
+
 describe('migrations', () => {
   // The issue's "done when": create the schema from empty, and upgrade a previous version.
   it('create the schema in an empty database', () => {
@@ -157,6 +162,12 @@ describe('migrations', () => {
     });
     expect(await index.counts()).toEqual({ patients: 1, studies: 2, series: 7, instances: 11 });
     expect((await index.getStudy(studyUid(PLANNING)))?.description).toBe(PLANNING.description);
+    // What was filed before version 3 says nothing of frames: one image each.
+    const dose = (await index.findSeries({ modality: 'RTDOSE' }))[0];
+    expect(dose).toMatchObject({ instances: 1, images: 1 });
+    expect(
+      (await index.findInstances({ seriesInstanceUid: dose.seriesInstanceUid }))[0].frames,
+    ).toBe(null);
     // And what version 2 added works on it.
     const [structureSet] = syntheticRtDataset().filter((one) => one.series.modality === 'RTSTRUCT');
     expect(await index.putInstance(structureSet)).toBe('updated');
@@ -236,6 +247,7 @@ describe('putting instances', () => {
       studyInstanceUid: studyUid(PLANNING),
       modality: 'CT',
       number: 1,
+      frames: null,
       size: 1001,
       sha256: '1'.padStart(64, '0'),
     });
@@ -247,6 +259,7 @@ describe('putting instances', () => {
       description: 'Synthetic CT',
       frameOfReferenceUid: RT.planningFrame,
       instances: 1,
+      images: 1,
       structureSets: 0,
     });
     expect(await index.getStudy(studyUid(PLANNING))).toEqual({
@@ -422,6 +435,8 @@ describe('putting instances', () => {
         references: [{ relation: 'dose.plan' as const, targetUid: 'plan' }],
       }),
     ],
+    ['number of frames is not a count', (e: InstanceEntry) => withFrames(e, 0)],
+    ['number of frames is not a count', (e: InstanceEntry) => withFrames(e, 2.5)],
     [
       'reference has an unknown relation',
       (e: InstanceEntry) => ({
@@ -435,6 +450,39 @@ describe('putting instances', () => {
       new InvalidEntryError(`The entry's ${what}.`),
     );
     expect(await index.counts()).toEqual({ patients: 0, studies: 0, series: 0, instances: 0 });
+  });
+});
+
+describe('the images of a series', () => {
+  it('are the frames of each instance, and one for an instance that does not say', async () => {
+    const index = await memory([
+      // Three files of one image each.
+      ...[1, 2, 3].map((n) => entry(PLANNING, 'CT', SERIES.CT, n)),
+      // One file of 49 planes.
+      entry(PLANNING, 'RTDOSE', SERIES.RTDOSE, 1, { frames: 49 }),
+      // An enhanced image of four frames, and beside it a file that says nothing.
+      entry(PLANNING, 'MR', SERIES.MR, 1, { frames: 4 }),
+      entry(PLANNING, 'MR', SERIES.MR, 2),
+    ]);
+    const series = new Map(
+      (await index.findSeries()).map((one) => [one.modality, [one.instances, one.images]]),
+    );
+    expect(series.get('CT')).toEqual([3, 3]);
+    expect(series.get('RTDOSE')).toEqual([1, 49]);
+    expect(series.get('MR')).toEqual([2, 5]);
+    expect((await index.getInstance(instanceUid(PLANNING, SERIES.RTDOSE, 1)))!.frames).toBe(49);
+  });
+
+  it('follow an instance that is put again, and one that is removed', async () => {
+    const index = await memory([entry(PLANNING, 'RTDOSE', SERIES.RTDOSE, 1)]);
+    const images = async () => (await index.getSeries(seriesUid(PLANNING, SERIES.RTDOSE)))?.images;
+    expect(await images()).toBe(1);
+    await index.putInstance(entry(PLANNING, 'RTDOSE', SERIES.RTDOSE, 1, { frames: 12 }));
+    expect(await images()).toBe(12);
+    await index.putInstance(entry(PLANNING, 'RTDOSE', SERIES.RTDOSE, 2, { frames: 3 }));
+    expect(await images()).toBe(15);
+    await index.removeInstance(instanceUid(PLANNING, SERIES.RTDOSE, 1));
+    expect(await images()).toBe(3);
   });
 });
 

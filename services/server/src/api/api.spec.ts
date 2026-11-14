@@ -268,6 +268,19 @@ describe('browse', () => {
       structureSets: 1,
     });
 
+    // A dose is one file of several planes: one instance, as many images.
+    const doses = await made.json<PageOf<{ instances: number; images: number }>>(
+      `/studies/${COURSE.planningStudy}/series?modality=RTDOSE`,
+    );
+    expectSchema(doses, 'SeriesPage');
+    const [dose] = doses.items;
+    expect(dose.instances).toBe(1);
+    expect(dose.images).toBeGreaterThan(1);
+    const stored = await made.json<{ frames: number | null }>(`/instances/${COURSE.dose}`);
+    expectSchema(stored, 'InstanceDetail');
+    expect(stored.frames).toBe(dose.images);
+    expect(ct).toMatchObject({ images: 3 });
+
     const instances = await made.json<PageOf<{ number: number; sopInstanceUid: string }>>(
       `/series/${COURSE.ct}/instances`,
     );

@@ -69,6 +69,12 @@ export interface InstanceHeader {
     readonly frameOfReferenceUid: string | null;
   };
   readonly instanceNumber: number | null;
+  /**
+   * Number of Frames (0028,0008): how many images the one file holds, as an
+   * enhanced image or a dose grid does. Null when the file does not say, or
+   * says something that is not a count; it then holds one image, if any.
+   */
+  readonly frames: number | null;
   /** What the object refers to, each reference once. Empty for an image. */
   readonly references: readonly InstanceReference[];
 }
@@ -106,6 +112,12 @@ function text(dataSet: DataSet, tag: string): string | null {
 function integer(dataSet: DataSet, tag: string): number | null {
   const value = Number(text(dataSet, tag) ?? NaN);
   return Number.isInteger(value) ? value : null;
+}
+
+/** An integer string's value when it is one or more; null otherwise. */
+function count(dataSet: DataSet, tag: string): number | null {
+  const value = integer(dataSet, tag);
+  return value !== null && value >= 1 ? value : null;
 }
 
 function items(dataSet: DataSet, tag: string): DataSet[] {
@@ -232,6 +244,7 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
         frameOfReferenceUid: uid(dataSet, 'x00200052'),
       },
       instanceNumber: integer(dataSet, 'x00200013'),
+      frames: count(dataSet, 'x00280008'),
       references: references.list,
     },
   };

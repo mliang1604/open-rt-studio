@@ -78,9 +78,25 @@ describe('readInstanceHeader', () => {
           frameOfReferenceUid: null,
         },
         instanceNumber: null,
+        frames: null,
         references: [],
       },
     });
+  });
+
+  it.each([
+    ['49', 49],
+    ['1', 1],
+    // Not a count of images: taken as not said.
+    ['0', null],
+    ['-3', null],
+    ['2.5', null],
+    ['many', null],
+  ])('reads Number of Frames %j as %j', (written, frames) => {
+    const result = readInstanceHeader(
+      part10([...WHOLE, [0x0028, 0x0008, 'IS', written] as (typeof WHOLE)[number]]),
+    );
+    expect(result).toMatchObject({ ok: true, header: { frames } });
   });
 
   it.each(WHOLE.map((element, index) => [element[1].toString(16), index] as const))(

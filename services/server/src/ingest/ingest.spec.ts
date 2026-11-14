@@ -17,6 +17,7 @@ import {
   type SyntheticFile,
 } from '@open-rt-studio/testdata';
 
+import { readInstanceHeader } from '@open-rt-studio/dicom';
 import { CoreStoppingError, createCore } from '../core/core.js';
 import { createLogger } from '../logger.js';
 import type { PacsIndex } from '../pacs-index/pacs-index.js';
@@ -25,7 +26,7 @@ import type { DicomStore } from '../store/dicom-store.js';
 import { openFileStore } from '../store/file-store.js';
 import { createMemoryStore } from '../store/memory-store.js';
 import { sopInstanceUidOf } from '../store/testing.js';
-import { createIngest, type Ingest, type ImportProgress } from './ingest.js';
+import { createIngest, indexEntry, type Ingest, type ImportProgress } from './ingest.js';
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -113,6 +114,48 @@ describe('ingest', () => {
         sha256: sha256(file.bytes),
       });
     }
+  });
+
+  it('files with each instance how many frames it has, and counts them as the images of its series', async () => {
+    const { index, ingest } = await pacs();
+    for (const file of COURSE_FILES) await ingest.ingest(file.bytes);
+
+    const header = readInstanceHeader(
+      COURSE_FILES.find((file) => uidOf(file) === COURSE.dose)!.bytes,
+    );
+    if (!header.ok) throw new Error('the dose has no header');
+    // The dose is one file of several planes.
+    expect(header.header.frames).toBeGreaterThan(1);
+    expect((await index.getInstance(COURSE.dose))!.frames).toBe(header.header.frames);
+    const [dose] = await index.findSeries({ modality: 'RTDOSE' });
+    expect(dose).toMatchObject({ instances: 1, images: header.header.frames });
+    // An image file says nothing of frames, and is one image.
+    const ct = (await index.getSeries(COURSE.ct))!;
+    expect(ct).toMatchObject({ instances: COURSE.ctSlices, images: COURSE.ctSlices });
+  });
+
+  it('learns the frames of an instance that was filed before they were kept, when the file comes again', async () => {
+    const { store, index, ingest } = await pacs();
+    const file = COURSE_FILES.find((one) => uidOf(one) === COURSE.dose)!;
+    const header = readInstanceHeader(file.bytes);
+    if (!header.ok) throw new Error('the dose has no header');
+    // As an earlier version left it: the bytes stored, the entry without frames.
+    await store.put(uidOf(file), file.bytes);
+    const entry = indexEntry(header.header, {
+      size: file.bytes.byteLength,
+      sha256: sha256(file.bytes),
+    });
+    await index.putInstance({ ...entry, instance: { ...entry.instance, frames: null } });
+    expect((await index.findSeries({ modality: 'RTDOSE' }))[0].images).toBe(1);
+
+    const put = vi.spyOn(store, 'put');
+    expect(await ingest.ingest(file.bytes)).toEqual({
+      outcome: 'unchanged',
+      sopInstanceUid: uidOf(file),
+    });
+    expect(put).not.toHaveBeenCalled(); // nothing is written to the store
+    expect((await index.getInstance(uidOf(file)))!.frames).toBe(header.header.frames);
+    expect((await index.findSeries({ modality: 'RTDOSE' }))[0].images).toBe(header.header.frames);
   });
 
   // The issue's "done when": ingesting the synthetic dataset twice leaves one copy.
