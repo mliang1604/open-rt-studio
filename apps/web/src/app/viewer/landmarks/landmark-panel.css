@@ -1,0 +1,131 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85em;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actions button,
+.file {
+  padding: 3px 10px;
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The file input is inside a label that looks like the buttons beside it. */
+.file {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  cursor: pointer;
+}
+
+.file:hover:not(.disabled),
+.file:focus-within {
+  border-color: var(--accent);
+}
+
+.file.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
+  align-items: center;
+  gap: 2px 4px;
+  padding-left: 4px;
+  border-left: 2px solid transparent;
+}
+
+li.active {
+  border-left-color: var(--accent);
+}
+
+.name {
+  min-width: 0;
+  padding: 2px 5px;
+}
+
+.small {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+/* A point that is not placed yet: its button is the one to look at. */
+.small.unset {
+  border-style: dashed;
+}
+
+.distance {
+  grid-column: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.direction {
+  grid-column: 2 / -1;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+caption {
+  text-align: left;
+  padding-bottom: 3px;
+  color: var(--muted);
+}
+
+th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--muted);
+  padding: 1px 6px 1px 0;
+}
+
+td {
+  text-align: right;
+  padding: 1px 0;
+}
+
+.note {
+  margin: 0;
+  color: var(--muted);
+}

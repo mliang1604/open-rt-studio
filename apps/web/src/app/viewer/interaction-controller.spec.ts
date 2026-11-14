@@ -99,6 +99,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     endStroke: vi.fn(),
     moveRegisterDrag: vi.fn(),
     endRegisterDrag: vi.fn(),
+    placeLandmark: vi.fn(),
   } as const;
 
   const deps: InteractionInit = {
@@ -129,6 +130,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     cprDrawing: () => false,
     registerDragActive: () => false,
     beginRegisterDrag: () => false,
+    landmarkPlacing: () => false,
     ...fns,
     ...overrides,
   };
@@ -369,6 +371,27 @@ describe('InteractionController', () => {
       h.controller.onPointerDown(pointer({ button: 2, clientX: 50, clientY: 50 }));
       expect(h.controller.drag()?.kind).toBe('zoom');
       expect(begin).not.toHaveBeenCalled();
+    });
+
+    it('places a landmark’s point on a left click while landmarks are placed (#85)', () => {
+      const h = setup({ landmarkPlacing: () => true, crosshairGrabbable: () => true });
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50 }));
+      expect(h.fns.placeLandmark).toHaveBeenCalledTimes(1);
+      expect(h.fns.placeLandmark).toHaveBeenCalledWith(MPR_PANE, expect.anything());
+      // A click, not a drag: nothing pans, and the crosshair's handle is inert.
+      expect(h.controller.drag()).toBeNull();
+      expect(h.fns.setFocus).not.toHaveBeenCalled();
+
+      // The 3D pane orbits, ⇧ sets the crosshair and ⌥ pans, as always.
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 150, clientY: 50 }));
+      expect(h.controller.drag()?.kind).toBe('orbit');
+      h.controller.onPointerUp(pointer({}));
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50, shiftKey: true }));
+      expect(h.controller.drag()?.kind).toBe('focus');
+      h.controller.onPointerUp(pointer({}));
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50, altKey: true }));
+      expect(h.controller.drag()?.kind).toBe('pan');
+      expect(h.fns.placeLandmark).toHaveBeenCalledTimes(1);
     });
 
     it('does nothing before the viewer is ready', () => {

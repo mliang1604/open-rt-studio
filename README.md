@@ -103,6 +103,9 @@ by git) if you want files on disk to open.
   opacity, and brush editing of new structures
 - Two structures compared: the distances between their surfaces (mean, 95th
   percentile, maximum) and their Dice overlap, with how they were measured
+- Landmarks placed in two images, and a registration's error at them (target
+  registration error): each landmark's, then the mean, standard deviation
+  and maximum, with how many landmarks they are of
 - A patient timeline of everything imported, a metadata panel and a raw DICOM
   tag inspector
 

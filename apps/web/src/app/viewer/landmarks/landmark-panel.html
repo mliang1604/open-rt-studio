@@ -1,0 +1,127 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<div class="actions">
+  <button
+    type="button"
+    (click)="placingToggled.emit()"
+    [class.active]="placing()"
+    [attr.aria-pressed]="placing()"
+    data-landmark-place
+    title="Click the same place of the anatomy in each image of the Compare layout: the base image, then the compared one"
+  >
+    Place landmarks {{ placing() ? 'on' : 'off' }}
+  </button>
+  <button
+    type="button"
+    (click)="exportAsked.emit()"
+    [disabled]="!canExchange() || rows().length === 0"
+    title="Save the landmarks as a file"
+  >
+    Save…
+  </button>
+  <label
+    class="file"
+    [class.disabled]="!canExchange()"
+    title="Read landmarks from a file, in place of these"
+  >
+    Open…
+    <input
+      type="file"
+      accept=".json,application/json"
+      [disabled]="!canExchange()"
+      (change)="onFile($event)"
+      aria-label="Open a landmark file"
+    />
+  </label>
+</div>
+
+@if (rows().length > 0) {
+  <ul class="list">
+    @for (row of rows(); track row.id) {
+      <li [class.active]="row.active" [attr.data-landmark-row]="row.name">
+        <input
+          class="name"
+          type="text"
+          [value]="row.name"
+          maxlength="64"
+          (change)="onRename(row.id, $event)"
+          [attr.aria-label]="'Name of landmark ' + row.name"
+        />
+        <button
+          type="button"
+          class="small"
+          (click)="selected.emit(row.id)"
+          [attr.aria-label]="'Go to landmark ' + row.name"
+          title="Go to this landmark; the next click places a point it lacks"
+        >
+          ⌖
+        </button>
+        <button
+          type="button"
+          class="small"
+          [class.unset]="!row.hasFixed"
+          (click)="pointCleared.emit({ id: row.id, side: 'fixed' })"
+          [disabled]="!row.hasFixed"
+          [attr.aria-label]="'Place the base image’s point of ' + row.name + ' again'"
+          title="Take its point in the base image away, to place it again"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          class="small"
+          [class.unset]="!row.hasMoving"
+          (click)="pointCleared.emit({ id: row.id, side: 'moving' })"
+          [disabled]="!row.hasMoving"
+          [attr.aria-label]="'Place the compared image’s point of ' + row.name + ' again'"
+          title="Take its point in the compared image away, to place it again"
+        >
+          C
+        </button>
+        <button
+          type="button"
+          class="small"
+          (click)="removed.emit(row.id)"
+          [attr.aria-label]="'Delete landmark ' + row.name"
+          title="Delete this landmark"
+        >
+          ×
+        </button>
+        <span class="distance">{{ distance(row) }}</span>
+        <span class="direction">{{ direction(row) }}</span>
+      </li>
+    }
+  </ul>
+
+  @if (summary().length > 0) {
+    <table>
+      <caption>
+        Target registration error
+      </caption>
+      <tbody>
+        @for (line of summary(); track line.name) {
+          <tr>
+            <th scope="row">{{ line.name }}</th>
+            <td>{{ line.value }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+    <p class="note" data-landmark-registration>{{ registration() }}.</p>
+    <p class="note">
+      Each error is from the landmark’s place in the base image to where the registration puts its
+      place in the compared image: its length, and how far along the patient’s left (L), back (P)
+      and head (S).
+    </p>
+    <p class="note" data-landmark-note>{{ note() }}</p>
+  } @else {
+    <p class="note">No landmark has both its points yet.</p>
+  }
+} @else {
+  <p class="note">
+    No landmarks. Switch placing on, then click the same place in the base image and in the compared
+    image.
+  </p>
+}

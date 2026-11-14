@@ -6,6 +6,7 @@ import { Injectable, type WritableSignal, inject } from '@angular/core';
 
 import { BrushController, type BrushMode } from './brush-controller';
 import { CprStore } from './cpr/cpr-store';
+import { LandmarkStore } from './landmarks/landmark-store';
 import { LayersStore, type ByHandDrag } from './layers-store';
 import { type ToolMode } from './measure-controller';
 import { MeasurementStore, type MeasureTool } from './measurement-store';
@@ -22,6 +23,7 @@ export class ToolSwitch {
   private readonly brush = inject(BrushController);
   private readonly cpr = inject(CprStore);
   private readonly layers = inject(LayersStore);
+  private readonly landmarks = inject(LandmarkStore);
   private readonly measurements = inject(MeasurementStore);
   private activeTool: WritableSignal<ToolMode> | null = null;
 
@@ -40,6 +42,7 @@ export class ToolSwitch {
       this.brush.deactivate();
       this.cpr.drawing.set(false);
       this.layers.stopByHandDrag();
+      this.landmarks.placing.set(false);
     }
   }
 
@@ -72,6 +75,14 @@ export class ToolSwitch {
   }
 
   /**
+   * Placing landmarks was switched on or off (#85). On, it is the tool in
+   * hand, and the others are put down.
+   */
+  landmarkPlacingChanged(): void {
+    if (this.landmarks.placing()) this.putDownAllBut('landmark');
+  }
+
+  /**
    * Put down whichever tool is on, for Escape. Returns whether one was, so the
    * caller knows the key did something.
    */
@@ -80,16 +91,18 @@ export class ToolSwitch {
       this.activeTool!() !== 'none' ||
       this.brush.mode() !== 'off' ||
       this.cpr.drawing() ||
-      this.layers.byHandDrag() !== null;
+      this.layers.byHandDrag() !== null ||
+      this.landmarks.placing();
     this.putDownAllBut(null);
     return wasOn;
   }
 
-  private putDownAllBut(keep: 'brush' | 'cpr' | 'register' | null): void {
+  private putDownAllBut(keep: 'brush' | 'cpr' | 'register' | 'landmark' | null): void {
     this.measurements.cancelPending();
     this.activeTool!.set('none');
     if (keep !== 'brush') this.brush.deactivate();
     if (keep !== 'cpr') this.cpr.drawing.set(false);
     if (keep !== 'register') this.layers.stopByHandDrag();
+    if (keep !== 'landmark') this.landmarks.placing.set(false);
   }
 }

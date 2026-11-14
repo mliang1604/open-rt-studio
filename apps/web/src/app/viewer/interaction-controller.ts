@@ -194,6 +194,13 @@ export class InteractionController {
       return;
     }
 
+    // While landmarks are placed (#85), a left click on an MPR pane places a
+    // point of one. The 3D pane keeps its orbit gesture.
+    if (d.landmarkPlacing() && placement.kind === 'mpr') {
+      d.placeLandmark(placement, event);
+      return;
+    }
+
     // While a layer is dragged by hand (#78), a left-drag on an MPR pane shifts
     // or turns it in that plane instead of panning. A press outside the image
     // has nothing to drag by, and pans as always.
@@ -248,7 +255,7 @@ export class InteractionController {
   ): boolean {
     const d = this.deps!;
     if (d.brushActive() || d.activeTool() !== 'none' || d.cprDrawing()) return false;
-    if (d.registerDragActive()) return false;
+    if (d.registerDragActive() || d.landmarkPlacing()) return false;
     return d.crosshairGrabbable(placement, x, y);
   }
 

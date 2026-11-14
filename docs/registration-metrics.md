@@ -140,6 +140,7 @@ it.
   per-landmark table.
 - #86 (contour metrics): lead with surface distances (mean, 95th
   percentile, maximum); Dice beside them, not instead.
+- #87 (report): the wording rules above.
 
 ## Contour metrics as built
 
@@ -169,9 +170,49 @@ was not measured against another program here.
 Not done: a grid whose slices are tilted is refused. Painted structures are
 not offered, only those of the structure sets. The work is done in the
 page, which does not answer meanwhile: about a second and a half for a
-lung, four for a body outline, on a grid of 512 × 512 × 200.
+lung, four for a body outline, on a grid of 512 × 512 × 200 (#237).
 
-- #87 (report): the wording rules above.
+## Target registration error as built
+
+What #85 measures is stated in `packages/dicom/src/landmarks.ts`, and with
+the numbers where they are shown. In short:
+
+- A landmark is one place of the anatomy, pointed at in the base image and
+  in the image compared with it. Its point in the base image is kept in the
+  base image's frame of reference, its point in the other image in that
+  image's own frame, each in mm. So the landmarks do not depend on a
+  registration, and the same landmarks can be held against one registration
+  after another.
+- The error at a landmark is from its point in the base image to where the
+  registration puts its point of the other image: its length in mm, and how
+  far along the patient's left, back and head.
+- Over the landmarks that have both points: how many, the mean, the standard
+  deviation (over n − 1; none for one landmark) and the maximum. The count
+  comes first, and "Measured at N landmarks only. Includes the error of
+  placing them." is under the numbers.
+- The registration is the one that places the compared image at that moment:
+  one from a file, one chosen among several, or one being made by hand, whose
+  numbers the errors follow as they change. The panel says which. With both
+  images in one frame of reference there is none, and the two points are
+  compared as they are.
+
+A point is placed by a click in the Compare layout: the base image's column
+gives the base image's point, the other column the other image's. That
+column shows the other image through the registration in use, so two clicks
+at the same place of the screen make a landmark with no error under that
+registration. A landmark says something about a registration only when each
+point was put on the anatomy in its own image.
+
+Landmarks are saved as a JSON file (`open-rt-studio.landmarks`, version 1)
+that names the two frames of reference, each landmark's name and its two
+points, and nothing else of the patient. A file of other frames of
+reference is refused. Landmarks are not kept by the server, and are let go
+of when another base image is shown.
+
+Not done: a point is where the click was on the slice on screen, to no
+finer than the picture; nothing snaps to an edge or a centre. Only rigid
+and affine registrations are measured, as only those are applied. The
+numbers were not compared with another program's.
 
 ## Sources
 

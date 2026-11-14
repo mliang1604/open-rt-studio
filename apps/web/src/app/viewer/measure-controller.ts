@@ -18,8 +18,16 @@ import {
   type TransferFunction,
   type Vec2,
   type PaneRect,
+  resolveGeometry,
 } from '@open-rt-studio/render';
-import { Orientation, pointBetweenLayers, type Layer, type Volume } from '@open-rt-studio/dicom';
+import {
+  Orientation,
+  patientToVoxel,
+  pointBetweenLayers,
+  type Layer,
+  type Vec3,
+  type Volume,
+} from '@open-rt-studio/dicom';
 import { MeasurementStore, type MeasureTool } from './measurement-store';
 import { placementAt, type PanePlacement } from './pane-placement';
 import { LayersController } from './layers-controller';
@@ -336,6 +344,21 @@ export class MeasureController {
     );
     if (!pick) return; // the ray missed the volume (or, for DVR, hit nothing solid)
     this.navigateToVoxel(volume, pick.voxel);
+  }
+
+  /**
+   * Take the views to a point of the base image's frame: the crosshair goes
+   * to the voxel it is in, and every orientation to that voxel's slice.
+   * Nothing happens for a point outside the image.
+   */
+  goToPatientPoint(point: Vec3): void {
+    const volume = this.deps?.volume();
+    if (!volume) return;
+    const at = patientToVoxel(resolveGeometry(volume), point);
+    if (!at) return;
+    const voxel = at.map(Math.round) as [number, number, number];
+    if (voxel.some((c, axis) => c < 0 || c >= volume.dims[axis])) return;
+    this.navigateToVoxel(volume, voxel);
   }
 
   /** Make `voxel` the shared focus and scroll every orientation to its slice. */

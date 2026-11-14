@@ -1,0 +1,50 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@for (pane of panes(); track pane.paneKey) {
+  <svg
+    class="landmarks"
+    [style.left.px]="pane.rect.x"
+    [style.top.px]="pane.rect.y"
+    [attr.width]="pane.rect.width"
+    [attr.height]="pane.rect.height"
+  >
+    @for (marker of pane.markers; track marker.key) {
+      <g
+        class="landmark"
+        [class.moving]="marker.side === 'moving'"
+        [class.active]="marker.active"
+        [attr.data-landmark]="marker.name"
+        [attr.data-side]="marker.side"
+      >
+        <circle
+          class="landmark-ring"
+          [attr.cx]="marker.x - pane.rect.x"
+          [attr.cy]="marker.y - pane.rect.y"
+          r="6"
+          tabindex="0"
+          role="button"
+          [attr.aria-label]="describe(marker)"
+          (pointerdown)="onDown($event, marker)"
+          (pointermove)="onMove($event)"
+          (pointerup)="onUp($event)"
+          (pointercancel)="onUp($event)"
+        />
+        <circle
+          class="landmark-dot"
+          [attr.cx]="marker.x - pane.rect.x"
+          [attr.cy]="marker.y - pane.rect.y"
+          r="1"
+        />
+        <text
+          class="landmark-name"
+          [attr.x]="marker.x - pane.rect.x + 9"
+          [attr.y]="marker.y - pane.rect.y - 7"
+        >
+          {{ marker.name }}
+        </text>
+      </g>
+    }
+  </svg>
+}
