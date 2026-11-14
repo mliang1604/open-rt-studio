@@ -655,6 +655,11 @@ export class LoadController {
     }
   }
 
+  /** Say something over the viewport for a while, for another controller; longer for a problem. */
+  showNotice(message: string, problem = false): void {
+    this.flashNotice(message, problem ? ERROR_NOTICE_MS : NOTICE_MS);
+  }
+
   /** Flash a transient notice over the viewport, replacing any still showing. */
   private flashNotice(message: string, ms = NOTICE_MS): void {
     const d = this.deps;

@@ -137,6 +137,15 @@ also builds on its own to `dist/` for consumers outside the workspace.
   takes an `AbortSignal` and may report progress; a source that answers at
   once reports none, and the viewer then shows none. Importing files is not
   in the interface: only the local source does it.
+- **A save is always a new object** (#48). What is made in the viewer, an RT
+  Structure Set so far, goes to the data source as the bytes of a DICOM file:
+  a download for opened files, an upload for a server, which files it by its
+  header like any other instance. Each save has its own SOP Instance UID and
+  the server is asked to keep what it holds, so nothing stored is ever
+  replaced; saving twice leaves two objects. The painted set stays editable
+  in the viewer, and the stored one comes back with its series, as an
+  imported structure set, the next time the series is loaded. The server has
+  no way to delete yet, so a save cannot be taken back from the application.
 
 ## Desktop
 

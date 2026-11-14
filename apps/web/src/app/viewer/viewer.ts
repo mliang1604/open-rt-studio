@@ -596,6 +596,7 @@ export class Viewer {
         if (state.status !== 'ready') return null;
         return state.result.series.find((s) => s.uid === state.result.selectedUid) ?? null;
       },
+      notify: (message, problem) => this.loadCtl.showNotice(message, problem),
     });
 
     // Wire the render controller: it owns the WebGPU lifecycle, the resize sync and

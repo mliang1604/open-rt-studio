@@ -151,7 +151,7 @@ describe('LocalFilesSource', () => {
       expect(clicked).toEqual([
         { download: 'rtstruct-test.dcm', href: 'blob:application/dicom:3' },
       ]);
-      await saving;
+      expect(await saving).toEqual({ kind: 'downloaded' });
     } finally {
       click.mockRestore();
       vi.unstubAllGlobals();

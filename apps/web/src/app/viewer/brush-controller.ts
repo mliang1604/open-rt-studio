@@ -41,6 +41,8 @@ export interface BrushInit {
   readonly sagittalFlipped: () => boolean;
   /** The image series on screen, which an exported structure set is tied to. */
   readonly baseSeries: () => Series | null;
+  /** Say something over the viewport for a while; longer when it is a problem. */
+  readonly notify: (message: string, problem: boolean) => void;
 }
 
 /**
@@ -84,6 +86,9 @@ export class BrushController {
 
   /** The active set's label, for the rename field; '' when no set is active yet. */
   readonly activeSetLabel = computed(() => this.store.activeSet()?.label ?? '');
+
+  /** True while a save is on its way to a source that stores; the button waits for it. */
+  readonly saving = signal(false);
 
   /** The voxel the last stroke sample landed on, so a drag can interpolate from it. */
   private lastVoxel: VoxelIndex | null = null;
@@ -217,22 +222,41 @@ export class BrushController {
   }
 
   /**
-   * Save the active authored set as a DICOM RT Structure Set file. The painted
+   * Save the active authored set as a DICOM RT Structure Set. The painted
    * voxels become contours, and the object refers to the series on screen so it
    * can be put back on the same images, here or in another system.
+   *
+   * Where it goes is the data source's to say: a download for opened files, an
+   * upload for a server. Each save is a new object, as the set is at that
+   * moment; saving twice leaves two, and neither replaces the other.
    */
-  exportActiveSet(): void {
+  async exportActiveSet(): Promise<void> {
     const label = this.store.labelVolume();
     const set = this.store.activeSet();
-    if (!label || !set || set.rois.length === 0) return;
+    if (!label || !set || set.rois.length === 0 || this.saving()) return;
     const { bytes, filename } = authoredSetRtStruct(
       label,
       set,
       this.deps?.baseSeries() ?? null,
       new Date(),
     );
-    // Where it goes is the data source's to say: for opened files, a download.
-    void this.source.save({ bytes, filename, mediaType: 'application/dicom' });
+    const name = set.label.trim() || 'Authored structures';
+    this.saving.set(true);
+    try {
+      const outcome = await this.source.save({ bytes, filename, mediaType: 'application/dicom' });
+      // A download shows itself in the browser. An upload shows nowhere, so say it.
+      if (outcome.kind === 'stored') {
+        this.deps?.notify(
+          `Saved “${name}” (${outcome.where}). It comes with this series the next time it is loaded.`,
+          false,
+        );
+      }
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      this.deps?.notify(`“${name}” was not saved. ${why}`, true);
+    } finally {
+      this.saving.set(false);
+    }
   }
 
   /**

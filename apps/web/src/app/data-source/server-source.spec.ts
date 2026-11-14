@@ -2,7 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { groupSeries } from '@open-rt-studio/dicom';
+import {
+  groupSeries,
+  parseStructureSet,
+  readInstanceHeader,
+  writeStructureSet,
+} from '@open-rt-studio/dicom';
 import {
   SYNTHETIC_RT_COURSE as COURSE,
   SYNTHETIC_STUDY,
@@ -22,6 +27,30 @@ const ADDRESS = 'http://127.0.0.1:4300';
 const FILES = syntheticRtCourse();
 const asFile = (file: (typeof FILES)[number]): File =>
   new File([file.bytes.slice().buffer], file.name);
+
+/**
+ * A structure set as the viewer would write one for the course's CT: the
+ * contours of the one the course has, under another label, as a new object
+ * unless `sopInstanceUid` says which.
+ */
+function authored(label: string, sopInstanceUid?: string): ArrayBuffer {
+  const file = FILES.find((one) => {
+    const read = readInstanceHeader(one.bytes);
+    return read.ok && read.header.series.modality === 'RTSTRUCT';
+  })!;
+  const header = readInstanceHeader(file.bytes);
+  if (!header.ok) throw new Error('the course has no structure set');
+  const set = parseStructureSet(file.name, file.bytes.slice().buffer)!;
+  return writeStructureSet(
+    { ...set, label },
+    {
+      sopInstanceUid,
+      patientId: header.header.patient.id,
+      patientName: header.header.patient.name ?? undefined,
+      studyInstanceUid: header.header.study.uid,
+    },
+  );
+}
 
 interface Made {
   readonly server: FakeServer;
@@ -262,5 +291,90 @@ describe('ServerSource', () => {
     const { source, server } = await withPatient();
     server.loseNetworkAfter(0);
     expect(await source.thumbnail(COURSE.mr)).toEqual({ kind: 'icon', modality: 'MR' });
+  });
+
+  describe('saving', () => {
+    const dicom = (bytes: ArrayBuffer) => ({
+      bytes,
+      filename: 'rtstruct.dcm',
+      mediaType: 'application/dicom',
+    });
+
+    it('uploads a structure set, which comes with its series from then on', async () => {
+      const { source, server } = await withPatient();
+      const before = await source.fetchSeries(COURSE.ct);
+      expect(before.structureSets.map((set) => set.label)).not.toContain('Painted here');
+
+      expect(await source.save(dicom(authored('Painted here')))).toEqual({
+        kind: 'stored',
+        where: 'Server at 127.0.0.1:4300',
+      });
+      // One upload, as DICOM, asking the server to keep whatever it holds.
+      expect(server.uploads).toEqual([{ mediaType: 'application/dicom', status: 201 }]);
+      expect(server.asked.at(-1)).toBe('/instances?onDifferent=keep');
+
+      const after = await source.fetchSeries(COURSE.ct);
+      expect(after.structureSets).toHaveLength(before.structureSets.length + 1);
+      const saved = after.structureSets.find((set) => set.label === 'Painted here')!;
+      expect(saved.referencedSeriesUids).toContain(COURSE.ct);
+      expect(saved.rois.map((roi) => roi.name)).toEqual(
+        before.structureSets[0].rois.map((roi) => roi.name),
+      );
+    });
+
+    it('makes each save an object of its own', async () => {
+      const { source, server } = await withPatient();
+      await source.save(dicom(authored('First')));
+      await source.save(dicom(authored('Second')));
+      expect(server.uploads.map((upload) => upload.status)).toEqual([201, 201]);
+      const labels = (await source.fetchSeries(COURSE.ct)).structureSets.map((set) => set.label);
+      expect(labels).toContain('First');
+      expect(labels).toContain('Second');
+    });
+
+    it('never replaces what the server holds', async () => {
+      const { source } = await withPatient();
+      const uid = '1.2.826.0.1.3680043.10.1561.999.1';
+      const first = authored('First', uid);
+      await source.save(dicom(first));
+      // The very same object again is nothing new, and no error.
+      expect((await source.save(dicom(first))).kind).toBe('stored');
+
+      // Another object under the same UID is refused, and the first is kept.
+      const refused = await source.save(dicom(authored('Second', uid))).catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(ServerError);
+      expect((refused as ServerError).status).toBe(409);
+      expect((refused as ServerError).message).toBe(
+        'The server refused: The server holds this differently, and has kept what it had.',
+      );
+      const labels = (await source.fetchSeries(COURSE.ct)).structureSets.map((set) => set.label);
+      expect(labels).toContain('First');
+      expect(labels).not.toContain('Second');
+    });
+
+    it('sends nothing that is not DICOM', async () => {
+      const { source, server } = await withPatient();
+      await expect(
+        source.save({ bytes: new ArrayBuffer(8), filename: 'notes.txt', mediaType: 'text/plain' }),
+      ).rejects.toThrow('Only DICOM objects can be saved to a server.');
+      expect(server.uploads).toEqual([]);
+    });
+
+    it('passes on the server’s reason when it cannot file what was sent', async () => {
+      const { source } = await withPatient();
+      const refused = await source.save(dicom(new ArrayBuffer(200))).catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(ServerError);
+      expect((refused as ServerError).status).toBe(422);
+    });
+
+    it('says so when the server cannot be reached, and has saved nothing', async () => {
+      const { source, server } = await withPatient();
+      server.loseUploads();
+      const lost = await source.save(dicom(authored('Lost'))).catch((e: unknown) => e);
+      expect(lost).toBeInstanceOf(ServerError);
+      expect((lost as ServerError).lost).toBe(true);
+      expect((lost as ServerError).message).toContain('could not be reached');
+      expect(server.uploads).toEqual([]);
+    });
   });
 });

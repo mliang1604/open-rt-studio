@@ -15,6 +15,7 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SaveOutcome,
   SeriesSummary,
 } from './data-source';
 
@@ -95,9 +96,12 @@ export class FakeDataSource implements DataSource {
     return new Promise((resolve) => this.thumbnailsWaiting.push(() => resolve(picture)));
   }
 
-  save(object: SavedObject): Promise<void> {
+  /** What a save answers with. A spec may make it a rejection, or hold it. */
+  saveAnswer: () => Promise<SaveOutcome> = () => Promise.resolve({ kind: 'downloaded' });
+
+  save(object: SavedObject): Promise<SaveOutcome> {
     this.saved.push(object);
-    return Promise.resolve();
+    return this.saveAnswer();
   }
 }
 

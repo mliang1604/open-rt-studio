@@ -49,6 +49,10 @@ export interface FakeServer {
   hold(held: boolean): void;
   /** Give lists in parts of at most this many, to see that the rest is asked for. */
   pageSize: number;
+  /** Every upload received, in order: its media type and how the server answered. */
+  readonly uploads: { readonly mediaType: string; readonly status: number }[];
+  /** From now on, uploads fail as they do when the network is gone. */
+  loseUploads(): void;
 }
 
 export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
@@ -64,6 +68,7 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
   let lostAfter = Infinity;
   let holding = false;
   let release: (() => void)[] = [];
+  let uploadsLost = false;
 
   const instance = ({ header, bytes }: Held) => ({
     sopInstanceUid: header.sopInstanceUid,
@@ -77,6 +82,8 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
 
   const server: FakeServer = {
     asked,
+    uploads: [],
+    loseUploads: () => (uploadsLost = true),
     pageSize: 1000,
     mostAtOnce: () => most,
     loseNetworkAfter: (count) => (lostAfter = count),
@@ -105,6 +112,45 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
       const seriesOf = (uid: string) => held.filter((one) => one.header.series.uid === uid);
 
       let match: RegExpExecArray | null;
+      if (path === '/instances' && init?.method === 'POST') {
+        if (uploadsLost) throw new TypeError('Failed to fetch');
+        const mediaType = new Headers(init.headers).get('Content-Type') ?? '';
+        const answer = (body: unknown, status: number): Response => {
+          server.uploads.push({ mediaType, status });
+          return json(body, status);
+        };
+        if (mediaType !== 'application/dicom') {
+          return answer({ error: 'unsupported-media-type', message: 'Send one DICOM file.' }, 415);
+        }
+        const bytes = new Uint8Array(init.body as ArrayBuffer);
+        const read = readInstanceHeader(bytes);
+        if (!read.ok) {
+          return answer(
+            { error: 'not-dicom', message: 'The body is not a DICOM file that can be filed.' },
+            422,
+          );
+        }
+        const uid = read.header.sopInstanceUid;
+        const had = held.find((one) => one.header.sopInstanceUid === uid);
+        if (had) {
+          const same =
+            had.bytes.byteLength === bytes.byteLength &&
+            had.bytes.every((byte, index) => byte === bytes[index]);
+          if (same) return answer({ outcome: 'unchanged', sopInstanceUid: uid }, 200);
+          // Asked to keep what it has, as the client asks.
+          if (url.searchParams.get('onDifferent') !== 'replace') {
+            return answer(
+              {
+                error: 'different',
+                message: 'The server holds this differently, and has kept what it had.',
+              },
+              409,
+            );
+          }
+        }
+        held.push({ header: read.header, bytes });
+        return answer({ outcome: 'stored', sopInstanceUid: uid }, 201);
+      }
       if (path === '/patients') {
         const [{ header }] = held;
         const studies = new Set(held.map((one) => one.header.study.uid)).size;

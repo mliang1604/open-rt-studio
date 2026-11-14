@@ -2,19 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { syntheticThoraxPatient, THORAX_PATIENT } from '@open-rt-studio/testdata';
+import { parseStructureSet, readInstanceHeader } from '@open-rt-studio/dicom';
+import {
+  syntheticThoraxPatient,
+  THORAX_PATIENT,
+  THORAX_PLANNING_STUDY,
+  thoraxGrid,
+} from '@open-rt-studio/testdata';
 import { expect, test, type Page } from '@playwright/test';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
 import { importFiles, pickSeries } from './fixtures/load';
 import { startTestServer, type TestServer } from './fixtures/server';
 
-// Loading from a server (#47), against the real server of this repository
-// running as its own process. The page is on another origin than the server,
+// Loading from a server (#47) and saving to it (#48), against the real server
+// of this repository running as its own process. The page is on another origin than the server,
 // as it is in use, so everything here goes through the browser's cross-origin
 // rules for real.
 
-const PATIENT = syntheticThoraxPatient({ size: 48, slices: 16 });
+const SHAPE = { size: 48, slices: 16 };
+const PATIENT = syntheticThoraxPatient(SHAPE);
 const PAGE_ORIGIN = `http://localhost:${process.env['E2E_PORT'] ?? 4200}`;
 
 let server: TestServer;
@@ -204,5 +211,139 @@ test('a server that was not told to allow this page gives it nothing', async ({ 
     ).toBeVisible();
   } finally {
     await closed.stop();
+  }
+});
+
+/** The planning CT of the synthetic patient: the first CT chip on the timeline. */
+function planningCtUid(): string {
+  for (const file of PATIENT) {
+    const read = readInstanceHeader(file.bytes);
+    if (
+      read.ok &&
+      read.header.series.modality === 'CT' &&
+      read.header.study.description === THORAX_PLANNING_STUDY.description
+    ) {
+      return read.header.series.uid;
+    }
+  }
+  throw new Error('the synthetic patient has no planning CT');
+}
+
+/** The structure sets a server gives with a series, asked as a program would (no page). */
+async function structureSetsOf(
+  address: string,
+  seriesUid: string,
+): Promise<{ sopInstanceUid: string }[]> {
+  const response = await fetch(`${address}/api/v1/series/${seriesUid}/related`);
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { structureSets: { sopInstanceUid: string }[] }).structureSets;
+}
+
+// The "done when" of #48.
+test('a structure painted on a server series is saved to the server, and comes back with the series', async ({
+  page,
+}) => {
+  // A server of its own: what is saved here would be one structure more for
+  // the tests above, which compare against the files.
+  const own = await startTestServer([PAGE_ORIGIN]);
+  try {
+    await own.upload(PATIENT);
+    const ct = planningCtUid();
+    const held = await structureSetsOf(own.address, ct);
+
+    const problems = watchProblems(page);
+    await open(page);
+    await connect(page, own.address);
+    await pickSeries(page, 'CT');
+    await expect(page.locator('div.status')).toContainText('volume 48 × 48 × 16');
+    const names = page.locator('.roi-legend .roi-name');
+    await expect(names).not.toHaveCount(0);
+    const phantom = await names.allInnerTexts();
+
+    // Connected, the button saves to the server; there is nothing to save yet.
+    const save = page.getByRole('button', { name: /save to server/i });
+    await expect(save).toBeDisabled();
+    await expect(page.getByRole('button', { name: /export rtstruct/i })).toHaveCount(0);
+
+    // A new structure, painted with one stamp on the axial slice.
+    await page.getByTitle('Create a new structure and paint it').click();
+    await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+    const pane = (await page.locator('.pane-overlay .pane').first().boundingBox())!;
+    // Off the centre of the pane: the crosshair's handle is there, and takes the press.
+    await page.mouse.move(pane.x + pane.width * 0.42, pane.y + pane.height * 0.42);
+    const probe = page.locator('.probe');
+    await expect(probe).toBeVisible();
+    const [i, j, k] = /voxel \((\d+), (\d+), (\d+)\)/
+      .exec(await probe.innerText())!
+      .slice(1)
+      .map(Number);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(save).toBeEnabled();
+
+    // While the server cannot be reached, the save says so and keeps the painting.
+    await page.route('**/api/v1/instances?*', (route) => route.abort('internetdisconnected'));
+    await save.click();
+    await expect(page.locator('.notice')).toContainText('was not saved');
+    await expect(page.locator('.notice')).toContainText('could not be reached');
+    await expect(save).toBeEnabled();
+    expect(await structureSetsOf(own.address, ct)).toHaveLength(held.length);
+    await page.unroute('**/api/v1/instances?*');
+
+    // Saved.
+    await save.click();
+    await expect(page.locator('.notice')).toContainText(`(Server at ${new URL(own.address).host})`);
+    await expect(page.locator('.notice')).toContainText(/^\s*Saved “.+”/);
+    await expect(save).toBeEnabled();
+
+    // The server holds one structure set more for the CT, and it is what was
+    // painted: one structure, one closed outline, on the painted slice, around
+    // the voxel that was under the cursor.
+    const now = await structureSetsOf(own.address, ct);
+    expect(now).toHaveLength(held.length + 1);
+    const added = now.find(
+      (one) => !held.some((had) => had.sopInstanceUid === one.sopInstanceUid),
+    )!;
+    const file = await fetch(`${own.address}/api/v1/instances/${added.sopInstanceUid}/file`);
+    expect(file.status).toBe(200);
+    const stored = parseStructureSet('saved.dcm', await file.arrayBuffer());
+    expect(stored).not.toBeNull();
+    expect(stored!.referencedSeriesUids).toEqual([ct]);
+    expect(stored!.rois.map((roi) => roi.name)).toEqual(['Structure 1']);
+    const grid = thoraxGrid(SHAPE);
+    const centre = [
+      grid.origin[0] + i * grid.pixelSpacing,
+      grid.origin[1] + j * grid.pixelSpacing,
+      grid.origin[2] + k * grid.sliceSpacing,
+    ];
+    expect(stored!.rois[0].contours).toHaveLength(1);
+    const points = stored!.rois[0].contours[0].points;
+    expect(points.length).toBeGreaterThanOrEqual(4);
+    const xs = points.map((point) => point[0]);
+    const ys = points.map((point) => point[1]);
+    for (const point of points) expect(point[2]).toBeCloseTo(centre[2], 3);
+    // The outline runs along voxel edges around the stamp.
+    expect((Math.min(...xs) + Math.max(...xs)) / 2).toBeCloseTo(centre[0], 3);
+    expect((Math.min(...ys) + Math.max(...ys)) / 2).toBeCloseTo(centre[1], 3);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThanOrEqual(grid.pixelSpacing - 1e-3);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(2 * (5 + grid.pixelSpacing));
+
+    // In a fresh page, the structure comes with the series, beside the
+    // phantom's own.
+    await page.reload();
+    await connect(page, own.address);
+    await pickSeries(page, 'CT');
+    await expect(page.locator('div.status')).toContainText('volume 48 × 48 × 16');
+    await expect(names).toHaveCount(phantom.length + 1, { timeout: 30_000 });
+    expect((await names.allInnerTexts()).sort()).toEqual([...phantom, 'Structure 1'].sort());
+    // Imported contours start hidden; switched on, they are drawn.
+    await page.getByLabel('Toggle all structures').check();
+    await expect(page.locator('.contours polygon, .contours polyline').first()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    expectNoProblems(problems);
+  } finally {
+    await own.stop();
   }
 });
