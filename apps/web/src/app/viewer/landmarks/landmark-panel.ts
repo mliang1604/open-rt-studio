@@ -5,6 +5,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import type { TargetRegistrationError } from '@open-rt-studio/dicom';
 
+import type { ReportSection } from '../report/registration-report';
 import type { LandmarkRow } from './landmark-controller';
 import type { LandmarkSide } from './landmark-store';
 
@@ -40,6 +41,56 @@ export function errorSummary(
 export function errorNote(count: number): string {
   const at = count === 1 ? 'at 1 landmark only' : `at ${count} landmarks only`;
   return `Measured ${at}. Includes the error of placing them.`;
+}
+
+/** A landmark's error as a length, or a dash while it has none. */
+export function landmarkDistance(row: LandmarkRow): string {
+  return row.distanceMm === null ? '–' : `${mm(row.distanceMm)} mm`;
+}
+
+/** A landmark's error along the patient's left, back and head. */
+export function landmarkDirection(row: LandmarkRow): string {
+  if (!row.error) return row.hasFixed && row.hasMoving ? '' : 'one point not placed';
+  const [x, y, z] = row.error;
+  return `L ${signed(x)}  P ${signed(y)}  S ${signed(z)}`;
+}
+
+/** What each error is the distance between, by the frame it is measured in. */
+export const MEASURED_IN: Readonly<Record<'fixed' | 'moving', string>> = {
+  fixed:
+    'Each error is from the landmark’s place in the base image to where the registration puts its place in the compared image: its length, and how far along the patient’s left (L), back (P) and head (S).',
+  moving:
+    'A deformation field maps one way, from the base image. So each error is from the landmark’s place in the compared image to where the registration puts its place in the base image, in the compared image’s own frame: its length, and how far along that image’s left (L), back (P) and head (S). The compared image’s points are not drawn in its column: where they are there is not known without turning the field round.',
+};
+
+/**
+ * The landmarks and their errors as a section of the registration report
+ * (#87): the panel's numbers and notes. Null while no landmark has both its
+ * points, when there is no number to report.
+ */
+export function landmarkSection(
+  rows: readonly LandmarkRow[],
+  error: TargetRegistrationError,
+  registration: string,
+  measuredIn: 'fixed' | 'moving',
+): ReportSection | null {
+  const summary = errorSummary(error);
+  if (summary.length === 0) return null;
+  return {
+    title: 'Landmarks: target registration error',
+    about: null,
+    tables: [
+      { caption: 'Target registration error', rows: summary },
+      {
+        caption: 'At each landmark',
+        rows: rows.map((row) => ({
+          name: row.name,
+          value: [landmarkDistance(row), landmarkDirection(row)].filter(Boolean).join('   '),
+        })),
+      },
+    ],
+    notes: [`${registration}.`, MEASURED_IN[measuredIn], errorNote(error.count)],
+  };
 }
 
 /**
@@ -79,16 +130,11 @@ export class LandmarkPanel {
   protected readonly summary = computed(() => errorSummary(this.error()));
   protected readonly note = computed(() => errorNote(this.error().count));
 
-  protected distance(row: LandmarkRow): string {
-    return row.distanceMm === null ? '–' : `${mm(row.distanceMm)} mm`;
-  }
+  protected readonly measured = computed(() => MEASURED_IN[this.measuredIn()]);
 
+  protected readonly distance = landmarkDistance;
   /** The error's direction: along the patient's left, back and head. */
-  protected direction(row: LandmarkRow): string {
-    if (!row.error) return row.hasFixed && row.hasMoving ? '' : 'one point not placed';
-    const [x, y, z] = row.error;
-    return `L ${signed(x)}  P ${signed(y)}  S ${signed(z)}`;
-  }
+  protected readonly direction = landmarkDirection;
 
   protected onRename(id: number, event: Event): void {
     if (!(event.target instanceof HTMLInputElement)) return;

@@ -2,7 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import {
   compareRois,
   type Roi,
@@ -11,6 +19,7 @@ import {
   type Volume,
 } from '@open-rt-studio/dicom';
 
+import type { ReportSection } from '../report/registration-report';
 import { structureSetLabel } from '../roi-legend';
 
 /** A structure that may be chosen for a comparison. */
@@ -87,6 +96,31 @@ export function comparisonNotes(found: RoiComparison): string[] {
   return notes;
 }
 
+/**
+ * A comparison as a section of the registration report (#87), with what it
+ * was made of, so that it is not reported of another image or of structures
+ * that are no longer there.
+ */
+export interface ComparisonReport {
+  readonly volume: Volume;
+  readonly rois: readonly [Roi, Roi];
+  readonly section: ReportSection;
+}
+
+/** The numbers and notes of a comparison, as the report's section. */
+export function comparisonSection(
+  first: string,
+  second: string,
+  found: RoiComparison,
+): ReportSection {
+  return {
+    title: 'Structures: surface distances and overlap',
+    about: `“${first}” (the first) against “${second}” (the second), both on the base image’s grid.`,
+    tables: [{ caption: 'Surface distances and overlap', rows: comparisonRows(found) }],
+    notes: comparisonNotes(found),
+  };
+}
+
 /** A comparison that was made, with what it was made of. */
 interface Made {
   readonly volume: Volume;
@@ -154,6 +188,22 @@ export class StructureCompare {
     const found = this.shown()?.found;
     return found ? comparisonNotes(found) : [];
   });
+
+  /** What is shown, for the registration report; null when no numbers are. */
+  readonly reported = output<ComparisonReport | null>();
+  private readonly report = computed<ComparisonReport | null>(() => {
+    const shown = this.shown();
+    if (!shown?.found) return null;
+    return {
+      volume: shown.volume,
+      rois: [shown.first.roi, shown.second.roi],
+      section: comparisonSection(shown.first.label, shown.second.label, shown.found),
+    };
+  });
+
+  constructor() {
+    effect(() => this.reported.emit(this.report()));
+  }
 
   protected choose(which: 'first' | 'second', event: Event): void {
     if (!(event.target instanceof HTMLSelectElement)) return;

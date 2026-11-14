@@ -2,7 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import {
   fieldMetrics,
   fieldVectorsInRoi,
@@ -16,6 +24,7 @@ import {
   type Volume,
 } from '@open-rt-studio/dicom';
 
+import type { ReportSection } from '../report/registration-report';
 import type { StructureChoice } from '../structure-compare/structure-compare';
 
 /**
@@ -34,6 +43,15 @@ export type FieldWayBack =
       readonly map: (point: Vec3) => Vec3 | null;
     }
   | { readonly kind: 'several'; readonly count: number };
+
+/**
+ * A field's measures as a section of the registration report (#87), with
+ * the field they are of, so that they are not reported of another.
+ */
+export interface FieldReport {
+  readonly field: PlacementField;
+  readonly section: ReportSection;
+}
 
 /** One line of a table: a name and a value with its unit. */
 export interface MetricRow {
@@ -286,6 +304,36 @@ export class FieldMetricsPanel {
     const found = this.found();
     return found && !this.empty() ? fieldNotes(found, this.field().grid, this.region()) : [];
   });
+
+  /** What is shown, for the registration report; null until the field is measured. */
+  readonly reported = output<FieldReport | null>();
+  private readonly report = computed<FieldReport | null>(() => {
+    const current = this.current();
+    if (!current) return null;
+    const region = this.region();
+    const tables = [
+      { caption: 'Jacobian determinant', rows: this.jacobian() },
+      { caption: 'Displacement', rows: this.displacement() },
+      { caption: 'There and back (inverse consistency)', rows: this.consistency() },
+    ].filter((one) => one.rows.length > 0);
+    const folding = this.empty()
+      ? `No vector of the field’s grid lies inside “${region!.name}”, so there is nothing to measure there.`
+      : (this.folding() ??
+        'No determinant could be worked out: every vector is undefined, or beside one that is.');
+    return {
+      field: current.field,
+      section: {
+        title: 'Deformation field',
+        about: region ? `Inside “${region.name}”.` : 'Over the whole field.',
+        tables,
+        notes: [folding, ...this.notes(), ...this.consistencyNotes()],
+      },
+    };
+  });
+
+  constructor() {
+    effect(() => this.reported.emit(this.report()));
+  }
 
   protected choose(key: string): void {
     this.chosen.set(key);

@@ -1,0 +1,45 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<p class="note">
+  One file with the two images, the registration, pictures of the panes, and what has been measured
+  here:
+</p>
+<ul class="parts" data-report-parts>
+  @for (part of parts(); track part.key) {
+    <li [attr.data-report-part]="part.key" [class.none]="!part.measured">
+      <span>{{ part.title }}</span>
+      <span class="state">{{ part.measured ? 'measured' : 'not measured' }}</span>
+    </li>
+  }
+</ul>
+<label class="check">
+  <input
+    type="checkbox"
+    [checked]="identifiers()"
+    (change)="identifiersToggled.emit()"
+    data-report-identifiers-toggle
+  />
+  <span>Put in the patient’s name and ID, dates and UIDs</span>
+</label>
+@if (identifiers()) {
+  <p class="note" data-report-identifiers-note>
+    The file will hold the patient’s identifiers. Guard it like the data.
+  </p>
+} @else {
+  <p class="note" data-report-identifiers-note>
+    Left out: the patient’s name and ID, dates, descriptions and UIDs. Names typed for
+    registrations, structures and landmarks are kept.
+  </p>
+}
+<button
+  type="button"
+  (click)="saveAsked.emit()"
+  [disabled]="busy()"
+  data-report-save
+  title="Save the report as one HTML file; print it from a browser for a PDF"
+>
+  {{ busy() ? 'Making the report…' : 'Save report (HTML)' }}
+</button>
+<p class="note">Not for clinical use: the report says so on every page.</p>

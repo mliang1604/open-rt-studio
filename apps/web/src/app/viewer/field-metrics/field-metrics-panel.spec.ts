@@ -10,6 +10,7 @@ import {
   type FieldMetrics,
   type PlacementField,
   type Roi,
+  type Vec3,
   type Volume,
 } from '@open-rt-studio/dicom';
 
@@ -18,6 +19,7 @@ import type { FieldWayBack } from './field-metrics-panel';
 
 import {
   FieldMetricsPanel,
+  type FieldReport,
   consistencyNotes,
   consistencyRows,
   displacementRows,
@@ -400,6 +402,57 @@ describe('FieldMetricsPanel', () => {
     expect(host.querySelector('[data-field-consistency-several]')!.textContent).toContain(
       '2 registrations lead back',
     );
+  });
+});
+
+describe('a field’s measures as a section of the registration report', () => {
+  it('is what the panel shows: every table, and every line under them', () => {
+    const fixture = TestBed.createComponent(FieldMetricsPanel);
+    fixture.componentRef.setInput('field', {
+      pre: IDENTITY_MAT4,
+      grid: SQUEEZE,
+      post: IDENTITY_MAT4,
+    });
+    fixture.componentRef.setInput('back', {
+      kind: 'one',
+      name: '“Back”',
+      deformable: false,
+      map: (point: Vec3) => point,
+    });
+    const reported: (FieldReport | null)[] = [];
+    fixture.componentInstance.reported.subscribe((report) => reported.push(report));
+    fixture.detectChanges();
+    // Nothing to report until the field is measured.
+    expect(reported.at(-1)).toBeNull();
+    const host = fixture.nativeElement as HTMLElement;
+    host.querySelector<HTMLButtonElement>('[data-field-measure]')!.click();
+    fixture.detectChanges();
+
+    const { field, section } = reported.at(-1)!;
+    expect(field.grid).toBe(SQUEEZE);
+    expect(section.title).toBe('Deformation field');
+    expect(section.about).toBe('Over the whole field.');
+    const text = (node: Element): string => node.textContent.replace(/\s+/g, ' ').trim();
+    const shown = [...host.querySelectorAll('table')].map((table) => ({
+      caption: text(table.querySelector('caption')!),
+      rows: [...table.querySelectorAll('tbody tr')].map((row) => ({
+        name: text(row.children[0]),
+        value: text(row.children[1]),
+      })),
+    }));
+    expect(shown.map((table) => table.caption)).toEqual([
+      'Jacobian determinant',
+      'Displacement',
+      'There and back (inverse consistency)',
+    ]);
+    expect(section.tables).toEqual(shown);
+    // The lines under the tables, the one about folding first.
+    const lines = [...host.querySelectorAll('p')].map(text);
+    expect(section.notes).toEqual(lines);
+    expect(section.notes).toContain(
+      'Shows whether the deformation is physically plausible, not whether it is right.',
+    );
+    expect(section.notes.at(-1)).toBe('Consistent is not the same as accurate.');
   });
 });
 

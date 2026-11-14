@@ -66,6 +66,9 @@ import { FieldViewPanel } from './field-view/field-view-panel';
 import { LandmarkController } from './landmarks/landmark-controller';
 import { LandmarkMarkers } from './landmarks/landmark-markers';
 import { LandmarkPanel } from './landmarks/landmark-panel';
+import type { ReportPicture } from './report/registration-report';
+import { ReportController } from './report/report-controller';
+import { ReportPanel } from './report/report-panel';
 import { LandmarkStore } from './landmarks/landmark-store';
 import { StructureCompare } from './structure-compare/structure-compare';
 import { ManualRegistration } from './manual-registration/manual-registration';
@@ -136,6 +139,7 @@ const MAX_ZOOM = 20;
     StructureCompare,
     LandmarkMarkers,
     LandmarkPanel,
+    ReportPanel,
     FieldMetricsPanel,
     FieldViewPanel,
     FieldArrowsLayer,
@@ -160,6 +164,7 @@ const MAX_ZOOM = 20;
     LayersController,
     LandmarkStore,
     LandmarkController,
+    ReportController,
     ManualRegistrationController,
     ToolbarController,
     StatusController,
@@ -202,6 +207,7 @@ export class Viewer {
   protected readonly brushCtl = inject(BrushController);
   protected readonly manualRegistration = inject(ManualRegistrationController);
   protected readonly landmarks = inject(LandmarkController);
+  protected readonly report = inject(ReportController);
   protected readonly landmarkStore = inject(LandmarkStore);
   /** The painted structures, for the list of them under Structures. */
   protected readonly structures = inject(EditableStructuresStore);
@@ -640,6 +646,13 @@ export class Viewer {
       download: downloadBlob,
     });
 
+    this.report.init({
+      structures: () => this.roiCtl.compareChoices().map((choice) => choice.roi),
+      pictures: () => this.reportPictures(),
+      now: () => new Date(),
+      download: downloadBlob,
+    });
+
     this.brushCtl.init({
       volume: () => this.layersCtl.volume(),
       isReady: () => this.isReady(),
@@ -804,6 +817,23 @@ export class Viewer {
     const pane = pickCaptureTarget(this.panes(), this.hoveredKey(), (p) => this.paneKey(p));
     if (!pane) return null;
     return { rect: scaleRect(pane.rect, this.viewport().dpr), tag: this.toolbar.paneViewTag(pane) };
+  }
+  /** A picture of every pane on screen, named by its view, for the registration report. */
+  private async reportPictures(): Promise<ReportPicture[]> {
+    const dpr = this.viewport().dpr;
+    const taken = await this.capture.pictures(
+      this.panes().map((pane) => ({
+        rect: scaleRect(pane.rect, dpr),
+        tag: this.toolbar.paneViewTag(pane),
+      })),
+    );
+    const seen = new Map<string, number>();
+    return taken.map(({ tag, dataUrl }) => {
+      const count = (seen.get(tag) ?? 0) + 1;
+      seen.set(tag, count);
+      const name = tag === '3d' ? '3D' : tag.charAt(0).toUpperCase() + tag.slice(1);
+      return { caption: count > 1 ? `${name} (${count})` : name, dataUrl };
+    });
   }
   /** Placement of the pane under a pointer event, or null if outside the panes. */
   private placementAtEvent(event: MouseEvent): PanePlacement | null {

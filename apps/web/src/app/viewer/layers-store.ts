@@ -121,7 +121,7 @@ export interface ByHand {
 }
 
 /** The name a registration goes by: its description, else its label. */
-function registrationName(step: PlacementStep): string {
+export function registrationName(step: PlacementStep): string {
   return step.description?.trim() || step.label?.trim() || 'unnamed';
 }
 
