@@ -57,6 +57,28 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    // The server runs in Node and inside the desktop application's main
+    // process. It has no user interface and is reached over HTTP only.
+    files: ['services/*/src/**/*.ts'],
+    languageOptions: { globals: globals.node },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            NO_DEEP_IMPORTS,
+            { group: ['@angular/*', 'rxjs', 'rxjs/*'], message: 'The server has no Angular.' },
+            { group: ['**/apps/*'], message: 'The server never imports from apps/.' },
+            {
+              group: ['@open-rt-studio/render', '@open-rt-studio/web'],
+              message: 'The server draws nothing: packages/render and the web client stay out.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The Angular application: component and directive conventions, with
     // inline templates linted like template files.
     files: ['apps/web/src/**/*.ts'],
