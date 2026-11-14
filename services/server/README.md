@@ -88,8 +88,88 @@ history would see it.
 
 What is not there yet: HTTPS (#57), so on a network the token and the
 password travel in the clear unless something in front of the server
-encrypts; an audit log of who did what (#56); and logins through an identity
-provider. The log says that someone logged in or failed to, never who.
+encrypts; and logins through an identity provider. The application log says
+that someone logged in or failed to, never who; who is in the audit log.
+
+## The audit log
+
+A server with a data directory writes down who did what, in `audit.sqlite`
+there, apart from the application log. The application log says how the
+server is doing and holds no identifier; the audit log says whose data was
+touched and by whom, and is for an administrator.
+
+A record says **who** (`actor`, the account; empty when no one was logged
+in), **when** (`time`), **what** (`action`), **to what** (`patientId`,
+`studyUid`, `seriesUid`, or `object` for an account or a job), **how it
+ended** (`outcome`: `ok`, `refused`, `not-found`, `rejected`, `failed`) and
+what more there is to say (`detail`: what was searched for, what was
+changed).
+
+| Action                                                  | Written when                                               |
+| ------------------------------------------------------- | ---------------------------------------------------------- |
+| `login`, `logout`, `password-change`                    | Someone logs in (or fails to), logs out, changes their own |
+| `patients-list`, `studies-search`                       | A list is asked for; `detail` holds what was searched for  |
+| `study-read`, `series-read`, `instance-read`            | A study, a series or an instance is looked at              |
+| `instance-download`                                     | A file is fetched                                          |
+| `instance-upload`                                       | A file is sent; `detail` says what became of it            |
+| `accounts-list`, `account-create`, `-change`, `-remove` | An administrator, or the `account` command, does so        |
+| `job-start`, `job-cancel`, `job-read`                   | A job is submitted, cancelled, followed                    |
+| `audit-read`, `audit-export`                            | The audit log itself is read                               |
+
+What to know about it:
+
+- **The same thing done again is one record.** The 300 files of a series,
+  fetched one after another, are one `instance-download` of that series with
+  `count` 300, from `time` to `until`. A record counts while the same thing
+  recurs within 5 minutes, for an hour at most. Files are recorded by their
+  series, not one by one.
+- **The record is written before the answer is sent, and without it there is
+  no answer.** If the log cannot be written (a full disk), a request that
+  would be recorded is answered 500 and the application log says
+  `audit-failed`. An upload has been stored by then; a read has given
+  nothing away. `GET /health` still answers.
+- **A route is recorded unless it says not to** (`audit: false` on the
+  route): the health of the server, its description, its counts, the kinds
+  of job, and who one is logged in as. A new route that says nothing is
+  recorded as a `request`, by its pattern.
+- **Not recorded: a request refused for want of a login.** There is no one
+  to name, and anyone who can reach the port can send as many as they like.
+  A refused login is recorded, with the name when the name is an account's.
+  What was typed in place of a name is not kept: it may be a password.
+- **No password and no token is ever in it.** A search is: the log holds the
+  names and IDs that were searched for.
+- **Records are not changed or deleted.** The file refuses it (SQLite
+  triggers), whoever writes to it through SQL. That stops a mistake, not
+  someone who can replace the file. There is no retention period and nothing
+  that clears old records; the file grows.
+- **The `account` command writes to it too**, as origin `command`, with the
+  name the operating system gives for whoever ran it.
+- A server without a data directory keeps nothing, an audit log no more than
+  anything else. A server without accounts records what is done by no one in
+  particular.
+
+An administrator reads it through the API:
+
+| Method and path            | Answer                                                                    |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `GET /api/v1/audit`        | A part of the log, the latest first. `limit` (100, at most 500), `offset` |
+| `GET /api/v1/audit/export` | All of it, the earliest first, as `format=csv` (the default) or `ndjson`  |
+
+Both take `from` and `before` (a day, `2026-03-01`, or a moment with its
+zone), `actor`, `action`, `outcome`, `patientId` and `studyUid`, joined by
+"and":
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:4300/api/v1/audit?patientId=SYN-0001&from=2026-03-01"
+curl -H "Authorization: Bearer $TOKEN" -o audit.csv \
+  http://127.0.0.1:4300/api/v1/audit/export
+```
+
+In the CSV a value that a spreadsheet would take for a formula is given a
+leading apostrophe. The viewer has no screen for the log yet, and nothing
+clears old records (#213). DIMSE sends and retrievals will be recorded when
+there is DIMSE (#212).
 
 `SIGTERM` or `SIGINT` (Ctrl+C) stops it: it takes no new connections, answers
 the requests it has, lets the core finish its work, and exits with 0. If the
@@ -235,6 +315,11 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   the lock after wrong passwords, the last administrator. The core knows
   nothing of it: accounts belong to the network host, and an embedded core
   has none.
+- `src/audit/`: who did what (#56). `audit-store.ts` keeps the records in
+  SQLite and `audit.ts` is the log: it counts the same thing done again on
+  the record there is. The host writes a record for each request
+  (`src/host/host.ts`); a route says what it is recorded as (`audit` on the
+  route) and whose data it touched (`request.audit(...)`).
 - `src/account-cli.ts`: the `account` command.
 - `src/config.ts`: the settings above, typed and checked.
 - `src/logger.ts`: the log.
@@ -436,6 +521,13 @@ As a net under those rules, a field whose name says it identifies a person
 (`patientName`, `patient_id`, `accessionNumber`, `mrn`, ...) is written as
 `[redacted]` whatever it holds. The net catches a mistake; it does not make
 the field right to pass.
+
+A test holds the server to this (`src/log-identifiers.spec.ts`): it does
+everything the API can be asked, rightly and wrongly, to synthetic data with
+known identifiers, and then searches the whole log, at its most talkative,
+for each of them: Patient ID, name, every UID, account names, passwords,
+tokens, what was searched for. When you add a route, add a call to it there.
+Who did what belongs in [the audit log](#the-audit-log).
 
 ## Tests
 

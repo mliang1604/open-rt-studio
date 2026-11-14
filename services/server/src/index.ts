@@ -55,6 +55,27 @@ export {
 } from './accounts/password.js';
 export { accountRoutes, openSessionRoute } from './api/account-routes.js';
 export {
+  AUDIT_PAGE_MAX,
+  AUDIT_RUN_IDLE_MS,
+  AUDIT_RUN_MAX_MS,
+  createAuditLog,
+  type AuditLog,
+  type AuditLogOptions,
+} from './audit/audit.js';
+export {
+  AUDIT_ACTIONS,
+  AUDIT_MIGRATIONS,
+  AUDIT_OUTCOMES,
+  openSqliteAuditStore,
+  type AuditAction,
+  type AuditEntry,
+  type AuditOutcome,
+  type AuditQuery,
+  type AuditRecord,
+  type AuditStore,
+} from './audit/audit-store.js';
+export { auditRoutes } from './api/audit-routes.js';
+export {
   createHost,
   type HostAddress,
   type HostClosure,

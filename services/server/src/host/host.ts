@@ -7,12 +7,14 @@ import type { AddressInfo } from 'node:net';
 import { pipeline } from 'node:stream/promises';
 
 import type { Accounts, Session } from '../accounts/accounts.js';
+import { outcomeOf, type AuditLog } from '../audit/audit.js';
 import type { ServerCore } from '../core/core.js';
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
 import {
   healthRoute,
   HttpError,
   matchPath,
+  type AuditNote,
   type Route,
   type RouteRequest,
   type RouteResponse,
@@ -38,6 +40,14 @@ export interface HostOptions {
    * answered: for a server that only this machine can reach, and tests.
    */
   readonly accounts?: Accounts | null;
+  /**
+   * Where it is written who did what. With one, a request to a route that
+   * does not say `audit: false` is recorded before it is answered, and is
+   * not answered when it cannot be recorded. A request that is refused for
+   * want of a login is not recorded: there is no one to name, and anyone
+   * can send as many as they like.
+   */
+  readonly audit?: AuditLog | null;
 }
 
 /** Where the host listens. */
@@ -106,6 +116,7 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
   const loopbackOnly = LOOPBACK_ADDRESSES.has(options.host);
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
   const accounts = options.accounts ?? null;
+  const audit = options.audit ?? null;
   let inFlight = 0;
   let closing: Promise<HostClosure> | null = null;
   /** Called each time a request is answered while a close is waiting. */
@@ -156,11 +167,13 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
     query: URLSearchParams,
     session: Session | null,
     token: string | null,
+    note: AuditNote,
   ): RouteRequest => ({
     params,
     query,
     session,
     token,
+    audit: (more) => void Object.assign(note, more),
     header: (name) => {
       const value = request.headers[name];
       return Array.isArray(value) ? value[0] : value;
@@ -179,6 +192,43 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
       return Buffer.concat(pieces);
     },
   });
+
+  /**
+   * Write the audit record of a request. False when it could not be written:
+   * the request is then not answered, so that nothing leaves the server
+   * without a record of who had it.
+   */
+  const recorded = (
+    route: Route,
+    params: Readonly<Record<string, string>>,
+    session: Session | null,
+    note: AuditNote,
+    status: number,
+  ): boolean => {
+    if (!audit || route.audit === false) return true;
+    const action = route.audit ?? 'request';
+    // A route that says nothing of itself is known by its pattern and what stood in it.
+    const unnamed = action === 'request';
+    try {
+      audit.record({
+        actor: note.actor !== undefined ? note.actor : (session?.account.name ?? null),
+        origin: 'api',
+        action,
+        outcome: outcomeOf(status),
+        patientId: note.patientId ?? null,
+        studyUid: note.studyUid ?? null,
+        seriesUid: note.seriesUid ?? null,
+        object: note.object ?? (unnamed ? `${route.method} ${route.path}` : null),
+        detail:
+          note.detail ??
+          (unnamed && Object.keys(params).length > 0 ? JSON.stringify(params) : null),
+      });
+      return true;
+    } catch (error) {
+      logger.error('audit-failed', { route: route.path, ...errorFields(error) });
+      return false;
+    }
+  };
 
   /** Answer one request; says which route it was, for the log. */
   const answer = async (request: IncomingMessage, response: ServerResponse): Promise<string> => {
@@ -283,15 +333,35 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
         return route.path;
       }
       if (access === 'admin' && session?.account.role !== 'admin') {
+        // Who tried what they may not is kept; the answer is the same whether it could be.
+        recorded(route, params, session, {}, 403);
         await fail(response, new HttpError(403, 'forbidden', 'This is for an administrator.'));
         return route.path;
       }
     }
+    const note: AuditNote = {};
+    let result: RouteResponse | null = null;
+    let thrown: { readonly error: unknown } | null = null;
     try {
-      await send(
-        response,
-        await route.handle(requestOf(request, params, url.searchParams, session, token)),
+      result = await route.handle(
+        requestOf(request, params, url.searchParams, session, token, note),
       );
+    } catch (error) {
+      thrown = { error };
+    }
+    const status = result
+      ? result.status
+      : thrown?.error instanceof HttpError
+        ? thrown.error.status
+        : 500;
+    if (!recorded(route, params, session, note, status)) {
+      if (result && 'stream' in result) result.stream.destroy();
+      await fail(response, new HttpError(500, 'internal', 'The server could not answer.'));
+      return route.path;
+    }
+    try {
+      if (thrown) throw thrown.error;
+      await send(response, result!);
     } catch (error) {
       if (response.headersSent) {
         // Part of an answer is out already; the rest cannot be taken back.

@@ -114,6 +114,40 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     },
     'A login: the token, told once, and the session it stands for.',
   ),
+  AuditRecord: object(
+    {
+      id: count,
+      time: { type: 'string', description: 'When, or when first: ISO 8601, UTC.' },
+      until: { type: 'string', description: 'When last, for a record that counts several.' },
+      count: { type: 'integer', minimum: 1, description: 'How often, from `time` to `until`.' },
+      actor: {
+        ...nullableText,
+        description:
+          'The account. Null when no one was logged in: a server without accounts, a command, a login with a name that is no account.',
+      },
+      origin: { type: 'string', enum: ['api', 'command'] },
+      action: text,
+      outcome: { type: 'string', enum: ['ok', 'refused', 'not-found', 'rejected', 'failed'] },
+      patientId: nullableText,
+      studyUid: nullableText,
+      seriesUid: nullableText,
+      object: {
+        ...nullableText,
+        description: 'What else it was done to: an account, a job, an instance that was not found.',
+      },
+      detail: {
+        ...nullableText,
+        description: 'What more there is to say: what was searched for, what was changed.',
+      },
+    },
+    'Who did what, to what, and how it ended.',
+  ),
+  AuditPage: object({
+    items: { type: 'array', items: ref('AuditRecord') },
+    limit: count,
+    offset: count,
+    more: { type: 'boolean', description: 'Whether there are records after these.' },
+  }),
   Health: object({
     status: { type: 'string', enum: ['ok', 'stopping'] },
     version: text,

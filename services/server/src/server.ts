@@ -11,7 +11,10 @@ import { openSqliteAccountStore } from './accounts/account-store.js';
 import { createAccounts, type Accounts } from './accounts/accounts.js';
 import { accountRoutes, openSessionRoute } from './api/account-routes.js';
 import { apiRoutes } from './api/api-routes.js';
+import { auditRoutes } from './api/audit-routes.js';
 import { jobRoutes } from './api/job-routes.js';
+import { openSqliteAuditStore } from './audit/audit-store.js';
+import { createAuditLog, type AuditLog } from './audit/audit.js';
 import { ConfigError, ENVIRONMENT_VARIABLES, type ServerConfig } from './config.js';
 import { createCore, type ServerCore } from './core/core.js';
 import { createHost, type HostAddress } from './host/host.js';
@@ -64,6 +67,11 @@ export interface ServerParts {
    * server closes them when it stops.
    */
   readonly accounts?: Accounts;
+  /**
+   * The audit log, in place of the one kept in the data directory: for a
+   * test, which keeps it in memory. The server closes it when it stops.
+   */
+  readonly audit?: AuditLog;
 }
 
 /** The name of the file in the data directory that holds the accounts and their sessions. */
@@ -103,6 +111,21 @@ export function openAccounts(
   });
 }
 
+/** The name of the file in the data directory that holds the audit log. */
+export const AUDIT_FILE = 'audit.sqlite';
+
+/**
+ * Where it is written who did what: in the data directory. Null for a
+ * server without one, which keeps nothing, an audit log no more than
+ * anything else.
+ */
+export function openAudit(dataDir: string | null, given?: AuditLog): AuditLog | null {
+  if (given) return given;
+  if (dataDir === null) return null;
+  mkdirSync(dataDir, { recursive: true });
+  return createAuditLog({ store: openSqliteAuditStore(join(dataDir, AUDIT_FILE)) });
+}
+
 /** The job manager the configuration asks for, and how to clear up after it. */
 async function openJobs(config: ServerConfig, logger: Logger, kinds: readonly JobKind[]) {
   // Without a data directory, jobs work in a temporary one that goes when the server stops.
@@ -131,21 +154,25 @@ export async function startServer(
 ): Promise<RunningServer> {
   // First: a configuration that is refused opens nothing.
   const accounts = openAccounts(config, logger, parts.accounts);
+  const audit = openAudit(config.dataDir, parts.audit);
   const pacs = await openPacs(config, logger);
   const { jobs, clear } = await openJobs(config, logger, parts.jobKinds ?? []);
   const core = createCore({ logger, pacs, jobs });
   const jobApi = jobRoutes(jobs);
   const sessionApi = accounts ? accountRoutes(accounts) : [openSessionRoute()];
+  const auditApi = audit ? auditRoutes(audit) : [];
   const routes = [
     ...sessionApi,
+    ...auditApi,
     ...jobApi,
     ...apiRoutes(core.pacs!, {
       maxUploadBytes: config.maxUploadBytes,
-      described: [healthRoute(core), ...sessionApi, ...jobApi],
+      described: [healthRoute(core), ...sessionApi, ...auditApi, ...jobApi],
       login: accounts !== null,
+      audit: audit !== null,
     }),
   ];
-  const host = createHost(core, { ...config, logger, routes, accounts });
+  const host = createHost(core, { ...config, logger, routes, accounts, audit });
   if (accounts === null) {
     // Whoever can reach the port can use the server. Only this machine can.
     logger.warn('no-login');
@@ -165,6 +192,7 @@ export async function startServer(
     await core.dispose();
     await clear();
     accounts?.close();
+    audit?.close();
     throw error;
   }
   logger.info('listening', { host: address.host, port: address.port });
@@ -179,6 +207,7 @@ export async function startServer(
         const disposal = await core.dispose({ timeoutMs: config.shutdownTimeoutMs });
         await clear();
         accounts?.close();
+        audit?.close();
         const clean = closure.finished && disposal.finished;
         logger.info('stopped', { clean });
         return clean;

@@ -7,6 +7,7 @@
 // its first argument it is the command that makes and changes accounts.
 
 import { mkdirSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 
 import { runAccountCommand, terminalPasswords } from './account-cli.js';
@@ -14,7 +15,7 @@ import { openSqliteAccountStore } from './accounts/account-store.js';
 import { createAccounts } from './accounts/accounts.js';
 import { ConfigError, ENVIRONMENT_VARIABLES, loadConfig, type ServerConfig } from './config.js';
 import { createLogger, errorFields } from './logger.js';
-import { ACCOUNTS_FILE, startServer } from './server.js';
+import { ACCOUNTS_FILE, openAudit, startServer } from './server.js';
 
 let config: ServerConfig;
 try {
@@ -37,17 +38,31 @@ if (process.argv[2] === 'account') {
   const accounts = createAccounts({
     store: openSqliteAccountStore(join(config.dataDir, ACCOUNTS_FILE)),
   });
+  // What the command does to the accounts goes to the audit log the server writes to.
+  const audit = openAudit(config.dataDir);
+  let osUser: string | null = null;
+  try {
+    osUser = userInfo().username;
+  } catch {
+    // A machine that cannot say who its user is: the record says so by saying nothing.
+  }
   let code = 1;
   try {
-    code = await runAccountCommand(process.argv.slice(3), accounts, {
-      out: (line) => process.stdout.write(`${line}\n`),
-      err: (line) => process.stderr.write(`${line}\n`),
-      ...terminalPasswords(),
-    });
+    code = await runAccountCommand(
+      process.argv.slice(3),
+      accounts,
+      {
+        out: (line) => process.stdout.write(`${line}\n`),
+        err: (line) => process.stderr.write(`${line}\n`),
+        ...terminalPasswords(),
+      },
+      audit ? { log: audit, osUser } : undefined,
+    );
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   } finally {
     accounts.close();
+    audit?.close();
   }
   process.exit(code);
 }

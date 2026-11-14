@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 
 import { syntheticCtSeries } from '@open-rt-studio/testdata';
 
+import { openSqliteAuditStore } from './audit/audit-store.js';
+import { createAuditLog } from './audit/audit.js';
 import { SERVER_VERSION } from './version.js';
 
 // The server as a process, built: `npm test` builds it first (pretest).
@@ -252,6 +254,23 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
       empty.child.kill('SIGTERM');
       expect(await empty.exited).toBe(0);
       expect(await readdir(directory)).toContain('accounts.sqlite');
+      // What the command and the server did is in one audit log, in the same directory.
+      const audit = createAuditLog({
+        store: openSqliteAuditStore(join(directory, 'audit.sqlite')),
+      });
+      try {
+        expect([...audit.all()]).toMatchObject([
+          { origin: 'command', action: 'account-create', object: 'ada', outcome: 'rejected' },
+          { origin: 'command', action: 'account-create', object: 'ada', outcome: 'ok' },
+          { origin: 'command', action: 'accounts-list', outcome: 'ok' },
+          { origin: 'api', action: 'login', actor: 'ada', outcome: 'refused' },
+          { origin: 'api', action: 'login', actor: 'ada', outcome: 'ok' },
+        ]);
+        // By whom on the machine, as far as the machine says.
+        expect([...audit.all()][1].detail).toMatch(/^role=admin( os-user=\S+)?$/);
+      } finally {
+        audit.close();
+      }
       // Neither who logged in nor what they typed is in the log.
       const logged = JSON.stringify(empty.log());
       expect(logged).not.toContain('ada');
