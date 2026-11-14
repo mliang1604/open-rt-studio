@@ -45,4 +45,22 @@ export {
   type LoggerOptions,
 } from './logger.js';
 export { startServer, type RunningServer } from './server.js';
+export {
+  EmptyInstanceError,
+  InstanceNotFoundError,
+  InvalidUidError,
+  assertUid,
+  isUid,
+  type DicomStore,
+  type InstanceBytes,
+  type StoredInstance,
+} from './store/dicom-store.js';
+export {
+  STORE_LAYOUT,
+  STORE_MARKER,
+  StoreLayoutError,
+  openFileStore,
+  type FileStoreOptions,
+} from './store/file-store.js';
+export { createMemoryStore } from './store/memory-store.js';
 export { SERVER_VERSION } from './version.js';

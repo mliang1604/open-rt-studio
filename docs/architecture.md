@@ -149,6 +149,13 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   at again when the HTTP API is designed (#46): uploads, request validation
   and login (#55) are where a framework such as Fastify (MIT) would start to
   pay for itself. Status: **decided for the skeleton, open for #46.**
+- The file store (#42) names an instance's files by the SHA-256 of its SOP
+  Instance UID, so that paths hold no patient identifier and not the UID
+  either. It keeps the bytes as an ordinary DICOM file beside a small record
+  (UID, size, SHA-256), writes through a temporary file and a rename, and
+  treats the record's rename as the step that stores an instance. The layout
+  has a version, written in the store directory. See
+  [the server's README](../services/server/README.md#the-file-store).
 - The server listens on `127.0.0.1` unless it is told otherwise, and warns
   when it is told otherwise, until there are accounts (#55).
 - Logs are JSON lines and carry no patient identifiers: an event is a fixed

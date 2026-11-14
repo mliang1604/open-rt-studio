@@ -5,6 +5,15 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  resolve: {
+    // The specs use the generators from source, as the other workspaces do.
+    alias: {
+      '@open-rt-studio/testdata': new URL('../../packages/testdata/src/index.ts', import.meta.url)
+        .pathname,
+      '@open-rt-studio/dicom': new URL('../../packages/dicom/src/index.ts', import.meta.url)
+        .pathname,
+    },
+  },
   test: {
     globals: true,
     environment: 'node',
