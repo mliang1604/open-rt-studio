@@ -76,11 +76,15 @@ export class ManualRegistration {
   readonly saving = input(false);
   /** Whether Reset would change anything. */
   readonly changed = input(true);
+  /** What a drag in the planes does to the image now, or null when it is not moved by one. */
+  readonly dragMode = input<'shift' | 'turn' | null>(null);
 
   readonly paramsChange = output<RigidParams>();
   readonly resetAsked = output<void>();
   readonly saveAsked = output<void>();
   readonly discardAsked = output<void>();
+  /** A drag mode was asked for; asked for again, it is put down. */
+  readonly dragAsked = output<'shift' | 'turn'>();
 
   protected readonly title = computed(() => `Registration of the ${this.image()} by hand`);
 

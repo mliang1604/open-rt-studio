@@ -441,7 +441,10 @@ describe('a registration made by hand (#78)', () => {
   it('goes with the other overrides when a new base is loaded', () => {
     const store = new LayersStore();
     store.beginByHand(unplaced()[1], base);
+    store.toggleByHandDrag('ov', 'turn');
+    expect(store.byHandDrag()).toEqual({ id: 'ov', mode: 'turn' });
     store.reset();
     expect(store.byHand().size).toBe(0);
+    expect(store.byHandDrag()).toBeNull();
   });
 });

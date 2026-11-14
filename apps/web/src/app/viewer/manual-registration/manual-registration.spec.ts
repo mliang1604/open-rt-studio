@@ -97,6 +97,22 @@ describe('ManualRegistration', () => {
     expect(saving.button('Saving…').disabled).toBe(true);
   });
 
+  it('asks for a drag mode, and shows which one is on', () => {
+    const asked: string[] = [];
+    const off = setup();
+    off.fixture.componentInstance.dragAsked.subscribe((mode) => asked.push(mode));
+    off.button('Drag to shift').click();
+    off.button('Drag to turn').click();
+    expect(asked).toEqual(['shift', 'turn']);
+    expect(off.button('Drag to shift').getAttribute('aria-pressed')).toBe('false');
+    expect(off.button('Drag to turn').getAttribute('aria-pressed')).toBe('false');
+
+    const turning = setup({ dragMode: 'turn' });
+    expect(turning.button('Drag to turn').getAttribute('aria-pressed')).toBe('true');
+    expect(turning.button('Drag to turn').classList.contains('active')).toBe(true);
+    expect(turning.button('Drag to shift').getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('has nothing to reset where nothing was changed', () => {
     expect(setup({ changed: false }).button('Reset').disabled).toBe(true);
     expect(setup({ changed: true }).button('Reset').disabled).toBe(false);

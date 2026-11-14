@@ -74,6 +74,16 @@ export interface LayerLegendEntry {
   readonly byHand: ByHand | null;
 }
 
+/**
+ * What a drag in the planes does to a layer that is being registered by
+ * hand: shifts it along the plane, or turns it in the plane about its middle.
+ */
+export interface ByHandDrag {
+  /** The layer's id. */
+  readonly id: string;
+  readonly mode: 'shift' | 'turn';
+}
+
 /** A registration that is being made by hand for a layer. */
 export interface ByHand {
   /** As it is set now. */
@@ -214,6 +224,29 @@ export class LayersStore {
   /** The registrations being made by hand, by layer id. */
   readonly byHand = this._byHand.asReadonly();
 
+  private readonly _byHandDrag = signal<ByHandDrag | null>(null);
+
+  /**
+   * The layer a left drag in the planes moves by hand, and how. Null when a
+   * drag does what it always does. It is a tool like the brush: one at a time.
+   */
+  readonly byHandDrag = this._byHandDrag.asReadonly();
+
+  /**
+   * Switch dragging a layer by hand on in a mode, or off when it is on in
+   * that mode already. Only for a layer that is being registered by hand.
+   */
+  toggleByHandDrag(id: string, mode: ByHandDrag['mode']): void {
+    const current = this._byHandDrag();
+    if (current?.id === id && current.mode === mode) this._byHandDrag.set(null);
+    else if (this._byHand().has(id)) this._byHandDrag.set({ id, mode });
+  }
+
+  /** Put the dragging by hand down. */
+  stopByHandDrag(): void {
+    this._byHandDrag.set(null);
+  }
+
   /**
    * The placement each of them gives its layer. Kept apart from
    * {@link apply}, so that a matrix is made when the numbers change and not
@@ -302,6 +335,7 @@ export class LayersStore {
    * it, placed by their registration or not drawn.
    */
   discardByHand(id: string): void {
+    if (this._byHandDrag()?.id === id) this._byHandDrag.set(null);
     this._byHand.update((map) => {
       if (!map.has(id)) return map;
       const next = new Map(map);
@@ -388,6 +422,7 @@ export class LayersStore {
     this._windows.set(new Map());
     this._placements.set(new Map());
     this._byHand.set(new Map());
+    this._byHandDrag.set(null);
     this.checkerboardEnabled.set(false);
   }
 }

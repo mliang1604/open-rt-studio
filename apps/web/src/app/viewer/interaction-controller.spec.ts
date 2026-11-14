@@ -97,6 +97,8 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     beginStroke: vi.fn(),
     extendStroke: vi.fn(),
     endStroke: vi.fn(),
+    moveRegisterDrag: vi.fn(),
+    endRegisterDrag: vi.fn(),
   } as const;
 
   const deps: InteractionInit = {
@@ -125,6 +127,8 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     deselectMeasurement: () => {},
     crosshairGrabbable: () => false,
     cprDrawing: () => false,
+    registerDragActive: () => false,
+    beginRegisterDrag: () => false,
     ...fns,
     ...overrides,
   };
@@ -311,6 +315,60 @@ describe('InteractionController', () => {
       controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50 }));
       expect(fns.beginStroke).toHaveBeenCalledOnce();
       expect(controller.drag()).toMatchObject({ kind: 'draw', orientation: Orientation.Axial });
+    });
+
+    it('moves a layer by hand instead of panning while that dragging is on (#78)', () => {
+      const begun: unknown[] = [];
+      const h = setup({
+        registerDragActive: () => true,
+        beginRegisterDrag: (placement) => {
+          begun.push(placement);
+          return true;
+        },
+        crosshairGrabbable: () => true,
+      });
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50 }));
+      expect(begun).toEqual([MPR_PANE]);
+      expect(h.controller.drag()).toEqual({ kind: 'register' });
+      expect(h.setPointerCapture).toHaveBeenCalledOnce();
+      // The crosshair's handle is inert meanwhile.
+      expect(h.fns.setFocus).not.toHaveBeenCalled();
+
+      h.controller.onPointerMove(pointer({ clientX: 60, clientY: 55 }));
+      expect(h.fns.moveRegisterDrag).toHaveBeenCalledOnce();
+      expect(h.fns.setMasterPan).not.toHaveBeenCalled();
+      expect(h.controller.overCrosshair()).toBe(false);
+
+      h.controller.onPointerUp(pointer({ clientX: 60, clientY: 55 }));
+      expect(h.fns.endRegisterDrag).toHaveBeenCalledOnce();
+      expect(h.controller.drag()).toBeNull();
+      expect(h.releasePointerCapture).toHaveBeenCalledOnce();
+    });
+
+    it('pans as always when there is nothing under the press to drag the layer by', () => {
+      const h = setup({ registerDragActive: () => true, beginRegisterDrag: () => false });
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50 }));
+      expect(h.controller.drag()?.kind).toBe('pan');
+      h.controller.onPointerUp(pointer({}));
+      expect(h.fns.endRegisterDrag).not.toHaveBeenCalled();
+    });
+
+    it('keeps the other gestures while a layer is dragged by hand', () => {
+      const begin = vi.fn(() => true);
+      const h = setup({ registerDragActive: () => true, beginRegisterDrag: begin });
+      // The 3D pane orbits, ⇧ sets the crosshair, ⌥ pans, the right button zooms.
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 150, clientY: 50 }));
+      expect(h.controller.drag()?.kind).toBe('orbit');
+      h.controller.onPointerUp(pointer({}));
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50, shiftKey: true }));
+      expect(h.controller.drag()?.kind).toBe('focus');
+      h.controller.onPointerUp(pointer({}));
+      h.controller.onPointerDown(pointer({ button: 0, clientX: 50, clientY: 50, altKey: true }));
+      expect(h.controller.drag()?.kind).toBe('pan');
+      h.controller.onPointerUp(pointer({}));
+      h.controller.onPointerDown(pointer({ button: 2, clientX: 50, clientY: 50 }));
+      expect(h.controller.drag()?.kind).toBe('zoom');
+      expect(begin).not.toHaveBeenCalled();
     });
 
     it('does nothing before the viewer is ready', () => {

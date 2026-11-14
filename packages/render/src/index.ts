@@ -78,6 +78,7 @@ export {
   NO_OBLIQUE,
   type ObliqueRotation,
   planeExtentMm,
+  planeNormal,
   sliceCountFor,
   slicePlaneCorners,
   resolveGeometry,

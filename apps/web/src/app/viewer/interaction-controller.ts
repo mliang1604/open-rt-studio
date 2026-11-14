@@ -194,6 +194,17 @@ export class InteractionController {
       return;
     }
 
+    // While a layer is dragged by hand (#78), a left-drag on an MPR pane shifts
+    // or turns it in that plane instead of panning. A press outside the image
+    // has nothing to drag by, and pans as always.
+    if (d.registerDragActive() && placement.kind === 'mpr') {
+      if (d.beginRegisterDrag(placement, event)) {
+        d.canvas().setPointerCapture(event.pointerId);
+        this.drag.set({ kind: 'register' });
+        return;
+      }
+    }
+
     // A press on the crosshair's handle drags the crosshair instead of panning.
     if (placement.kind === 'mpr') {
       const bounds = d.canvas().getBoundingClientRect();
@@ -237,6 +248,7 @@ export class InteractionController {
   ): boolean {
     const d = this.deps!;
     if (d.brushActive() || d.activeTool() !== 'none' || d.cprDrawing()) return false;
+    if (d.registerDragActive()) return false;
     return d.crosshairGrabbable(placement, x, y);
   }
 
@@ -262,6 +274,7 @@ export class InteractionController {
     if (drag?.kind === 'pan') this.dragPan(event, drag);
     else if (drag?.kind === 'focus') d.setFocus(drag.placement, event);
     else if (drag?.kind === 'draw') this.dragDraw(event, drag);
+    else if (drag?.kind === 'register') d.moveRegisterDrag(event);
     else if (drag?.kind === 'orbit') this.dragOrbit(event, drag);
     else if (drag?.kind === 'cameraPan') this.dragCameraPan(event, drag);
     else if (drag?.kind === 'zoom') this.dragZoom(event, drag);
@@ -287,10 +300,12 @@ export class InteractionController {
     const d = this.deps;
     if (!d || !this.drag()) return;
     const wasDraw = this.drag()?.kind === 'draw';
+    const wasRegister = this.drag()?.kind === 'register';
     const canvas = d.canvas();
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     this.drag.set(null);
     if (wasDraw) d.endStroke();
+    if (wasRegister) d.endRegisterDrag();
   }
 
   onPointerLeave(event: PointerEvent): void {

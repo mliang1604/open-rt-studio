@@ -327,4 +327,18 @@ export function perTexel(index: Vec3, dims: readonly [number, number, number]): 
   return [index[0] / dims[0], index[1] / dims[1], index[2] / dims[2]];
 }
 
+/**
+ * The direction a pane's plane faces, in the volume's patient frame: the
+ * unit vector along which its slices follow one another, tilted as the
+ * plane is. What something turned "in the plane" turns about.
+ */
+export function planeNormal(
+  volume: Volume,
+  orientation: Orientation,
+  rotation?: ObliqueRotation,
+): Vec3 {
+  const bounds = patientBounds(resolveGeometry(volume), volume.dims);
+  return normalize(obliqueBasis(planeBasis(orientation, bounds), rotation).axisS);
+}
+
 export { patientBounds, planeBasis, obliqueBasis };

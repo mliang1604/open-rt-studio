@@ -77,6 +77,9 @@ export {
   manualPlacement,
   rigidParamsMatrix,
   rigidParamsOf,
+  shiftedBy,
+  turnBetween,
+  turnedAbout,
   startingRigidParams,
   volumeCentre,
 } from './rigid-params.js';

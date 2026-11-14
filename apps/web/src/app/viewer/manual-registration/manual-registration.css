@@ -53,6 +53,11 @@ input {
   padding: 3px 10px;
 }
 
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .state {
   margin: 0;
   color: var(--muted);
