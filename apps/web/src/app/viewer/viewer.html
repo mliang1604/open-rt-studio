@@ -1007,11 +1007,15 @@
           class="oblique-knob"
           [attr.cx]="gizmo.knobX"
           [attr.cy]="gizmo.knobY"
-          r="8"
+          [attr.r]="obliqueKnobRadius"
           tabindex="0"
           role="slider"
           [attr.aria-label]="toolbar.orientationName(gizmo.orientation) + ' oblique tilt'"
-          (pointerdown)="view3d.onObliqueHandleDown($event, gizmo.orientation)"
+          (pointerdown)="
+            $event.shiftKey
+              ? interaction.onPointerDown($event)
+              : view3d.onObliqueHandleDown($event, gizmo.orientation)
+          "
           (pointermove)="view3d.onObliqueHandleMove($event)"
           (pointerup)="view3d.onObliqueHandleUp($event)"
           (pointercancel)="view3d.onObliqueHandleUp($event)"

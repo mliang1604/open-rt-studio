@@ -2,8 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { clampIndex, Orientation, type Vec3, type Volume } from '@open-rt-studio/dicom';
+import {
+  clampIndex,
+  Orientation,
+  voxelToPatient,
+  type Vec3,
+  type Volume,
+} from '@open-rt-studio/dicom';
 import type { PaneRect, Vec2 } from './layout.js';
+import { resolveGeometry } from './plane-basis.js';
 import { planeCoordsAt, planeToTex, sliceCountFor, type ObliqueRotation } from './reslice.js';
 import { aspectScale } from './slice-renderer.js';
 
@@ -28,6 +35,16 @@ export interface PanePoint {
 function voxelTexCoord(volume: Volume, voxel: readonly [number, number, number]): Vec3 {
   const [dx, dy, dz] = volume.dims;
   return [(voxel[0] + 0.5) / dx, (voxel[1] + 0.5) / dy, (voxel[2] + 0.5) / dz];
+}
+
+/**
+ * The patient point (LPS, mm) at the centre of `voxel`: what an
+ * {@link ObliqueRotation} takes as its `pivot` to turn a plane about the
+ * crosshair. A plane tilted about it keeps the voxel on the same slice
+ * ({@link focusSliceIndex}) and at the same pane pixel ({@link focusPanePoint}).
+ */
+export function focusPatientPoint(volume: Volume, voxel: readonly [number, number, number]): Vec3 {
+  return voxelToPatient(resolveGeometry(volume), [voxel[0], voxel[1], voxel[2]]);
 }
 
 /**

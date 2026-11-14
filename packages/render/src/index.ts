@@ -26,7 +26,7 @@ export {
 } from './camera.js';
 export { COLORMAPS } from './colormap.js';
 export { buildCenterline, type Centerline, type CprImage, straightenedCpr } from './cpr.js';
-export { focusPanePoint, focusSliceIndex } from './crosshair.js';
+export { focusPanePoint, focusPatientPoint, focusSliceIndex } from './crosshair.js';
 export {
   type GpuContext,
   type GpuUnavailableReason,
@@ -74,6 +74,7 @@ export {
 export type { PaneView } from './pane-view.js';
 export { pickProjection } from './pick.js';
 export {
+  isOblique,
   NO_OBLIQUE,
   type ObliqueRotation,
   planeExtentMm,

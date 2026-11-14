@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import type { WritableSignal } from '@angular/core';
-import { Orientation, type Layer, type Volume } from '@open-rt-studio/dicom';
+import { Orientation, type Layer, type Vec3, type Volume } from '@open-rt-studio/dicom';
 import type { Vec2, OrbitCamera, WindowLevel, SliceRenderer } from '@open-rt-studio/render';
 import type { PanePlacement } from './viewer';
 
@@ -98,6 +98,8 @@ export type Drag =
       readonly startY: number;
       readonly startTiltU: number;
       readonly startTiltV: number;
+      /** The patient point the plane turns about for this drag; none is the volume centre. */
+      readonly pivot: Vec3 | undefined;
     };
 
 /**

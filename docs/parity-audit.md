@@ -154,20 +154,20 @@ Open RT Studio differs from dicom-workspace in these ways, on purpose.
 Things the backlog issues describe that dicom-workspace does not have. They
 are not regressions. Each has an issue.
 
-| Issue | What is missing                                                                   | Mentioned in |
-| ----- | --------------------------------------------------------------------------------- | ------------ |
-| #143  | Cancelling a load (added since)                                                   | #20          |
-| #144  | JPEG Lossless and 12-bit JPEG; one unsupported file fails the batch               | #20          |
-| #145  | Selecting, moving and deleting one measurement (added since)                      | #27          |
-| #146  | Cine direction and loop mode (added since)                                        | #28          |
-| #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only        | #29          |
-| #149  | Window/level linking in Compare (added since)                                     | #26          |
-| #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot        | #22          |
-| #151  | Filled display of imported structures                                             | #104         |
-| #152  | Rename, recolour and delete for painted structures; listing them under Structures | #105         |
-| #155  | Tree view expansion remembered                                                    | #33          |
-| #156  | Reopening a recent selection without picking the files again                      | #34          |
-| #157  | Probe position in patient millimetres (added since)                               | #21          |
+| Issue | What is missing                                                                              | Mentioned in |
+| ----- | -------------------------------------------------------------------------------------------- | ------------ |
+| #143  | Cancelling a load (added since)                                                              | #20          |
+| #144  | JPEG Lossless and 12-bit JPEG; one unsupported file fails the batch                          | #20          |
+| #145  | Selecting, moving and deleting one measurement (added since)                                 | #27          |
+| #146  | Cine direction and loop mode (added since)                                                   | #28          |
+| #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only                   | #29          |
+| #149  | Window/level linking in Compare (added since)                                                | #26          |
+| #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot (both done since) | #22          |
+| #151  | Filled display of imported structures                                                        | #104         |
+| #152  | Rename, recolour and delete for painted structures; listing them under Structures            | #105         |
+| #155  | Tree view expansion remembered                                                               | #33          |
+| #156  | Reopening a recent selection without picking the files again                                 | #34          |
+| #157  | Probe position in patient millimetres (added since)                                          | #21          |
 
 #148 asked whether captured images and video should carry a
 not-for-clinical-use mark, which #29 left open. Decided on 2026-11-13: no.
@@ -183,6 +183,7 @@ Found on the way, also present in dicom-workspace:
 | #158  | Code the interface can no longer reach (removed since; import-to-edit is left to #152) |
 | #159  | Initial bundle over its warning budget; `viewer.css` near its limit (both fixed since) |
 | #160  | Accessibility lint for templates was not on (turned on since)                          |
+| #181  | Structure outlines are wrong on a tilted plane (open)                                  |
 
 ## End-to-end tests in CI
 

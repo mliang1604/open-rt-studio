@@ -4,7 +4,7 @@
 
 import { Orientation, type Volume, type VolumeGeometry } from '@open-rt-studio/dicom';
 import type { PaneRect } from './layout.js';
-import { focusPanePoint, focusSliceIndex } from './crosshair.js';
+import { focusPanePoint, focusPatientPoint, focusSliceIndex } from './crosshair.js';
 import { probeVoxel } from './probe.js';
 
 /** A dims[0]×dims[1]×dims[2] volume whose every voxel holds its flat index. */
@@ -119,5 +119,95 @@ describe('focusPanePoint', () => {
     const empty: PaneRect = { x: 0, y: 0, width: 0, height: 0 };
 
     expect(focusPanePoint(volume, Orientation.Axial, [1, 1, 1], 1, empty)).toBeNull();
+  });
+});
+
+describe('tilting a plane about the crosshair (focusPatientPoint as the pivot)', () => {
+  const geometry: VolumeGeometry = {
+    iStep: [2, 0, 0],
+    jStep: [0, 1, 0],
+    kStep: [0, 0, 3],
+    origin: [10, -20, 5],
+  };
+  const volume = makeVolume([16, 24, 12], geometry);
+  const voxel = [3, 17, 8] as const; // well off the centre (7.5, 11.5, 5.5)
+  const PANE: PaneRect = { x: 40, y: 10, width: 300, height: 200 };
+  const ORIENTATIONS = [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal];
+  const TILTS = [
+    { tiltU: 0.35, tiltV: 0 },
+    { tiltU: -0.2, tiltV: 0.45 },
+  ];
+
+  it('is the patient position of the voxel centre', () => {
+    expect(focusPatientPoint(volume, voxel)).toEqual([10 + 2 * 3, -20 + 17, 5 + 3 * 8]);
+    // Without recorded geometry the grid itself is the patient frame.
+    expect(focusPatientPoint(makeVolume([4, 4, 4]), [1, 2, 3])).toEqual([1, 2, 3]);
+  });
+
+  it('keeps the crosshair on its slice and at its pixel while the plane tilts', () => {
+    const pivot = focusPatientPoint(volume, voxel);
+    for (const orientation of ORIENTATIONS) {
+      const slice = focusSliceIndex(volume, orientation, voxel);
+      const at = focusPanePoint(volume, orientation, voxel, 1.5, PANE, false, { x: 0.05, y: 0 })!;
+      for (const tilt of TILTS) {
+        const rotation = { ...tilt, pivot };
+        expect(focusSliceIndex(volume, orientation, voxel, rotation)).toBe(slice);
+        const tilted = focusPanePoint(
+          volume,
+          orientation,
+          voxel,
+          1.5,
+          PANE,
+          false,
+          { x: 0.05, y: 0 },
+          rotation,
+        )!;
+        expect(tilted.x).toBeCloseTo(at.x, 4);
+        expect(tilted.y).toBeCloseTo(at.y, 4);
+      }
+    }
+  });
+
+  it('the probe under the crosshair still reads the crosshair voxel after the tilt', () => {
+    const pivot = focusPatientPoint(volume, voxel);
+    for (const orientation of ORIENTATIONS) {
+      for (const tilt of TILTS) {
+        const rotation = { ...tilt, pivot };
+        const slice = focusSliceIndex(volume, orientation, voxel, rotation);
+        const at = focusPanePoint(volume, orientation, voxel, 1, PANE, false, undefined, rotation)!;
+        const probe = probeVoxel(
+          volume,
+          orientation,
+          slice,
+          1,
+          PANE,
+          at.x,
+          at.y,
+          false,
+          undefined,
+          rotation,
+        );
+        expect(probe?.voxel).toEqual([...voxel]);
+      }
+    }
+  });
+
+  it('about the volume centre instead, the same pixel reads another voxel', () => {
+    const tilt = TILTS[0];
+    const slice = focusSliceIndex(volume, Orientation.Axial, voxel);
+    const at = focusPanePoint(volume, Orientation.Axial, voxel, 1, PANE)!;
+    const probe = probeVoxel(
+      volume,
+      Orientation.Axial,
+      slice,
+      1,
+      PANE,
+      at.x,
+      at.y,
+      false,
+      undefined,
+      tilt,
+    );
+    expect(probe?.voxel).not.toEqual([...voxel]);
   });
 });
