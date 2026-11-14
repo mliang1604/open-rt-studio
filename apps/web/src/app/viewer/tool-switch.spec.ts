@@ -9,6 +9,7 @@ import { Orientation, overlayLayerUnplaced, type Volume } from '@open-rt-studio/
 import { BrushController } from './brush-controller';
 import { CprStore } from './cpr/cpr-store';
 import { EditableStructuresStore } from './editable-structures-store';
+import { LandmarkStore } from './landmarks/landmark-store';
 import { LayersStore } from './layers-store';
 import { type ToolMode } from './measure-controller';
 import { MeasurementStore } from './measurement-store';
@@ -23,6 +24,7 @@ function setup() {
       CprStore,
       MeasurementStore,
       LayersStore,
+      LandmarkStore,
     ],
   });
   const tools = TestBed.inject(ToolSwitch);
@@ -196,5 +198,45 @@ describe('ToolSwitch and dragging a layer by hand (#78)', () => {
     tools.toggleRegistrationDrag('nothing', 'shift');
     expect(TestBed.inject(LayersStore).byHandDrag()).toBeNull();
     expect(on().brush).toBe('paint');
+  });
+});
+
+describe('ToolSwitch and placing landmarks (#85)', () => {
+  it('puts the other tools down when placing is switched on', () => {
+    const { tools, on } = setup();
+    const landmarks = TestBed.inject(LandmarkStore);
+    tools.toggleBrush('paint');
+    landmarks.placing.set(true);
+    tools.landmarkPlacingChanged();
+    expect(on()).toEqual({ measure: 'none', brush: 'off', cpr: false });
+    expect(landmarks.placing()).toBe(true);
+  });
+
+  it('leaves the other tools alone when placing is switched off', () => {
+    const { tools, on } = setup();
+    tools.toggleBrush('paint');
+    tools.landmarkPlacingChanged();
+    expect(on().brush).toBe('paint');
+  });
+
+  it('is put down by each of the other tools, and by Escape', () => {
+    const { tools } = setup();
+    const landmarks = TestBed.inject(LandmarkStore);
+    const placing = (): void => {
+      landmarks.placing.set(true);
+      tools.landmarkPlacingChanged();
+    };
+    placing();
+    tools.toggleMeasureTool('distance');
+    expect(landmarks.placing()).toBe(false);
+    placing();
+    tools.toggleBrush('paint');
+    expect(landmarks.placing()).toBe(false);
+    placing();
+    tools.toggleCprDrawing();
+    expect(landmarks.placing()).toBe(false);
+    placing();
+    expect(tools.putDown()).toBe(true);
+    expect(landmarks.placing()).toBe(false);
   });
 });

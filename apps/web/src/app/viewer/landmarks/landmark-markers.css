@@ -1,0 +1,51 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+.landmarks {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* The base image's points and the compared image's are told apart by colour
+   and by where they are: each is drawn in its own column. */
+.landmark {
+  --mark: #4ade80;
+}
+
+.landmark.moving {
+  --mark: #f0abfc;
+}
+
+.landmark-ring {
+  fill: transparent;
+  stroke: var(--mark);
+  stroke-width: 1.5;
+  pointer-events: auto;
+  cursor: move;
+  /* A dark edge keeps the ring readable over bright anatomy. */
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
+}
+
+.landmark.active .landmark-ring {
+  stroke-width: 2.5;
+}
+
+.landmark-ring:hover,
+.landmark-ring:focus-visible {
+  stroke: #fff;
+  outline: none;
+}
+
+.landmark-dot {
+  fill: var(--mark);
+}
+
+.landmark-name {
+  fill: var(--mark);
+  font-size: 11px;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 3px;
+}

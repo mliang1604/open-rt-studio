@@ -60,6 +60,10 @@ import {
 } from './editable-structures-store';
 import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
+import { LandmarkController } from './landmarks/landmark-controller';
+import { LandmarkMarkers } from './landmarks/landmark-markers';
+import { LandmarkPanel } from './landmarks/landmark-panel';
+import { LandmarkStore } from './landmarks/landmark-store';
 import { StructureCompare } from './structure-compare/structure-compare';
 import { ManualRegistration } from './manual-registration/manual-registration';
 import { ManualRegistrationController } from './manual-registration/manual-registration-controller';
@@ -127,6 +131,8 @@ const MAX_ZOOM = 20;
     ServerPanel,
     ManualRegistration,
     StructureCompare,
+    LandmarkMarkers,
+    LandmarkPanel,
   ],
   providers: [
     MeasurementStore,
@@ -146,6 +152,8 @@ const MAX_ZOOM = 20;
     BrushController,
     ToolSwitch,
     LayersController,
+    LandmarkStore,
+    LandmarkController,
     ManualRegistrationController,
     ToolbarController,
     StatusController,
@@ -187,6 +195,8 @@ export class Viewer {
   /** Owns the brush/eraser structures-editing gesture and its settings; wired in the constructor. */
   protected readonly brushCtl = inject(BrushController);
   protected readonly manualRegistration = inject(ManualRegistrationController);
+  protected readonly landmarks = inject(LandmarkController);
+  protected readonly landmarkStore = inject(LandmarkStore);
   /** The painted structures, for the list of them under Structures. */
   protected readonly structures = inject(EditableStructuresStore);
   protected readonly cpr = inject(CprStore);
@@ -508,6 +518,8 @@ export class Viewer {
       beginStroke: (placement, event) => this.brushCtl.beginStroke(placement, event),
       extendStroke: (placement, event) => this.brushCtl.extendStroke(placement, event),
       endStroke: () => this.brushCtl.endStroke(),
+      landmarkPlacing: () => this.landmarks.placingActive(),
+      placeLandmark: (placement, event) => this.landmarks.place(placement, event),
       registerDragActive: () => this.manualRegistration.dragActive(),
       beginRegisterDrag: (placement, event) => this.manualRegistration.beginDrag(placement, event),
       moveRegisterDrag: (event) => this.manualRegistration.moveDrag(event),
@@ -603,9 +615,23 @@ export class Viewer {
       sagittalFlipped: () => this.sagittalFlipped(),
     });
     // A path belongs to the volume it was drawn in: a new base volume drops it.
+    // So do landmarks: they are between that image and another.
     effect(() => {
       this.layersCtl.volume();
-      untracked(() => this.cpr.reset());
+      untracked(() => {
+        this.cpr.reset();
+        this.landmarkStore.reset();
+      });
+    });
+    this.landmarks.init({
+      panes: () => this.panes(),
+      canvasBounds: () => this.canvasRef().nativeElement.getBoundingClientRect(),
+      sagittalFlipped: () => this.sagittalFlipped(),
+      obliques: () => this.obliques(),
+      baseFrame: () => this.baseSeries()?.frameOfReferenceUid ?? null,
+      goTo: (point) => this.measureCtl.goToPatientPoint(point),
+      notify: (message, problem) => this.loadCtl.showNotice(message, problem),
+      download: downloadBlob,
     });
 
     this.brushCtl.init({

@@ -418,6 +418,34 @@
       </details>
     }
 
+    @if (landmarks.available()) {
+      <details
+        class="tool-group"
+        role="group"
+        aria-label="Landmarks"
+        title="Landmarks between the base image and the compared one, and the registration’s error at them"
+        open
+      >
+        <summary class="tool-group-label">Landmarks</summary>
+        <div class="tool-group-body">
+          <app-landmark-panel
+            [rows]="landmarks.rows()"
+            [error]="landmarks.error()"
+            [registration]="landmarks.registration()"
+            [placing]="landmarks.placing()"
+            [canExchange]="landmarks.canExchange()"
+            (placingToggled)="landmarks.togglePlacing(); tools.landmarkPlacingChanged()"
+            (selected)="landmarks.select($event)"
+            (renamed)="landmarks.rename($event.id, $event.name)"
+            (removed)="landmarks.remove($event)"
+            (pointCleared)="landmarks.clearPoint($event.id, $event.side)"
+            (exportAsked)="landmarks.exportFile()"
+            (imported)="landmarks.importText($event)"
+          />
+        </div>
+      </details>
+    }
+
     <details
       class="tool-group"
       role="group"
@@ -1124,6 +1152,23 @@
           }
         }
       </svg>
+    }
+
+    <!-- Landmarks between the base image and the compared one, on the slices on screen. -->
+    @if (landmarks.markers().length > 0) {
+      <app-landmark-markers
+        [markers]="landmarks.markers()"
+        (moved)="
+          landmarks.moveMarker(
+            $event.id,
+            $event.side,
+            $event.paneKey,
+            $event.clientX,
+            $event.clientY
+          )
+        "
+        (selected)="landmarkStore.activeId.set($event)"
+      />
     }
 
     <!-- Curved reformat path: centreline and draggable control points on each MPR pane. -->

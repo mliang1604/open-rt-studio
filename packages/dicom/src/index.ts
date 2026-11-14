@@ -82,6 +82,21 @@ export {
   compareRois,
 } from './contour-metrics.js';
 export {
+  type LandmarkError,
+  type LandmarkPair,
+  type LandmarkSet,
+  type TargetRegistrationError,
+  LANDMARK_FILE_MAX,
+  LANDMARK_FORMAT,
+  LANDMARK_NAME_MAX,
+  LANDMARK_VERSION,
+  LandmarkFileError,
+  parseLandmarks,
+  targetRegistrationError,
+  targetRegistrationErrorOfMatrix,
+  writeLandmarks,
+} from './landmarks.js';
+export {
   type RigidParams,
   manualPlacement,
   rigidParamsMatrix,

@@ -237,6 +237,13 @@ export interface InteractionInit {
   /** End the in-progress brush stroke. */
   readonly endStroke: () => void;
 
+  /** Whether a left click on an MPR pane places a landmark's point. */
+  readonly landmarkPlacing: () => boolean;
+  readonly placeLandmark: (
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    event: PointerEvent,
+  ) => void;
+
   /** Whether a left drag on an MPR pane moves a layer that is being registered by hand. */
   readonly registerDragActive: () => boolean;
   /** Begin such a drag at the press point. False when there is nothing under it to drag by. */
