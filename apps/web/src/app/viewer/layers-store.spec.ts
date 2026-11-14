@@ -619,6 +619,34 @@ describe('what of a deformation field is shown (#83)', () => {
     expect(store.fieldViewMaxMm()).toBeNull();
   });
 
+  it('draws no grid and no arrows until asked, and none again after a new base is loaded', () => {
+    const store = new LayersStore();
+    expect([store.fieldGrid(), store.fieldArrows(), store.fieldGridSpacingMm()]).toEqual([
+      false,
+      false,
+      null,
+    ]);
+    store.toggleFieldGrid();
+    store.toggleFieldArrows();
+    store.setFieldGridSpacingMm(2.5);
+    expect([store.fieldGrid(), store.fieldArrows(), store.fieldGridSpacingMm()]).toEqual([
+      true,
+      true,
+      2.5,
+    ]);
+    store.setFieldGridSpacingMm(0);
+    expect(store.fieldGridSpacingMm()).toBe(0.1);
+    store.setFieldGridSpacingMm(Number.NaN);
+    expect(store.fieldGridSpacingMm()).toBeNull();
+    store.setFieldGridSpacingMm(4);
+    store.reset();
+    expect([store.fieldGrid(), store.fieldArrows(), store.fieldGridSpacingMm()]).toEqual([
+      false,
+      false,
+      null,
+    ]);
+  });
+
   it('fits a scale to a field: its largest displacement, up to the next whole millimetre', () => {
     const grid = (vectors: number[]) => ({
       dims: [vectors.length / 3, 1, 1] as const,

@@ -216,6 +216,7 @@ export class RenderController {
       const renderer = d.renderer();
       if (renderer) {
         renderer.setFieldView(this.layersCtl.fieldView(), this.layersCtl.fieldViewDeterminants());
+        renderer.setFieldGrid(this.layersCtl.fieldGridDrawn());
       }
       this.scheduleFrame();
     }, opts);

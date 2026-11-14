@@ -1,0 +1,39 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@for (pane of panes(); track pane.paneKey) {
+  <svg
+    class="arrows"
+    [attr.data-field-arrows]="pane.paneKey"
+    [style.left.px]="pane.rect.x"
+    [style.top.px]="pane.rect.y"
+    [attr.width]="pane.rect.width"
+    [attr.height]="pane.rect.height"
+    aria-hidden="true"
+  >
+    @for (arrow of pane.arrows; track $index) {
+      <g
+        class="arrow"
+        data-field-arrow
+        [attr.data-x]="(arrow.x - pane.rect.x).toFixed(2)"
+        [attr.data-y]="(arrow.y - pane.rect.y).toFixed(2)"
+        [attr.data-dx]="arrow.dx.toFixed(2)"
+        [attr.data-dy]="arrow.dy.toFixed(2)"
+        [attr.data-mm]="arrow.mm.toFixed(3)"
+      >
+        @if (isDot(arrow)) {
+          <circle [attr.cx]="arrow.x - pane.rect.x" [attr.cy]="arrow.y - pane.rect.y" r="1.2" />
+        } @else {
+          <line
+            [attr.x1]="arrow.x - pane.rect.x"
+            [attr.y1]="arrow.y - pane.rect.y"
+            [attr.x2]="arrow.x - pane.rect.x + arrow.dx"
+            [attr.y2]="arrow.y - pane.rect.y + arrow.dy"
+          />
+          <polygon [attr.points]="head(arrow, pane.rect)" />
+        }
+      </g>
+    }
+  </svg>
+}

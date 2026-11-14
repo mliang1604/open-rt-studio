@@ -448,6 +448,13 @@
             (kindChange)="layersCtl.setFieldViewKind($event)"
             (opacityChange)="layersCtl.setFieldViewOpacity($event)"
             (maxMmChange)="layersCtl.setFieldViewMaxMm($event)"
+            [grid]="layersCtl.fieldGridOn()"
+            [gridSpacingMm]="layersCtl.fieldGridSpacingMm()"
+            [gridSpacingFits]="layersCtl.fieldGridSpacingFits()"
+            [arrows]="layersCtl.fieldArrowsOn()"
+            (gridToggle)="layersCtl.toggleFieldGrid()"
+            (gridSpacingChange)="layersCtl.setFieldGridSpacingMm($event)"
+            (arrowsToggle)="layersCtl.toggleFieldArrows()"
           />
           <app-field-metrics-panel
             [field]="field"
@@ -1193,6 +1200,11 @@
           }
         }
       </svg>
+    }
+
+    <!-- The deformation field as arrows, in the panes laid out on the base image. -->
+    @if (measureCtl.fieldArrows().length > 0) {
+      <app-field-arrows-layer [panes]="measureCtl.fieldArrows()" />
     }
 
     <!-- Landmarks between the base image and the compared one, on the slices on screen. -->

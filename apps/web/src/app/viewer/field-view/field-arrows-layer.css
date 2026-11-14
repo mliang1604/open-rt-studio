@@ -1,0 +1,27 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+.arrows {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* The colour of the deformed grid's lines (GRID_COLOUR of the render
+   package), with a dark edge so that an arrow reads over bright anatomy. */
+.arrow {
+  --mark: rgb(102, 242, 217);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
+}
+
+line {
+  stroke: var(--mark);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+polygon,
+circle {
+  fill: var(--mark);
+}

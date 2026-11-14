@@ -114,12 +114,18 @@ export {
 } from './roi-overlay.js';
 export {
   DISPLACEMENT_FADE,
+  GRID_COLOUR,
+  GRID_LINE_PIXELS,
+  GRID_STRENGTH,
   NO_FIELD_VIEW,
   displacementLegendGradient,
   displacementWash,
+  fittingGridSpacingMm,
   foldLegendBackground,
+  gridAxesInPlane,
   jacobianLegendGradient,
   jacobianWash,
+  onGridLine,
   washOver,
   type FieldView,
   type FieldViewKind,

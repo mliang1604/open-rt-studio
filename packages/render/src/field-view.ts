@@ -19,6 +19,16 @@ import { f32ToF16 } from '@open-rt-studio/dicom';
 //   magenta with dark stripes, at full strength whatever the wash's opacity,
 //   so that it is not told by its hue alone and is not faded away.
 //
+// And over either wash or none, **the deformed grid**: a regular grid of the
+// compared image, drawn where the field puts it in the base image's planes.
+// A place of the base is on a line when the place it is read from in the
+// compared image is a whole number of spacings along one of that image's
+// axes, counted from the image's corner. Where the field moves nothing the
+// lines are straight and evenly apart; where it squeezes they crowd, where
+// it stretches they part, and where it folds they cross. Only the two axes
+// that lie most in the pane's plane are drawn: the third would paint whole
+// regions, not lines.
+//
 // The colours are worked out by the slice shader. The functions here do the
 // same arithmetic on the CPU, for the legends and the tests; the shader's
 // text is made from the same constants ({@link FIELD_VIEW_WGSL}), so the two
@@ -70,6 +80,11 @@ export const FOLD_STRIPE_PIXELS = 4;
 export const FOLD_STRIPE_SHADE = 0.45;
 /** The largest determinant a texel holds, either way: a half float has no more to give. */
 const DETERMINANT_LIMIT = 1000;
+
+/** The deformed grid's lines: their colour, how much of it, and their width in framebuffer pixels. */
+export const GRID_COLOUR: Rgb = [0.4, 0.95, 0.85];
+export const GRID_STRENGTH = 0.85;
+export const GRID_LINE_PIXELS = 1.5;
 
 /** A colour and how much of it is laid over what is beneath, before the wash's own opacity. */
 export interface Wash {
@@ -136,6 +151,54 @@ export function foldLegendBackground(): string {
   return `repeating-linear-gradient(135deg, ${css(JACOBIAN_FOLD, 1)} 0 ${w}px, ${css(dark, 1)} ${w}px ${w2}px)`;
 }
 
+/**
+ * A spacing for the deformed grid that fits an image: about an eighth of its
+ * longest side, as 1, 2 or 5 times a power of ten millimetres.
+ */
+export function fittingGridSpacingMm(extentMm: readonly number[]): number {
+  const longest = Math.max(...extentMm.map(Math.abs));
+  if (!(longest > 0) || !Number.isFinite(longest)) return 1;
+  const rough = longest / 8;
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const steps = [1, 2, 5, 10].map((step) => step * power);
+  return steps.reduce((best, step) =>
+    Math.abs(step - rough) < Math.abs(best - rough) ? step : best,
+  );
+}
+
+/**
+ * Which of the compared image's three axes the deformed grid draws lines
+ * for in a pane: the two that lie most in the pane's plane. `throughPlaneMm`
+ * is how far a step through the pane's plane goes along each of the image's
+ * axes, in mm; the axis it goes furthest along is the one left out.
+ */
+export function gridAxesInPlane(throughPlaneMm: readonly number[]): [number, number, number] {
+  const sizes = throughPlaneMm.map(Math.abs);
+  const out = sizes.indexOf(Math.max(...sizes));
+  return [out === 0 ? 0 : 1, out === 1 ? 0 : 1, out === 2 ? 0 : 1];
+}
+
+/**
+ * Whether a place is on a line of the deformed grid: `mm` is where it is
+ * read from in the compared image, in mm from that image's corner along its
+ * axes; `axes` says which axes have lines (see {@link gridAxesInPlane}). On a
+ * line when within `halfWidthMm` of a whole number of spacings along one of
+ * them. The shader's `onGridLine` is the same arithmetic.
+ */
+export function onGridLine(
+  mm: readonly number[],
+  axes: readonly number[],
+  spacingMm: number,
+  halfWidthMm: number,
+): boolean {
+  if (!(spacingMm > 0)) return false;
+  return mm.some((along, axis) => {
+    if (axes[axis] === 0) return false;
+    const cell = along / spacingMm;
+    return Math.abs(cell - Math.round(cell)) * spacingMm < halfWidthMm;
+  });
+}
+
 const vec3 = (rgb: Rgb): string => `vec3<f32>(${rgb.map((part) => part.toFixed(4)).join(', ')})`;
 
 /**
@@ -160,6 +223,18 @@ fn jacobianWash(determinant : f32) -> vec4<f32> {
 fn fieldFold(pos : vec2<f32>) -> vec3<f32> {
   let stripe = floor((pos.x + pos.y) / ${FOLD_STRIPE_PIXELS.toFixed(1)}) % 2.0;
   return ${vec3(JACOBIAN_FOLD)} * select(1.0, ${FOLD_STRIPE_SHADE.toFixed(4)}, stripe >= 1.0);
+}
+
+// Whether a place read from mm of the compared image (from its corner, along
+// its axes) is on a line of the grid; an axis with 0 in axes has none.
+fn onGridLine(mm : vec3<f32>, axes : vec3<f32>, spacing : f32, halfWidth : f32) -> bool {
+  let cell = mm / spacing;
+  let off = abs(cell - round(cell)) * spacing;
+  return any((off < vec3<f32>(halfWidth)) & (axes > vec3<f32>(0.5)));
+}
+
+fn gridOver(rgb : vec3<f32>) -> vec3<f32> {
+  return mix(rgb, ${vec3(GRID_COLOUR)}, ${GRID_STRENGTH.toFixed(4)});
 }
 `;
 

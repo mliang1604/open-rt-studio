@@ -7,9 +7,12 @@ import { TestBed } from '@angular/core/testing';
 import {
   baseImageLayer,
   findPlacement,
+  invertMat4,
   jacobianDeterminants,
   manualPlacement,
   overlayImageLayer,
+  rigidMat4,
+  transformVector,
   type DeformationGrid,
   type Layer,
   type LayerPlacement,
@@ -313,6 +316,55 @@ describe('LayersController and what a deformation field is doing (#83)', () => {
     expect(controller.fieldReading([0, 2, 2])).toEqual({ kind: 'jacobian', determinant: 1 });
     expect(controller.fieldReading([4, 2, 2])).toEqual({ kind: 'jacobian', determinant: -1 });
     expect(controller.fieldReading([1, 2, 2])).toEqual({ kind: 'jacobian', determinant: 0.5 });
+  });
+
+  it('draws the deformed grid at a spacing that fits the overlay, or the one the user sets', () => {
+    const { controller } = setup('MR', through(SQUEEZE));
+    // The renderer is given no spacing until the grid is asked for.
+    expect(controller.fieldGridDrawn()).toBeNull();
+    controller.toggleFieldGrid();
+    // The overlay is 4 mm a side: about an eighth of that, as 1, 2 or 5 times a power of ten.
+    expect(controller.fieldGridSpacingMm()).toBeCloseTo(0.5, 9);
+    expect(controller.fieldGridSpacingFits()).toBe(true);
+    expect(controller.fieldGridDrawn()).toBeCloseTo(0.5, 9);
+    controller.setFieldGridSpacingMm(2);
+    expect(controller.fieldGridDrawn()).toBe(2);
+    expect(controller.fieldGridSpacingFits()).toBe(false);
+    controller.setFieldGridSpacingMm(null);
+    expect(controller.fieldGridDrawn()).toBeCloseTo(0.5, 9);
+    controller.toggleFieldGrid();
+    expect(controller.fieldGridDrawn()).toBeNull();
+  });
+
+  it('gives the field’s displacement at a point of the base as a vector of the base’s frame', () => {
+    // The base's x = 2 is the grid's x = 4, where the field moves by −1 mm along x.
+    const { controller } = setup('MR', through(SQUEEZE));
+    expect(controller.fieldDisplacementAt([2, 2, 2])).toEqual([-1, 0, 0]);
+    expect(controller.fieldDisplacementAt([7, 2, 2])).toBeNull();
+    // It does not wait for a wash to be on.
+    expect(controller.fieldView().kind).toBe('none');
+  });
+
+  it('turns the displacement back into the base’s frame when the matrix before the field turns it', () => {
+    // The matrix before the field turns the base a quarter about the head-foot
+    // axis: the base's x is the grid's y. The field moves along the grid's x.
+    const quarter = rigidMat4([0, 0, 1], 90);
+    const plain = manualPlacement('planning', 'follow-up', shiftMatrix(0, 0, 0));
+    const grid: DeformationGrid = {
+      ...gridOf(() => 1),
+      origin: [-4, -2, -2],
+    };
+    const { controller } = setup('MR', {
+      ...plain,
+      steps: [{ ...plain.steps[0], byHand: false, deformable: true }],
+      field: { pre: quarter, grid, post: plain.baseToLayer },
+    });
+    const moved = controller.fieldDisplacementAt([0, 0, 0])!;
+    // 1 mm along the grid's x is 1 mm along the base's −y... or +y: whichever the turn undone gives.
+    const back = transformVector(invertMat4(quarter), [1, 0, 0]);
+    moved.forEach((part, axis) => expect(part).toBeCloseTo(back[axis], 9));
+    expect(Math.abs(moved[1])).toBeCloseTo(1, 9);
+    expect(moved[0]).toBeCloseTo(0, 9);
   });
 
   it('has nothing to show for an overlay placed by a matrix', () => {

@@ -102,6 +102,8 @@ by git) if you want files on disk to open.
 - The same as a colour wash over the image, with a legend: how far the field
   moves each place, or its Jacobian determinant, with folds striped; the
   probe reads the value under the cursor
+- The deformed grid (the compared image's regular grid where the field puts
+  it) and the field as arrows, in every slice pane
 - Rigid registration by hand: shift and turn one series over another by
   dragging it in any plane or with numbers, see the fused picture follow,
   and save the result as a DICOM Spatial Registration object

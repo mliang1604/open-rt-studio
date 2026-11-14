@@ -29,7 +29,7 @@ import {
   type Volume,
 } from '@open-rt-studio/dicom';
 import { MeasurementStore, type MeasureTool } from './measurement-store';
-import { placementAt, type PanePlacement } from './pane-placement';
+import { paneKeyOf, placementAt, type PanePlacement } from './pane-placement';
 import { LayersController } from './layers-controller';
 import { formatProbe } from './viewer-format';
 import {
@@ -49,6 +49,7 @@ import {
   type PerOrientationOblique,
   type PerOrientationPan,
 } from './viewer-overlays';
+import { paneFieldArrows, type PaneArrows } from './field-view/field-arrows';
 
 /** Outline colour of each MPR cut-plane drawn in the 3D pane, indexed by Orientation. */
 const SLICE_PLANE_COLORS: readonly [string, string, string] = ['#ff6b6b', '#5ee08a', '#6bb6ff'];
@@ -223,6 +224,37 @@ export class MeasureController {
     const d = this.deps!;
     if (!d.crosshairsEnabled() || !d.isReady()) return [];
     return buildObliqueGizmos(this.overlayView(), d.hoveredKey(), this.crosshairs());
+  });
+
+  /**
+   * The deformation field as arrows (#83), pane by pane: in each pane that is
+   * laid out on the base image's grid, which is where the field is drawn.
+   */
+  readonly fieldArrows = computed<PaneArrows[]>(() => {
+    const d = this.deps!;
+    const base = d.volume();
+    if (!d.isReady() || !base || !this.layersCtl.fieldArrowsOn()) return [];
+    if (!this.layersCtl.selectedField()) return [];
+    const out: PaneArrows[] = [];
+    for (const pane of d.panes()) {
+      if (pane.kind !== 'mpr' || this.layersCtl.groupVolume(pane.group) !== base) continue;
+      const { group, orientation, rect } = pane;
+      const arrows = paneFieldArrows(
+        {
+          volume: base,
+          orientation,
+          sliceIndex: this.layersCtl.paneSliceIndex(group, orientation),
+          zoom: this.layersCtl.paneZoom(group, orientation),
+          rect,
+          flipX: orientation === Orientation.Sagittal && d.sagittalFlipped(),
+          pan: this.layersCtl.panePan(group, orientation),
+          oblique: d.obliques()[orientation],
+        },
+        (point) => this.layersCtl.fieldDisplacementAt(point),
+      );
+      if (arrows.length > 0) out.push({ paneKey: paneKeyOf(pane), rect, arrows });
+    }
+    return out;
   });
 
   /** Per-MPR-pane 2D overlays: anatomical edge letters and a physical scale bar. */
