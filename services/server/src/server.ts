@@ -23,7 +23,7 @@ import { healthRoute } from './host/routes.js';
 import { createJobManager } from './jobs/job-manager.js';
 import { openSqliteJobStore } from './jobs/job-store.js';
 import type { JobKind } from './jobs/job.js';
-import type { LogFields, Logger } from './logger.js';
+import { errorFields, type LogFields, type Logger } from './logger.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
 import { openFileStore } from './store/file-store.js';
 import { createMemoryStore } from './store/memory-store.js';
@@ -226,6 +226,37 @@ export function startWarnings(
   return warnings;
 }
 
+/** How often a server with a retention period looks for audit records that have outlived it. */
+export const AUDIT_CLEARING_INTERVAL_MS = DAY_MS;
+
+/**
+ * Keep the audit log's retention period: clear what has outlived it now, and
+ * again every day. Gives what stops it. Does nothing, and gives a stop that
+ * does nothing, when there is no log or no period.
+ */
+export function keepAuditRetention(
+  audit: AuditLog | null,
+  days: number | null,
+  logger: Logger,
+  now: () => number = Date.now,
+): () => void {
+  if (audit === null || days === null) return () => undefined;
+  const clear = (): void => {
+    try {
+      const removed = audit.clear(now() - days * DAY_MS, { actor: null, origin: 'server' });
+      if (removed > 0) logger.info('audit-cleared', { count: removed, days });
+    } catch (error) {
+      // The log is whole, only longer than it was meant to be; tomorrow is another try.
+      logger.error('audit-clearing-failed', errorFields(error));
+    }
+  };
+  clear();
+  const timer = setInterval(clear, AUDIT_CLEARING_INTERVAL_MS);
+  // A server that is otherwise done is not kept running for this.
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 /** The job manager the configuration asks for, and how to clear up after it. */
 async function openJobs(config: ServerConfig, logger: Logger, kinds: readonly JobKind[]) {
   // Without a data directory, jobs work in a temporary one that goes when the server stops.
@@ -256,6 +287,7 @@ export async function startServer(
   const tls = openTls(config, logger);
   const accounts = openAccounts(config, logger, parts.accounts);
   const audit = openAudit(config.dataDir, parts.audit);
+  const stopClearing = keepAuditRetention(audit, config.auditRetentionDays, logger);
   const pacs = await openPacs(config, logger);
   const { jobs, clear } = await openJobs(config, logger, parts.jobKinds ?? []);
   const core = createCore({ logger, pacs, jobs });
@@ -286,6 +318,7 @@ export async function startServer(
     // Nothing is left open by a server that could not start.
     await core.dispose();
     await clear();
+    stopClearing();
     accounts?.close();
     audit?.close();
     throw error;
@@ -302,6 +335,7 @@ export async function startServer(
         const closure = await host.close();
         const disposal = await core.dispose({ timeoutMs: config.shutdownTimeoutMs });
         await clear();
+        stopClearing();
         accounts?.close();
         audit?.close();
         const clean = closure.finished && disposal.finished;

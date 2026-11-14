@@ -66,6 +66,7 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_ALLOWED_ORIGINS: 'http://localhost:4200, https://Example.org',
       OPEN_RT_STUDIO_TLS_CERT: ' /etc/open-rt-studio/cert.pem ',
       OPEN_RT_STUDIO_TLS_KEY: '/etc/open-rt-studio/key.pem',
+      OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS: '365',
     });
     // Port 0 asks the operating system for a free port; it is a valid setting.
     expect(config).toEqual({
@@ -80,7 +81,24 @@ describe('resolveConfig', () => {
       allowedOrigins: ['http://localhost:4200', 'https://example.org'],
       tlsCert: '/etc/open-rt-studio/cert.pem',
       tlsKey: '/etc/open-rt-studio/key.pem',
+      auditRetentionDays: 365,
     });
+  });
+
+  it('keeps every audit record unless it is given a number of days', () => {
+    expect(DEFAULT_CONFIG.auditRetentionDays).toBeNull();
+    expect(resolveConfig({ auditRetentionDays: 90 }).auditRetentionDays).toBe(90);
+    expect(resolveConfig({ auditRetentionDays: null }).auditRetentionDays).toBeNull();
+    for (const wrong of [0, -1, 1.5, 36_501, '90', true]) {
+      expect(() => resolveConfig({ auditRetentionDays: wrong }), String(wrong)).toThrow(
+        new ConfigError(
+          'The config file\'s "auditRetentionDays" must be a whole number of days from 1 to 36500, or null to keep every record.',
+        ),
+      );
+    }
+    expect(() =>
+      resolveConfig(undefined, { OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS: 'a year' }),
+    ).toThrow(/OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS must be a whole number of days/);
   });
 
   it('speaks HTTP unless it is given a certificate and its key, and takes both or neither', () => {
@@ -196,7 +214,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey.',
+        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey, auditRetentionDays.',
       ),
     );
   });

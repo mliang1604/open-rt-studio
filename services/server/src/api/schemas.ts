@@ -125,7 +125,7 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
         description:
           'The account. Null when no one was logged in: a server without accounts, a command, a login with a name that is no account.',
       },
-      origin: { type: 'string', enum: ['api', 'command'] },
+      origin: { type: 'string', enum: ['api', 'command', 'server'] },
       action: text,
       outcome: { type: 'string', enum: ['ok', 'refused', 'not-found', 'rejected', 'failed'] },
       patientId: nullableText,

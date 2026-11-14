@@ -27,6 +27,7 @@ export const AUDIT_ACTIONS = [
   'job-read',
   'audit-read',
   'audit-export',
+  'audit-clear',
   'request',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -39,8 +40,11 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export const AUDIT_OUTCOMES = ['ok', 'refused', 'not-found', 'rejected', 'failed'] as const;
 export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
 
-/** Through what it was done: the API, or a command on the server's machine. */
-export const AUDIT_ORIGINS = ['api', 'command'] as const;
+/**
+ * Through what it was done: the API, a command on the server's machine, or
+ * the server itself, by a rule it was set to keep (its retention period).
+ */
+export const AUDIT_ORIGINS = ['api', 'command', 'server'] as const;
 export type AuditOrigin = (typeof AUDIT_ORIGINS)[number];
 
 /** Who did what, to what, and how it ended. */
@@ -86,8 +90,10 @@ export interface AuditQuery {
 }
 
 /**
- * Where audit records are kept. Records are added and never taken away; the
- * one change a record sees is being counted again (`extend`).
+ * Where audit records are kept. Records are added; the one change a record
+ * sees is being counted again (`extend`). They are taken away only by
+ * `clearBefore`, all that ended before a moment, which is how a retention
+ * period is kept.
  */
 export interface AuditStore {
   insert(entry: AuditEntry, atMs: number): number;
@@ -97,6 +103,12 @@ export interface AuditStore {
   find(query: AuditQuery, page: { readonly limit: number; readonly offset: number }): AuditRecord[];
   /** The earliest first, those after the record `afterId`: for reading all of it in parts. */
   after(query: AuditQuery, afterId: number, limit: number): AuditRecord[];
+  /**
+   * Remove every record whose last moment is before this one, and say how
+   * many went. From then on the store lets nothing be removed that is not
+   * older still than this moment: the moment only moves forward.
+   */
+  clearBefore(beforeMs: number): number;
   close(): void;
 }
 
@@ -143,6 +155,36 @@ export const AUDIT_MIGRATIONS: readonly Migration[] = [
         OR NEW.count <= OLD.count OR NEW.until < OLD.until
       BEGIN
         SELECT RAISE(ABORT, 'audit records are not changed');
+      END;
+    `,
+  },
+  {
+    version: 2,
+    name: 'a floor, below which records may be cleared',
+    // Clearing old records (#216) is two steps: the floor is raised to a
+    // moment, then what ended before it is deleted. A DELETE that is not
+    // that (a slip, a bug) still removes nothing from the floor up, which is
+    // everything a retention period means to keep. The floor only rises.
+    sql: `
+      CREATE TABLE audit_floor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        before INTEGER NOT NULL
+      ) STRICT;
+      INSERT INTO audit_floor (id, before) VALUES (1, 0);
+      DROP TRIGGER audit_is_kept;
+      CREATE TRIGGER audit_is_kept BEFORE DELETE ON audit
+      WHEN OLD.until >= (SELECT before FROM audit_floor WHERE id = 1)
+      BEGIN
+        SELECT RAISE(ABORT, 'audit records are not deleted');
+      END;
+      CREATE TRIGGER audit_floor_rises BEFORE UPDATE ON audit_floor
+      WHEN NEW.before < OLD.before OR NEW.id IS NOT OLD.id
+      BEGIN
+        SELECT RAISE(ABORT, 'the floor of the audit log does not go back');
+      END;
+      CREATE TRIGGER audit_floor_stays BEFORE DELETE ON audit_floor
+      BEGIN
+        SELECT RAISE(ABORT, 'the floor of the audit log is not removed');
       END;
     `,
   },
@@ -256,6 +298,19 @@ export function openSqliteAuditStore(location: string): AuditStore {
           .prepare(`SELECT * FROM audit WHERE ${sql} AND id > ? ORDER BY id LIMIT ?`)
           .all(...values, afterId, limit) as Row[]
       ).map(toRecord);
+    },
+
+    clearBefore(beforeMs) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('UPDATE audit_floor SET before = MAX(before, ?) WHERE id = 1').run(beforeMs);
+        const result = db.prepare('DELETE FROM audit WHERE until < ?').run(beforeMs);
+        db.exec('COMMIT');
+        return Number(result.changes);
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
     },
 
     close() {

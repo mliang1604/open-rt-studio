@@ -39,6 +39,12 @@ export interface AuditLog {
   ): { readonly items: AuditRecord[]; readonly more: boolean };
   /** Every record that fits, the earliest first, read from the store in parts. */
   all(query?: AuditQuery): Generator<AuditRecord>;
+  /**
+   * Remove the records that ended before a moment, and write down that it
+   * was done: by whom, up to when, and how many went. Says how many. When
+   * none went, nothing is written.
+   */
+  clear(beforeMs: number, by: Pick<AuditEntry, 'actor' | 'origin'>): number;
   close(): void;
 }
 
@@ -112,6 +118,26 @@ export function createAuditLog(options: AuditLogOptions): AuditLog {
         if (part.length < AUDIT_PAGE_MAX) return;
         last = part[part.length - 1].id;
       }
+    },
+
+    clear(beforeMs, by) {
+      const removed = store.clearBefore(beforeMs);
+      // A record that was counted on may be gone; the next of its kind begins anew.
+      runs.clear();
+      if (removed > 0) {
+        this.record({
+          ...by,
+          action: 'audit-clear',
+          outcome: 'ok',
+          patientId: null,
+          studyUid: null,
+          seriesUid: null,
+          object: null,
+          // How many first: a list that cuts what is long still shows it.
+          detail: `removed=${removed} before=${new Date(beforeMs).toISOString()}`,
+        });
+      }
+      return removed;
     },
 
     close: () => store.close(),

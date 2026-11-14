@@ -336,8 +336,15 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   - The viewer shows the log to an administrator (#213), from the server
     card. The role is the server's to enforce: the viewer only decides
     whether to offer the button.
-  - Not there: retention and clearing of old records (#216), DIMSE events
-    (#212), a second copy off the machine.
+  - **Kept for good unless a period is set** (`auditRetentionDays`, #216).
+    Off by default, so that upgrading loses nothing. With it the server
+    clears, at start and daily, what ended longer ago, and records that it
+    did. The file's refusal to delete became a floor: a moment below which
+    records may go, raised by the clearing and never lowered, so that a
+    stray `DELETE` still takes nothing the period means to keep. There is no
+    clearing on request: a period is a rule, and a request would be a way to
+    remove chosen records.
+  - Not there: DIMSE events (#212), a second copy off the machine.
 
   Status: **decided, and Michael's to overturn**, most of all the choice to
   stop answering when the log cannot be written.
