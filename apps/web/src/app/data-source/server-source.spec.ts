@@ -7,7 +7,9 @@ import {
   groupSeries,
   parseStructureSet,
   readInstanceHeader,
+  writeDerivedSeries,
   writeStructureSet,
+  type Volume,
 } from '@open-rt-studio/dicom';
 import {
   populationStudies,
@@ -17,6 +19,7 @@ import {
   syntheticRtCourse,
 } from '@open-rt-studio/testdata';
 
+import { PartlySavedError, type SavedSeries } from './data-source';
 import {
   AUDIT_PER_PAGE,
   auditFilters,
@@ -64,6 +67,59 @@ function authored(label: string, sopInstanceUid?: string): ArrayBuffer {
       studyInstanceUid: header.header.study.uid,
     },
   );
+}
+
+/** A derived series of three small slices of the course's patient, in the study of its CT. */
+function derived(seriesInstanceUid: string): SavedSeries {
+  const ct = FILES.map((file) => readInstanceHeader(file.bytes)).find(
+    (read) => read.ok && read.header.series.uid === COURSE.ct,
+  )!;
+  if (!ct.ok) throw new Error('the course has no CT');
+  const volume: Volume = {
+    dims: [4, 3, 3],
+    spacing: [2, 2, 5],
+    data: Float32Array.from({ length: 36 }, (_, at) => at * 10),
+    min: 0,
+    max: 350,
+    windowCenter: 40,
+    windowWidth: 400,
+    rescaleSlope: 1,
+    rescaleIntercept: -1024,
+    modality: 'CT',
+    geometry: { iStep: [2, 0, 0], jStep: [0, 2, 0], kStep: [0, 0, 5], origin: [0, 0, 0] },
+  };
+  const written = writeDerivedSeries(
+    {
+      volume,
+      frameOfReferenceUid: '1.2.826.0.1.3680043.10.1561.777',
+      patientName: ct.header.patient.name,
+      patientId: ct.header.patient.id,
+      studyInstanceUid: ct.header.study.uid,
+      studyDate: null,
+      studyTime: null,
+      studyDescription: null,
+      seriesDescription: 'Resampled: a test',
+      seriesNumber: null,
+      source: {
+        studyInstanceUid: ct.header.study.uid,
+        seriesInstanceUid: COURSE.ct,
+        sopClassUid: null,
+        attributes: {},
+      },
+      registrations: [],
+      derivationDescription: 'Resampled for a test.',
+    },
+    { seriesInstanceUid, sopInstanceUid: (slice) => `${seriesInstanceUid}.${slice + 1}` },
+  );
+  return {
+    name: 'resampled-series-test',
+    made: new Date(2026, 10, 14),
+    objects: written.instances.map((instance) => ({
+      bytes: instance.bytes,
+      filename: `IM${String(instance.instanceNumber).padStart(4, '0')}.dcm`,
+      mediaType: 'application/dicom',
+    })),
+  };
 }
 
 /** How many structure sets the source's timeline says a series has. */
@@ -574,6 +630,93 @@ describe('ServerSource', () => {
       expect(lost).toBeInstanceOf(ServerError);
       expect((lost as ServerError).lost).toBe(true);
       expect((lost as ServerError).message).toContain('could not be reached');
+      expect(server.uploads).toEqual([]);
+    });
+  });
+
+  describe('saving a series', () => {
+    const UID = '1.2.826.0.1.3680043.10.1561.888';
+    const listed = (source: ServerSource) =>
+      (source.currentPatient()?.studies ?? [])
+        .flatMap((study) => study.series)
+        .find((one) => one.uid === UID);
+
+    it('uploads each slice in order, and the series is the patient’s from then on', async () => {
+      const { source, server } = await withPatient();
+      expect(listed(source)).toBeUndefined();
+      const told: [number, number][] = [];
+      const outcome = await source.saveSeries(derived(UID), (kept, of) => told.push([kept, of]));
+      expect(outcome).toEqual({ kind: 'stored', where: 'Server at 127.0.0.1:4300' });
+      expect(server.uploads).toEqual(
+        new Array(3).fill({ mediaType: 'application/dicom', status: 201 }),
+      );
+      expect(told).toEqual([
+        [1, 3],
+        [2, 3],
+        [3, 3],
+      ]);
+      // In the timeline without the patient being chosen again, under its own name.
+      expect(listed(source)).toMatchObject({ description: 'Resampled: a test', modality: 'CT' });
+      const fetched = await source.fetchSeries(UID);
+      expect(fetched.series.slices).toHaveLength(3);
+      expect(fetched.series.slices.map((slice) => slice.instanceNumber).sort()).toEqual([1, 2, 3]);
+    });
+
+    it('says how many slices the server kept when it could not go on, and takes the rest later', async () => {
+      const { server } = await withPatient();
+      // The second upload is lost on the way; everything else goes through.
+      let posts = 0;
+      const flaky: typeof fetch = (input, init) => {
+        if (init?.method === 'POST' && String(input).includes('/instances') && ++posts === 2) {
+          return Promise.reject(new TypeError('Failed to fetch'));
+        }
+        return server.fetch(input, init);
+      };
+      const source = new ServerSource(ADDRESS, { fetch: flaky, parse: parseHere });
+      await source.refresh();
+      await source.selectPatient('1');
+      const series = derived(UID);
+      const told: number[] = [];
+      const stopped = await source
+        .saveSeries(series, (kept) => told.push(kept))
+        .catch((e: unknown) => e);
+      expect(stopped).toBeInstanceOf(PartlySavedError);
+      expect([(stopped as PartlySavedError).kept, (stopped as PartlySavedError).of]).toEqual([
+        1, 3,
+      ]);
+      expect((stopped as PartlySavedError).why).toContain('could not be reached');
+      expect(told).toEqual([1]);
+      // The timeline shows what the server now holds: a series of one slice.
+      expect((await source.fetchSeries(UID)).series.slices).toHaveLength(1);
+
+      // The very same objects again: the one that is there is nothing new, the rest are added.
+      expect((await source.saveSeries(series)).kind).toBe('stored');
+      expect(server.uploads.map((upload) => upload.status)).toEqual([201, 200, 201, 201]);
+      expect((await source.fetchSeries(UID)).series.slices).toHaveLength(3);
+    });
+
+    it('has saved nothing, and says so plainly, when the first slice cannot be sent', async () => {
+      const { source, server } = await withPatient();
+      server.loseUploads();
+      const lost = await source.saveSeries(derived(UID)).catch((e: unknown) => e);
+      expect(lost).toBeInstanceOf(ServerError);
+      expect(lost).not.toBeInstanceOf(PartlySavedError);
+      expect(server.uploads).toEqual([]);
+    });
+
+    it('sends none of them when one is not DICOM', async () => {
+      const { source, server } = await withPatient();
+      const series = derived(UID);
+      const mixed = {
+        ...series,
+        objects: [
+          ...series.objects,
+          { bytes: new ArrayBuffer(8), filename: 'notes.txt', mediaType: 'text/plain' },
+        ],
+      };
+      await expect(source.saveSeries(mixed)).rejects.toThrow(
+        'Only DICOM objects can be saved to a server.',
+      );
       expect(server.uploads).toEqual([]);
     });
   });

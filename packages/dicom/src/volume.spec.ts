@@ -163,6 +163,20 @@ describe('buildVolume', () => {
     expect(volume.missingSlices?.maxGapMm).toBeCloseTo(99.8, 6);
   });
 
+  it('leaves the slices of a uniform series as they are when positions are a hair off the grid', () => {
+    // Positions as files give them, with a few decimals: each slice is some
+    // ten-millionths of a millimetre from where an even step would put it.
+    const values = [0, 500, -1000, 37];
+    const slices = values.map((value, at) =>
+      axialSlice(at * 2.5 + [0, 3e-7, -2e-7, 4e-7][at], value, at + 1),
+    );
+    const volume = buildVolume(slices);
+    expect(volume.dims[2]).toBe(4);
+    // Not a blend with the next slice by a ten-millionth: the very values.
+    expect([...volume.data].filter((_, at) => at % 4 === 0)).toEqual(values);
+    expect(volume.missingSlices).toBeUndefined();
+  });
+
   it('reports no missing slices for a uniformly-spaced series', () => {
     const volume = buildVolume([axialSlice(0, 0, 1), axialSlice(2, 10, 2), axialSlice(4, 20, 3)]);
 

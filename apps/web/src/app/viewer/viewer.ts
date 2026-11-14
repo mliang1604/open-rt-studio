@@ -71,6 +71,8 @@ import { ReportController } from './report/report-controller';
 import { ReportPanel } from './report/report-panel';
 import { LandmarkStore } from './landmarks/landmark-store';
 import { StructureCompare } from './structure-compare/structure-compare';
+import { DerivedSeries } from './derived-series/derived-series';
+import { DerivedSeriesController } from './derived-series/derived-series-controller';
 import { ManualRegistration } from './manual-registration/manual-registration';
 import { ManualRegistrationController } from './manual-registration/manual-registration-controller';
 import { LayersController } from './layers-controller';
@@ -136,6 +138,7 @@ const MAX_ZOOM = 20;
     PaintedStructures,
     ServerPanel,
     ManualRegistration,
+    DerivedSeries,
     StructureCompare,
     LandmarkMarkers,
     LandmarkPanel,
@@ -166,6 +169,7 @@ const MAX_ZOOM = 20;
     LandmarkController,
     ReportController,
     ManualRegistrationController,
+    DerivedSeriesController,
     ToolbarController,
     StatusController,
     CprStore,
@@ -206,6 +210,7 @@ export class Viewer {
   /** Owns the brush/eraser structures-editing gesture and its settings; wired in the constructor. */
   protected readonly brushCtl = inject(BrushController);
   protected readonly manualRegistration = inject(ManualRegistrationController);
+  protected readonly derivedSeries = inject(DerivedSeriesController);
   protected readonly landmarks = inject(LandmarkController);
   protected readonly report = inject(ReportController);
   protected readonly landmarkStore = inject(LandmarkStore);
@@ -665,6 +670,18 @@ export class Viewer {
       baseSeries: () => this.baseSeries(),
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
     });
+    this.derivedSeries.init({
+      series: (uid) => {
+        const state = this.load();
+        if (state.status !== 'ready') return null;
+        const { series, overlaySeries = [] } = state.result;
+        return [...series, ...overlaySeries].find((one) => one.uid === uid) ?? null;
+      },
+      device: () => this.render.device(),
+      notify: (message, problem) => this.loadCtl.showNotice(message, problem),
+      now: () => new Date(),
+    });
+
     this.manualRegistration.init({
       baseSeries: () => this.baseSeries(),
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),

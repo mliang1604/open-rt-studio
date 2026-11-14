@@ -231,6 +231,14 @@ export class RenderController {
     for (const fn of d.auxEffects) effect(fn, opts);
   }
 
+  /**
+   * The GPU device the panes are drawn with, for work that is not drawing
+   * (resampling); null when there is none, or it was lost.
+   */
+  device(): GPUDevice | null {
+    return this.gpu?.device ?? null;
+  }
+
   /** (Re)initialise the WebGPU device + renderer for the canvas. */
   async initGpu(): Promise<void> {
     const d = this.deps;

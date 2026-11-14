@@ -19,6 +19,20 @@ export {
 } from './catalog.js';
 export { type RasterizeResult, rasterizeRoiContours } from './contour-raster.js';
 export {
+  type DerivedInstance,
+  type DerivedSeries,
+  type DerivedSeriesContent,
+  type DerivedSeriesWriteOptions,
+  type SourceInstance,
+  CT_IMAGE_SOP_CLASS,
+  DerivedSeriesError,
+  MR_IMAGE_SOP_CLASS,
+  SECONDARY_CAPTURE_SOP_CLASS,
+  derivedSopClass,
+  registrationReference,
+  writeDerivedSeries,
+} from './derived-series.js';
+export {
   type Affine,
   type Interpolation,
   type ResampleGrid,

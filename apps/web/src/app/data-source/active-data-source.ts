@@ -12,7 +12,9 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SavedSeries,
   SaveOutcome,
+  SaveProgress,
 } from './data-source';
 import { LocalFilesSource } from './local-files-source';
 
@@ -54,5 +56,9 @@ export class ActiveDataSource implements DataSource {
 
   save(object: SavedObject): Promise<SaveOutcome> {
     return this.chosen().save(object);
+  }
+
+  saveSeries(series: SavedSeries, onProgress?: SaveProgress): Promise<SaveOutcome> {
+    return this.chosen().saveSeries(series, onProgress);
   }
 }

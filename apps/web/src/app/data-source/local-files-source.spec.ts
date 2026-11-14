@@ -334,4 +334,51 @@ describe('LocalFilesSource', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('saves a series as one download, an archive of its files in a folder, in the turn it was asked', async () => {
+    const clicked: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push(this.download);
+    });
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.fn((blob: Blob) => `blob:${blobs.push(blob)}`);
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+    try {
+      const told: [number, number][] = [];
+      const saving = source.saveSeries(
+        {
+          name: 'resampled-series-20261114-090507',
+          made: new Date(2026, 10, 14, 9, 5, 7),
+          objects: ['first', 'second'].map((text, at) => ({
+            bytes: new TextEncoder().encode(text).buffer as ArrayBuffer,
+            filename: `IM000${at + 1}.dcm`,
+            mediaType: 'application/dicom',
+          })),
+        },
+        (kept, of) => told.push([kept, of]),
+      );
+      // Before anything is awaited: a browser allows a download only then.
+      expect(clicked).toEqual(['resampled-series-20261114-090507.zip']);
+      expect(await saving).toEqual({ kind: 'downloaded' });
+      expect(told).toEqual([[2, 2]]);
+      expect(blobs).toHaveLength(1);
+      expect(blobs[0].type).toBe('application/zip');
+      // Not compressed: the names and the files can be read in it as they are.
+      const archive = new TextDecoder('latin1').decode(await blobs[0].arrayBuffer());
+      expect(archive.startsWith('PK\u0003\u0004')).toBe(true);
+      for (const part of [
+        'resampled-series-20261114-090507/IM0001.dcm',
+        'resampled-series-20261114-090507/IM0002.dcm',
+        'first',
+        'second',
+      ]) {
+        expect(archive, part).toContain(part);
+      }
+    } finally {
+      click.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 });

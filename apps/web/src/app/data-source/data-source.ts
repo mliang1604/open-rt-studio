@@ -57,6 +57,47 @@ export interface DataSource {
    * SOP Instance UID, and a source that stores keeps what it already holds.
    */
   save(object: SavedObject): Promise<SaveOutcome>;
+
+  /**
+   * Keep objects made here that belong together: the slices of a derived
+   * series. For files they are one download, an archive; for a server, an
+   * upload each, in order. Like {@link save}, it replaces nothing.
+   *
+   * Rejects with a {@link PartlySavedError} when a source that stores kept
+   * some and then could not go on: what it kept stays, and saving the very
+   * same objects again adds the rest.
+   */
+  saveSeries(series: SavedSeries, onProgress?: SaveProgress): Promise<SaveOutcome>;
+}
+
+/** Objects made here that belong together, such as the slices of a series. */
+export interface SavedSeries {
+  /** In the order they are to be kept; each with a name that is no other's. */
+  readonly objects: readonly SavedObject[];
+  /**
+   * What the whole is called where it becomes one file: letters, digits,
+   * `.`, `_` and `-`, with no extension, and nothing of the patient.
+   */
+  readonly name: string;
+  /** When it was made. */
+  readonly made: Date;
+}
+
+/** Told how many of the objects are kept so far. */
+export type SaveProgress = (kept: number, of: number) => void;
+
+/** A source kept some of the objects of a {@link SavedSeries} and then could not go on. */
+export class PartlySavedError extends Error {
+  constructor(
+    /** How many were kept before the one that failed. */
+    readonly kept: number,
+    readonly of: number,
+    /** Why it could not go on. */
+    readonly why: string,
+  ) {
+    super(why);
+    this.name = 'PartlySavedError';
+  }
 }
 
 /** A patient as a source lists them. */
