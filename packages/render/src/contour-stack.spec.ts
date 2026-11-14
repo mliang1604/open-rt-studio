@@ -10,7 +10,12 @@ import {
   type Vec3,
   type Volume,
 } from '@open-rt-studio/dicom';
-import { buildContourStack, cutContourStack, type StackContour } from './contour-stack.js';
+import {
+  buildContourStack,
+  cutContourStack,
+  fillContourStack,
+  type StackContour,
+} from './contour-stack.js';
 import {
   classifyContour,
   crossSectionOutline,
@@ -19,7 +24,8 @@ import {
   type ContourPolyline,
 } from './contours.js';
 import { planeToTex, resolveGeometry, texCoordAt, type ObliqueRotation } from './reslice.js';
-import { roiContourCoords, roiPlaneShapes } from './roi-overlay.js';
+import type { PlanePoint } from './pane-coords.js';
+import { roiContourCoords, roiPlaneShapes, roiScreenShapes } from './roi-overlay.js';
 
 // Shapes of known form are cut with tilted planes and the outline is checked
 // against the form. The volume is 128 x 128 x 64 voxels of 2 x 2 x 3 mm with
@@ -93,6 +99,8 @@ function ellipsoidLevel(p: Vec3): number {
 
 interface Cut {
   readonly outline: ContourPolyline[];
+  /** The inside, as rings to fill. */
+  readonly rings: PlanePoint[][];
   /** A pane point `(u, v)` on the displayed slice, in the patient. */
   readonly toPatient: (u: number, v: number) => Vec3;
 }
@@ -120,7 +128,11 @@ function cut(
       tex[2] * DIMS[2] - 0.5,
     ]);
   };
-  return { outline: cutContourStack(stack, slicePos), toPatient };
+  return {
+    outline: cutContourStack(stack, slicePos),
+    rings: fillContourStack(stack, slicePos),
+    toPatient,
+  };
 }
 
 /** The outline as line segments in the patient. */
@@ -464,5 +476,160 @@ describe('the overlay pipeline', () => {
     const heightMm = (Math.max(...vs) - Math.min(...vs)) * DIMS[1] * SPACING[1];
     expect(widthMm).toBeGreaterThan(2 * ELLIPSOID.semi[0] - 4);
     expect(heightMm).toBeGreaterThan(2 * ELLIPSOID.semi[1] - 4);
+  });
+});
+
+/** The area a planar ring encloses, in mm². */
+function areaOf(points: readonly Vec3[]): number {
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    x += a[1] * b[2] - a[2] * b[1];
+    y += a[2] * b[0] - a[0] * b[2];
+    z += a[0] * b[1] - a[1] * b[0];
+  }
+  return Math.hypot(x, y, z) / 2;
+}
+
+describe('the inside of a structure on a tilted plane', () => {
+  const loops = ellipsoidContours();
+
+  it.each([
+    ['axial, 4°', Orientation.Axial, { tiltU: degrees(4), tiltV: 0 }],
+    ['axial, 20° and 10°', Orientation.Axial, { tiltU: degrees(20), tiltV: degrees(10) }],
+    ['axial, 40°', Orientation.Axial, { tiltU: 0, tiltV: degrees(40) }],
+    ['coronal, 15°', Orientation.Coronal, { tiltU: degrees(15), tiltV: 0 }],
+    ['sagittal, 30° and 20°', Orientation.Sagittal, { tiltU: degrees(30), tiltV: degrees(20) }],
+  ] as [string, Orientation, ObliqueRotation][])(
+    '%s: one ring, with the area of the true cut',
+    (_name, orientation, rotation) => {
+      const c = cut(loops, orientation, rotation, MIDDLE[orientation]);
+      expect(c.rings).toHaveLength(1);
+      const ring = c.rings[0].map((p) => c.toPatient(p.u, p.v));
+      const truth = areaOf(trueBoundary(c, 720));
+      // Within 3%: the ring is the outline, steps and all, joined up.
+      expect(Math.abs(areaOf(ring) - truth) / truth).toBeLessThan(0.03);
+      // Joined up, where the ring is made of pieces (the axial cases): no jump
+      // in it longer than a step between two slices can be. Across the stack
+      // the ring's first and last sides are whole chords, and long.
+      for (let i = 0; orientation === Orientation.Axial && i < ring.length; i++) {
+        const a = ring[i];
+        const b = ring[(i + 1) % ring.length];
+        expect(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])).toBeLessThan(12);
+      }
+    },
+  );
+
+  it('a hole is a ring of its own, inside the outer one', () => {
+    const OUTER = 40;
+    const INNER = 14;
+    const hollow: Vec3[][] = [];
+    for (let k = 10; k <= 54; k++) {
+      hollow.push(ellipse([0, 0], [OUTER, OUTER], sliceZ(k), 180));
+      hollow.push(ellipse([0, 0], [INNER, INNER], sliceZ(k), 180));
+    }
+    const tilt = degrees(25);
+    const c = cut(hollow, Orientation.Axial, { tiltU: tilt, tiltV: 0 }, 32);
+    const areas = c.rings
+      .map((ring) => areaOf(ring.map((p) => c.toPatient(p.u, p.v))))
+      .sort((a, b) => a - b);
+    // A circle cut at an angle is an ellipse, longer by 1 / cos.
+    expect(areas).toHaveLength(2);
+    expect(areas[0] / ((Math.PI * INNER * INNER) / Math.cos(tilt))).toBeCloseTo(1, 2);
+    expect(areas[1] / ((Math.PI * OUTER * OUTER) / Math.cos(tilt))).toBeCloseTo(1, 2);
+  });
+
+  it('stops at the edge of the pane, as the outline does', () => {
+    // A column through every slice, wider than tall: a tilted coronal plane
+    // runs out of its rectangle before the column ends.
+    const column: Vec3[][] = [];
+    for (let k = 0; k < DIMS[2]; k++) column.push(ellipse([0, 0], [100, 60], sliceZ(k)));
+    const c = cut(column, Orientation.Coronal, { tiltU: degrees(25), tiltV: 0 }, 64);
+    expect(c.rings.length).toBeGreaterThan(0);
+    const every = [...c.rings.flat(), ...c.outline.flatMap((line) => line.points)];
+    for (const p of every) {
+      expect(p.u).toBeGreaterThanOrEqual(0);
+      expect(p.u).toBeLessThanOrEqual(1);
+      expect(p.v).toBeGreaterThanOrEqual(0);
+      expect(p.v).toBeLessThanOrEqual(1);
+    }
+    // And it does reach the edge: the column goes on past it.
+    expect(Math.min(...c.rings.flat().map((p) => p.v))).toBeCloseTo(0, 6);
+    expect(Math.max(...c.rings.flat().map((p) => p.v))).toBeCloseTo(1, 6);
+  });
+
+  it('is nothing where the plane misses the structure', () => {
+    expect(cut(loops, Orientation.Axial, { tiltU: degrees(5), tiltV: 0 }, 2).rings).toEqual([]);
+  });
+});
+
+describe('filling in the overlay pipeline', () => {
+  const volume = makeVolume();
+  const NO_PAN = [0, 1, 2].map(() => ({ x: 0, y: 0 }));
+  const hollow: Contour[] = [];
+  for (let k = 20; k <= 44; k++) {
+    for (const radius of [40, 14]) {
+      hollow.push({
+        geometricType: 'CLOSED_PLANAR',
+        points: ellipse([0, 0], [radius, radius], sliceZ(k), 48),
+      } as unknown as Contour);
+    }
+  }
+  const sets = [
+    { rois: [{ number: 7, name: 'Hollow', color: [0, 128, 255], contours: hollow }] },
+  ] as unknown as StructureSet[];
+  const orientations = [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal];
+  const flat = { tiltU: 0, tiltV: 0 };
+  const options = {
+    sliceIndices: [32, 64, 64],
+    shown: new Set(orientations),
+    hidden: new Set<string>(),
+    colorOverrides: new Map<string, string>(),
+    opacities: new Map<string, number>([['0:7', 0.8]]),
+    selectedSet: -1,
+    decimateTolerance: 0,
+  };
+  const coords = roiContourCoords(volume, sets, orientations, [flat, flat, flat]);
+
+  it('is left out unless asked for', () => {
+    const shapes = roiPlaneShapes(volume, coords, options);
+    expect(shapes.get(Orientation.Axial)![0].fills).toBeUndefined();
+    const panes = [
+      { key: 'a', orientation: Orientation.Axial, rect: { x: 0, y: 0, width: 256, height: 256 } },
+    ];
+    const [overlay] = roiScreenShapes(volume, shapes, panes, [1, 1, 1], NO_PAN, false);
+    expect(overlay.fills).toBeUndefined();
+  });
+
+  it('gives an untilted pane the closed lines it draws: wall and hole on the slice, the silhouette across', () => {
+    const shapes = roiPlaneShapes(volume, coords, { ...options, fill: true });
+    const axial = shapes.get(Orientation.Axial)![0];
+    expect(axial.fills).toHaveLength(2);
+    expect(axial.fills).toEqual(axial.polylines.map((line) => line.points));
+    const coronal = shapes.get(Orientation.Coronal)![0];
+    expect(coronal.fills).toHaveLength(1);
+  });
+
+  it('becomes one path per structure, a closed subpath per ring', () => {
+    const shapes = roiPlaneShapes(volume, coords, { ...options, fill: true });
+    const panes = [
+      { key: 'a', orientation: Orientation.Axial, rect: { x: 10, y: 20, width: 256, height: 256 } },
+    ];
+    const [overlay] = roiScreenShapes(volume, shapes, panes, [1, 1, 1], NO_PAN, false);
+    expect(overlay.fills).toHaveLength(1);
+    const [fill] = overlay.fills!;
+    expect(fill.key).toBe('0:7');
+    expect(fill.color).toBe('rgb(0, 128, 255)');
+    expect(fill.opacity).toBe(0.8);
+    expect(fill.d.match(/M/g)).toHaveLength(2);
+    expect(fill.d.match(/Z/g)).toHaveLength(2);
+    // In the pane's own pixels: the volume is 256 mm across and so is the pane,
+    // so the outer wall (40 mm) spans 88..168 around the middle (128).
+    const xs = [...fill.d.matchAll(/[ML](-?[\d.]+),/g)].map((m) => Number(m[1]));
+    expect(Math.min(...xs)).toBeCloseTo(88, 0);
+    expect(Math.max(...xs)).toBeCloseTo(168, 0);
   });
 });

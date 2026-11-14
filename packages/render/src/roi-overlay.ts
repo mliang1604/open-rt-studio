@@ -4,7 +4,7 @@
 
 import { Orientation, type StructureSet, type Volume } from '@open-rt-studio/dicom';
 import type { PaneRect, Vec2 } from './layout.js';
-import { planePointToPane } from './pane-coords.js';
+import { planePointToPane, type PlanePoint } from './pane-coords.js';
 import {
   classifyContour,
   crossSectionOutline,
@@ -18,6 +18,7 @@ import {
 import {
   buildContourStack,
   cutContourStack,
+  fillContourStack,
   type ContourStack,
   type StackContour,
 } from './contour-stack.js';
@@ -67,6 +68,22 @@ export interface RoiPlaneShapes {
   readonly opacity: number;
   /** Loops and the cross-section outline, in plane `(u, v)` coordinates. */
   readonly polylines: readonly ContourPolyline[];
+  /**
+   * The structure's inside as closed rings, to fill by the even-odd rule (a
+   * ring inside another is a hole). Set only when filling was asked for.
+   */
+  readonly fills?: readonly (readonly PlanePoint[])[];
+}
+
+/** One structure's filled inside on a pane, as one SVG path in pane-local pixels. */
+export interface ContourFill {
+  /** Stable key for the `@for` track: the ROI's key. */
+  readonly key: string;
+  /** SVG path data: one closed subpath per ring. Fill it with `fill-rule: evenodd`. */
+  readonly d: string;
+  readonly color: string;
+  /** The ROI's own opacity in `[0, 1]`; the fill opacity is applied on top. */
+  readonly opacity: number;
 }
 
 /** One ROI contour shape projected into a pane, in pane-local pixels. */
@@ -91,6 +108,8 @@ export interface ContourPaneOverlay {
   readonly rect: PaneRect;
   /** The contour shapes drawn on this pane. */
   readonly shapes: readonly ContourShape[];
+  /** The filled insides, drawn under the shapes. Set only when filling was asked for. */
+  readonly fills?: readonly ContourFill[];
 }
 
 /** An MPR pane to project contours onto: its identity, orientation and rectangle. */
@@ -193,6 +212,8 @@ export interface RoiPlaneShapesOptions {
   readonly selectedSet: number;
   /** Ramer–Douglas–Peucker tolerance for coplanar loops, in plane `(u, v)` units. */
   readonly decimateTolerance: number;
+  /** Also work out each structure's inside ({@link RoiPlaneShapes.fills}). */
+  readonly fill?: boolean;
 }
 
 /**
@@ -213,6 +234,7 @@ export function roiPlaneShapes(
 
   const { sliceIndices, shown, hidden, colorOverrides, opacities, selectedSet, decimateTolerance } =
     options;
+  const fill = options.fill === true;
 
   for (const [orientation, rois] of coordsByOrientation) {
     if (!shown.has(orientation)) continue;
@@ -225,11 +247,17 @@ export function roiPlaneShapes(
 
       const loops: ContourPolyline[] = [];
       const rows: CrossSectionRow[] = [];
+      let fills: PlanePoint[][] | null = null;
       if (roi.stack) {
         // A tilted pane: cut the stack of contours with the plane.
         const slicePos = displayedSlicePos(volume, orientation, sliceIndex);
         for (const { points, closed } of cutContourStack(roi.stack, slicePos)) {
           loops.push({ points: decimate(points, decimateTolerance), closed });
+        }
+        if (fill) {
+          fills = fillContourStack(roi.stack, slicePos).map((ring) =>
+            decimate(ring, decimateTolerance),
+          );
         }
       } else {
         for (const c of roi.contours) {
@@ -245,11 +273,18 @@ export function roiPlaneShapes(
 
       const polylines = [...loops, ...crossSectionOutline(rows)];
       if (polylines.length === 0) continue;
+      // An untilted pane: every closed line it draws bounds the inside.
+      if (fill && !fills) {
+        fills = polylines
+          .filter((line) => line.closed && line.points.length >= 3)
+          .map((line) => [...line.points]);
+      }
       roiShapes.push({
         key,
         color: colorOverrides.get(key) ?? roi.baseColor,
         opacity: opacities.get(key) ?? 1,
         polylines,
+        ...(fills ? { fills } : {}),
       });
     }
     if (roiShapes.length) out.set(orientation, roiShapes);
@@ -286,7 +321,26 @@ export function roiScreenShapes(
     const pan = pans[orientation];
 
     const shapes: ContourShape[] = [];
+    const fills: ContourFill[] = [];
+    let filling = false;
     for (const roi of roiShapes) {
+      if (roi.fills) {
+        filling = true;
+        const rings: string[] = [];
+        for (const ring of roi.fills) {
+          const pixels: string[] = [];
+          for (const point of ring) {
+            const screen = planePointToPane(volume, orientation, point, zoom, rect, flipX, pan);
+            if (!screen) break;
+            pixels.push(`${(screen.x - rect.x).toFixed(1)},${(screen.y - rect.y).toFixed(1)}`);
+          }
+          if (pixels.length === ring.length && pixels.length >= 3)
+            rings.push(`M${pixels.join('L')}Z`);
+        }
+        if (rings.length) {
+          fills.push({ key: roi.key, d: rings.join(''), color: roi.color, opacity: roi.opacity });
+        }
+      }
       for (let pi = 0; pi < roi.polylines.length; pi++) {
         const polyline = roi.polylines[pi];
         const pixels: string[] = [];
@@ -305,7 +359,7 @@ export function roiScreenShapes(
         });
       }
     }
-    if (shapes.length) result.push({ key: pane.key, rect, shapes });
+    if (shapes.length) result.push({ key: pane.key, rect, shapes, ...(filling ? { fills } : {}) });
   }
   return result;
 }
