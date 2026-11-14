@@ -113,19 +113,14 @@ export class LayersController {
   );
 
   /**
-   * The overlay the Compare layout shows in its second column: the active
-   * overlay, unless a registration places it. That column draws an image on
-   * its own grid, which a registration does not line up with the base's, so
-   * until Compare can show such an image rightly the column falls back to
-   * the base, as it does with no overlay at all.
+   * Whether the Compare layout shows the active overlay in the base's planes:
+   * so for one that a registration places. Such an image's own grid is not
+   * where the base's is, so its column is drawn as the base's column is, plane
+   * for plane, with the overlay read through the registration. Everything
+   * about where that column is (its slices, its zoom, what a click points at)
+   * is then the base's, and only the picture and its window are the overlay's.
    */
-  readonly compareOverlay = computed<Layer | null>(() => {
-    const overlay = this.selectedOverlay();
-    return overlay?.placement ? null : overlay;
-  });
-
-  /** Whether the active overlay is one that Compare does not show yet. */
-  readonly compareLacksOverlay = computed(() => !!this.selectedOverlay()?.placement);
+  readonly compareInBasePlanes = computed(() => !!this.selectedOverlay()?.placement);
 
   /** True in the side-by-side Compare layout (vs. the composited fusion views). */
   readonly isCompare = computed(() => this.deps!.layoutMode() === LayoutMode.Compare);
@@ -137,7 +132,7 @@ export class LayersController {
   readonly activeWlLayer = computed<Layer | null>(() => {
     const base = baseLayer(this.layers()) ?? null;
     if (!this.isCompare()) return base;
-    const overlay = this.compareOverlay();
+    const overlay = this.selectedOverlay();
     if (!overlay) return base;
     return this.deps!.activeCompareGroup() >= 1 ? overlay : base;
   });
@@ -148,7 +143,7 @@ export class LayersController {
   /** The modalities of the two Compare columns: the base layer and the overlay. */
   readonly compareModalities = computed<readonly [string | null, string | null]>(() => [
     baseLayer(this.layers())?.volume.modality ?? null,
-    this.compareOverlay()?.volume.modality ?? null,
+    this.selectedOverlay()?.volume.modality ?? null,
   ]);
 
   /** Whether the two columns hold the same modality, so one window can serve both. */
@@ -235,10 +230,24 @@ export class LayersController {
     this.deps!.layoutMode.set(mode === 'compare' ? LayoutMode.Compare : LayoutMode.TriMpr);
   }
 
-  /** The volume a Compare group draws: base for group 0, the active overlay otherwise. */
+  /**
+   * The volume whose grid a Compare group is laid out on: the base for group
+   * 0, the active overlay otherwise, unless that overlay is shown in the
+   * base's planes ({@link compareInBasePlanes}).
+   */
   groupVolume(group: number): Volume | null {
-    if (group === 0) return this.volume();
-    return this.compareOverlay()?.volume ?? this.volume();
+    if (group === 0 || this.compareInBasePlanes()) return this.volume();
+    return this.selectedOverlay()?.volume ?? this.volume();
+  }
+
+  /**
+   * The layer whose image a pane of a group shows: the base, or in the second
+   * Compare column the active overlay (the base when there is none).
+   */
+  groupLayer(group: number): Layer | null {
+    const base = baseLayer(this.layers()) ?? null;
+    if (group === 0 || !this.isCompare()) return base;
+    return this.selectedOverlay() ?? base;
   }
 
   /** Whether a Compare group navigates on its own (unlinked, and not the base group). */

@@ -218,21 +218,11 @@
               (click)="layersCtl.setViewMode('compare')"
               [class.active]="layersCtl.isCompare()"
               [attr.aria-pressed]="layersCtl.isCompare()"
-              [disabled]="layersCtl.compareLacksOverlay() && !layersCtl.isCompare()"
-              [title]="
-                layersCtl.compareLacksOverlay()
-                  ? 'Compare does not show an image placed by a registration yet'
-                  : 'Compare: show the base and overlay side by side (6-pane)'
-              "
+              title="Compare: show the base and overlay side by side (6-pane)"
             >
               Compare
             </button>
           </div>
-          @if (layersCtl.compareLacksOverlay() && layersCtl.isCompare()) {
-            <div class="layer-note" data-compare-lacks-overlay>
-              Not shown here yet: an image placed by a registration
-            </div>
-          }
 
           <div class="layer-legend">
             @for (layer of layersCtl.layerLegend(); track layer.id) {

@@ -397,7 +397,7 @@ export class InteractionController {
     const d = this.deps!;
     const base = baseLayer(d.layers()) ?? null;
     if (placement.kind !== 'mpr' || !d.isCompare()) return base;
-    const overlay = d.compareOverlay();
+    const overlay = d.selectedOverlay();
     return placement.group >= 1 && overlay ? overlay : base;
   }
 

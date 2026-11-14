@@ -588,15 +588,23 @@ export class SliceRenderer {
       if (!slot) continue;
       // Compare's second column (group ≥ 1) draws the overlay layer standalone on
       // its own grid; everything else draws the base. Fall back to the base when
-      // there's no overlay to compare against, or when a registration places
-      // it: its own grid is then not where the base's is, and the column would
-      // show planes that do not belong together.
+      // there's no overlay to compare against. Not for one a registration
+      // places: its own grid is not where the base's is, and the column would
+      // show planes that do not belong together (see `alone` below).
       const useOverlay =
         (pane.group ?? 0) >= 1 &&
         !!this.overlayTexture &&
         !!this.overlayVolume &&
         !!this.overlayOwnMatrices &&
         !this.overlayRegistration;
+      // An overlay that a registration places is shown in that column all the
+      // same: by itself, in the base's planes, read through the registration.
+      // The two columns are then one position in the patient, pixel for pixel.
+      const alone =
+        (pane.group ?? 0) >= 1 &&
+        !!this.overlayVolume &&
+        !!this.overlayMatrices &&
+        !!this.overlayRegistration;
       const paneVolume = useOverlay ? this.overlayVolume! : volume;
       const matrices = useOverlay ? this.overlayOwnMatrices! : this.matrices;
       const composite = pane.composite ?? true;
@@ -607,7 +615,8 @@ export class SliceRenderer {
       if (!bindGroup) continue;
       // The label mask is aligned to the base grid, so it draws only on base panes
       // (not Compare's standalone overlay column, which samples the overlay's grid).
-      const mask = !useOverlay;
+      // The column of a registered overlay is the overlay's column too: no mask.
+      const mask = !useOverlay && !alone;
       this.writeParams(
         slot.buffer,
         pane,
@@ -617,6 +626,7 @@ export class SliceRenderer {
         composite,
         colormapBase,
         mask,
+        alone,
       );
       draws.push({ rect, bindGroup, pipeline: this.pipeline });
     }
@@ -708,6 +718,7 @@ export class SliceRenderer {
     composite: boolean,
     colormapBase: boolean,
     maskActive: boolean,
+    alone = false,
   ): void {
     const count = sliceCountFor(volume, view.orientation);
     // Sample the centre of the voxel so the first/last slices aren't clamped away.
@@ -726,8 +737,10 @@ export class SliceRenderer {
     // The overlay shares the pane plane but samples its own grid, so it gets its
     // own (possibly oblique) plane→texture matrix and is windowed by its own
     // volume's defaults. Null when not compositing (Compare) or there's no overlay.
+    // Shown by itself (`alone`), it is the pane's image: at full strength, in
+    // the window the pane was given, and never as a checkerboard.
     const overlay =
-      composite && this.overlayVolume && this.overlayMatrices
+      (composite || alone) && this.overlayVolume && this.overlayMatrices
         ? {
             matrix: isOblique(view.rotation)
               ? overlayPlaneToTexMatrix(
@@ -738,11 +751,12 @@ export class SliceRenderer {
                   this.overlayRegistration ?? undefined,
                 )
               : this.overlayMatrices[view.orientation],
-            windowCenter: this.overlayVolume.windowCenter,
-            windowWidth: this.overlayVolume.windowWidth,
-            opacity: this.overlayOpacity,
+            windowCenter: alone ? view.windowCenter : this.overlayVolume.windowCenter,
+            windowWidth: alone ? view.windowWidth : this.overlayVolume.windowWidth,
+            opacity: alone ? 1 : this.overlayOpacity,
             colormap: this.overlayColormap,
-            checkerboard: this.overlayCheckerboard,
+            checkerboard: !alone && this.overlayCheckerboard,
+            alone,
             // Derive the cell's framebuffer size from the pane width so a fixed
             // count of cells spans the image regardless of how large it draws,
             // then scale by the pane zoom so the pattern tracks the anatomy (the

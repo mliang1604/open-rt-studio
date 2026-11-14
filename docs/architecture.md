@@ -491,10 +491,18 @@ of reference over a series of another, as a fusion overlay.
   stays a plane; the probe carries its point the same way
   (`pointBetweenLayers`). Both take the matrix from the layer's placement,
   so they cannot disagree about it.
-- The Compare layout does not show a placed overlay yet: its second column
-  draws an image on its own grid, which a registration does not line up
-  with the base's. The column falls back to the base and the layers panel
-  says so. Linked navigation through a registration is the rest of #76.
+- **The Compare layout shows a placed overlay in the base's planes.** Its
+  second column is laid out as the first is, plane for plane, and draws the
+  overlay by itself, read through the registration (the shader's overlay
+  mode 2: the base is not shown, and where the overlay does not reach the
+  pane is black). So the two columns are one position in the patient, pixel
+  for pixel: crosshair, scroll, zoom and pan need no mapping, linked or not.
+  The column's picture and window are the overlay's; its slices and its
+  geometry are the base's (`LayersController.compareInBasePlanes`). The
+  probe there gives the overlay's value first, with its own voxel and its
+  position in its own frame. An overlay in the base's own frame is drawn on
+  its own grid, as before.
+- Choosing among several registrations is the rest of #76.
 
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), and how a Deformable

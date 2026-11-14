@@ -83,6 +83,13 @@ export interface SliceParams {
     readonly colormap: boolean;
     /** Composite as a checkerboard (alternating cells) vs. a uniform blend. */
     readonly checkerboard: boolean;
+    /**
+     * Show the overlay by itself: the base is not drawn, and where the overlay
+     * does not reach the pane is black. The Compare column of an overlay that
+     * a registration places, drawn in the base's planes. Goes before
+     * {@link checkerboard}.
+     */
+    readonly alone?: boolean;
     /** Checkerboard cell size in framebuffer pixels. */
     readonly checkerSize: number;
   } | null;
@@ -133,7 +140,8 @@ export function packSliceParams(p: SliceParams): ArrayBuffer {
   uints[MATRIX_FLOATS + 11] = p.colormapBase ? 1 : 0;
   if (p.overlay) {
     // Checkerboard flag + cell size fill the mat4-alignment pad (floats 25, 26).
-    uints[MATRIX_FLOATS + 9] = p.overlay.checkerboard ? 1 : 0; // float 25 (u32)
+    // overlayMode, float 25 (u32): 0 blend, 1 checkerboard, 2 the overlay alone.
+    uints[MATRIX_FLOATS + 9] = p.overlay.alone ? 2 : p.overlay.checkerboard ? 1 : 0;
     floats[MATRIX_FLOATS + 10] = p.overlay.checkerSize; // float 26
     floats.set(p.overlay.matrix as ArrayLike<number>, OVERLAY_FLOATS); // overlayToTex, 28..43
     floats[OVERLAY_FLOATS + 16] = p.overlay.windowCenter; // float 44

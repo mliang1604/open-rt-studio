@@ -39,12 +39,11 @@ export type LoadOutcome =
   /** The series is already shown: nothing to load; `compare` may still open the columns. */
   | { readonly kind: 'noop'; readonly compare: boolean };
 
-/** Why a series was not fused, when it is not only that nothing connects it. */
-export type CantFuse =
-  /** More than one registration leads to it, and none is chosen for the user. */
-  | 'several-registrations'
-  /** It is placed by a registration, which the Compare layout does not show yet. */
-  | 'compare-through-registration';
+/**
+ * Why a series was not fused, when it is not only that nothing connects it:
+ * more than one registration leads to it, and none is chosen for the user.
+ */
+export type CantFuse = 'several-registrations';
 
 /**
  * Feedback when a held-modifier drop can't apply: ⌥ fuse and ⇧ compare both need a
@@ -57,8 +56,6 @@ export function cantFuseMessage(intent: 'overlay' | 'compare', why?: CantFuse): 
   switch (why) {
     case 'several-registrations':
       return `Can’t ${action}: more than one registration connects this series to the current scan, and choosing between them is not there yet.`;
-    case 'compare-through-registration':
-      return 'Can’t compare through a registration yet. Hold ⌥ to fuse the series instead.';
     case undefined:
       return `Can’t ${action}: drop a series that shares the current scan’s frame of reference, or that an opened registration connects to it.`;
     default: {
@@ -75,12 +72,6 @@ export function cantFuseMessage(intent: 'overlay' | 'compare', why?: CantFuse): 
  */
 function outcomeForMerged(merged: MergedLoad, intent: 'overlay' | 'compare'): LoadOutcome {
   if (!merged.added) return { kind: 'reject', message: cantFuseMessage(intent, merged.why) };
-  // The series that was added is the last layer. The Compare layout draws its
-  // second column on that image's own grid, which a registration does not
-  // line up with the base's: refused until it can be shown rightly.
-  if (intent === 'compare' && merged.result.layers.at(-1)?.placement) {
-    return { kind: 'reject', message: cantFuseMessage(intent, 'compare-through-registration') };
-  }
   return { kind: 'overlay', result: merged.result, compare: intent === 'compare' };
 }
 
@@ -192,7 +183,7 @@ export interface SeriesLoadDeps {
  * *replaces* the view, unloading every other image so the viewport shows exactly
  * the series the user chose (#241) — re-picking the current base simply reloads
  * it. A held modifier instead fuses: ⌥ overlays and ⇧ overlays-and-compares a
- * same-frame series (⌥ also one that a registration the source holds places), while an already-composited series is a no-op (⇧ still opens
+ * same-frame series, or one that a registration the source holds places, while an already-composited series is a no-op (⇧ still opens
  * the compare columns). Unlike a file load it never touches the catalog or
  * prompts — panel series are already known. The series comes from the data
  * source, which may take its time: the answer is a promise.

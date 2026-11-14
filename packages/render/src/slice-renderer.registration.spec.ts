@@ -22,6 +22,12 @@ interface WrittenPane {
   readonly overlayMatrix: number[];
   /** Overlay opacity, float 46: 0 when the pane composites no overlay. */
   readonly overlayOpacity: number;
+  /** `overlayMode`, a u32 at float 25: 0 blend, 1 checkerboard, 2 the overlay alone. */
+  readonly overlayMode: number;
+  /** The overlay's window centre and width, floats 44 and 45. */
+  readonly overlayWindow: [number, number];
+  /** Mask opacity, float 64. */
+  readonly maskOpacity: number;
 }
 
 function fakeGpu(): { gpu: GpuContext; panes: WrittenPane[]; textures: { count: number } } {
@@ -60,6 +66,9 @@ function fakeGpu(): { gpu: GpuContext; panes: WrittenPane[]; textures: { count: 
           slicePos: floats[22],
           overlayMatrix: [...floats.slice(28, 44)],
           overlayOpacity: floats[46],
+          overlayMode: new Uint32Array(bytes)[25],
+          overlayWindow: [floats[44], floats[45]],
+          maskOpacity: floats[64],
         });
       },
       writeTexture: () => undefined,
@@ -196,19 +205,44 @@ describe('SliceRenderer with an overlay placed by a registration', () => {
     );
   });
 
-  it('shows the base in the Compare column, not the placed image on its own grid', () => {
+  it('shows the placed image by itself in the Compare column, in the base’s planes', () => {
     const { gpu, panes } = fakeGpu();
     const renderer = new SliceRenderer(gpu);
     renderer.setVolume(base);
 
-    // An overlay in the base's frame is drawn by itself: slice 1 of its 2.
+    // An overlay in the base's frame is drawn on its own grid: slice 1 of its 2,
+    // as the pane's base image, with nothing composited.
     renderer.setOverlay(overlay, 0.5);
-    expect(drawn(renderer, panes, SECOND_COLUMN).slicePos).toBeCloseTo(0.75);
+    const ownGrid = drawn(renderer, panes, SECOND_COLUMN);
+    expect(ownGrid.slicePos).toBeCloseTo(0.75);
+    expect(ownGrid.overlayOpacity).toBe(0);
 
-    // One placed by a registration is not: slice 1 of the base's 4.
+    // One placed by a registration is drawn in the base's plane (slice 1 of
+    // the base's 4), read through the registration, by itself and at full
+    // strength whatever its blend, in the window the pane was given.
     renderer.setOverlay(overlay, 0.5, undefined, baseToOverlay);
-    const column = drawn(renderer, panes, SECOND_COLUMN);
+    renderer.setOverlayCheckerboard(true);
+    const column = drawn(renderer, panes, {
+      ...SECOND_COLUMN,
+      windowCenter: 600,
+      windowWidth: 1200,
+    });
     expect(column.slicePos).toBeCloseTo(0.375);
-    expect(column.overlayOpacity).toBe(0);
+    expect(column.overlayMode).toBe(2);
+    expect(column.overlayOpacity).toBe(1);
+    expect(column.overlayWindow).toEqual([600, 1200]);
+    close(
+      column.overlayMatrix,
+      overlayPlaneToTexMatrix(base, overlay, Orientation.Axial, undefined, baseToOverlay),
+    );
+
+    // The first column is the base, with nothing over it; the fused view
+    // still blends, or shows the checkerboard that was asked for.
+    const first = drawn(renderer, panes, { ...AXIAL, composite: false });
+    expect(first.overlayOpacity).toBe(0);
+    expect(first.overlayMode).toBe(0);
+    const fused = drawn(renderer, panes, AXIAL);
+    expect(fused.overlayMode).toBe(1);
+    expect(fused.overlayOpacity).toBeCloseTo(0.5);
   });
 });

@@ -104,11 +104,6 @@ test('a series of another frame of reference is fused through its registration',
   await expect(layerPanel.locator('[data-placement]')).toHaveText(
     'Placed by registration “REGISTRATION” (written this image → base)',
   );
-  // Compare does not show such an image yet, and says so in place of offering it.
-  const compare = layerPanel.getByRole('button', { name: 'Compare' });
-  await expect(compare).toBeDisabled();
-  await expect(compare).toHaveAttribute('title', /placed by a registration/);
-
   // The probe reads the CT, and the MR where the registration puts it: by the
   // generator's formula, the MR's voxel two, three and one back.
   const places: [number, number][] = [
@@ -186,4 +181,134 @@ test('without the registration the series is not fused; opened later, it is', as
   const { voxel, mr: value } = await probeAt(page, 0.4, 0.5);
   expect(value).toBe(registeredMrValueAtCtVoxel(...voxel));
   expect(value).not.toBeNull();
+});
+
+/** The two axial panes of the Compare layout: the base's column, then the overlay's. */
+async function axialColumns(page: Page): Promise<[Locator, Locator]> {
+  const axial = page
+    .locator('.pane-overlay .pane')
+    .filter({ has: page.locator('.pane-tag', { hasText: /^\s*Axial/ }) });
+  await expect(axial).toHaveCount(2);
+  const [a, b] = [axial.nth(0), axial.nth(1)];
+  const [boxA, boxB] = [(await a.boundingBox())!, (await b.boundingBox())!];
+  return boxA.x <= boxB.x ? [a, b] : [b, a];
+}
+
+/** Move to a voxel of the base's grid in an axial pane (its image is a centred square). */
+async function hoverVoxel(page: Page, pane: Locator, x: number, y: number): Promise<void> {
+  const box = (await pane.boundingBox())!;
+  const side = Math.min(box.width, box.height);
+  const voxel = side / PAIR.size;
+  await page.mouse.move(
+    box.x + (box.width - side) / 2 + (x + 0.5) * voxel,
+    box.y + (box.height - side) / 2 + (y + 0.5) * voxel,
+  );
+}
+
+/** The slice an axial pane's tag names, from 0. */
+async function sliceOf(pane: Locator): Promise<number> {
+  const tag = await pane.locator('.pane-tag').innerText();
+  const match = /Axial · (\d+) \/ (\d+)/.exec(tag);
+  expect(match, `unexpected tag: ${tag}`).not.toBeNull();
+  return Number(match![1]) - 1;
+}
+
+test('Compare shows the registered image in the base’s planes: both columns are one position', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+  });
+  await requireWebGpu(page);
+
+  const pair = syntheticRegisteredPair();
+  await importFiles(page, [...pair.planningCt, ...pair.followUpMr, pair.registration]);
+  await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
+  await showCt(page);
+  await fuseChipByDrag(page, await chipOf(page, 'MR'));
+  await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
+
+  await page.locator('.layer-panel').getByRole('button', { name: 'Compare' }).click();
+  await expect(page.locator('.pane-overlay .pane')).toHaveCount(6);
+  const [ctColumn, mrColumn] = await axialColumns(page);
+  const probe = page.locator('.probe');
+  const [sx, sy, sz] = PAIR.shiftVoxels;
+
+  // Linked: the same slice in both columns, on the base's grid.
+  const z = await sliceOf(ctColumn);
+  expect(await sliceOf(mrColumn)).toBe(z);
+
+  for (const [x, y] of [
+    [12, 16],
+    [22, 9],
+    [8, 25],
+  ]) {
+    // The base's column: the CT's voxel, with the MR read through the registration.
+    await hoverVoxel(page, ctColumn, x, y);
+    await expect(probe).toHaveText(
+      new RegExp(
+        `^Axial · voxel \\(${x}, ${y}, ${z}\\) .* · value ${syntheticCtValue(x, z, PAIR.size)} HU · MR ${registeredMrValueAtCtVoxel(x, y, z)}$`,
+      ),
+    );
+
+    // The same place in the other column is the same anatomy: there the MR
+    // comes first, as its own voxel and its position in its own frame, and
+    // the CT's value after it is the one the first column read.
+    await hoverVoxel(page, mrColumn, x, y);
+    await expect(probe).toBeVisible();
+    const text = await probe.innerText();
+    const match =
+      /^Axial · voxel \((\d+), (\d+), (\d+)\) · LPS \(([-\d.]+), ([-\d.]+), ([-\d.]+)\) mm · value (-?\d+) · CT (-?\d+) HU$/.exec(
+        text,
+      );
+    expect(match, `unexpected probe text: ${text}`).not.toBeNull();
+    const [i, j, k, px, py, pz, mr, ct] = match!.slice(1).map(Number);
+    expect([i, j, k]).toEqual([x - sx, y - sy, z - sz]);
+    expect(mr).toBe(registeredMrValueAtCtVoxel(x, y, z));
+    expect(ct).toBe(syntheticCtValue(x, z, PAIR.size));
+    // The MR's own coordinates, nowhere near the CT's: its origin plus its voxel.
+    expect(Math.abs(px - (PAIR.mrOrigin[0] + i))).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(py - (PAIR.mrOrigin[1] + j))).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(pz - (PAIR.mrOrigin[2] + k))).toBeLessThanOrEqual(0.5);
+  }
+
+  // Where the moved MR does not reach, its column shows nothing and reads nothing.
+  await hoverVoxel(page, mrColumn, 1, 8);
+  await expect(probe).toHaveCount(0);
+  await hoverVoxel(page, ctColumn, 1, 8);
+  await expect(probe).toHaveText(/ HU$/);
+
+  // Unlinked, the MR's column scrolls by itself, still through the base's
+  // planes: one slice on, it reads the MR one slice on.
+  const linkToggle = page.locator('button[data-linked]');
+  await linkToggle.click();
+  await expect(linkToggle).toHaveAttribute('data-linked', 'false');
+  await hoverVoxel(page, mrColumn, 12, 16);
+  await page.mouse.wheel(0, 100);
+  // The pane's tag names the first column's slice, so the column's own is
+  // read from the probe: the MR's slice, and the registration's one more.
+  await hoverVoxel(page, mrColumn, 12, 17);
+  const own = /^Axial · voxel \((\d+), (\d+), (\d+)\) .* · value (-?\d+) · CT (-?\d+) HU$/;
+  await expect.poll(async () => Number(own.exec(await probe.innerText())?.[3]) + sz).not.toBe(z);
+  const [i, j, k, mr, ct] = own
+    .exec(await probe.innerText())!
+    .slice(1)
+    .map(Number);
+  const scrolled = k + sz;
+  expect(Math.abs(scrolled - z)).toBe(1);
+  expect([i, j]).toEqual([12 - sx, 17 - sy]);
+  expect(mr).toBe(registeredMrValueAtCtVoxel(12, 17, scrolled));
+  expect(ct).toBe(syntheticCtValue(12, scrolled, PAIR.size));
+  // The first column stayed where it was.
+  await hoverVoxel(page, ctColumn, 12, 17);
+  await expect(probe).toHaveText(new RegExp(`^Axial · voxel \\(12, 17, ${z}\\) `));
+
+  // Back to the fused view, which still blends.
+  await page.locator('.layer-panel').getByRole('button', { name: 'Fusion' }).click();
+  await expect(page.locator('.pane-overlay .pane')).toHaveCount(3);
+  await expect(page.locator('.blend-bar')).toBeVisible();
+
+  expect(errors, errors.join('\n')).toEqual([]);
 });

@@ -59,7 +59,9 @@ export interface FrameInput {
   readonly baseVolume: Volume;
   /**
    * The overlay layer's volume, drawn by the non-base Compare groups and used to
-   * map the linked slice onto its grid. Null falls back to the base volume.
+   * map the linked slice onto its grid. Null falls back to the base volume:
+   * with no overlay, and for an overlay that is drawn in the base's planes
+   * (one a registration places), whose column takes its slices from the base.
    */
   readonly overlayVolume: Volume | null;
   /** Master per-orientation slice indices (axial/coronal/sagittal). */
