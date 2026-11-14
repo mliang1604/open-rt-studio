@@ -137,6 +137,15 @@ also builds on its own to `dist/` for consumers outside the workspace.
   takes an `AbortSignal` and may report progress; a source that answers at
   once reports none, and the viewer then shows none. Importing files is not
   in the interface: only the local source does it.
+- **A server is browsed by its studies** (#37). The browser lists studies,
+  each with its patient, because that is what can be searched by date and
+  modality as well as by name and ID, and what the server already answers
+  (`GET /studies`, the keys C-FIND will use). Choosing any study of a patient
+  opens that patient's timeline. The list comes a part at a time; the server
+  orders it (newest, oldest, by patient name) from a fixed list of orders,
+  each ending in the Study Instance UID so that parts do not overlap. What is
+  typed into the search goes to the server when asked for and is not kept in
+  the browser: it is who a patient is.
 - **A save is always a new object** (#48). What is made in the viewer, an RT
   Structure Set so far, goes to the data source as the bytes of a DICOM file:
   a download for opened files, an upload for a server, which files it by its

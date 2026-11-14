@@ -77,8 +77,13 @@ interface ServerPatient {
 }
 interface ServerStudy {
   readonly studyInstanceUid: string;
+  readonly patientKey: number;
+  readonly patientId: string;
+  readonly patientName: string | null;
   readonly date: string | null;
   readonly description: string | null;
+  readonly modalities: readonly string[];
+  readonly series: number;
 }
 interface ServerSeries {
   readonly seriesInstanceUid: string;
@@ -106,6 +111,74 @@ export interface ServerPatientSummary extends PatientSummary {
  * The address of a server as the user may type it, as an origin: `127.0.0.1:4300`
  * gives `http://127.0.0.1:4300`. Throws for what is not an address.
  */
+/** The orders the server lists studies in. */
+export const STUDY_ORDERS = ['newest', 'oldest', 'patient'] as const;
+export type StudyOrder = (typeof STUDY_ORDERS)[number];
+
+/** How many studies the browser shows at a time. */
+export const STUDIES_PER_PAGE = 20;
+
+/**
+ * What the study browser asks for. Every part may be left out; those given
+ * are joined by "and".
+ */
+export interface StudySearch {
+  /**
+   * Part of a patient's name, as typed: found anywhere in the name, without
+   * regard to case. With a `*` or `?` in it, it is the whole pattern.
+   */
+  readonly name?: string;
+  /** A Patient ID, whole and with its case, unless it has a `*` or `?` in it. */
+  readonly patientId?: string;
+  /** The earliest and the latest study date, `YYYYMMDD`; either may be left out. */
+  readonly from?: string;
+  readonly to?: string;
+  /** Studies with a series of this modality. */
+  readonly modality?: string;
+  readonly order?: StudyOrder;
+  /** Which part of the list, from 0. */
+  readonly page?: number;
+}
+
+/** A study as the browser lists it, with the patient it is of. */
+export interface FoundStudy {
+  readonly studyUid: string;
+  readonly patient: PatientSummary;
+  /** `YYYYMMDD`. */
+  readonly date: string | null;
+  readonly description: string | null;
+  readonly modalities: readonly string[];
+  /** How many series it has, of every kind. */
+  readonly series: number;
+}
+
+/** One part of what a search found. */
+export interface FoundStudies {
+  readonly studies: readonly FoundStudy[];
+  readonly page: number;
+  /** True when there is a part after this one. */
+  readonly more: boolean;
+}
+
+const hasWildcard = (text: string): boolean => /[*?]/.test(text);
+
+/** The query of `GET /studies` for a search: what the server is asked, and no more. */
+export function studyQuery(search: StudySearch): string {
+  const query = new URLSearchParams();
+  const name = search.name?.trim() ?? '';
+  if (name !== '') query.set('patientName', hasWildcard(name) ? name : `*${name}*`);
+  const patientId = search.patientId?.trim() ?? '';
+  if (patientId !== '') query.set('patientId', patientId);
+  const from = search.from ?? '';
+  const to = search.to ?? '';
+  if (from !== '' || to !== '') query.set('date', from === to ? from : `${from}-${to}`);
+  if (search.modality) query.set('modality', search.modality);
+  query.set('order', search.order ?? 'newest');
+  query.set('limit', String(STUDIES_PER_PAGE));
+  query.set('offset', String(Math.max(0, search.page ?? 0) * STUDIES_PER_PAGE));
+  return query.toString();
+}
+
 export function serverAddress(typed: string): string {
   const text = typed.trim();
   const wrong = new Error('That is not a server address. Try http://127.0.0.1:4300.');
@@ -211,14 +284,45 @@ export class ServerSource implements DataSource {
    * its series. Null turns it to nobody. Rejects when the server cannot be
    * asked; the timeline then stays as it was.
    */
-  async selectPatient(key: string | null, signal?: AbortSignal): Promise<void> {
+  /**
+   * One part of the studies that match a search, each with its patient. The
+   * search goes to the server as it is; nothing of it is kept here.
+   */
+  async findStudies(search: StudySearch = {}, signal?: AbortSignal): Promise<FoundStudies> {
+    const page = await this.json<Page<ServerStudy>>(`/studies?${studyQuery(search)}`, signal);
+    return {
+      studies: page.items.map((study) => ({
+        studyUid: study.studyInstanceUid,
+        patient: {
+          key: String(study.patientKey),
+          patientId: study.patientId,
+          name: study.patientName,
+        },
+        date: study.date,
+        description: study.description,
+        modalities: study.modalities,
+        series: study.series,
+      })),
+      page: Math.max(0, search.page ?? 0),
+      more: page.more,
+    };
+  }
+
+  /**
+   * Turn the timeline to a patient, or to none. A key names one of the
+   * patients listed; a patient found another way, as the study browser finds
+   * them, is given whole.
+   */
+  async selectPatient(chosen: string | PatientSummary | null, signal?: AbortSignal): Promise<void> {
     const selection = ++this.selection;
-    if (key === null) {
+    if (chosen === null) {
       this.current.set(null);
       return;
     }
-    const patient = this.listed().find((one) => one.key === key);
+    const patient =
+      typeof chosen === 'string' ? this.listed().find((one) => one.key === chosen) : chosen;
     if (!patient) throw new Error('That patient is not among those listed.');
+    const key = patient.key;
     const studies = await this.all<ServerStudy>(
       `/studies?patientKey=${encodeURIComponent(key)}`,
       signal,
@@ -368,7 +472,7 @@ export class ServerSource implements DataSource {
     // The timeline says what the server holds for each series: ask again, so
     // that it counts what was just saved. The save stands if this fails.
     const patient = this.current();
-    if (patient) await this.selectPatient(patient.key).catch(() => undefined);
+    if (patient) await this.selectPatient(patient).catch(() => undefined);
     return { kind: 'stored', where: this.label };
   }
 

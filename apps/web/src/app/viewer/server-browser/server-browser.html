@@ -1,0 +1,114 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<form
+  class="browser-search"
+  role="search"
+  aria-label="Studies on the server"
+  (submit)="onSearch($event)"
+>
+  <!-- A label beside its control, not around it: around a select, the label
+       would take the options into the control's name. -->
+  <div class="field wide">
+    <label for="browser-name">Patient name</label>
+    <input
+      id="browser-name"
+      type="search"
+      spellcheck="false"
+      autocomplete="off"
+      placeholder="Any part of it"
+      [value]="name()"
+      (input)="onText('name', $event)"
+    />
+  </div>
+  <div class="field">
+    <label for="browser-id">Patient ID</label>
+    <input
+      id="browser-id"
+      type="search"
+      spellcheck="false"
+      autocomplete="off"
+      placeholder="Whole, or with *"
+      [value]="patientId()"
+      (input)="onText('patientId', $event)"
+    />
+  </div>
+  <div class="field">
+    <label for="browser-from">From</label>
+    <input id="browser-from" type="date" [value]="from()" (input)="onText('from', $event)" />
+  </div>
+  <div class="field">
+    <label for="browser-to">To</label>
+    <input id="browser-to" type="date" [value]="to()" (input)="onText('to', $event)" />
+  </div>
+  <div class="field">
+    <label for="browser-modality">Modality</label>
+    <select id="browser-modality" [value]="modality()" (change)="onModality($event)">
+      <option value="">Any</option>
+      @for (one of modalities; track one) {
+        <option [value]="one">{{ one }}</option>
+      }
+    </select>
+  </div>
+  <div class="field">
+    <label for="browser-order">Order</label>
+    <select id="browser-order" [value]="order()" (change)="onOrder($event)">
+      @for (one of orders; track one.order) {
+        <option [value]="one.order">{{ one.label }}</option>
+      }
+    </select>
+  </div>
+  <div class="browser-buttons">
+    <button type="submit">Search</button>
+    <button type="button" (click)="onClear()">Clear</button>
+  </div>
+</form>
+
+@if (problem(); as message) {
+  <p class="browser-problem" role="alert">{{ message }}</p>
+}
+
+@if (found(); as list) {
+  @if (list.studies.length === 0) {
+    <p class="browser-note" role="status">
+      {{ list.page === 0 ? 'No study matches.' : 'There are no more studies.' }}
+    </p>
+  } @else {
+    <div class="browser-columns" aria-hidden="true">
+      <span>Patient</span><span>ID</span><span>Study date</span><span>Description</span
+      ><span>Modalities</span><span>Series</span>
+    </div>
+    <ul class="browser-studies" aria-label="Studies found" [attr.aria-busy]="busy()">
+      @for (study of list.studies; track study.studyUid) {
+        <li>
+          <button
+            type="button"
+            class="browser-study"
+            [class.active]="study.patient.key === chosenKey()"
+            [attr.aria-current]="study.patient.key === chosenKey() ? 'true' : null"
+            [attr.aria-label]="rowLabel(study)"
+            [disabled]="disabled()"
+            (click)="onChoose(study)"
+          >
+            <span class="study-patient">{{ study.patient.name || 'No name' }}</span>
+            <span class="study-id">{{ study.patient.patientId || 'No ID' }}</span>
+            <span class="study-date">{{ dateLabel(study) }}</span>
+            <span class="study-description">{{ study.description || '' }}</span>
+            <span class="study-modalities">{{ study.modalities.join(' ') }}</span>
+            <span class="study-series">{{ seriesLabel(study) }}</span>
+          </button>
+        </li>
+      }
+    </ul>
+  }
+  <div class="browser-pager">
+    <button type="button" (click)="onPage(-1)" [disabled]="busy() || list.page === 0">
+      Previous
+    </button>
+    <span role="status">{{ busy() ? 'Asking the server…' : 'Page ' + (list.page + 1) }}</span>
+    <button type="button" (click)="onPage(1)" [disabled]="busy() || !list.more">Next</button>
+  </div>
+} @else if (busy()) {
+  <p class="browser-note" role="status">Asking the server…</p>
+}

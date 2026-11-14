@@ -15,6 +15,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
 import { importFiles, pickSeries } from './fixtures/load';
 import { startTestServer, type TestServer } from './fixtures/server';
+import { connectTo, openServerCard, studyRows } from './fixtures/server-card';
 
 // Loading from a server (#47) and saving to it (#48), against the real server
 // of this repository running as its own process. The page is on another origin than the server,
@@ -42,38 +43,15 @@ async function open(page: Page): Promise<void> {
   await requireWebGpu(page);
 }
 
-/**
- * Open the server card from where it is offered: the empty state while
- * nothing is loaded, the history bar once there is a history.
- *
- * The caller says which. One locator for "whichever is there" resolved, on a
- * slow runner, to the history bar's button in the moment between the viewer
- * being created and its first change detection, when that bar was not yet
- * hidden; Playwright then waited on the hidden button until the test timed
- * out. The bar is hidden from creation now, and each test names its button.
- */
-async function openServerCard(page: Page, from: 'empty state' | 'history'): Promise<void> {
-  const button =
-    from === 'empty state'
-      ? // The empty state is in the page only while it is shown.
-        page.locator('app-empty-state').getByRole('button', { name: /server…$/ })
-      : page.locator('app-history-panel').getByRole('button', { name: 'Server…' });
-  await expect(button).toBeVisible();
-  await button.click();
-}
-
 /** Connect to a server through the card, and turn the timeline to the synthetic patient. */
 async function connect(
   page: Page,
   address: string,
   from: 'empty state' | 'history' = 'empty state',
 ): Promise<void> {
-  await openServerCard(page, from);
-  const card = page.locator('app-server-panel');
-  await card.getByLabel('Address of an Open RT Studio server').fill(address);
-  await card.getByRole('button', { name: 'Connect' }).click();
-  await expect(card.getByRole('status')).toContainText('Connected');
-  await card.getByRole('button', { name: new RegExp(THORAX_PATIENT.id) }).click();
+  const card = await connectTo(page, address, from);
+  // Any study of the patient leads to their timeline.
+  await studyRows(card).filter({ hasText: THORAX_PATIENT.id }).first().click();
   await expect(card).toHaveCount(0);
   await expect(page.locator('.study-tile')).toHaveCount(2);
 }
@@ -232,7 +210,7 @@ test('a server that was not told to allow this page gives it nothing', async ({ 
     await expect(card.getByRole('alert')).toContainText('could not be reached');
     await expect(card.getByRole('alert')).toContainText('allowedOrigins');
     // Nothing of the server reached the page.
-    await expect(page.locator('.server-patient')).toHaveCount(0);
+    await expect(page.locator('.browser-study')).toHaveCount(0);
     await expect(
       page.locator('app-empty-state').getByRole('button', { name: 'Connect to a server…' }),
     ).toBeVisible();

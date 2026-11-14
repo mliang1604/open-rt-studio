@@ -24,7 +24,8 @@ application. Never commit patient data or real DICOM files
 - `apps/web`: the Angular application. The viewer is one large component
   (`src/app/viewer`) with controllers and stores beside it; newer pieces are
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
-  `metadata-panel/`, `dvr-panel/`, `shortcut-help/`). The viewer route is
+  `metadata-panel/`, `dvr-panel/`, `shortcut-help/`, `server-panel/`,
+  `server-browser/`). The viewer route is
   loaded on demand, so it is not in the initial bundle.
 - `services/server`: the Node server, a small PACS. `src/core` is the server
   without the network (no port, no environment), which the desktop

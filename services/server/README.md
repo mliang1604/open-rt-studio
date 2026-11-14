@@ -63,27 +63,27 @@ Everything is under `/api/v1`, and is described by the server itself as
 OpenAPI 3.1 at `/api/v1/openapi.json`. The description is made from the
 routes, so what is served is what is described.
 
-| Method and path                      | Answer                                                             |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| `GET /health`                        | 200 while the server takes work, 503 once it is stopping           |
-| `GET /api/v1/counts`                 | How many patients, studies, series and instances                   |
-| `GET /api/v1/patients`               | Patients, by name                                                  |
-| `GET /api/v1/studies`                | Studies, the latest first                                          |
-| `GET /api/v1/studies/{uid}`          | One study                                                          |
-| `GET /api/v1/studies/{uid}/series`   | Its series, by series number                                       |
-| `GET /api/v1/series/{uid}`           | One series                                                         |
-| `GET /api/v1/series/{uid}/instances` | Its instances, by instance number                                  |
-| `GET /api/v1/series/{uid}/related`   | Its structure sets, plans, doses, registrations, same-frame series |
-| `GET /api/v1/instances/{uid}`        | One instance, and what it refers to                                |
-| `GET /api/v1/instances/{uid}/file`   | Its DICOM file, streamed; `Range` and `If-None-Match` are honoured |
-| `POST /api/v1/instances`             | Upload one DICOM file as `application/dicom`                       |
-| `GET /api/v1/openapi.json`           | The description                                                    |
-| `GET /api/v1/job-kinds`              | The kinds of job this server can run                               |
-| `GET /api/v1/jobs`                   | Jobs, the latest first; `status` filters                           |
-| `POST /api/v1/jobs`                  | Submit a job: `{"kind": "...", "inputs": {...}}`                   |
-| `GET /api/v1/jobs/{id}`              | One job: status, progress, result                                  |
-| `GET /api/v1/jobs/{id}/log`          | The last lines its worker wrote                                    |
-| `POST /api/v1/jobs/{id}/cancel`      | Stop it                                                            |
+| Method and path                      | Answer                                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| `GET /health`                        | 200 while the server takes work, 503 once it is stopping                   |
+| `GET /api/v1/counts`                 | How many patients, studies, series and instances                           |
+| `GET /api/v1/patients`               | Patients, by name                                                          |
+| `GET /api/v1/studies`                | Studies: the latest first, or `order=oldest`, or `order=patient` (by name) |
+| `GET /api/v1/studies/{uid}`          | One study                                                                  |
+| `GET /api/v1/studies/{uid}/series`   | Its series, by series number                                               |
+| `GET /api/v1/series/{uid}`           | One series                                                                 |
+| `GET /api/v1/series/{uid}/instances` | Its instances, by instance number                                          |
+| `GET /api/v1/series/{uid}/related`   | Its structure sets, plans, doses, registrations, same-frame series         |
+| `GET /api/v1/instances/{uid}`        | One instance, and what it refers to                                        |
+| `GET /api/v1/instances/{uid}/file`   | Its DICOM file, streamed; `Range` and `If-None-Match` are honoured         |
+| `POST /api/v1/instances`             | Upload one DICOM file as `application/dicom`                               |
+| `GET /api/v1/openapi.json`           | The description                                                            |
+| `GET /api/v1/job-kinds`              | The kinds of job this server can run                                       |
+| `GET /api/v1/jobs`                   | Jobs, the latest first; `status` filters                                   |
+| `POST /api/v1/jobs`                  | Submit a job: `{"kind": "...", "inputs": {...}}`                           |
+| `GET /api/v1/jobs/{id}`              | One job: status, progress, result                                          |
+| `GET /api/v1/jobs/{id}/log`          | The last lines its worker wrote                                            |
+| `POST /api/v1/jobs/{id}/cancel`      | Stop it                                                                    |
 
 ```sh
 curl -X POST -H 'Content-Type: application/dicom' --data-binary @slice.dcm \

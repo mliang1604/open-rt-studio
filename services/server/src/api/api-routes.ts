@@ -12,7 +12,12 @@ import {
   type RouteRequest,
   type RouteResponse,
 } from '../host/routes.js';
-import { InvalidQueryError, type Page } from '../pacs-index/pacs-index.js';
+import {
+  InvalidQueryError,
+  STUDY_ORDERS,
+  type Page,
+  type StudyOrder,
+} from '../pacs-index/pacs-index.js';
 import { isUid } from '../uid.js';
 import { openApiDocument } from './openapi.js';
 
@@ -58,6 +63,9 @@ export const BAD_REQUEST = {
 } as const;
 
 /** A path part that must be a UID. */
+const isStudyOrder = (value: string): value is StudyOrder =>
+  (STUDY_ORDERS as readonly string[]).includes(value);
+
 function uidOf(request: RouteRequest, name: string): string {
   const value = request.params[name];
   if (!isUid(value)) throw new HttpError(400, 'invalid-uid', 'That is not a UID.');
@@ -205,6 +213,13 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
       in: 'query',
       description: 'Studies with at least one series of this modality, such as `CT` or `RTDOSE`.',
     },
+    {
+      name: 'order',
+      in: 'query',
+      description:
+        "The order of the list: `newest` first (the default), `oldest` first, or by `patient` name with each patient's latest study first. Undated studies are last.",
+      schema: { type: 'string', enum: [...STUDY_ORDERS], default: 'newest' },
+    },
     LIMIT,
     OFFSET,
   ];
@@ -265,8 +280,17 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
       handle: (request) => {
         const get = queryOf(request, studyParameters);
         const key = get('patientKey');
+        const order = get('order') ?? 'newest';
+        if (!isStudyOrder(order)) {
+          throw new HttpError(
+            400,
+            'invalid-parameter',
+            `order must be one of: ${STUDY_ORDERS.join(', ')}.`,
+          );
+        }
         return listOf(pageOf(get), (page) =>
           index.findStudies({
+            order,
             patientKey:
               key === undefined ? undefined : whole(key, 'patientKey', 0, Number.MAX_SAFE_INTEGER),
             patientId: get('patientId'),
@@ -281,7 +305,7 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
       },
       doc: {
         tag: 'Browse',
-        summary: 'List studies, the latest first',
+        summary: 'List studies, the latest first unless another order is asked for',
         description: 'The parameters are joined by "and".',
         parameters: studyParameters,
         responses: {

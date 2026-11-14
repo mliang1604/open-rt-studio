@@ -9,8 +9,10 @@ import {
   writeStructureSet,
 } from '@open-rt-studio/dicom';
 import {
+  populationStudies,
   SYNTHETIC_RT_COURSE as COURSE,
   SYNTHETIC_STUDY,
+  syntheticPopulation,
   syntheticRtCourse,
 } from '@open-rt-studio/testdata';
 
@@ -19,6 +21,8 @@ import {
   serverAddress,
   ServerError,
   ServerSource,
+  STUDIES_PER_PAGE,
+  studyQuery,
   type ServerSourceOptions,
 } from './server-source';
 import { fakeServer, parseHere, type FakeServer } from './server-testing';
@@ -101,6 +105,54 @@ describe('serverAddress', () => {
   );
 });
 
+describe('studyQuery', () => {
+  const asked = (search: Parameters<typeof studyQuery>[0]): Record<string, string> =>
+    Object.fromEntries(new URLSearchParams(studyQuery(search)));
+
+  it('asks for the first part of everything, the latest first, when nothing is searched for', () => {
+    expect(asked({})).toEqual({ order: 'newest', limit: String(STUDIES_PER_PAGE), offset: '0' });
+  });
+
+  it('looks for a typed name anywhere in the name, and takes a pattern as it is', () => {
+    expect(asked({ name: ' thor ' })['patientName']).toBe('*thor*');
+    expect(asked({ name: 'ALD*' })['patientName']).toBe('ALD*');
+    expect(asked({ name: 'O?K^*' })['patientName']).toBe('O?K^*');
+    expect('patientName' in asked({ name: '   ' })).toBe(false);
+  });
+
+  it('asks for a Patient ID whole, as typed', () => {
+    expect(asked({ patientId: ' SYN-1003 ' })['patientId']).toBe('SYN-1003');
+    expect(asked({ patientId: 'SYN-10*' })['patientId']).toBe('SYN-10*');
+    expect('patientId' in asked({ patientId: '' })).toBe(false);
+  });
+
+  it('makes a range of the two dates, open at an end that is left out', () => {
+    expect(asked({ from: '20260101', to: '20260131' })['date']).toBe('20260101-20260131');
+    expect(asked({ from: '20260101' })['date']).toBe('20260101-');
+    expect(asked({ to: '20260131' })['date']).toBe('-20260131');
+    expect(asked({ from: '20260105', to: '20260105' })['date']).toBe('20260105');
+    expect('date' in asked({ from: '', to: '' })).toBe(false);
+  });
+
+  it('asks for a modality, an order and a part of the list', () => {
+    expect(asked({ modality: 'MR', order: 'patient', page: 2 })).toEqual({
+      modality: 'MR',
+      order: 'patient',
+      limit: String(STUDIES_PER_PAGE),
+      offset: String(2 * STUDIES_PER_PAGE),
+    });
+    expect(asked({ page: -1 })['offset']).toBe('0');
+  });
+
+  it('writes what was typed so that it stays one value', () => {
+    const query = studyQuery({ name: 'a&order=oldest', patientId: 'x y#z' });
+    const read = new URLSearchParams(query);
+    expect(read.get('patientName')).toBe('*a&order=oldest*');
+    expect(read.get('patientId')).toBe('x y#z');
+    expect(read.getAll('order')).toEqual(['newest']);
+  });
+});
+
 describe('ServerSource', () => {
   it('lists the server’s patients on connecting, and no history until one is chosen', async () => {
     const { source, server } = await connected();
@@ -149,6 +201,67 @@ describe('ServerSource', () => {
       expect(series.imageCount, series.modality ?? '').toBe(local.imageCount);
     }
     expect(listed.find((series) => series.modality === 'RTDOSE')!.imageCount).toBeGreaterThan(1);
+  });
+
+  it('finds studies, each with its patient, and asks the server for exactly the search', async () => {
+    const { source, server } = await connected();
+    const found = await source.findStudies({ name: 'synth', modality: 'CT', order: 'oldest' });
+    expect(server.asked.at(-1)).toBe(
+      `/studies?${studyQuery({ name: 'synth', modality: 'CT', order: 'oldest' })}`,
+    );
+    expect(found.page).toBe(0);
+    expect(found.more).toBe(false);
+    expect(found.studies.map((study) => study.studyUid)).toEqual([
+      COURSE.planningStudy,
+      COURSE.followUpStudy,
+    ]);
+    expect(found.studies[0]).toMatchObject({
+      patient: {
+        key: '1',
+        patientId: SYNTHETIC_STUDY.patient.id,
+        name: SYNTHETIC_STUDY.patient.name,
+      },
+      date: SYNTHETIC_STUDY.date,
+      description: SYNTHETIC_STUDY.description,
+      series: 5,
+    });
+    expect(found.studies[0].modalities).toContain('RTDOSE');
+  });
+
+  it('gives a search in parts, and says when there is more', async () => {
+    const server = fakeServer(syntheticPopulation());
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    const total = populationStudies().length;
+    const first = await source.findStudies();
+    expect(first.studies).toHaveLength(STUDIES_PER_PAGE);
+    expect(first.more).toBe(true);
+    const second = await source.findStudies({ page: 1 });
+    expect(second.page).toBe(1);
+    expect(second.studies).toHaveLength(total - STUDIES_PER_PAGE);
+    expect(second.more).toBe(false);
+    // No study twice.
+    expect(new Set([...first.studies, ...second.studies].map((study) => study.studyUid)).size).toBe(
+      total,
+    );
+  });
+
+  it('turns to a patient a search found, who need not be among those listed', async () => {
+    const server = fakeServer(syntheticPopulation());
+    const source = new ServerSource(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    // Not connected through refresh: no patient is listed.
+    expect(source.patients()).toEqual([]);
+    const { studies } = await source.findStudies({ order: 'oldest' });
+    const wanted = studies[3].patient;
+    await source.selectPatient(wanted);
+    expect(source.currentPatient()).toMatchObject({ ...wanted });
+    expect(source.currentPatient()!.studies.length).toBeGreaterThan(0);
+    for (const study of source.currentPatient()!.studies) {
+      expect(
+        populationStudies().find((one) => one.study.date === study.date)!.study.patient.id,
+      ).toBe(wanted.patientId);
+    }
+    // A key alone still has to be one of the listed.
+    await expect(source.selectPatient('999')).rejects.toThrow('not among those listed');
   });
 
   it('keeps to the patient asked for last', async () => {
