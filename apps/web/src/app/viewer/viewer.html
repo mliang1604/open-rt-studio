@@ -791,6 +791,12 @@
               (setRemoved)="onPaintedSetRemove($event)"
             />
           }
+          @if (roiCtl.compareChoices().length > 1) {
+            <app-structure-compare
+              [choices]="roiCtl.compareChoices()"
+              [volume]="layersCtl.volume()"
+            />
+          }
         </div>
       </details>
     }

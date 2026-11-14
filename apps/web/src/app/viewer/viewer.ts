@@ -60,6 +60,7 @@ import {
 } from './editable-structures-store';
 import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
+import { StructureCompare } from './structure-compare/structure-compare';
 import { ManualRegistration } from './manual-registration/manual-registration';
 import { ManualRegistrationController } from './manual-registration/manual-registration-controller';
 import { LayersController } from './layers-controller';
@@ -125,6 +126,7 @@ const MAX_ZOOM = 20;
     PaintedStructures,
     ServerPanel,
     ManualRegistration,
+    StructureCompare,
   ],
   providers: [
     MeasurementStore,

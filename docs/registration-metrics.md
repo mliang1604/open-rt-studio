@@ -140,6 +140,37 @@ it.
   per-landmark table.
 - #86 (contour metrics): lead with surface distances (mean, 95th
   percentile, maximum); Dice beside them, not instead.
+
+## Contour metrics as built
+
+What #86 measures is stated in `packages/dicom/src/contour-metrics.ts`, and
+with the numbers where they are shown. In short:
+
+- The two structures are filled into voxels of the image they are shown on,
+  as a structure is when it is taken up for editing: a voxel is in when its
+  centre is inside a contour on its slice.
+- A surface voxel is one with a face neighbour outside. The distance from it
+  to the other surface is between voxel centres, in mm, to the nearest
+  surface voxel of the other. It is exact for the voxels (a distance
+  transform, checked against trying every pair), and so in steps of the
+  grid.
+- Each direction has its mean, 95th percentile (nearest rank) and maximum.
+  The mean that is shown is over both directions' distances together; the
+  95th percentile and the maximum are the larger of the two directions'.
+  Both directions are shown beside them.
+- Dice is twice the voxels in both over the voxels in the one plus the
+  other.
+
+Other programs choose otherwise at each of these points (how a surface is
+taken, whether the two directions are pooled or averaged, how a percentile
+is read), and their numbers will differ from these by about a voxel. That
+was not measured against another program here.
+
+Not done: a grid whose slices are tilted is refused. Painted structures are
+not offered, only those of the structure sets. The work is done in the
+page, which does not answer meanwhile: about a second and a half for a
+lung, four for a body outline, on a grid of 512 × 512 × 200.
+
 - #87 (report): the wording rules above.
 
 ## Sources

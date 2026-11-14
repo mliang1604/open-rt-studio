@@ -1,0 +1,63 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<span class="title">Compare two structures</span>
+<!-- The selection comes from each option's [selected]: a select's [value] is
+     applied before its options are there. -->
+<label>
+  <span>First</span>
+  <select (change)="choose('first', $event)" data-compare="first">
+    @for (choice of choices(); track choice.key) {
+      <option [value]="choice.key" [selected]="choice === first()">{{ choice.label }}</option>
+    }
+  </select>
+</label>
+<label>
+  <span>Second</span>
+  <select (change)="choose('second', $event)" data-compare="second">
+    @for (choice of choices(); track choice.key) {
+      <option [value]="choice.key" [selected]="choice === second()">{{ choice.label }}</option>
+    }
+  </select>
+</label>
+<button
+  type="button"
+  (click)="run()"
+  [disabled]="!canCompare() || busy()"
+  [title]="
+    canCompare()
+      ? 'Measure the distances between the two surfaces, and their overlap'
+      : 'Choose two different structures'
+  "
+>
+  {{ busy() ? 'Comparing…' : 'Compare' }}
+</button>
+@if (shown(); as made) {
+  @if (made.problem; as problem) {
+    <p class="problem" role="alert">Not compared. {{ problem }}</p>
+  } @else {
+    <table>
+      <caption>
+        {{
+          made.first.label
+        }}
+        and
+        {{
+          made.second.label
+        }}
+      </caption>
+      <tbody>
+        @for (row of rows(); track row.name) {
+          <tr>
+            <th scope="row">{{ row.name }}</th>
+            <td>{{ row.value }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+    @for (note of notes(); track $index) {
+      <p class="note">{{ note }}</p>
+    }
+  }
+}

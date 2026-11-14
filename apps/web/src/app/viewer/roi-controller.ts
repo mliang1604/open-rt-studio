@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { structureChoices } from './structure-compare/structure-compare';
 import { Injectable, computed, inject, signal, type Signal } from '@angular/core';
 import {
   loftRoiMesh,
@@ -106,6 +107,9 @@ export class RoiController {
     const state = this.deps!.load();
     return state.status === 'ready' ? state.result.structureSets : [];
   });
+
+  /** Every structure of those sets, to choose two of for a comparison (#86). */
+  readonly compareChoices = computed(() => structureChoices(this.structureSets()));
 
   /** Whether any structure set annotates the displayed series (gates the panel). */
   readonly hasStructures = computed(() => this.structureSets().length > 0);
