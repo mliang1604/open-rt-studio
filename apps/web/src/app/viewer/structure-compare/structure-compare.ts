@@ -5,14 +5,16 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
+  inject,
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
-  compareRois,
   type Roi,
   type RoiComparison,
   type StructureSet,
@@ -20,6 +22,7 @@ import {
 } from '@open-rt-studio/dicom';
 
 import type { ReportSection } from '../report/registration-report';
+import { compareInWorker, type CompareRunner } from './compare-in-worker';
 import { structureSetLabel } from '../roi-legend';
 
 /** A structure that may be chosen for a comparison. */
@@ -147,8 +150,8 @@ export class StructureCompare {
   readonly choices = input.required<readonly StructureChoice[]>();
   /** The image they are shown on, whose grid they are compared on. */
   readonly volume = input.required<Volume | null>();
-  /** Works a comparison out. A spec may give another. */
-  readonly compare = input<(volume: Volume, first: Roi, second: Roi) => RoiComparison>(compareRois);
+  /** Works a comparison out, off the page's own thread. A spec may give another. */
+  readonly compare = input<CompareRunner>(compareInWorker);
 
   private readonly firstKey = signal<string | null>(null);
   private readonly secondKey = signal<string | null>(null);
@@ -203,6 +206,15 @@ export class StructureCompare {
 
   constructor() {
     effect(() => this.reported.emit(this.report()));
+    // A comparison is of two structures on an image: when any of the three
+    // is another, the one under way is of nothing that is asked for.
+    effect(() => {
+      this.volume();
+      this.first();
+      this.second();
+      untracked(() => this.abandon());
+    });
+    inject(DestroyRef).onDestroy(() => this.abandon());
   }
 
   protected choose(which: 'first' | 'second', event: Event): void {
@@ -210,24 +222,40 @@ export class StructureCompare {
     (which === 'first' ? this.firstKey : this.secondKey).set(event.target.value);
   }
 
+  /** The comparison under way, to abandon it; null when none is. */
+  private running: AbortController | null = null;
+
   /**
-   * Work the comparison out. It takes a moment for large structures, and
-   * happens in the page: the button says so first, then the numbers come.
+   * Work the comparison out. It takes seconds for large structures, and
+   * happens off the page's own thread: the button says that it is under way,
+   * and the page goes on answering. Choosing other structures, another image
+   * or leaving the form abandons it.
    */
   protected run(): void {
     const [volume, first, second] = [this.volume(), this.first(), this.second()];
     if (!volume || !first || !second || !this.canCompare() || this.busy()) return;
+    const running = new AbortController();
+    this.running = running;
     this.busy.set(true);
-    setTimeout(() => {
-      try {
-        const found = this.compare()(volume, first.roi, second.roi);
-        this.made.set({ volume, first, second, found, problem: null });
-      } catch (error) {
-        const problem = error instanceof Error ? error.message : String(error);
-        this.made.set({ volume, first, second, found: null, problem });
-      } finally {
-        this.busy.set(false);
-      }
-    });
+    const made = (found: RoiComparison | null, problem: string | null): void => {
+      // An abandoned comparison says nothing, whatever came of it.
+      if (this.running !== running) return;
+      this.running = null;
+      this.busy.set(false);
+      this.made.set({ volume, first, second, found, problem });
+    };
+    this.compare()(volume, first.roi, second.roi, running.signal).then(
+      (found) => made(found, null),
+      (error: unknown) => made(null, error instanceof Error ? error.message : String(error)),
+    );
+  }
+
+  /** Abandon the comparison under way, if there is one. */
+  private abandon(): void {
+    const running = this.running;
+    if (!running) return;
+    this.running = null;
+    this.busy.set(false);
+    running.abort();
   }
 }

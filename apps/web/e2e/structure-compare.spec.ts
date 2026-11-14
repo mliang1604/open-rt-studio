@@ -37,8 +37,11 @@ test('two structures are compared: surface distances first, in mm, and the overl
   await form(page).locator('[data-compare="first"]').selectOption({ label: 'GTV' });
   await form(page).locator('[data-compare="second"]').selectOption({ label: 'PTV_60' });
   await expect(form(page).locator('table')).toHaveCount(0);
+  // Worked out in a worker of its own, so the page goes on answering (#237).
+  const worker = page.waitForEvent('worker');
   await form(page).getByRole('button', { name: 'Compare' }).click();
   await expect(form(page).locator('caption')).toHaveText(/GTV\s+and\s+PTV_60/);
+  expect((await worker).url()).toContain('worker');
 
   // The distances lead, then the overlap, then the volumes.
   await expect(form(page).locator('tbody th')).toHaveText([
