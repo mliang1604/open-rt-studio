@@ -1,0 +1,28 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# What an image build is not sent. The server's image (services/server/Dockerfile)
+# is built from the repository root and copies what it needs by name.
+.git
+.github
+**/node_modules
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+**/.angular
+docs
+sample-data
+native
+# The viewer and the desktop application are not in the server's image; their
+# manifests are, for the lockfile to be read.
+apps/*/*
+!apps/*/package.json
+# Data, certificates and settings of whoever builds: never in an image.
+**/*.sqlite
+**/*.sqlite-*
+**/*.pem
+**/*.key
+**/.env
+**/.env.*

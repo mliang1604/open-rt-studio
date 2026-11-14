@@ -349,6 +349,20 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   Status: **decided, and Michael's to overturn**, most of all the choice to
   stop answering when the log cannot be written.
 
+- **The server in a container** (part of #59). One image, built from the
+  repository root in stages: the last holds the built server, the DICOM
+  package and their runtime dependencies, and runs as a user that is not
+  root, with everything it keeps in one volume. The base is the official
+  `node` image on Debian (slim), by major version; nothing else is added to
+  it. The image's health check is the server's own `health` command, so no
+  `curl` is installed for it. `compose.yaml` publishes the port to this
+  machine only, because the server speaks plain HTTP until it is given a
+  certificate. CI builds the image and checks it from outside
+  (`scripts/container-check.sh`); it publishes nothing. Not there: a
+  published image, PostgreSQL in the compose file (#44), DICOM test peers
+  (#49). Status: **decided, and Michael's to overturn**: the base image, and
+  whether and where an image is published.
+
 - The file store (#42) names an instance's files by the SHA-256 of its SOP
   Instance UID, so that paths hold no patient identifier and not the UID
   either. It keeps the bytes as an ordinary DICOM file beside a small record

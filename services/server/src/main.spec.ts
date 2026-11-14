@@ -356,6 +356,20 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
     }
   }, 30_000);
 
+  it('has a health command, which says by its exit code whether the server answers', async () => {
+    const server = run(OPEN);
+    const port = await listeningPort(server);
+    const asked = { ...OPEN, OPEN_RT_STUDIO_PORT: String(port) };
+    const well = run(asked, ['health']);
+    expect(await well.exited).toBe(0);
+    // It says nothing: the exit code is the answer.
+    expect(well.stdout() + well.stderr()).toBe('');
+
+    server.child.kill('SIGTERM');
+    await server.exited;
+    expect(await run(asked, ['health']).exited).toBe(1);
+  }, 20_000);
+
   it('does not start on a wrong setting: it says which, and exits with 2', async () => {
     const server = run({ OPEN_RT_STUDIO_PORT: 'eighty' });
     expect(await server.exited).toBe(2);

@@ -78,7 +78,9 @@ CI runs the same commands in the `Build & test` job. It and `End-to-end smoke`
 (`npm run e2e:smoke`, only `apps/web/e2e/smoke.spec.ts`) are the required
 checks on `main`. Keep both job names stable. A third job, `End-to-end`, runs
 the whole Playwright suite; it is not required by the ruleset, so wait for it
-yourself before merging.
+yourself before merging. A fourth, `Container`, builds the server's image and
+runs `scripts/container-check.sh` against it; wait for it too when a change
+touches the server, the Dockerfile or `compose.yaml`.
 
 ## Patterns
 

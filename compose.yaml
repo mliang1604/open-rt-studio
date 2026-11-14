@@ -1,0 +1,44 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# The Open RT Studio server in a container. Not for clinical use.
+#
+#   docker compose up --build --detach
+#   docker compose run --rm server account add <name> --admin
+#
+# The second line makes the first account; until there is one, no one can log
+# in. See services/server/README.md ("In a container").
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: services/server/Dockerfile
+    image: open-rt-studio-server
+    ports:
+      # Reached from this machine only. The server speaks plain HTTP unless it
+      # is given a certificate: before this line is widened to other machines,
+      # give it one (OPEN_RT_STUDIO_TLS_CERT and _KEY) or put a proxy that
+      # speaks HTTPS in front.
+      - '127.0.0.1:${OPEN_RT_STUDIO_PUBLISHED_PORT:-4300}:4300'
+    environment:
+      # The web origins whose pages may call the server from a browser, with
+      # commas between: where the viewer is served from.
+      OPEN_RT_STUDIO_ALLOWED_ORIGINS: ${OPEN_RT_STUDIO_ALLOWED_ORIGINS:-}
+      OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS: ${OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS:-}
+    volumes:
+      # Instances, the index, accounts and the audit log. Guard it like the data it is.
+      - data:/data
+    restart: unless-stopped
+    # The server writes to its data and nowhere else.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  data:
