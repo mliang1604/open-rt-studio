@@ -6,7 +6,13 @@ import { TestBed } from '@angular/core/testing';
 import { targetRegistrationErrorOfMatrix, IDENTITY_MAT4 } from '@open-rt-studio/dicom';
 
 import type { LandmarkRow } from './landmark-controller';
-import { LandmarkPanel, errorNote, errorSummary } from './landmark-panel';
+import {
+  LandmarkPanel,
+  MEASURED_IN,
+  errorNote,
+  errorSummary,
+  landmarkSection,
+} from './landmark-panel';
 
 const ERROR = targetRegistrationErrorOfMatrix(
   [
@@ -214,5 +220,37 @@ describe('LandmarkPanel', () => {
   it('cannot save or open where the images name no frame of reference', () => {
     const { host } = setup({ canExchange: false });
     expect(host.querySelector<HTMLInputElement>('input[type="file"]')!.disabled).toBe(true);
+  });
+});
+
+describe('the landmarks as a section of the registration report', () => {
+  it('holds the panel’s numbers and notes', () => {
+    const section = landmarkSection(ROWS, ERROR, 'Placed by registration “REG”', 'fixed')!;
+    expect(section.title).toBe('Landmarks: target registration error');
+    expect(section.tables[0]).toEqual({
+      caption: 'Target registration error',
+      rows: errorSummary(ERROR),
+    });
+    expect(section.tables[1].caption).toBe('At each landmark');
+    expect(section.tables[1].rows.slice(0, 2)).toEqual([
+      { name: 'Carina', value: '3.00 mm   L +3.0  P +0.0  S +0.0' },
+      { name: 'Apex', value: '4.00 mm   L +0.0  P −4.0  S +0.0' },
+    ]);
+    // A landmark with one point is listed, without a number.
+    expect(section.tables[1].rows[2]).toEqual({ name: 'Rib', value: '–   one point not placed' });
+    expect(section.notes).toEqual([
+      'Placed by registration “REG”.',
+      MEASURED_IN.fixed,
+      errorNote(ERROR.count),
+    ]);
+    expect(landmarkSection(ROWS, ERROR, 'x', 'moving')!.notes[1]).toBe(MEASURED_IN.moving);
+  });
+
+  it('is none while no landmark has both its points', () => {
+    const none = targetRegistrationErrorOfMatrix(
+      [{ name: 'Rib', fixed: [0, 0, 0], moving: null }],
+      IDENTITY_MAT4,
+    );
+    expect(landmarkSection(ROWS.slice(2), none, 'x', 'fixed')).toBeNull();
   });
 });

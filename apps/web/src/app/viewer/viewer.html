@@ -461,6 +461,7 @@
             [choices]="roiCtl.compareChoices()"
             [volume]="layersCtl.volume()"
             [back]="layersCtl.fieldWayBack()"
+            (reported)="report.setFieldMeasures($event)"
           />
         </div>
       </details>
@@ -490,6 +491,26 @@
             (pointCleared)="landmarks.clearPoint($event.id, $event.side)"
             (exportAsked)="landmarks.exportFile()"
             (imported)="landmarks.importText($event)"
+          />
+        </div>
+      </details>
+    }
+
+    @if (report.available()) {
+      <details
+        class="tool-group"
+        role="group"
+        aria-label="Registration report"
+        title="Save what has been measured of the registration as one file"
+      >
+        <summary class="tool-group-label">Report</summary>
+        <div class="tool-group-body">
+          <app-report-panel
+            [parts]="report.partStates()"
+            [identifiers]="report.identifiers()"
+            [busy]="report.busy()"
+            (identifiersToggled)="report.toggleIdentifiers()"
+            (saveAsked)="report.save()"
           />
         </div>
       </details>
@@ -872,6 +893,7 @@
             <app-structure-compare
               [choices]="roiCtl.compareChoices()"
               [volume]="layersCtl.volume()"
+              (reported)="report.setComparison($event)"
             />
           }
         </div>

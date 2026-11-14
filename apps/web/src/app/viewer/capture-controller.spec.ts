@@ -203,6 +203,8 @@ describe('CaptureController', () => {
           draws,
           getContext: () => ({ drawImage: (...args: unknown[]) => draws.push(args) }),
           toBlob: (done: (blob: Blob) => void) => done(new Blob(['png'])),
+          // Names the region it was drawn from, so a test can tell pictures apart.
+          toDataURL: () => `data:image/png;base64,${String(draws[0][3])}x${String(draws[0][4])}`,
           captureStream: vi.fn(() => ({ getTracks: () => [{ stop: trackStop }] })),
         };
         made.push(fake);
@@ -352,6 +354,44 @@ describe('CaptureController', () => {
       runAllFrames();
       expect(made[0].draws).toHaveLength(ROTATION_FRAMES);
       expect(download).toHaveBeenCalledOnce();
+    });
+
+    it('takes a picture of each region asked for, in the frame just drawn, no larger than asked', async () => {
+      const canvas = gpuCanvas();
+      const { controller, presentViews } = setup({ canvas: () => canvas });
+      const taking = controller.pictures(
+        [
+          { rect: PANE, tag: 'coronal' },
+          { rect: { x: 0, y: 0, width: 400, height: 600 }, tag: 'axial' },
+          // Nothing of a region with no size.
+          { rect: { x: 0, y: 0, width: 0, height: 10 }, tag: 'none' },
+        ],
+        200,
+      );
+      expect(presentViews).not.toHaveBeenCalled();
+      runAllFrames();
+      expect(await taking).toEqual([
+        { tag: 'coronal', dataUrl: 'data:image/png;base64,400x300' },
+        { tag: 'axial', dataUrl: 'data:image/png;base64,400x600' },
+      ]);
+      expect(presentViews).toHaveBeenCalledOnce();
+      // The longest side is 200 pixels; the whole region is drawn into it.
+      expect(made.map((one) => [one.width, one.height])).toEqual([
+        [200, 150],
+        [133, 200],
+      ]);
+      expect(made[0].draws).toEqual([[canvas, 400, 0, 400, 300, 0, 0, 200, 150]]);
+    });
+
+    it('takes no pictures while nothing can be drawn', async () => {
+      expect(
+        await setup({ isReady: () => false }).controller.pictures([{ rect: PANE, tag: 'x' }]),
+      ).toEqual([]);
+      TestBed.resetTestingModule();
+      expect(
+        await setup({ renderer: () => null }).controller.pictures([{ rect: PANE, tag: 'x' }]),
+      ).toEqual([]);
+      expect(made).toHaveLength(0);
     });
 
     it('records the whole canvas when the 3D pane cannot be measured', () => {

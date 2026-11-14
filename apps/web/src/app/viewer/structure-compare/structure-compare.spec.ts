@@ -15,7 +15,9 @@ import {
   StructureCompare,
   comparisonNotes,
   comparisonRows,
+  comparisonSection,
   structureChoices,
+  type ComparisonReport,
   type StructureChoice,
 } from './structure-compare';
 
@@ -229,5 +231,24 @@ describe('StructureCompare', () => {
   it('has nothing to compare on without an image', () => {
     const { button } = setup({ volume: null });
     expect(button().disabled).toBe(true);
+  });
+
+  it('hands what it shows to the registration report, and takes it back when it shows none', () => {
+    const { fixture, choose, run } = setup();
+    const reported: (ComparisonReport | null)[] = [];
+    fixture.componentInstance.reported.subscribe((report) => reported.push(report));
+    run();
+    const report = reported.at(-1)!;
+    expect(report.volume).toBe(VOLUME);
+    expect(report.rois).toEqual([CHOICES[0].roi, CHOICES[1].roi]);
+    expect(report.section).toEqual(comparisonSection('Heart', 'Lung', FOUND));
+    expect(report.section.about).toBe(
+      '“Heart” (the first) against “Lung” (the second), both on the base image’s grid.',
+    );
+    expect(report.section.tables[0].rows).toEqual(comparisonRows(FOUND));
+    expect(report.section.notes).toEqual(comparisonNotes(FOUND));
+    // Another structure is chosen: the numbers are not of it.
+    choose(1, '0:3');
+    expect(reported.at(-1)).toBeNull();
   });
 });

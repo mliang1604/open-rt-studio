@@ -118,6 +118,10 @@ by git) if you want files on disk to open.
 - Landmarks placed in two images, and a registration's error at them (target
   registration error): each landmark's, then the mean, standard deviation
   and maximum, with how many landmarks they are of
+- A registration report: one HTML file with the two images, the
+  registration, pictures of the panes and everything that was measured, the
+  not-for-clinical-use notice on every page, and the patient's identifiers
+  left out unless asked for
 - A patient timeline of everything imported, a metadata panel and a raw DICOM
   tag inspector
 

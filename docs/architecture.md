@@ -673,6 +673,31 @@ pre`), which is what the registration is with nothing deformed. A point is
     arrow is as long on screen as the place is moved in the plane; what is
     moved through the plane is not drawn. On a small image shown large the
     arrows of a strong field run over one another.
+- **The registration report** (#87) is one HTML file made in the page
+  (`viewer/report/`): the two images, the registration and which way it was
+  written and is used, each kind of measurement, and a picture of every
+  pane. Nothing is sent anywhere to make it.
+  - _It says what the panels say._ A section is made where its numbers are
+    made (`landmarkSection`, `comparisonSection`, the field panel's own) and
+    carried to the report whole, notes and all, so the report cannot word a
+    number differently from the screen or lose what it cannot tell. A kind
+    that was not measured is listed as "Not measured.". What was measured of
+    another image, of structures that are gone, or of another field than the
+    one in use is not reported.
+  - _Identifiers are left out unless asked for_: the patient's name and ID,
+    dates, study and series descriptions and every UID. Names typed for
+    registrations, structures and landmarks are kept, and the report says
+    so. The file's name holds nothing of the patient either way. The
+    pictures are of the canvas alone, so no text the page lays over a pane
+    is in them; what is written into an image's own pixels is.
+  - _The file runs nothing and fetches nothing._ Text from files is escaped
+    wherever it is written, the pictures are PNG data in the file, there is
+    no script, and the file's own Content-Security-Policy forbids scripts
+    and anything fetched.
+  - _Not for clinical use on every page_: the notice is the head and the
+    foot of a table that holds the rest, which a browser prints at the top
+    and the bottom of every page. A PDF is the browser's print of the file;
+    none is made here, which would need a library.
 
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), for the matrix object and

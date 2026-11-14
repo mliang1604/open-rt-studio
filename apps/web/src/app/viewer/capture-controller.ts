@@ -177,6 +177,36 @@ export class CaptureController {
   }
 
   /**
+   * PNG pictures of regions of the canvas as they are drawn now, each as a
+   * data address, for a file that carries its own pictures (the registration
+   * report, #87). A region longer than `maxSide` pixels is made smaller. The
+   * pictures are of the canvas alone: nothing laid over it is in them. None
+   * when nothing can be drawn.
+   */
+  pictures(
+    targets: readonly ScreenshotTarget[],
+    maxSide = 800,
+  ): Promise<{ readonly tag: string; readonly dataUrl: string }[]> {
+    const deps = this.deps;
+    const renderer = deps?.renderer();
+    if (!deps || !renderer || !deps.isReady()) return Promise.resolve([]);
+    const views = deps.composeViews();
+    if (!views) return Promise.resolve([]);
+    const canvas = deps.canvas();
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        deps.presentViews(views);
+        const taken: { tag: string; dataUrl: string }[] = [];
+        for (const target of targets) {
+          const region = cropCanvas(canvas, target.rect, maxSide);
+          if (region) taken.push({ tag: target.tag, dataUrl: region.toDataURL('image/png') });
+        }
+        resolve(taken);
+      });
+    });
+  }
+
+  /**
    * Record a 360° spin of the 3D pane to a WebM clip. A MediaRecorder samples the
    * canvas via {@link HTMLCanvasElement.captureStream} while the orbit camera steps
    * through one full revolution ({@link rotationAzimuths}); each step is rendered
@@ -306,15 +336,31 @@ function drawCropped(crop: HTMLCanvasElement, picture: CanvasImageSource, rect: 
  * must run in the same frame the region was rendered. Returns null for a degenerate
  * (sub-pixel) rect or when a 2-D context can't be obtained.
  */
-function cropCanvas(source: HTMLCanvasElement, rect: PaneRect): HTMLCanvasElement | null {
+function cropCanvas(
+  source: HTMLCanvasElement,
+  rect: PaneRect,
+  maxSide = Number.POSITIVE_INFINITY,
+): HTMLCanvasElement | null {
   const width = Math.round(rect.width);
   const height = Math.round(rect.height);
   if (width < 1 || height < 1) return null;
+  // Made smaller, never larger, when a longest side is asked for.
+  const scale = Math.min(1, maxSide / Math.max(width, height));
   const out = document.createElement('canvas');
-  out.width = width;
-  out.height = height;
+  out.width = Math.max(1, Math.round(width * scale));
+  out.height = Math.max(1, Math.round(height * scale));
   const ctx = out.getContext('2d');
   if (!ctx) return null;
-  ctx.drawImage(source, Math.round(rect.x), Math.round(rect.y), width, height, 0, 0, width, height);
+  ctx.drawImage(
+    source,
+    Math.round(rect.x),
+    Math.round(rect.y),
+    width,
+    height,
+    0,
+    0,
+    out.width,
+    out.height,
+  );
   return out;
 }
