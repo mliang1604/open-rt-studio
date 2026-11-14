@@ -25,8 +25,8 @@ application. Never commit patient data or real DICOM files
   (`src/app/viewer`) with controllers and stores beside it; newer pieces are
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
   `metadata-panel/`, `dvr-panel/`, `shortcut-help/`, `server-panel/`,
-  `server-browser/`, `audit-panel/`). The viewer route is
-  loaded on demand, so it is not in the initial bundle.
+  `server-browser/`, `audit-panel/`, `accounts-panel/`). The viewer route
+  is loaded on demand, so it is not in the initial bundle.
 - `services/server`: the Node server, a small PACS. `src/core` is the server
   without the network (no port, no environment), which the desktop
   application will embed; `src/store` keeps instances, `src/pacs-index`

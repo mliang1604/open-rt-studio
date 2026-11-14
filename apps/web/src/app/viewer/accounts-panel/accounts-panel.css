@@ -1,0 +1,180 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+p,
+h3 {
+  margin: 0;
+}
+
+h3 {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+/* A form's fields side by side, wrapping where the card is narrow. */
+.accounts-new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 130px;
+  min-width: 0;
+}
+
+.field.narrow {
+  flex: 0 1 90px;
+}
+
+label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+input,
+select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* As the cards' inputs are, for a select, which the shared styles leave out. */
+select {
+  padding: 5px 9px;
+  font: inherit;
+  color: var(--text);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--accent-ring);
+  outline: none;
+}
+
+.accounts-note {
+  color: var(--muted);
+}
+
+.accounts-problem {
+  color: #ff9d8a;
+}
+
+.accounts-done {
+  color: var(--text);
+}
+
+/* The accounts are what shrinks and scrolls when the card is too tall, and
+   sideways when it is too narrow. */
+.accounts-scroll {
+  min-height: 60px;
+  overflow: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* The corner both stay by: above the names that pass under it. */
+thead th:first-child {
+  left: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+
+tbody tr {
+  border-top: 1px solid var(--glass-border);
+}
+
+/* The name stays in sight when the table is scrolled sideways for what can
+   be done to it, and a long one is cut (whole in its title). */
+.account-name {
+  position: sticky;
+  left: 0;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Not glass: what scrolls under a name must not show through it. */
+  background: var(--panel);
+  font-weight: 500;
+}
+
+/* A role stays readable where the table is squeezed: it scrolls instead. */
+td select {
+  min-width: 84px;
+}
+
+.account-you {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* A disabled account is said to be, in words; the dimming only helps the eye. */
+.disabled .account-name,
+.disabled .account-state {
+  color: var(--muted);
+}
+
+.account-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.account-actions button {
+  padding: 3px 8px;
+}
+
+.unseen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

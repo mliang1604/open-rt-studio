@@ -1,0 +1,174 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (problem(); as message) {
+  <p class="accounts-problem" role="alert">{{ message }}</p>
+}
+@if (done(); as message) {
+  <p class="accounts-done" role="status">{{ message }}</p>
+}
+
+@if (manages()) {
+  <section aria-labelledby="accounts-title">
+    <h3 id="accounts-title">Accounts</h3>
+    @if (accounts(); as list) {
+      <div class="accounts-scroll">
+        <table [attr.aria-busy]="busy()">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Role</th>
+              <th scope="col">State</th>
+              <th scope="col"><span class="unseen">What to do</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (account of list; track account.name) {
+              <tr [class.disabled]="account.disabled">
+                <th scope="row" class="account-name" [title]="account.name">
+                  {{ account.name }}
+                  @if (account.name === me()) {
+                    <span class="account-you">you</span>
+                  }
+                </th>
+                <td>
+                  <select
+                    [attr.aria-label]="'Role of ' + account.name"
+                    [value]="account.role"
+                    [disabled]="busy()"
+                    (change)="onRole(account, $event)"
+                  >
+                    @for (role of roles; track role) {
+                      <option [value]="role" [selected]="role === account.role">{{ role }}</option>
+                    }
+                  </select>
+                </td>
+                <td class="account-state">{{ account.disabled ? 'Disabled' : 'Can log in' }}</td>
+                <td class="account-actions">
+                  <button
+                    type="button"
+                    [disabled]="busy()"
+                    [attr.aria-label]="(account.disabled ? 'Enable ' : 'Disable ') + account.name"
+                    (click)="onDisabled(account)"
+                  >
+                    {{ account.disabled ? 'Enable' : 'Disable' }}
+                  </button>
+                  <!-- One's own is changed below, with the current one: set from
+                       here it would end this login with every other. -->
+                  @if (account.name !== me()) {
+                    <button
+                      type="button"
+                      [disabled]="busy()"
+                      [attr.aria-label]="'Set a new password for ' + account.name"
+                      [attr.aria-expanded]="settingFor() === account.name"
+                      aria-controls="account-password-form"
+                      (click)="onSetPassword(account.name)"
+                    >
+                      Set password…
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    [disabled]="busy()"
+                    [attr.aria-label]="'Remove ' + account.name"
+                    (click)="onRemove(account)"
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else if (busy()) {
+      <p class="accounts-note" role="status">Asking the server…</p>
+    }
+
+    <!-- Under the table and not in it: the table scrolls sideways where the
+         card is narrow, and a form in it would scroll out of sight. -->
+    @if (settingFor(); as name) {
+      <form class="accounts-new" id="account-password-form" (submit)="onPasswordFor(name, $event)">
+        <div class="field">
+          <label for="account-password-new">New password for {{ name }}</label>
+          <input
+            id="account-password-new"
+            type="password"
+            autocomplete="new-password"
+            [value]="setTo()"
+            (input)="onText('setTo', $event)"
+          />
+        </div>
+        <button type="submit" [disabled]="busy()">Set password</button>
+        <button type="button" (click)="onSetPassword(name)">Cancel</button>
+      </form>
+    }
+
+    <form class="accounts-new" aria-label="A new account" (submit)="onCreate($event)">
+      <div class="field">
+        <label for="account-new-name">Name of a new account</label>
+        <input
+          id="account-new-name"
+          type="text"
+          spellcheck="false"
+          autocapitalize="none"
+          autocomplete="off"
+          [value]="newName()"
+          (input)="onText('newName', $event)"
+        />
+      </div>
+      <div class="field">
+        <label for="account-new-password">Its password</label>
+        <input
+          id="account-new-password"
+          type="password"
+          autocomplete="new-password"
+          [value]="newPassword()"
+          (input)="onText('newPassword', $event)"
+        />
+      </div>
+      <div class="field narrow">
+        <label for="account-new-role">Role</label>
+        <select id="account-new-role" [value]="newRole()" (change)="onNewRole($event)">
+          @for (role of roles; track role) {
+            <option [value]="role" [selected]="role === newRole()">{{ role }}</option>
+          }
+        </select>
+      </div>
+      <button type="submit" [disabled]="busy()">Make account</button>
+    </form>
+  </section>
+}
+
+@if (me()) {
+  <section aria-labelledby="own-password-title">
+    <h3 id="own-password-title">Your password</h3>
+    <form class="accounts-new" (submit)="onOwnPassword($event)">
+      <div class="field">
+        <label for="own-current">Current password</label>
+        <input
+          id="own-current"
+          type="password"
+          autocomplete="current-password"
+          [value]="current()"
+          (input)="onText('current', $event)"
+        />
+      </div>
+      <div class="field">
+        <label for="own-next">New password</label>
+        <input
+          id="own-next"
+          type="password"
+          autocomplete="new-password"
+          [value]="next()"
+          (input)="onText('next', $event)"
+        />
+      </div>
+      <button type="submit" [disabled]="busy()">Change password</button>
+    </form>
+    <p class="accounts-note">
+      At least 12 characters. A password goes to the server and is not kept in this browser.
+    </p>
+  </section>
+}

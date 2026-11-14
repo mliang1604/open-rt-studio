@@ -71,24 +71,38 @@
     >
       {{ loggedInAs() ? 'Log out and disconnect' : 'Disconnect' }}
     </button>
-    @if (mayAudit()) {
-      @if (view() === 'audit') {
-        <button type="button" (click)="onView('studies')" title="Back to the studies on the server">
-          Studies
-        </button>
-      } @else {
-        <button
-          type="button"
-          (click)="onView('audit')"
-          title="Who did what on this server. For administrators"
-        >
-          Audit log
-        </button>
-      }
+    @if (shown() !== 'studies') {
+      <button type="button" (click)="onView('studies')" title="Back to the studies on the server">
+        Studies
+      </button>
+    }
+    @if (mayAudit() && shown() !== 'audit') {
+      <button
+        type="button"
+        (click)="onView('audit')"
+        title="Who did what on this server. For administrators"
+      >
+        Audit log
+      </button>
+    }
+    @if (accountsLabel() && shown() !== 'accounts') {
+      <button
+        type="button"
+        (click)="onView('accounts')"
+        [title]="
+          manages()
+            ? 'Who may use this server, and your own password. For administrators'
+            : 'Change the password you log in with'
+        "
+      >
+        {{ accountsLabel() }}
+      </button>
     }
   </div>
-  @if (view() === 'audit' && mayAudit()) {
+  @if (shown() === 'audit') {
     <app-audit-panel [server]="connected" />
+  } @else if (shown() === 'accounts') {
+    <app-accounts-panel [server]="connected" />
   } @else {
     <app-server-browser
       [server]="connected"

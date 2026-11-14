@@ -163,6 +163,15 @@ Viewer (`src/app/viewer`):
   account whose role is `admin`, or on a server without accounts. Like a
   study search, a search of the log is sent when asked for and kept nowhere.
   `e2e/audit.spec.ts` reads the log of the real server.
+- `accounts-panel/`: who may use the server. For an administrator, the
+  accounts: make one, change a role, disable and enable, set a password,
+  remove (the server card's "Accounts"). For anyone logged in, their own
+  password, changed with the current one ("Your password"). What the server
+  refuses (the last administrator, a password too short, a name taken) is
+  shown in its words. A password is typed, sent and kept nowhere: every
+  password field is emptied as soon as what it was typed for has been tried.
+  `e2e/accounts.spec.ts` makes an account on the real server and logs in
+  with it.
 - `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
   the data source and then built. A fetch that takes time shows progress, and
   is abandoned by a later pick, by Cancel or by an import.

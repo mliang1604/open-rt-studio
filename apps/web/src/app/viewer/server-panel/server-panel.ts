@@ -18,12 +18,16 @@ import { ActiveDataSource } from '../../data-source/active-data-source';
 import type { DataSource, PatientSummary } from '../../data-source/data-source';
 import { connectToServer, ServerSource } from '../../data-source/server-source';
 import { PreferencesStore } from '../../preferences-store';
+import { AccountsPanel } from '../accounts-panel/accounts-panel';
 import { AuditPanel } from '../audit-panel/audit-panel';
 import { ServerBrowser } from '../server-browser/server-browser';
 import { confirmLeavePatient } from '../viewer-dom';
 
 /** The address a server listens on unless it was told otherwise. */
 export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
+
+/** What the card holds once a server is connected. */
+type ServerView = 'studies' | 'audit' | 'accounts';
 
 /**
  * The card for reading from a server instead of opened files: its address,
@@ -43,7 +47,7 @@ export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
 @Component({
   selector: 'app-server-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AuditPanel, ServerBrowser],
+  imports: [AccountsPanel, AuditPanel, ServerBrowser],
   templateUrl: './server-panel.html',
   styleUrls: ['../panel-card.css', './server-panel.css'],
   host: {
@@ -115,10 +119,31 @@ export class ServerPanel {
     const who = this.loggedInAs();
     return `Connected: ${this.server()?.label ?? ''}${who ? `, as ${who}` : ''}.`;
   });
-  /** What the card holds once connected: the studies to choose from, or the audit log. */
-  protected readonly view = signal<'studies' | 'audit'>('studies');
+  /**
+   * What the card was asked to hold once connected: the studies to choose
+   * from, the audit log, or the accounts.
+   */
+  protected readonly view = signal<ServerView>('studies');
   /** Whether the audit log is offered: to an administrator, not to a user. */
   protected readonly mayAudit = computed(() => this.server()?.mayReadAudit() ?? false);
+  /** Whether every account is this user's to manage, and not their own password only. */
+  protected readonly manages = computed(() => this.server()?.mayManageAccounts() ?? false);
+  /**
+   * What the accounts are offered as: all of them to an administrator, their
+   * own password to anyone else who is logged in. Null on a server without
+   * accounts, which has neither.
+   */
+  protected readonly accountsLabel = computed(() => {
+    if (this.loggedInAs() === null) return null;
+    return this.manages() ? 'Accounts' : 'Your password';
+  });
+  /** What the card holds: what was asked for, as long as it is this user's to see. */
+  protected readonly shown = computed<ServerView>(() => {
+    const view = this.view();
+    if (view === 'audit' && !this.mayAudit()) return 'studies';
+    if (view === 'accounts' && this.accountsLabel() === null) return 'studies';
+    return view;
+  });
   protected readonly name = signal('');
   /**
    * What is typed as the password. It is held only while the form is filled
@@ -192,7 +217,7 @@ export class ServerPanel {
     this.waiting.set(null);
   }
 
-  protected onView(view: 'studies' | 'audit'): void {
+  protected onView(view: ServerView): void {
     this.problem.set(null);
     this.view.set(view);
   }

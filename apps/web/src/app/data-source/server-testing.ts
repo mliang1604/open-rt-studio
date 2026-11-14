@@ -58,6 +58,10 @@ export interface FakeServer {
   endSessions(): void;
   /** The tokens of the logins in force. */
   readonly tokens: () => string[];
+  /** The accounts as they now are, by name. */
+  readonly accounts: () => { name: string; role: string; disabled: boolean }[];
+  /** The password an account now has; undefined when there is no such account. */
+  readonly passwordOf: (name: string) => string | undefined;
 }
 
 /** An account of a stand-in server that has them. */
@@ -65,6 +69,14 @@ export interface FakeAccount {
   readonly name: string;
   readonly password: string;
   readonly role: 'admin' | 'user';
+}
+
+/** An account as the stand-in holds it. */
+interface Person {
+  name: string;
+  password: string;
+  role: 'admin' | 'user';
+  disabled: boolean;
 }
 
 /** How many wrong passwords in a row lock a name on the stand-in, as on the server. */
@@ -80,7 +92,17 @@ export function fakeServer(
   /** The records of its audit log, the earliest first. Without, it keeps none (404). */
   audit?: readonly AuditEntry[],
 ): FakeServer {
-  const sessions = new Map<string, FakeAccount>();
+  // The accounts as they are now: an administrator changes them (`/accounts`).
+  const people: Person[] = (accounts ?? []).map((one) => ({ ...one, disabled: false }));
+  const byName = (a: Person, b: Person): number => (a.name < b.name ? -1 : 1);
+  const shown = ({ name, role, disabled }: Person) => ({ name, role, disabled, createdAt: '' });
+  /** The logins in force: whose each token is. */
+  const sessions = new Map<string, string>();
+  const endSessionsOf = (name: string, but?: string | null): void => {
+    for (const [token, whose] of sessions) {
+      if (whose === name && token !== but) sessions.delete(token);
+    }
+  };
   const failures = new Map<string, number>();
   let issued = 0;
   const held: Held[] = files.map((file) => {
@@ -113,6 +135,9 @@ export function fakeServer(
     loseUploads: () => (uploadsLost = true),
     endSessions: () => sessions.clear(),
     tokens: () => [...sessions.keys()],
+    accounts: () =>
+      [...people].sort(byName).map(({ name, role, disabled }) => ({ name, role, disabled })),
+    passwordOf: (name) => people.find((one) => one.name === name)?.password,
     pageSize: 1000,
     mostAtOnce: () => most,
     loseNetworkAfter: (count) => (lostAfter = count),
@@ -131,7 +156,8 @@ export function fakeServer(
       // Who is asking, as the real server works it out.
       const sent = new Headers(init?.headers).get('Authorization') ?? '';
       const token = /^Bearer (.+)$/.exec(sent)?.[1] ?? null;
-      const who = token === null ? undefined : sessions.get(token);
+      const holder = token === null ? undefined : sessions.get(token);
+      const who = people.find((one) => one.name === holder && !one.disabled);
       if (path === '/session') {
         const method = init?.method ?? 'GET';
         if (!accounts) {
@@ -146,7 +172,9 @@ export function fakeServer(
               { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '30' } },
             );
           }
-          const account = accounts.find((one) => one.name === key && one.password === password);
+          const account = people.find(
+            (one) => one.name === key && one.password === password && !one.disabled,
+          );
           if (!account) {
             failures.set(key, (failures.get(key) ?? 0) + 1);
             return json(
@@ -156,7 +184,7 @@ export function fakeServer(
           }
           failures.delete(key);
           const made = `token-${++issued}-${account.name}`;
-          sessions.set(made, account);
+          sessions.set(made, account.name);
           return json({
             token: made,
             account: { name: account.name, role: account.role, disabled: false, createdAt: '' },
@@ -176,6 +204,93 @@ export function fakeServer(
       }
       if (accounts && !who) {
         return json({ error: 'unauthenticated', message: 'Log in to use this server.' }, 401);
+      }
+      if (who && (path === '/session/password' || path.startsWith('/accounts'))) {
+        const verb = init?.method ?? 'GET';
+        const sent = (): Record<string, unknown> =>
+          JSON.parse(String(init?.body)) as Record<string, unknown>;
+        const refuse = (error: string, message: string, status = 400): Response =>
+          json({ error, message }, status);
+        const weak = (password: unknown): Response | null =>
+          typeof password === 'string' && [...password].length >= 12
+            ? null
+            : refuse('weak-password', 'A password has at least 12 characters.');
+        if (path === '/session/password' && verb === 'PUT') {
+          const { current, next } = sent();
+          if (current !== who.password) {
+            return refuse('bad-credentials', 'The current password is not right.', 403);
+          }
+          const problem = weak(next);
+          if (problem) return problem;
+          who.password = next as string;
+          endSessionsOf(who.name, token);
+          return new Response(null, { status: 204 });
+        }
+        if (who.role !== 'admin') {
+          return refuse('forbidden', 'This is for an administrator.', 403);
+        }
+        /** Whether no administrator could log in, were this account as given. */
+        const leavesNoAdmin = (
+          one: Person,
+          as: Pick<Person, 'role' | 'disabled'> | null,
+        ): boolean =>
+          !people.some((other) => {
+            const now = other === one ? as : other;
+            return now !== null && now.role === 'admin' && !now.disabled;
+          });
+        const lastAdmin = (): Response =>
+          refuse(
+            'last-admin',
+            'This is the only administrator who can log in. Make another first.',
+            409,
+          );
+        if (path === '/accounts' && verb === 'GET') {
+          return json({ accounts: [...people].sort(byName).map(shown) });
+        }
+        if (path === '/accounts' && verb === 'POST') {
+          const { name, password, role } = sent();
+          const key = String(name).trim().toLowerCase();
+          if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(key)) {
+            return refuse('invalid-name', 'An account name is 1 to 64 lower-case letters.');
+          }
+          const problem = weak(password);
+          if (problem) return problem;
+          if (people.some((one) => one.name === key)) {
+            return refuse('exists', 'There is an account of that name already.', 409);
+          }
+          const made: Person = {
+            name: key,
+            password: password as string,
+            role: role === 'admin' ? 'admin' : 'user',
+            disabled: false,
+          };
+          people.push(made);
+          return json(shown(made), 201);
+        }
+        const named = decodeURIComponent(path.slice('/accounts/'.length));
+        const one = people.find((person) => person.name === named);
+        if (!one) return refuse('not-found', 'There is no account of that name.', 404);
+        if (verb === 'PUT') {
+          const { role, disabled, password } = sent();
+          const problem = password === undefined ? null : weak(password);
+          if (problem) return problem;
+          const as = {
+            role: role === undefined ? one.role : role === 'admin' ? ('admin' as const) : 'user',
+            disabled: typeof disabled === 'boolean' ? disabled : one.disabled,
+          };
+          if (leavesNoAdmin(one, as)) return lastAdmin();
+          Object.assign(one, as);
+          if (password !== undefined) one.password = password as string;
+          if (as.disabled || password !== undefined) endSessionsOf(one.name);
+          return json(shown(one));
+        }
+        if (verb === 'DELETE') {
+          if (leavesNoAdmin(one, null)) return lastAdmin();
+          people.splice(people.indexOf(one), 1);
+          endSessionsOf(one.name);
+          return new Response(null, { status: 204 });
+        }
+        return json({ error: 'method-not-allowed', message: 'Not that way.' }, 405);
       }
       if (audit && (path === '/audit' || path === '/audit/export')) {
         if (who && who.role !== 'admin') {

@@ -207,6 +207,25 @@ export const AUDIT_ACTIONS = [
     'request',
   ],
 ] as const;
+/** The roles an account can have, as the server names them. */
+export const ACCOUNT_ROLES = ['admin', 'user'] as const;
+
+/** An account of a server, as its administrator sees it. A password is never part of it. */
+export interface ServerAccount {
+  readonly name: string;
+  readonly role: string;
+  readonly disabled: boolean;
+  /** ISO 8601. */
+  readonly createdAt: string;
+}
+
+/** What to change of an account. What is left out stays as it is. */
+export interface AccountChange {
+  readonly role?: string;
+  readonly disabled?: boolean;
+  readonly password?: string;
+}
+
 /** How a thing that was done can have ended. */
 export const AUDIT_OUTCOMES = ['ok', 'refused', 'not-found', 'rejected', 'failed'] as const;
 /** How many records of the audit log are shown at a time. */
@@ -544,6 +563,69 @@ export class ServerSource implements DataSource {
       if (isAbortError(error)) throw error;
       throw new ServerError(`The server at ${this.host} stopped answering.`, null, true);
     }
+  }
+
+  /**
+   * Whether the server's accounts are this user's to manage: an
+   * administrator's, on a server that has accounts.
+   */
+  readonly mayManageAccounts = computed(() => {
+    const login = this.loginState();
+    return login.kind === 'in' && login.role === 'admin';
+  });
+
+  /** Every account of the server, by name. For an administrator. */
+  async accounts(signal?: AbortSignal): Promise<ServerAccount[]> {
+    return (await this.json<{ accounts: ServerAccount[] }>('/accounts', signal)).accounts;
+  }
+
+  /** Make an account. The password is sent and not kept. */
+  async createAccount(name: string, password: string, role: string): Promise<void> {
+    await this.send('POST', '/accounts', { name, password, role });
+  }
+
+  /**
+   * Change an account's role, whether it is disabled, or its password. The
+   * server carries out all that is asked or none of it. Disabling an account
+   * or giving it a password logs it out everywhere.
+   */
+  async changeAccount(name: string, change: AccountChange): Promise<void> {
+    const response = await this.send('PUT', `/accounts/${encodeURIComponent(name)}`, change);
+    let now: Partial<ServerAccount>;
+    try {
+      now = (await response.json()) as Partial<ServerAccount>;
+    } catch {
+      return;
+    }
+    // One's own role, changed: what the viewer offers follows it at once.
+    const login = this.loginState();
+    if (login.kind === 'in' && now.name === login.name && typeof now.role === 'string') {
+      if (now.role !== login.role) this.loginState.set({ ...login, role: now.role });
+    }
+  }
+
+  /** Remove an account, and end its logins. */
+  async removeAccount(name: string): Promise<void> {
+    await this.send('DELETE', `/accounts/${encodeURIComponent(name)}`);
+  }
+
+  /**
+   * Change the password of the account that is logged in. This login stays;
+   * the account's others end. Neither password is kept.
+   */
+  async changeOwnPassword(current: string, next: string): Promise<void> {
+    await this.send('PUT', '/session/password', { current, next });
+  }
+
+  /** Ask the API to change something, with what to change as JSON. */
+  private send(method: string, path: string, body?: unknown): Promise<Response> {
+    return this.ask(
+      path,
+      undefined,
+      body === undefined
+        ? { method }
+        : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    );
   }
 
   /** Ask for something of the audit log, and say plainly why it cannot be had. */

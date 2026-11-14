@@ -75,6 +75,10 @@ A password is typed when asked for (twice, unseen), or piped in on standard
 input. It is never an argument, where other processes and the shell's
 history would see it.
 
+Once there is an administrator, the rest can be done in the viewer: the
+server card's "Accounts" does what the command does, through the routes
+below, and "Your password" lets anyone logged in change their own.
+
 | Method and path                 | Who    | Answer                                                           |
 | ------------------------------- | ------ | ---------------------------------------------------------------- |
 | `POST /api/v1/session`          | anyone | Log in with `{"name", "password"}`: the token and the session    |
