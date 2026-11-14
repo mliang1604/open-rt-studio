@@ -1374,5 +1374,5 @@
      imported. Highlights the currently-loaded series' chip (read-only; #173). -->
 <app-history-panel
   [loadedSeriesUids]="status.loadedSeriesUids()"
-  (loadSeries)="loadCtl.loadSeriesFromPanel($event)"
+  (loadSeries)="loadCtl.loadSeriesFromPanel($event.uid)"
 />

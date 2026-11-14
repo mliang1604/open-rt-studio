@@ -12,14 +12,13 @@ import {
   output,
   viewChild,
 } from '@angular/core';
-import type { Series } from '@open-rt-studio/dicom';
+import type { SeriesSummary } from '../../data-source/data-source';
 import { toImageData, type SeriesThumbnail } from '../series-thumbnail';
 
 /**
- * The DnD MIME type a dragged chip writes its SeriesInstanceUID under, so the
- * viewport drop can resolve it back to the series via the catalog. `getData` is
- * blocked until drop, so only the UID (not the series object) crosses the
- * boundary — the receiver looks the series up itself.
+ * The DnD MIME type a dragged chip writes its SeriesInstanceUID under. Only
+ * the UID crosses the boundary; the viewport drop asks the data source for the
+ * series it names.
  */
 export const SERIES_DND_MIME = 'application/x-dicom-series-uid';
 
@@ -58,13 +57,13 @@ export const SERIES_DND_MIME = 'application/x-dicom-series-uid';
 })
 export class SeriesChip {
   /** The series this chip describes. */
-  readonly series = input.required<Series>();
+  readonly series = input.required<SeriesSummary>();
   /** Its precomputed preview (image or icon), supplied by the parent's cache. */
   readonly thumbnail = input.required<SeriesThumbnail>();
   /** Whether this series is the one currently loaded in the viewport (highlight). */
   readonly loaded = input(false);
   /** Emitted when the chip is clicked, key-activated, or its drag completes a load. */
-  readonly activate = output<Series>();
+  readonly activate = output<SeriesSummary>();
 
   private readonly canvasRef = viewChild<ElementRef<HTMLCanvasElement>>('thumb');
 
@@ -116,7 +115,7 @@ export class SeriesChip {
 }
 
 /** A series' chip label: its description, falling back to `Series <number>`. */
-export function seriesChipLabel(series: Series): string {
+export function seriesChipLabel(series: SeriesSummary): string {
   const description = series.description?.trim();
   if (description) return description;
   return series.seriesNumber !== null ? `Series ${series.seriesNumber}` : 'Series';

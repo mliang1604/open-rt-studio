@@ -4,8 +4,9 @@
 
 import { Injectable, inject } from '@angular/core';
 import { importKeepsOnePatient, type Series } from '@open-rt-studio/dicom';
+import { DATA_SOURCE, type FetchedSeries, type FetchOptions } from '../data-source/data-source';
+import { LocalFilesSource } from '../data-source/local-files-source';
 import { VolumeLoader, type LoadResult, type MergedLoad } from '../volume-loader';
-import { PatientCatalog } from '../patient-catalog';
 
 /**
  * What a viewport drop will do, selected by the modifier held while dropping: a
@@ -121,15 +122,15 @@ export function planFileLoad(deps: FileLoadDeps): LoadOutcome {
 /** Everything the history-panel series-load policy needs. */
 export interface SeriesLoadDeps {
   readonly previous: LoadResult | null;
-  readonly series: Series;
+  readonly seriesUid: string;
   readonly intent: DropIntent;
   /**
-   * Structure sets retained across this session's imports, so picking the image
-   * an RTSTRUCT annotates re-associates its contours even when the parsed batch
-   * was catalogued ingest-only (#241) and nothing is currently displayed.
+   * Get the series from the data source, with the structure sets the source
+   * holds that may belong to it: picking the image an RTSTRUCT annotates
+   * shows its contours even when nothing is displayed (#241). May reject.
    */
-  readonly knownStructureSets: LoadResult['allStructureSets'];
-  /** Parse the series into a registry; may throw (the caller handles it). */
+  readonly fetchSeries: (seriesUid: string) => Promise<FetchedSeries>;
+  /** Build the series into a registry; may throw (the caller handles it). */
   readonly loadSeries: (series: Series, known: LoadResult['allStructureSets']) => LoadResult;
   readonly merge: (current: LoadResult, incoming: LoadResult) => MergedLoad;
 }
@@ -141,32 +142,39 @@ export interface SeriesLoadDeps {
  * it. A held modifier instead fuses: ⌥ overlays and ⇧ overlays-and-compares a
  * same-frame series, while an already-composited series is a no-op (⇧ still opens
  * the compare columns). Unlike a file load it never touches the catalog or
- * prompts — panel series are already known.
+ * prompts — panel series are already known. The series comes from the data
+ * source, which may take its time: the answer is a promise.
  */
-export function planSeriesLoad(deps: SeriesLoadDeps): LoadOutcome {
-  const { previous, series, intent, knownStructureSets, loadSeries, merge } = deps;
-  if (intent !== 'primary' && previous?.layers.some((layer) => layer.id === series.uid)) {
+export async function planSeriesLoad(deps: SeriesLoadDeps): Promise<LoadOutcome> {
+  const { previous, seriesUid, intent, fetchSeries, loadSeries, merge } = deps;
+  // Decided before anything is fetched: a series that is shown needs no fetch.
+  if (intent !== 'primary' && previous?.layers.some((layer) => layer.id === seriesUid)) {
     return { kind: 'noop', compare: intent === 'compare' };
   }
-  // The session's retained structure sets (superset of any single displayed
-  // load's) so a primary pick re-associates an RTSTRUCT by frame of reference.
-  const incoming = loadSeries(series, knownStructureSets);
+  // Every structure set the source holds for it (more than any one displayed
+  // load's), so a primary pick puts an RTSTRUCT back by frame of reference.
+  const { series, structureSets } = await fetchSeries(seriesUid);
+  const incoming = loadSeries(series, structureSets);
   if (intent === 'primary') return { kind: 'replace', result: incoming };
   const merged = previous ? merge(previous, incoming) : { result: incoming, added: false };
   return outcomeForMerged(merged, intent);
 }
 
 /**
- * Resolves a load request to a {@link LoadOutcome} at the
- * {@link VolumeLoader} / {@link PatientCatalog} boundary, unifying the three load
+ * Resolves a load request to a {@link LoadOutcome}, unifying the three load
  * paths behind one tested policy. The viewer applies the returned outcome (and
  * passes the patient-switch confirm in, so the policy stays `window.confirm`-free
  * and testable). Provided at the component so its lifetime tracks the viewer.
+ *
+ * A series comes from the {@link DATA_SOURCE}, whatever that is. Files that
+ * were just parsed go into the {@link LocalFilesSource}: importing is what
+ * only that source does.
  */
 @Injectable()
 export class LoadCoordinator {
   private readonly loader = inject(VolumeLoader);
-  private readonly catalog = inject(PatientCatalog);
+  private readonly source = inject(DATA_SOURCE);
+  private readonly files = inject(LocalFilesSource);
 
   /** Resolve a freshly parsed file batch (file-picker or drag-to-load). */
   resolveFiles(
@@ -180,24 +188,33 @@ export class LoadCoordinator {
       result,
       intent,
       confirm,
-      currentPatientId: this.catalog.currentPatientId(),
+      currentPatientId: this.files.currentPatientId(),
       keepsOnePatient: importKeepsOnePatient,
       merge: (current, incoming) => this.loader.merge(current, incoming),
       catalog: {
-        add: (series) => this.catalog.add(series),
-        addStructureSets: (sets) => this.catalog.addStructureSets(sets),
-        clear: () => this.catalog.clear(),
+        add: (series) => this.files.add(series),
+        addStructureSets: (sets) => this.files.addStructureSets(sets),
+        clear: () => this.files.clear(),
       },
     });
   }
 
-  /** Resolve a history-panel series pick (may throw if the series fails to parse). */
-  resolveSeries(previous: LoadResult | null, series: Series, intent: DropIntent): LoadOutcome {
+  /**
+   * Resolve a history-panel series pick. Rejects when the source cannot give
+   * the series or it cannot be built, and with an `AbortError` when
+   * `options.signal` was aborted.
+   */
+  resolveSeries(
+    previous: LoadResult | null,
+    seriesUid: string,
+    intent: DropIntent,
+    options: FetchOptions = {},
+  ): Promise<LoadOutcome> {
     return planSeriesLoad({
       previous,
-      series,
+      seriesUid,
       intent,
-      knownStructureSets: this.catalog.structureSets(),
+      fetchSeries: (uid) => this.source.fetchSeries(uid, options),
       loadSeries: (s, known) => this.loader.loadSeries(s, known),
       merge: (current, incoming) => this.loader.merge(current, incoming),
     });

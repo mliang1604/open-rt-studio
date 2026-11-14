@@ -83,6 +83,10 @@ yourself before merging.
   CPU-side probe implement the same pan, letterbox and zoom geometry from
   opposite directions. Change one and you must change the other; shared pure
   geometry lives in helpers both use.
+- **Patient data comes through `DATA_SOURCE`** (`apps/web/src/app/data-source`).
+  The timeline and the load path inject it and know nothing of files or
+  servers. Do not inject `PatientCatalog` in new code; it is what the local
+  source holds.
 - **Packages have one entry point.** Import `@open-rt-studio/dicom`, not a
   file inside the package. Add new public names to the package's
   `src/index.ts`.

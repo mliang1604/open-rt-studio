@@ -12,15 +12,15 @@ import {
   filesOf,
   type AccessHandle,
 } from '../file-access';
+import { DATA_SOURCE, listedSeries } from '../data-source/data-source';
+import { LocalFilesSource } from '../data-source/local-files-source';
 import { demoPatient, demoPlanningCt } from '../demo-data';
-import { PatientCatalog } from '../patient-catalog';
 import { PreferencesStore } from '../preferences-store';
 import { isAbortError } from '../parse-pool';
 import { VolumeLoader, type LoadResult } from '../volume-loader';
 import { type ImportReport } from './import-report/import-report';
 import { LoadSequence } from './load-sequence';
 import {
-  type Series,
   clamp,
   baseLayer,
   Orientation,
@@ -117,7 +117,14 @@ export class LoadController {
   private readonly loader = inject(VolumeLoader);
   /** Which file import is the one in progress; see {@link LoadSequence}. */
   private readonly loads = new LoadSequence<LoadState>();
-  private readonly catalog = inject(PatientCatalog);
+  /**
+   * Which series pick is the one being fetched from the data source. Opened
+   * files answer at once; a source that takes its time can be overtaken by a
+   * later pick, or cancelled, the same way an import can.
+   */
+  private readonly picks = new LoadSequence<LoadState>();
+  private readonly source = inject(DATA_SOURCE);
+  private readonly files = inject(LocalFilesSource);
   private readonly loadCoordinator = inject(LoadCoordinator);
   private readonly recentStore = inject(RecentStore);
   private readonly handles = inject(RecentHandles);
@@ -207,8 +214,8 @@ export class LoadController {
   /**
    * Handle a drop on the viewport: the modifier held selects the {@link DropIntent}
    * (⌥ fuse / ⇧ compare / plain primary). A history-panel series chip (its UID
-   * payload) loads that retained series; otherwise the dropped folder/files are
-   * read, walking dropped directories for their slices.
+   * payload) loads that series from the data source; otherwise the dropped
+   * folder/files are read, walking dropped directories for their slices.
    */
   async onDrop(event: DragEvent): Promise<void> {
     const d = this.deps;
@@ -222,8 +229,10 @@ export class LoadController {
     const intent = dropIntentOf(event);
     const seriesUid = event.dataTransfer.getData(SERIES_DND_MIME);
     if (seriesUid) {
-      const series = this.catalog.seriesByUid(seriesUid);
-      if (series) this.loadSeriesFromPanel(series, intent);
+      // A UID that is not on the timeline is no chip of ours; nothing happens.
+      if (listedSeries(this.source).some((series) => series.uid === seriesUid)) {
+        await this.loadSeriesFromPanel(seriesUid, intent);
+      }
       return;
     }
     // Both read the drop's items, which are gone after the first await.
@@ -305,8 +314,13 @@ export class LoadController {
    * dropped onto the viewport). Routed through the same smart-auto merge rule as a
    * file load; the {@link intent} (set by the held modifier on a drop) routes ⌥
    * through the fusion overlay and ⇧ through the compare layout.
+   *
+   * The series is fetched from the data source. Opened files are there at
+   * once, and nothing is seen of the fetch. A source that reports progress
+   * gets the progress readout, and its fetch is abandoned by a later pick, by
+   * {@link cancelLoad} or by an import: whichever came last is what is shown.
    */
-  loadSeriesFromPanel(series: Series, intent: DropIntent = 'primary'): void {
+  async loadSeriesFromPanel(seriesUid: string, intent: DropIntent = 'primary'): Promise<void> {
     const d = this.deps;
     if (!d || d.renderer() === null) return; // GPU not ready; nothing to draw into yet
     // While files are being read the view state is the progress readout, and the
@@ -316,15 +330,27 @@ export class LoadController {
       this.flashNotice('Files are still being read. Wait for the import, or cancel it.');
       return;
     }
-    const previous = d.load();
+    // What was showing before this pick, or before the pick it overtakes.
+    const { signal, before: previous } = this.picks.begin(d.load());
     const previousResult = previous.status === 'ready' ? previous.result : null;
     let outcome: LoadOutcome;
     try {
-      outcome = this.loadCoordinator.resolveSeries(previousResult, series, intent);
+      outcome = await this.loadCoordinator.resolveSeries(previousResult, seriesUid, intent, {
+        signal,
+        onProgress: (loaded, total) => {
+          if (this.picks.isCurrent(signal)) d.load.set({ status: 'loading', loaded, total });
+        },
+      });
     } catch (error) {
+      // Cancelled or overtaken: whoever did that has seen to the view.
+      if (isAbortError(error) || !this.picks.isCurrent(signal)) return;
+      this.picks.finish(signal);
       d.load.set({ status: 'error', message: messageOf(error) });
       return;
     }
+    // Fetched, but cancelled or overtaken in the meantime: drop it.
+    if (!this.picks.isCurrent(signal)) return;
+    this.picks.finish(signal);
     this.applyOutcome(outcome, previous, null);
   }
 
@@ -356,10 +382,12 @@ export class LoadController {
       const demo = await demoPatient();
       // Cancelled, or overtaken by files the user chose meanwhile: stop here.
       if (!(await this.loadFiles(demo.files, null))) return;
-      const planningCt = demoPlanningCt(this.catalog.currentPatient(), demo);
+      const planningCt = demoPlanningCt(this.files.currentPatient(), demo);
       // A pick is ignored until the renderer exists, and on a slow adapter the
       // import can finish first. Wait for it, so the click is never lost.
-      if (planningCt && (await this.rendererReady())) this.loadSeriesFromPanel(planningCt);
+      if (planningCt && (await this.rendererReady())) {
+        await this.loadSeriesFromPanel(planningCt.uid);
+      }
     } finally {
       this.demoLoading.set(false);
     }
@@ -437,6 +465,10 @@ export class LoadController {
   ): Promise<boolean> {
     const d = this.deps;
     if (!d) return false;
+    // A series still being fetched gives way: the import is the later request,
+    // and what the fetch covered up is what the import goes back to.
+    const fetching = this.picks.cancel();
+    if (fetching) d.load.set(fetching.before);
     // What was showing before this run of loads began; a same-frame-of-reference
     // series adds atop it, and a cancel goes back to it.
     const { signal, before: previous } = this.loads.begin(d.load());
@@ -498,13 +530,18 @@ export class LoadController {
     }
   }
 
-  /** Cancel the import in progress and go back to what was on screen before it. */
+  /**
+   * Cancel the import in progress, or the series being fetched, and go back to
+   * what was on screen before it.
+   */
   cancelLoad(): void {
     const d = this.deps;
-    const cancelled = this.loads.cancel();
-    if (!d || !cancelled) return;
+    if (!d) return;
+    const imported = this.loads.cancel();
+    const cancelled = imported ?? this.picks.cancel();
+    if (!cancelled) return;
     d.load.set(cancelled.before);
-    this.flashNotice('Import cancelled.');
+    this.flashNotice(imported ? 'Import cancelled.' : 'Loading cancelled.');
   }
 
   /**
@@ -516,7 +553,7 @@ export class LoadController {
   private addStructureSets(sets: readonly StructureSet[], previous: LoadState): void {
     const d = this.deps;
     if (!d) return;
-    this.catalog.addStructureSets(sets);
+    this.files.addStructureSets(sets);
     const count = `${sets.length} structure set${sets.length === 1 ? '' : 's'}`;
     if (previous.status !== 'ready') {
       d.load.set({ status: 'idle' });

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import type { PatientRecord, Series } from '@open-rt-studio/dicom';
+import type { PatientHistory, SeriesSummary } from './data-source/data-source';
 
 /** The synthetic demo patient as browser files, with what identifies its planning CT. */
 export interface DemoPatient {
@@ -30,8 +30,11 @@ export async function demoPatient(): Promise<DemoPatient> {
   };
 }
 
-/** The planning CT of the demo patient in the catalog, or null when it is not there. */
-export function demoPlanningCt(patient: PatientRecord | null, demo: DemoPatient): Series | null {
+/** The planning CT of the demo patient as the data source lists it, or null when it is not there. */
+export function demoPlanningCt(
+  patient: PatientHistory | null,
+  demo: DemoPatient,
+): SeriesSummary | null {
   if (!patient || patient.patientId !== demo.patientId) return null;
   const study = patient.studies.find((s) => s.date === demo.planningStudyDate);
   return study?.series.find((s) => s.modality === 'CT') ?? null;

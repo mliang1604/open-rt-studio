@@ -79,8 +79,16 @@ Loading:
 - `viewer/load-sequence.ts`: which import is the one in progress. Cancel, or a
   second import, aborts the first, and an aborted import changes neither the
   catalog nor the view.
+- `data-source/`: where patient data comes from. `data-source.ts` is the
+  interface (`DataSource`) and the `DATA_SOURCE` token the timeline, the
+  status line and the load path inject. `local-files-source.ts` is the
+  source for opened files, and the default. `testing.ts` has a fake for
+  specs; provide it as `DATA_SOURCE` to drive the timeline or the load path
+  without a file. A new consumer of patient data injects `DATA_SOURCE`, not
+  the catalog.
 - `patient-catalog.ts`, `recent-store.ts`: the catalog of everything imported
-  in this session, and the list of recent selections.
+  in this session (what the local source holds), and the list of recent
+  selections.
 - `file-access.ts`, `recent-handles.ts`: where the browser has the File System
   Access API (Chromium), Open folder and Open files use its pickers, and the
   handle of a folder or of a single file is kept in IndexedDB. Choosing that
@@ -108,7 +116,11 @@ Viewer (`src/app/viewer`):
   from their positions and computed styles, and draws it over the copy of the
   canvas. An overlay added to the viewport shows in captures once its selector
   is in the list at the top of `capture-overlays.ts`.
-- `history-panel/`: the patient timeline and tree with series chips.
+- `history-panel/`: the patient timeline and tree with series chips. It
+  shows what the data source lists and asks the source for each preview.
+- `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
+  the data source and then built. A fetch that takes time shows progress, and
+  is abandoned by a later pick, by Cancel or by an import.
 - `cpr/`: the curved planar reformat tool: the path store, the controller
   that maps between panes and the patient, the overlay that draws the path and
   the panel that shows the reformat. The geometry is `packages/render` `cpr.ts`.
