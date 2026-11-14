@@ -29,6 +29,13 @@ export {
   type ImageSeriesOptions,
   type ImageSeriesSpec,
 } from './image-series.js';
+export {
+  SYNTHETIC_DEFORMATION,
+  syntheticDeformableRegistration,
+  syntheticDeformationGridPoint,
+  syntheticDeformationMm,
+  syntheticDeformedPoint,
+} from './deformable-registration.js';
 export { SYNTHETIC_PATIENT_STUDIES, syntheticPatient } from './patient.js';
 export {
   SYNTHETIC_REGISTERED_PAIR,

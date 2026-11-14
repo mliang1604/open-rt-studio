@@ -74,7 +74,11 @@ export interface DeformationGrid {
   readonly axes: readonly [Vec3, Vec3, Vec3];
   /** The distance between neighbouring vectors along each axis, in mm. */
   readonly spacing: Vec3;
-  /** Three numbers for each grid point, the x index running fastest, then y, then z. */
+  /**
+   * Three numbers for each grid point, the x index running fastest, then y,
+   * then z. A vector of NaN is a point where the field is undefined, as
+   * DICOM writes one (PS3.3 C.20.3.1.3).
+   */
   readonly vectors: Float32Array;
 }
 
@@ -177,8 +181,11 @@ function gridProblem(grid: DeformationGrid): string | null {
     return 'The axes of a deformation grid are unit vectors at right angles.';
   }
   for (let i = 0; i < grid.vectors.length; i++) {
-    if (!Number.isFinite(grid.vectors[i]))
-      return 'A deformation grid holds a number that is not finite.';
+    const value = grid.vectors[i];
+    // NaN says the field is undefined there. A displacement without end says nothing.
+    if (value === Infinity || value === -Infinity) {
+      return 'A deformation grid holds a displacement that is infinite.';
+    }
   }
   return null;
 }
@@ -212,7 +219,10 @@ export function deformableTransform(given: {
 /** An index just outside the grid by rounding is taken as on its edge. */
 const EDGE = 1e-6;
 
-/** The grid's displacement at a position, or null outside the grid. */
+/**
+ * The grid's displacement at a position. Null outside the grid, and where a
+ * vector that the position lies between is undefined (NaN).
+ */
 export function sampleDeformation(grid: DeformationGrid, position: Vec3): Vec3 | null {
   const relative: Vec3 = [
     position[0] - grid.origin[0],
@@ -249,6 +259,7 @@ export function sampleDeformation(grid: DeformationGrid, position: Vec3): Vec3 |
     out[1] += weight * grid.vectors[at + 1];
     out[2] += weight * grid.vectors[at + 2];
   }
+  if (Number.isNaN(out[0]) || Number.isNaN(out[1]) || Number.isNaN(out[2])) return null;
   return [out[0], out[1], out[2]];
 }
 

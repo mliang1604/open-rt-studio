@@ -118,6 +118,17 @@ export {
   registrationsOfPatient,
 } from './layer-placement.js';
 export {
+  type DeformableItemProblem,
+  type DeformableRegistrationContent,
+  type DeformableRegistrationWriteOptions,
+  type DeformableSpatialRegistration,
+  type ReadDeformableRegistration,
+  DEFORMABLE_SPATIAL_REGISTRATION_SOP_CLASS,
+  deformableRegistrationParts,
+  parseDeformableRegistration,
+  writeDeformableRegistration,
+} from './deformable-registration.js';
+export {
   type ReadRegistration,
   type RegistrationItemProblem,
   type SpatialRegistration,

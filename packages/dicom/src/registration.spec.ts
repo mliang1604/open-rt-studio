@@ -169,9 +169,9 @@ describe('a transform that is not one', () => {
         },
       }),
     ).toThrow(/unit vectors at right angles/);
-    const holed = gridOf(() => [0, 0, 0]);
-    holed.vectors[7] = NaN;
-    expect(() => deformableTransform({ ...field, grid: holed })).toThrow(/not finite/);
+    const endless = gridOf(() => [0, 0, 0]);
+    endless.vectors[7] = -Infinity;
+    expect(() => deformableTransform({ ...field, grid: endless })).toThrow(/infinite/);
     expect(() => deformableTransform({ ...field, grid, pre: [1, 2] })).toThrow(
       /The matrix before the field: .*16 numbers/,
     );
@@ -257,6 +257,34 @@ describe('a deformation field', () => {
     // One layer thick: only that plane has vectors.
     expect(sampleDeformation(grid, [0, 0, 1])).toBeNull();
     expect(sampleDeformation(grid, [10, 0, 0])).toBeNull();
+  });
+
+  it('says nothing where a vector it lies between is undefined', () => {
+    // Five points along x, 10 mm apart; the vector's x is ten times its index.
+    const grid: DeformationGrid = {
+      dims: [5, 1, 1],
+      origin: [0, 0, 0],
+      axes: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      spacing: [10, 10, 10],
+      vectors: Float32Array.from([0, 10, 20, 30, 40].flatMap((n) => [n, 0, 0])),
+    };
+    // The middle point is undefined, as DICOM writes it: three NaN.
+    grid.vectors.fill(NaN, 6, 9);
+    const field = deformableTransform({ id: 'd', from: CT, to: MR, grid });
+    expect(sampleDeformation(grid, [5, 0, 0])).toEqual([5, 0, 0]);
+    // Between a defined vector and the undefined one, and on it: nothing.
+    expect(sampleDeformation(grid, [15, 0, 0])).toBeNull();
+    expect(sampleDeformation(grid, [20, 0, 0])).toBeNull();
+    expect(sampleDeformation(grid, [25, 0, 0])).toBeNull();
+    // On a defined point beside it, the undefined one has no weight.
+    expect(sampleDeformation(grid, [10, 0, 0])).toEqual([10, 0, 0]);
+    expect(sampleDeformation(grid, [30, 0, 0])).toEqual([30, 0, 0]);
+    expect(mapPoint(field, [20, 0, 0], { from: CT, to: MR })).toBeNull();
+    expect(mapPoint(field, [35, 0, 0], { from: CT, to: MR })).toEqual([70, 0, 0]);
   });
 
   it('is as strict about direction as a matrix, and has no inverse here', () => {

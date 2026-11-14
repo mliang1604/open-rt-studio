@@ -431,7 +431,8 @@ data and pure functions.
   `p_to = post · (q + field(q))`, the field a grid of displacement vectors
   read by trilinear interpolation.
 - **Outside its grid a field says nothing**, and a point there is not mapped
-  (`null`). It is never extended.
+  (`null`). It is never extended. Nor is a point mapped that lies between
+  vectors of which one is undefined (three NaN, as DICOM writes it).
 - **Inversion**: exact for a matrix. Not available for a deformation field:
   none is approximated, and whoever computes a registration both ways gives
   two transforms.
@@ -443,7 +444,7 @@ data and pure functions.
   than one it gives them all and picks none: two registrations between the
   same frames may disagree, and which is meant is the user's to say.
 - **Refused**: a matrix that mirrors (it would swap left and right) or
-  flattens, a grid with a number that is not finite, and a transform whose
+  flattens, a grid with a displacement that is infinite, and a transform whose
   two frames are the same. Two series in one frame are in place already; a
   registration between them could not tell its direction by its frames.
 
@@ -465,6 +466,50 @@ from the item's frame to the object's frame, with the matrix as written.
   read the standard; it has not been checked with a validator.
 - A matrix element is written with as many digits as fit in sixteen
   characters, twelve or more decimals for a rotation.
+
+**Deformable Spatial Registration objects** (`deformable-registration.ts`,
+part of #75) are read into the model and written from it, as the standard
+has it (PS3.3 C.20.3). Their direction is **the other way round** from the
+matrix object's: the standard applies an item "to the Registered RCS
+coordinates", and "the resulting coordinate addresses the sample point
+within the Source RCS". So an item is a transform from the object's frame to
+the item's source frame: for each place of the object's frame, where to read
+the source image.
+
+- The standard's equation (C.20.3-1) is `source = Post · (Pre · p + D(p))`:
+  the grid is laid out in the object's frame, and its vector is added after
+  the matrix before it. The model looks its field up after that matrix,
+  which is not the same when the matrix does anything. What is read is
+  therefore held with no matrix before the field, which is the same map
+  exactly: `(Post · Pre) · (p + A⁻¹ · D(p))`, `A` the part of `Pre` that
+  turns and scales. With no `Pre`, or one that only moves, the vectors stay
+  as written to the last bit; otherwise each is turned back, and the reader
+  says that it did.
+- An item with no grid has no deformation, the standard says: its two
+  matrices are read as one matrix.
+- The reader lists what it did not read, with the reason, and reads the
+  rest: an item that names no source frame, one with more than one grid or
+  more than one matrix on a side, a matrix that mirrors or flattens, a grid
+  whose size its vectors do not bear out or whose directions are not at
+  right angles, a field within the object's own frame, and a file stored
+  most significant byte first.
+- **A large grid is in memory once.** Read, its vectors are a window on the
+  file's own bytes where they lie on a multiple of four bytes, and are copied
+  once where not. Written, the file comes as pieces (`deformableRegistrationParts`)
+  of which the vectors' piece is a window on the grid's own array: handed to
+  a `Blob`, nothing is copied.
+- The writer refuses a field that does not map out of the object's frame,
+  one with a matrix before it, and a grid whose third direction is not the
+  cross product of its first two (the file has no place for it). It writes
+  the matrix after the field as the Post Deformation matrix when it does
+  anything, and no Pre Deformation matrix. It writes every element the
+  standard requires as I read the standard, among them the equipment's
+  model name, serial number and software version, for which it has `0`
+  where it has nothing; it has not been checked with a validator.
+- `packages/testdata` has an object for the synthetic registered pair whose
+  field is a formula (`syntheticDeformationMm`), written by that package's
+  own encoder with sequences of defined length, where the writer here uses
+  undefined ones.
 
 **In the viewer** (part of #76) a registration places a series of one frame
 of reference over a series of another, as a fusion overlay.
@@ -545,8 +590,9 @@ of reference over a series of another, as a fusion overlay.
   hand is on, a press on it moves the image too.
 
 Not there, and not assumed: what other systems' files do differently (the
-vendor spike, #71, needs Michael's sample files), and how a Deformable
-Spatial Registration object fills the model (#75). Status: **decided, and
+vendor spike, #71, needs Michael's sample files), for the matrix object and
+for the deformable one alike. The viewer does not take in a deformable
+object yet: applying one is #77. Status: **decided, and
 Michael's to overturn**, most of all refusing a registration within one
 frame of reference, which some systems may write.
 
