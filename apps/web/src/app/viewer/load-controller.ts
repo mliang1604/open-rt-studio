@@ -690,6 +690,7 @@ export class LoadController {
       case 'overlay':
         this.addLayer(outcome.result);
         if (outcome.compare) d.setCompareLayout();
+        if (outcome.notice) this.flashNotice(outcome.notice);
         if (entry) this.recentStore.record({ ...entry, overlay: true });
         return;
       case 'imported':

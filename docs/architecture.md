@@ -474,10 +474,9 @@ of reference over a series of another, as a fusion overlay.
   fetched series by the data source (`FetchedSeries.registrations`). The
   server source gives none yet (#228).
 - A series joins the view as an overlay when it is in the base's frame, or
-  when exactly one way of the known registrations leads from the base's
-  frame to its own (`findPlacement`). With several equally short ways, none
-  is chosen and the series is refused with that reason. Choosing among them
-  is still to come.
+  when a way of the known registrations leads from the base's frame to its
+  own (`findPlacement`). With several equally short ways none is chosen for
+  the user (see below).
 - The layer carries its `placement`: the registrations on the way, each with
   the direction it was written in, and the matrix from the base's frame to
   the layer's with its inverse. A registration that a file writes from the
@@ -502,7 +501,16 @@ of reference over a series of another, as a fusion overlay.
   probe there gives the overlay's value first, with its own voxel and its
   position in its own frame. An overlay in the base's own frame is drawn on
   its own grid, as before.
-- Choosing among several registrations is the rest of #76.
+- **Between several registrations the user chooses.** When more than one
+  equally short way leads to the layer's frame (two registrations of the
+  same pair of images, for one), the series is added as a layer that carries
+  every placement (`placementChoices`) and is not drawn. The layers panel
+  offers them, each by its name, the direction it was written in, and the
+  length of its matrix's translation and the angle of its rotation, which
+  tell apart two of the same name. The layer is drawn once one is chosen,
+  and another may be chosen after. The choice is a per-layer override in
+  the layers store, like visibility and opacity, and a new load starts
+  without one.
 
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), and how a Deformable

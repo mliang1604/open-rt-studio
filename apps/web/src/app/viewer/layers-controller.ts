@@ -217,6 +217,11 @@ export class LayersController {
     this.layerStore.setOpacity(id, Number((event.target as HTMLInputElement).value));
   }
 
+  /** Layers-panel registration selector: which of a layer's registrations places it. */
+  onLayerPlacement(id: string, event: Event): void {
+    this.layerStore.choosePlacement(id, Number((event.target as HTMLSelectElement).value));
+  }
+
   /** Layers-panel display selector: grayscale or a named colormap for the layer. */
   onLayerDisplay(id: string, event: Event): void {
     const value = (event.target as HTMLSelectElement).value;

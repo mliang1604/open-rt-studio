@@ -231,6 +231,7 @@
                   <input
                     type="checkbox"
                     [checked]="layer.visible"
+                    [disabled]="!!layer.placementChoices && layer.placementChosen === null"
                     (change)="layersCtl.toggleLayerVisible(layer.id)"
                     [attr.aria-label]="'Show ' + layer.label + ' overlay'"
                   />
@@ -272,6 +273,34 @@
                 <div class="layer-note" [attr.data-placement]="layer.id">
                   {{ placement }}
                 </div>
+              }
+              @if (layer.placementChoices; as choices) {
+                <!-- Several registrations could place this layer. None is
+                     picked for the user: it is drawn once they choose. -->
+                <label class="layer-note layer-choice">
+                  Placed by registration
+                  <select
+                    (change)="layersCtl.onLayerPlacement(layer.id, $event)"
+                    [attr.data-placement-choice]="layer.id"
+                  >
+                    @if (layer.placementChosen === null) {
+                      <option value="" selected disabled>
+                        Choose one of {{ choices.length }}…
+                      </option>
+                    }
+                    @for (choice of choices; track $index) {
+                      <option [value]="$index" [selected]="$index === layer.placementChosen">
+                        {{ choice }}
+                      </option>
+                    }
+                  </select>
+                </label>
+                @if (layer.placementChosen !== null) {
+                  <!-- The closed select cuts its text short: the one in use, in full. -->
+                  <div class="layer-note" [attr.data-placement]="layer.id">
+                    {{ choices[layer.placementChosen] }}
+                  </div>
+                }
               }
             }
           </div>

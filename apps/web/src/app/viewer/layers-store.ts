@@ -9,6 +9,7 @@ import {
   applyLayerOverrides,
   type Layer,
   type LayerDisplay,
+  placementSize,
   type LayerPlacement,
   type PlacementStep,
 } from '@open-rt-studio/dicom';
@@ -37,9 +38,17 @@ export interface LayerLegendEntry {
   /**
    * For a layer in another frame of reference: which registration places it
    * over the base, and which way that registration was written. Null for a
-   * layer in the base's frame.
+   * layer in the base's frame, and for one that has registrations to choose
+   * among ({@link placementChoices}).
    */
   readonly placement: string | null;
+  /**
+   * The registrations to choose among, each in words, when more than one
+   * could place the layer. Null otherwise.
+   */
+  readonly placementChoices: readonly string[] | null;
+  /** Which of {@link placementChoices} is in use; null while none was chosen. */
+  readonly placementChosen: number | null;
 }
 
 /** The name a registration goes by: its description, else its label. */
@@ -63,6 +72,25 @@ export function placementText(placement: LayerPlacement): string {
   return `Placed by ${steps.length} registrations in a row: ${names}`;
 }
 
+/**
+ * One of several placements in words, for choosing among them: the
+ * registration's name and direction, and the length of its matrix's
+ * translation and the angle of its rotation, which tell apart two that go by
+ * the same name. The translation is between the two frames' coordinates, so
+ * it is large when their origins are far apart, however little the patient
+ * moved: it is named for what it is, not as how far the image moves.
+ */
+export function placementChoiceText(placement: LayerPlacement): string {
+  const { steps } = placement;
+  const names = steps.map((step) => `“${registrationName(step)}”`).join(', then ');
+  const written =
+    steps.length === 1
+      ? ` (written ${steps[0].inverted ? 'this image → base' : 'base → this image'})`
+      : '';
+  const { shiftMm, turnDeg } = placementSize(placement);
+  return `${names}${written} · translation ${shiftMm.toFixed(1)} mm, rotation ${turnDeg.toFixed(1)}°`;
+}
+
 /** Project the composed layers into panel rows (base first), each with its controls. */
 export function layerLegend(layers: readonly Layer[]): LayerLegendEntry[] {
   return layers.map((layer) => ({
@@ -73,7 +101,12 @@ export function layerLegend(layers: readonly Layer[]): LayerLegendEntry[] {
     visible: layer.visible,
     opacityPercent: Math.round(layer.opacity * 100),
     displayValue: layer.display.kind === 'grayscale' ? 'grayscale' : layer.display.name,
-    placement: layer.placement ? placementText(layer.placement) : null,
+    placement: layer.placement && !layer.placementChoices ? placementText(layer.placement) : null,
+    placementChoices: layer.placementChoices?.map(placementChoiceText) ?? null,
+    placementChosen:
+      layer.placement && layer.placementChoices?.includes(layer.placement)
+        ? layer.placementChoices.indexOf(layer.placement)
+        : null,
   }));
 }
 
@@ -115,6 +148,13 @@ export class LayersStore {
    */
   private readonly _windows = signal<ReadonlyMap<string, WindowLevel>>(new Map());
 
+  /**
+   * For a layer that several registrations could place, the one the user
+   * chose, by its index among the layer's choices, keyed by {@link Layer.id}.
+   * A layer absent from the map awaits the choice and is not drawn.
+   */
+  private readonly _placements = signal<ReadonlyMap<string, number>>(new Map());
+
   /** Checkerboard the overlay (alternating cells) instead of a uniform blend. */
   readonly checkerboardEnabled = signal(false);
 
@@ -126,7 +166,19 @@ export class LayersStore {
    * registry, producing the composed layers every consumer reads.
    */
   apply(rawLayers: readonly Layer[]): readonly Layer[] {
-    return applyLayerOverrides(rawLayers, this._hidden(), this._opacities(), this._displays());
+    return applyLayerOverrides(
+      rawLayers,
+      this._hidden(),
+      this._opacities(),
+      this._displays(),
+      this._placements(),
+    );
+  }
+
+  /** Choose which of a layer's registrations places it, by its index among the choices. */
+  choosePlacement(id: string, index: number): void {
+    if (!Number.isInteger(index) || index < 0) return;
+    this._placements.update((map) => new Map(map).set(id, index));
   }
 
   /** Toggle an overlay layer's visibility (the base underlay is never hidden). */
@@ -190,6 +242,7 @@ export class LayersStore {
     this._opacities.set(new Map());
     this._displays.set(new Map());
     this._windows.set(new Map());
+    this._placements.set(new Map());
     this.checkerboardEnabled.set(false);
   }
 }

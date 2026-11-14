@@ -23,8 +23,17 @@ export type DropIntent = 'primary' | 'overlay' | 'compare';
 export type LoadOutcome =
   /** Replace the view with a fresh base volume (`applyVolume`). */
   | { readonly kind: 'replace'; readonly result: LoadResult }
-  /** Keep the base and add `result`'s overlay layer; `compare` also opens the columns. */
-  | { readonly kind: 'overlay'; readonly result: LoadResult; readonly compare: boolean }
+  /**
+   * Keep the base and add `result`'s overlay layer; `compare` also opens the
+   * columns. `notice` is something to tell the user about the layer: that it
+   * waits for them to choose among several registrations.
+   */
+  | {
+      readonly kind: 'overlay';
+      readonly result: LoadResult;
+      readonly compare: boolean;
+      readonly notice?: string;
+    }
   /**
    * A plain file import: the batch was catalogued into the history but not shown —
    * the viewport waits for the user to pick a series (#241). `cleared` is true when
@@ -40,29 +49,22 @@ export type LoadOutcome =
   | { readonly kind: 'noop'; readonly compare: boolean };
 
 /**
- * Why a series was not fused, when it is not only that nothing connects it:
- * more than one registration leads to it, and none is chosen for the user.
- */
-export type CantFuse = 'several-registrations';
-
-/**
  * Feedback when a held-modifier drop can't apply: ⌥ fuse and ⇧ compare both need a
  * series in the current scan's frame of reference, or one that a registration
  * connects to it, so a different study (or nothing loaded to fuse against)
  * degrades to this notice instead of replacing.
  */
-export function cantFuseMessage(intent: 'overlay' | 'compare', why?: CantFuse): string {
+export function cantFuseMessage(intent: 'overlay' | 'compare'): string {
   const action = intent === 'overlay' ? 'fuse' : 'compare';
-  switch (why) {
-    case 'several-registrations':
-      return `Can’t ${action}: more than one registration connects this series to the current scan, and choosing between them is not there yet.`;
-    case undefined:
-      return `Can’t ${action}: drop a series that shares the current scan’s frame of reference, or that an opened registration connects to it.`;
-    default: {
-      const exhaustive: never = why;
-      return exhaustive;
-    }
-  }
+  return `Can’t ${action}: drop a series that shares the current scan’s frame of reference, or that an opened registration connects to it.`;
+}
+
+/**
+ * What is said when a series was added that several registrations could
+ * place: it is not drawn until the user chooses, and this says where.
+ */
+export function chooseRegistrationMessage(choices: number): string {
+  return `${choices} registrations connect this series to the one on screen. Choose one under Layers to show it.`;
 }
 
 /**
@@ -71,8 +73,13 @@ export function cantFuseMessage(intent: 'overlay' | 'compare', why?: CantFuse): 
  * Only the ⌥/⇧ paths reach here — a plain (primary) load replaces outright.
  */
 function outcomeForMerged(merged: MergedLoad, intent: 'overlay' | 'compare'): LoadOutcome {
-  if (!merged.added) return { kind: 'reject', message: cantFuseMessage(intent, merged.why) };
-  return { kind: 'overlay', result: merged.result, compare: intent === 'compare' };
+  if (!merged.added) return { kind: 'reject', message: cantFuseMessage(intent) };
+  return {
+    kind: 'overlay',
+    result: merged.result,
+    compare: intent === 'compare',
+    ...(merged.choices ? { notice: chooseRegistrationMessage(merged.choices) } : {}),
+  };
 }
 
 /** The minimal patient-catalog surface the file-load policy mutates. */

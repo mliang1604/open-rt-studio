@@ -2,11 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { findPlacement, pointBetweenLayers, registrationsOfPatient } from './layer-placement.js';
+import {
+  findPlacement,
+  placementSize,
+  pointBetweenLayers,
+  registrationsOfPatient,
+} from './layer-placement.js';
 import { rigidMat4, transformPoint, type Mat4 } from './mat4.js';
 import { matrixTransform } from './registration.js';
 import type { SpatialRegistration } from './spatial-registration.js';
-import { overlayImageLayer, type Vec3, type Volume } from './types.js';
+import {
+  applyLayerOverrides,
+  baseImageLayer,
+  overlayImageLayer,
+  overlayLayerAwaitingChoice,
+  type Vec3,
+  type Volume,
+} from './types.js';
 
 const [PLANNING, FOLLOW_UP, MR, ALONE] = ['1.2.1', '1.2.2', '1.2.3', '1.2.4'];
 
@@ -107,7 +119,13 @@ describe('placing a layer by registrations', () => {
 
   it('does not choose between two registrations of the same pair', () => {
     const other = object('9.3', FOLLOW_UP, PLANNING, rigidMat4([0, 0, 1], 31, [5, -3, 2]));
-    expect(findPlacement(PLANNING, FOLLOW_UP, [REG, other])).toEqual({ kind: 'several', ways: 2 });
+    const found = findPlacement(PLANNING, FOLLOW_UP, [REG, other]);
+    if (found.kind !== 'several') throw new Error(found.kind);
+    // Both are given, each as it would place the layer, in the order they were known.
+    expect(found.placements.map((one) => one.steps[0].sopInstanceUid)).toEqual(['9.1', '9.3']);
+    expect(found.placements.map(placementSize).map((size) => Math.round(size.turnDeg))).toEqual([
+      30, 31,
+    ]);
   });
 
   it('takes an object that was read twice as one', () => {
@@ -158,6 +176,46 @@ describe('an overlay layer', () => {
   });
 });
 
+describe('a layer that awaits a choice among registrations', () => {
+  const volume = { modality: 'CT' } as unknown as Volume;
+  const other = object('9.3', FOLLOW_UP, PLANNING, rigidMat4([0, 0, 1], 31, [5, -3, 2]));
+  const found = findPlacement(PLANNING, FOLLOW_UP, [REG, other]);
+  if (found.kind !== 'several') throw new Error(found.kind);
+  const choices = found.placements;
+  const layers = [
+    baseImageLayer('base', volume),
+    overlayLayerAwaitingChoice('over', volume, choices),
+  ];
+  const none = { hidden: new Set<string>(), opacities: new Map(), displays: new Map() };
+  const apply = (chosen?: Map<string, number>, hidden = none.hidden) =>
+    applyLayerOverrides(layers, hidden, none.opacities, none.displays, chosen)[1];
+
+  it('is not drawn and has no placement until one is chosen', () => {
+    expect(layers[1]).toMatchObject({ visible: false, placementChoices: choices });
+    expect(layers[1].placement).toBeUndefined();
+    expect(apply()).toBe(layers[1]);
+    // An index that is none of the choices chooses nothing.
+    expect(apply(new Map([['over', 7]]))).toBe(layers[1]);
+  });
+
+  it('is drawn, placed by the one that was chosen', () => {
+    const second = apply(new Map([['over', 1]]));
+    expect(second.visible).toBe(true);
+    expect(second.placement).toBe(choices[1]);
+    expect(apply(new Map([['over', 0]])).placement).toBe(choices[0]);
+    // And still hidden when the user hides it.
+    const hidden = apply(new Map([['over', 1]]), new Set(['over']));
+    expect(hidden.visible).toBe(false);
+    expect(hidden.placement).toBe(choices[1]);
+  });
+
+  it('leaves a layer with one placement as it is', () => {
+    const placed = overlayImageLayer('over', volume, choices[0]);
+    const [same] = applyLayerOverrides([placed], none.hidden, none.opacities, none.displays);
+    expect(same).toBe(placed);
+  });
+});
+
 describe('the registrations that may be a patient’s', () => {
   it('are all but those that name another patient', () => {
     const theirs = REG;
@@ -168,5 +226,33 @@ describe('the registrations that may be a patient’s', () => {
       unnamed,
     ]);
     expect(registrationsOfPatient([theirs, another], null)).toEqual([theirs, another]);
+  });
+});
+
+describe('the size of a placement', () => {
+  const placed = (matrix: Mat4) => {
+    const found = findPlacement(PLANNING, FOLLOW_UP, [object('9.9', FOLLOW_UP, PLANNING, matrix)]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    return placementSize(found.placement);
+  };
+
+  it('is how far it moves and how far it turns, the same either way round', () => {
+    const size = placed(rigidMat4([1, 2, -1], 27.5, [3, -4, 12]));
+    expect(size.turnDeg).toBeCloseTo(27.5, 6);
+    // A rigid matrix and its inverse move by the same length.
+    expect(size.shiftMm).toBeCloseTo(13, 6);
+  });
+
+  it('is nothing for the identity, and a pure move for a translation', () => {
+    expect(placed(rigidMat4([0, 0, 1], 0, [0, 0, 0]))).toEqual({ shiftMm: 0, turnDeg: 0 });
+    const moved = placed(rigidMat4([0, 0, 1], 0, [5, -3, 2]));
+    expect(moved.shiftMm).toBeCloseTo(Math.hypot(5, 3, 2), 9);
+    expect(moved.turnDeg).toBeCloseTo(0, 6);
+  });
+
+  it('takes a scale out of the angle', () => {
+    const turned = rigidMat4([0, 0, 1], 40, [0, 0, 0]);
+    const scaled = turned.map((value, i) => (i % 4 < 3 && i < 12 ? value * 1.5 : value));
+    expect(placed(scaled).turnDeg).toBeCloseTo(40, 6);
   });
 });

@@ -183,10 +183,10 @@ describe('mergeLoad', () => {
     // As a file has it: the follow-up's frame mapped into the planning frame.
     const registration = registrationObject('reg', 'frame-2', 'frame-1', shiftMatrix(5, -3, 2));
 
-    const { result, added, why } = mergeLoad(current, incoming, [registration]);
+    const { result, added, choices } = mergeLoad(current, incoming, [registration]);
 
     expect(added).toBe(true);
-    expect(why).toBeUndefined();
+    expect(choices).toBeUndefined();
     expect(result.layers.map((l) => [l.id, l.role])).toEqual([
       ['planning', 'base'],
       ['follow-up', 'overlay'],
@@ -213,13 +213,20 @@ describe('mergeLoad', () => {
     });
   });
 
-  it('does not choose between two registrations, and says that is why', () => {
-    const incoming = fakeLoad('follow-up', 'frame-2');
-    const merged = mergeLoad(fakeLoad('planning', 'frame-1'), incoming, [
+  it('does not choose between two registrations: the layer waits for the user to', () => {
+    const merged = mergeLoad(fakeLoad('planning', 'frame-1'), fakeLoad('follow-up', 'frame-2'), [
       registrationObject('reg-a', 'frame-2', 'frame-1', shiftMatrix(5, -3, 2)),
       registrationObject('reg-b', 'frame-2', 'frame-1', shiftMatrix(6, -3, 2)),
     ]);
-    expect(merged).toEqual({ result: incoming, added: false, why: 'several-registrations' });
+    expect(merged.added).toBe(true);
+    expect(merged.choices).toBe(2);
+    const layer = merged.result.layers[1];
+    expect(layer).toMatchObject({ id: 'follow-up', role: 'overlay', visible: false });
+    expect(layer.placement).toBeUndefined();
+    expect(layer.placementChoices!.map((one) => one.steps[0].sopInstanceUid)).toEqual([
+      'reg-a',
+      'reg-b',
+    ]);
   });
 
   it('replaces a registered series when a volume lacks geometry', () => {

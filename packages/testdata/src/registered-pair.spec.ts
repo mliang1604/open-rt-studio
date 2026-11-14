@@ -105,4 +105,26 @@ describe('the synthetic registered pair', () => {
     // Applied the wrong way round, it would read elsewhere: the test would see it.
     expect(syntheticMrValue(10, 6, 3, PAIR.size)).not.toBe(syntheticMrValue(14, 12, 5, PAIR.size));
   });
+
+  it('has a second registration of the same images that does not agree with the first', () => {
+    const other = parseSpatialRegistration(buffer(pair.otherRegistration))!;
+    expect(other.sopInstanceUid).not.toBe(registration.sopInstanceUid);
+    expect(other.description).toBe(PAIR.otherDescription);
+    expect(registration.description).toBeNull();
+    expect(pair.otherRegistration.name).not.toBe(pair.registration.name);
+    // Between the two, none is picked: both are given to choose among.
+    const found = findPlacement(PAIR.planningFrame, PAIR.followUpFrame, [registration, other]);
+    if (found.kind !== 'several') throw new Error(found.kind);
+    expect(found.placements).toHaveLength(2);
+    // By the second, the MR's first voxel is at the CT's voxel (6, 3, 1).
+    expect(pointBetweenLayers([6, 3, 1], undefined, found.placements[1])).toEqual([
+      ...PAIR.mrOrigin,
+    ]);
+    expect(registeredMrValueAtCtVoxel(12, 9, 4, PAIR.otherShiftVoxels)).toBe(
+      syntheticMrValue(6, 6, 3, PAIR.size),
+    );
+    expect(registeredMrValueAtCtVoxel(12, 9, 4, PAIR.otherShiftVoxels)).not.toBe(
+      registeredMrValueAtCtVoxel(12, 9, 4),
+    );
+  });
 });

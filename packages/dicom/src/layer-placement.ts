@@ -9,6 +9,7 @@ import {
   pathMatrix,
   type FrameUid,
   type MatrixTransform,
+  type TransformPath,
 } from './registration.js';
 import type { SpatialRegistration } from './spatial-registration.js';
 import type { Vec3 } from './types.js';
@@ -58,9 +59,10 @@ export type PlacementSearch =
   | { readonly kind: 'placed'; readonly placement: LayerPlacement }
   /**
    * More than one way, equally short: two registrations of the same pair of
-   * images, for one. They may not agree, and none is picked.
+   * images, for one. They may not agree, and none is picked: all are given,
+   * for whoever asked to choose among.
    */
-  | { readonly kind: 'several'; readonly ways: number };
+  | { readonly kind: 'several'; readonly placements: readonly LayerPlacement[] };
 
 /**
  * Find how a layer in `layerFrame` is placed over a base in `baseFrame`, from
@@ -89,36 +91,59 @@ export function findPlacement(
   const registry = createRegistrationRegistry([...written.values()].map((one) => one.transform));
   const found = registry.findPaths(baseFrame, layerFrame);
   if (found.kind === 'none' || found.kind === 'same-frame') return { kind: 'none' };
-  if (found.kind === 'several') return { kind: 'several', ways: found.paths.length };
 
-  const baseToLayer = pathMatrix(found.path);
-  // These objects hold matrices only; a field would have no single matrix.
-  if (!baseToLayer) return { kind: 'none' };
-  const steps = found.path.steps.map((step): PlacementStep => {
-    // A step is a registration as written, or the inverse of one.
-    const asWritten = written.get(step.id);
-    const source =
-      asWritten ??
-      [...written.values()].find((one) => invertTransform(one.transform).id === step.id)!;
+  const placementOf = (path: TransformPath): LayerPlacement | null => {
+    const baseToLayer = pathMatrix(path);
+    // These objects hold matrices only; a field would have no single matrix.
+    if (!baseToLayer) return null;
+    const steps = path.steps.map((step): PlacementStep => {
+      // A step is a registration as written, or the inverse of one.
+      const asWritten = written.get(step.id);
+      const source =
+        asWritten ??
+        [...written.values()].find((one) => invertTransform(one.transform).id === step.id)!;
+      return {
+        sopInstanceUid: source.object.sopInstanceUid,
+        label: source.object.label,
+        description: source.object.description,
+        writtenFrom: source.transform.from,
+        writtenTo: source.transform.to,
+        inverted: !asWritten,
+      };
+    });
     return {
-      sopInstanceUid: source.object.sopInstanceUid,
-      label: source.object.label,
-      description: source.object.description,
-      writtenFrom: source.transform.from,
-      writtenTo: source.transform.to,
-      inverted: !asWritten,
-    };
-  });
-  return {
-    kind: 'placed',
-    placement: {
       baseFrame,
       layerFrame,
       steps,
       baseToLayer,
       layerToBase: Object.freeze([...invertMat4(baseToLayer)]),
-    },
+    };
   };
+
+  if (found.kind === 'several') {
+    const placements = found.paths.flatMap((path) => placementOf(path) ?? []);
+    return { kind: 'several', placements };
+  }
+  const placement = placementOf(found.path);
+  return placement ? { kind: 'placed', placement } : { kind: 'none' };
+}
+
+/**
+ * How far a placement moves and turns the image, for telling one registration
+ * from another when their names are the same: the length of its translation
+ * in mm and the angle of its rotation in degrees. For a matrix that also
+ * scales or shears, the angle is that of its nearest reading as a rotation
+ * and is a rough guide only.
+ */
+export function placementSize(placement: LayerPlacement): { shiftMm: number; turnDeg: number } {
+  const m = placement.baseToLayer;
+  const shiftMm = Math.hypot(m[3], m[7], m[11]);
+  // The lengths of the three columns take a scale out of the trace.
+  const scale = (column: number): number => Math.hypot(m[column], m[4 + column], m[8 + column]);
+  const [sx, sy, sz] = [scale(0), scale(1), scale(2)];
+  const trace = (sx ? m[0] / sx : 1) + (sy ? m[5] / sy : 1) + (sz ? m[10] / sz : 1);
+  const turnDeg = (Math.acos(Math.min(1, Math.max(-1, (trace - 1) / 2))) * 180) / Math.PI;
+  return { shiftMm, turnDeg };
 }
 
 /**

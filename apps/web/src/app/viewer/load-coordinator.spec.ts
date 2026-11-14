@@ -7,6 +7,7 @@ import { registrationObject } from '../registration-testing';
 import type { LoadResult, MergedLoad } from '../volume-loader';
 import {
   cantFuseMessage,
+  chooseRegistrationMessage,
   planFileLoad,
   planSeriesLoad,
   type CatalogOps,
@@ -74,11 +75,8 @@ describe('cantFuseMessage', () => {
     expect(cantFuseMessage('compare')).toContain('compare');
     expect(cantFuseMessage('overlay')).toContain('frame of reference');
     expect(cantFuseMessage('overlay')).toContain('registration');
-    expect(cantFuseMessage('overlay', 'several-registrations')).toMatch(
-      /^Can’t fuse: more than one registration/,
-    );
-    expect(cantFuseMessage('compare', 'several-registrations')).toMatch(
-      /^Can’t compare: more than one registration/,
+    expect(chooseRegistrationMessage(2)).toBe(
+      '2 registrations connect this series to the one on screen. Choose one under Layers to show it.',
     );
   });
 });
@@ -246,16 +244,33 @@ describe('planFileLoad — held modifier', () => {
           intent: 'overlay',
           previous: result('base'),
           result: batch,
-          merge: (_c, i) => ({ result: i, added: false, why: 'several-registrations' }),
+          merge: (_c, i) => ({ result: i, added: false }),
+          catalog,
+        }),
+      );
+      expect(outcome).toEqual({ kind: 'reject', message: cantFuseMessage('overlay') });
+      expect(catalog.registrationAdds).toEqual([]);
+      expect(catalog.adds).toBe(0);
+    });
+
+    it('adds a series that several registrations could place, and says where to choose', () => {
+      const catalog = recordingCatalog();
+      const outcome = planFileLoad(
+        fileDeps({
+          intent: 'overlay',
+          previous: result('base'),
+          result: batch,
+          merge: (_c, i) => ({ result: i, added: true, choices: 3 }),
           catalog,
         }),
       );
       expect(outcome).toEqual({
-        kind: 'reject',
-        message: cantFuseMessage('overlay', 'several-registrations'),
+        kind: 'overlay',
+        result: batch,
+        compare: false,
+        notice: chooseRegistrationMessage(3),
       });
-      expect(catalog.registrationAdds).toEqual([]);
-      expect(catalog.adds).toBe(0);
+      expect(catalog.adds).toBe(1);
     });
 
     it('fuses (⌥) a series a registration placed, and compares (⇧) it', () => {
