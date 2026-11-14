@@ -31,6 +31,7 @@ describe('resolveConfig', () => {
       { OPEN_RT_STUDIO_PORT: '9090', OPEN_RT_STUDIO_LOG_LEVEL: 'warn' },
     );
     expect(config).toEqual({
+      ...DEFAULT_CONFIG,
       host: '0.0.0.0',
       port: 9090,
       logLevel: 'warn',
@@ -45,9 +46,39 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_PORT: '0',
       OPEN_RT_STUDIO_LOG_LEVEL: 'silent',
       OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS: '0',
+      OPEN_RT_STUDIO_DATA_DIR: ' /var/lib/open-rt-studio ',
+      OPEN_RT_STUDIO_MAX_UPLOAD_BYTES: '1048576',
     });
     // Port 0 asks the operating system for a free port; it is a valid setting.
-    expect(config).toEqual({ host: '::1', port: 0, logLevel: 'silent', shutdownTimeoutMs: 0 });
+    expect(config).toEqual({
+      host: '::1',
+      port: 0,
+      logLevel: 'silent',
+      shutdownTimeoutMs: 0,
+      dataDir: '/var/lib/open-rt-studio',
+      maxUploadBytes: 1_048_576,
+    });
+  });
+
+  it('keeps the PACS in memory unless it is given a directory', () => {
+    expect(DEFAULT_CONFIG.dataDir).toBeNull();
+    expect(resolveConfig({ dataDir: './data' }).dataDir).toBe('./data');
+    // The file can say null in so many words; the environment wins over it.
+    expect(resolveConfig({ dataDir: null }).dataDir).toBeNull();
+    expect(resolveConfig({ dataDir: null }, { OPEN_RT_STUDIO_DATA_DIR: '/srv/pacs' }).dataDir).toBe(
+      '/srv/pacs',
+    );
+  });
+
+  it.each([
+    [{ dataDir: '' }, 'The config file\'s "dataDir" must be a directory, or null to keep nothing.'],
+    [{ dataDir: 5 }, 'The config file\'s "dataDir" must be a directory, or null to keep nothing.'],
+    [
+      { maxUploadBytes: 0 },
+      'The config file\'s "maxUploadBytes" must be a whole number of bytes, 1 or more.',
+    ],
+  ])('says what is wrong with the PACS settings: %j', (file, message) => {
+    expect(() => resolveConfig(file)).toThrow(new ConfigError(message));
   });
 
   it('treats an empty environment variable as not set', () => {
@@ -83,7 +114,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, port, logLevel, shutdownTimeoutMs.',
+        'The config file has an unknown setting "prot". Known: host, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes.',
       ),
     );
   });

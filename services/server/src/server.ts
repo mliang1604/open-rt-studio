@@ -2,10 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { apiRoutes } from './api/api-routes.js';
 import type { ServerConfig } from './config.js';
 import { createCore, type ServerCore } from './core/core.js';
 import { createHost, type HostAddress } from './host/host.js';
+import { healthRoute } from './host/routes.js';
 import type { Logger } from './logger.js';
+import { openSqliteIndex } from './pacs-index/sqlite-index.js';
+import { openFileStore } from './store/file-store.js';
+import { createMemoryStore } from './store/memory-store.js';
 
 /** A server that is listening. */
 export interface RunningServer {
@@ -21,11 +29,35 @@ export interface RunningServer {
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
 
-/** Make a core, put the HTTP host in front of it and listen. */
+/** The store and the index the configuration asks for: on disk, or in memory. */
+async function openPacs(config: ServerConfig, logger: Logger) {
+  if (config.dataDir === null) {
+    // Nothing is kept: what is uploaded is gone when the server stops.
+    logger.warn('pacs-in-memory');
+    return { store: createMemoryStore(), index: await openSqliteIndex(':memory:', { logger }) };
+  }
+  await mkdir(config.dataDir, { recursive: true });
+  const store = await openFileStore(join(config.dataDir, 'store'), { logger });
+  const index = await openSqliteIndex(join(config.dataDir, 'index.sqlite'), { logger });
+  return { store, index };
+}
+
+/** Open the PACS, make a core on it, put the HTTP host in front and listen. */
 export async function startServer(config: ServerConfig, logger: Logger): Promise<RunningServer> {
-  const core = createCore({ logger });
-  const host = createHost(core, { ...config, logger });
-  const address = await host.listen();
+  const core = createCore({ logger, pacs: await openPacs(config, logger) });
+  const routes = apiRoutes(core.pacs!, {
+    maxUploadBytes: config.maxUploadBytes,
+    described: [healthRoute(core)],
+  });
+  const host = createHost(core, { ...config, logger, routes });
+  let address: HostAddress;
+  try {
+    address = await host.listen();
+  } catch (error) {
+    // Nothing is left open by a server that could not start.
+    await core.dispose();
+    throw error;
+  }
   logger.info('listening', { host: address.host, port: address.port });
   if (!LOOPBACK.has(config.host)) {
     // There are no accounts yet (#55): whoever can reach the port can use it.

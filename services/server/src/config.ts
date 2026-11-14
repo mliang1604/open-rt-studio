@@ -20,6 +20,13 @@ export interface ServerConfig {
   readonly logLevel: LogLevel;
   /** How long a shutdown waits for work in flight before giving up on it. */
   readonly shutdownTimeoutMs: number;
+  /**
+   * The directory the PACS keeps its instances and its index in. Null keeps
+   * them in memory: gone when the server stops, which is for trying it out.
+   */
+  readonly dataDir: string | null;
+  /** The largest instance an upload may hold, in bytes. */
+  readonly maxUploadBytes: number;
 }
 
 export const DEFAULT_CONFIG: ServerConfig = {
@@ -27,6 +34,8 @@ export const DEFAULT_CONFIG: ServerConfig = {
   port: 4300,
   logLevel: 'info',
   shutdownTimeoutMs: 10_000,
+  dataDir: null,
+  maxUploadBytes: 512 * 1024 * 1024,
 };
 
 /** The environment variable naming a JSON config file. */
@@ -38,6 +47,8 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   port: 'OPEN_RT_STUDIO_PORT',
   logLevel: 'OPEN_RT_STUDIO_LOG_LEVEL',
   shutdownTimeoutMs: 'OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS',
+  dataDir: 'OPEN_RT_STUDIO_DATA_DIR',
+  maxUploadBytes: 'OPEN_RT_STUDIO_MAX_UPLOAD_BYTES',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -69,10 +80,22 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       typeof value === 'number' && Number.isInteger(value) && value >= 0
         ? { value }
         : { wrong: 'must be a whole number of milliseconds, 0 or more' },
+    dataDir: (value) =>
+      value === null || (typeof value === 'string' && value.trim() !== '')
+        ? { value: value === null ? null : value.trim() }
+        : { wrong: 'must be a directory, or null to keep nothing' },
+    maxUploadBytes: (value) =>
+      typeof value === 'number' && Number.isInteger(value) && value >= 1
+        ? { value }
+        : { wrong: 'must be a whole number of bytes, 1 or more' },
   };
 
 /** The keys that are numbers, which the environment gives as text. */
-const NUMERIC: ReadonlySet<keyof ServerConfig> = new Set(['port', 'shutdownTimeoutMs']);
+const NUMERIC: ReadonlySet<keyof ServerConfig> = new Set([
+  'port',
+  'shutdownTimeoutMs',
+  'maxUploadBytes',
+]);
 
 const KEYS = Object.keys(DEFAULT_CONFIG) as (keyof ServerConfig)[];
 
@@ -92,8 +115,8 @@ function checked<K extends keyof ServerConfig>(
  * An unknown key in the file is an error, so a misspelt setting is noticed.
  */
 export function resolveConfig(file: unknown, environment: Environment = {}): ServerConfig {
-  const config: { -readonly [K in keyof ServerConfig]: ServerConfig[K] } = { ...DEFAULT_CONFIG };
-  const assign = <K extends keyof ServerConfig>(key: K, value: unknown, source: string): void => {
+  const config: Record<string, unknown> = { ...DEFAULT_CONFIG };
+  const assign = (key: keyof ServerConfig, value: unknown, source: string): void => {
     config[key] = checked(key, value, source);
   };
 
@@ -119,7 +142,7 @@ export function resolveConfig(file: unknown, environment: Environment = {}): Ser
     const value = NUMERIC.has(key) ? (/^\s*\d+\s*$/.test(text) ? Number(text) : NaN) : text;
     assign(key, value, variable);
   }
-  return config;
+  return config as unknown as ServerConfig;
 }
 
 /**

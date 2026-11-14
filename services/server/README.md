@@ -1,9 +1,10 @@
 # @open-rt-studio/server
 
-The Node server of Open RT Studio. So far it is the skeleton (#41): it starts,
-answers a health endpoint and stops cleanly. The DICOM store, the index,
-ingest, the HTTP API and DIMSE come with the later issues of
-[the server epic](https://github.com/mliang1604/open-rt-studio/issues/4).
+The Node server of Open RT Studio: a small PACS. It keeps DICOM instances in
+a file store, knows them through an index that understands how radiotherapy
+objects refer to each other, takes them in through one ingest pipeline, and
+serves them over an HTTP API. DIMSE, login and the rest come with the later
+issues of [the server epic](https://github.com/mliang1604/open-rt-studio/issues/4).
 
 **Not for clinical use.**
 
@@ -18,6 +19,13 @@ curl http://127.0.0.1:4300/health
 # {"status":"ok","version":"0.0.0","uptimeSeconds":3,"inFlight":0}
 ```
 
+Started like this it keeps what is uploaded in memory, and says so in its log.
+To keep it, give it a directory:
+
+```sh
+OPEN_RT_STUDIO_DATA_DIR=./data npm start -w @open-rt-studio/server
+```
+
 `SIGTERM` or `SIGINT` (Ctrl+C) stops it: it takes no new connections, answers
 the requests it has, lets the core finish its work, and exits with 0. If the
 shutdown timeout runs out first, what is left is cut off and it exits with 1.
@@ -29,12 +37,14 @@ set them, and an environment variable wins over the file. A wrong or misspelt
 setting stops the server from starting, with a message that names it (exit
 code 2).
 
-| Setting             | Environment variable                 | Default     | Meaning                                                           |
-| ------------------- | ------------------------------------ | ----------- | ----------------------------------------------------------------- |
-| `host`              | `OPEN_RT_STUDIO_HOST`                | `127.0.0.1` | Address to listen on                                              |
-| `port`              | `OPEN_RT_STUDIO_PORT`                | `4300`      | Port to listen on; `0` takes a free one, which the log then names |
-| `logLevel`          | `OPEN_RT_STUDIO_LOG_LEVEL`           | `info`      | `debug`, `info`, `warn`, `error` or `silent`                      |
-| `shutdownTimeoutMs` | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS` | `10000`     | How long a stop waits for requests, and then for the core's work  |
+| Setting             | Environment variable                 | Default     | Meaning                                                                                                                  |
+| ------------------- | ------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `host`              | `OPEN_RT_STUDIO_HOST`                | `127.0.0.1` | Address to listen on                                                                                                     |
+| `port`              | `OPEN_RT_STUDIO_PORT`                | `4300`      | Port to listen on; `0` takes a free one, which the log then names                                                        |
+| `logLevel`          | `OPEN_RT_STUDIO_LOG_LEVEL`           | `info`      | `debug`, `info`, `warn`, `error` or `silent`                                                                             |
+| `shutdownTimeoutMs` | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS` | `10000`     | How long a stop waits for requests, and then for the core's work                                                         |
+| `dataDir`           | `OPEN_RT_STUDIO_DATA_DIR`            | none        | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops |
+| `maxUploadBytes`    | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`    | `536870912` | The largest instance an upload may hold                                                                                  |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -45,13 +55,56 @@ The server listens on this machine only by default. **There is no login yet
 something else only on a network where that is acceptable; the server logs a
 warning when you do.
 
-## Endpoints
+## The API
 
-| Method and path | Answer                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| `GET /health`   | 200 and `{"status":"ok", ...}` while the server takes work; 503 and `"status":"stopping"` after. |
+Everything is under `/api/v1`, and is described by the server itself as
+OpenAPI 3.1 at `/api/v1/openapi.json`. The description is made from the
+routes, so what is served is what is described.
 
-Anything else is 404, or 405 with an `Allow` header for a known path.
+| Method and path                      | Answer                                                             |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| `GET /health`                        | 200 while the server takes work, 503 once it is stopping           |
+| `GET /api/v1/counts`                 | How many patients, studies, series and instances                   |
+| `GET /api/v1/patients`               | Patients, by name                                                  |
+| `GET /api/v1/studies`                | Studies, the latest first                                          |
+| `GET /api/v1/studies/{uid}`          | One study                                                          |
+| `GET /api/v1/studies/{uid}/series`   | Its series, by series number                                       |
+| `GET /api/v1/series/{uid}`           | One series                                                         |
+| `GET /api/v1/series/{uid}/instances` | Its instances, by instance number                                  |
+| `GET /api/v1/series/{uid}/related`   | Its structure sets, plans, doses, registrations, same-frame series |
+| `GET /api/v1/instances/{uid}`        | One instance, and what it refers to                                |
+| `GET /api/v1/instances/{uid}/file`   | Its DICOM file, streamed; `Range` and `If-None-Match` are honoured |
+| `POST /api/v1/instances`             | Upload one DICOM file as `application/dicom`                       |
+| `GET /api/v1/openapi.json`           | The description                                                    |
+
+```sh
+curl -X POST -H 'Content-Type: application/dicom' --data-binary @slice.dcm \
+  http://127.0.0.1:4300/api/v1/instances
+# 201 {"outcome":"stored","sopInstanceUid":"..."}
+curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-'
+```
+
+- **Lists come in parts**: `limit` (default 100, at most 1000) and `offset`,
+  and the answer says whether there is `more`.
+- **Filters match as DICOM C-FIND does**: `*` and `?`, date ranges; see
+  [The index](#the-index). A parameter the address does not know is an error,
+  so a misspelt filter does not silently match everything.
+- **To fetch a series**, list its instances and fetch each file. The `ETag` of
+  a file is its SHA-256.
+- **Upload** answers 201 `stored`, 200 `unchanged` or `replaced`, 409 when the
+  server holds this differently (see [Ingest](#ingest); `?onDifferent=replace`
+  to replace), 422 for what is not a DICOM file that can be filed, 413 above
+  `maxUploadBytes`.
+- **Errors** are `{"error": "<fixed word>", "message": "..."}`. A message
+  never repeats what the caller sent.
+- **A server on this machine answers only as this machine.** While `host` is
+  a loopback address, a request whose `Host` header is another name is
+  refused (403). That stops a web page elsewhere from reading the PACS by
+  pointing a name of its own at 127.0.0.1.
+- The API is **not DICOMweb**; see docs/architecture.md for why, and what
+  would change that. Other systems are to talk to the server by DIMSE.
+- A browser page on another origin cannot call the API yet: no CORS headers
+  are sent. That comes with the client that needs it (#47).
 
 ## Layout
 
@@ -62,8 +115,11 @@ Anything else is 404, or 405 with an `Allow` header for a known path.
   that work.
 - `src/host/`: HTTP in front of a core, on Node's `node:http`. No framework;
   see [docs/architecture.md](../../docs/architecture.md), "Server and PACS",
-  for why and for when that is to be looked at again. A route is a method, an
-  exact path and a function (`host/routes.ts`).
+  for why. A route is a method, a path pattern, a function and its
+  description (`host/routes.ts`).
+- `src/api/`: the routes of the API (`api-routes.ts`), the JSON Schemas of
+  its answers (`schemas.ts`) and the OpenAPI document made from both
+  (`openapi.ts`).
 - `src/store/`: where DICOM instances are kept (#42). `DicomStore` is the
   interface (`put`, `get` as a stream, `stat`, `exists`, `delete`, `verify`,
   all by SOP Instance UID); `openFileStore(directory)` is the one on disk and

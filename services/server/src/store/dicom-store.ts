@@ -15,6 +15,12 @@ export interface StoredInstance {
   readonly sha256: string;
 }
 
+/** A run of bytes within an instance, from `start` to `end`, both included. */
+export interface ByteRange {
+  readonly start: number;
+  readonly end: number;
+}
+
 /** The bytes of an instance: all at once, or in pieces as they arrive. */
 export type InstanceBytes = Uint8Array | Iterable<Uint8Array> | AsyncIterable<Uint8Array>;
 
@@ -34,8 +40,12 @@ export interface DicomStore {
    * part-way leaves what was there before.
    */
   put(sopInstanceUid: string, bytes: InstanceBytes): Promise<StoredInstance>;
-  /** The instance's bytes as a stream. Rejects with {@link InstanceNotFoundError}. */
-  get(sopInstanceUid: string): Promise<Readable>;
+  /**
+   * The instance's bytes as a stream: all of them, or the part from `start`
+   * to `end`, both counted from 0 and both included. Rejects with
+   * {@link InstanceNotFoundError}.
+   */
+  get(sopInstanceUid: string, part?: ByteRange): Promise<Readable>;
   /** What is kept under the UID, or null. */
   stat(sopInstanceUid: string): Promise<StoredInstance | null>;
   exists(sopInstanceUid: string): Promise<boolean>;

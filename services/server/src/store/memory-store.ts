@@ -41,10 +41,11 @@ export function createMemoryStore(): DicomStore {
       return instance;
     },
 
-    async get(sopInstanceUid) {
+    async get(sopInstanceUid, part) {
       const entry = found(sopInstanceUid);
       if (!entry) throw new InstanceNotFoundError();
-      return Readable.from([entry.bytes], { objectMode: false });
+      const bytes = part ? entry.bytes.subarray(part.start, part.end + 1) : entry.bytes;
+      return Readable.from([bytes], { objectMode: false });
     },
 
     async stat(sopInstanceUid) {

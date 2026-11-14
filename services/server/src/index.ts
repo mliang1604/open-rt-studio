@@ -31,7 +31,24 @@ export {
   type HostOptions,
   type ServerHost,
 } from './host/host.js';
-export { healthRoute, type Route, type RouteResponse } from './host/routes.js';
+export {
+  healthRoute,
+  HttpError,
+  matchPath,
+  type ParameterDoc,
+  type Route,
+  type RouteDoc,
+  type RouteRequest,
+  type RouteResponse,
+} from './host/routes.js';
+export {
+  API_PREFIX,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  apiRoutes,
+  type ApiOptions,
+} from './api/api-routes.js';
+export { openApiDocument } from './api/openapi.js';
 export {
   createIngest,
   indexEntry,
@@ -97,6 +114,7 @@ export {
   InvalidUidError,
   assertUid,
   isUid,
+  type ByteRange,
   type DicomStore,
   type InstanceBytes,
   type StoredInstance,

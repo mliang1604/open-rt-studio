@@ -102,6 +102,24 @@ describe.each(BACKENDS)('a DICOM store (%s)', (_name, open) => {
     expect(await read(await store.get(FIRST.uid))).toEqual(FIRST.bytes);
   });
 
+  it('gives a part of an instance, from one byte to another, both included', async () => {
+    await store.put(FIRST.uid, FIRST.bytes);
+    const size = FIRST.bytes.byteLength;
+    // "DICM" after the 128-byte preamble.
+    expect(
+      new TextDecoder().decode(await read(await store.get(FIRST.uid, { start: 128, end: 131 }))),
+    ).toBe('DICM');
+    expect(await read(await store.get(FIRST.uid, { start: 0, end: 0 }))).toEqual(
+      FIRST.bytes.subarray(0, 1),
+    );
+    expect(await read(await store.get(FIRST.uid, { start: size - 7, end: size - 1 }))).toEqual(
+      FIRST.bytes.subarray(size - 7),
+    );
+    expect(await read(await store.get(FIRST.uid, { start: 0, end: size - 1 }))).toEqual(
+      FIRST.bytes,
+    );
+  });
+
   it('holds nothing it was not given', async () => {
     expect(await store.exists(FIRST.uid)).toBe(false);
     expect(await store.stat(FIRST.uid)).toBeNull();

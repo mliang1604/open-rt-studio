@@ -26,9 +26,12 @@ application. Never commit patient data or real DICOM files
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
   `metadata-panel/`, `dvr-panel/`, `shortcut-help/`). The viewer route is
   loaded on demand, so it is not in the initial bundle.
-- `services/server`: the Node server. `src/core` is the server without the
-  network (no port, no environment), which the desktop application will
-  embed; `src/host` is HTTP on `node:http` in front of it. Logs carry no
+- `services/server`: the Node server, a small PACS. `src/core` is the server
+  without the network (no port, no environment), which the desktop
+  application will embed; `src/store` keeps instances, `src/pacs-index`
+  knows them (SQLite through `node:sqlite`), `src/ingest` is the one way in;
+  `src/host` is HTTP on `node:http` and `src/api` the routes it serves. A
+  route carries its own description, from which the OpenAPI document is made. Logs carry no
   patient identifiers: log a route, a count or a duration, never a name, an
   ID or the address that was asked for.
 - `apps/desktop`, `native/`: placeholders until M2 and M3.

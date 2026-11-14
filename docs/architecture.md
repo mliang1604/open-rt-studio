@@ -141,14 +141,31 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   opens no port and reads no environment; it is what the desktop application
   embeds. The **host** (`services/server/src/host`) puts HTTP in front of a
   core and is the only code that knows about HTTP.
-- **HTTP framework: none, for now.** The host uses Node's `node:http` with a
-  small table of routes. The reasons: the skeleton answers one endpoint; the
-  core must run inside Electron without a network stack; and every dependency
-  the server takes is one more to license-check and keep current. This is
-  the cheap choice to undo, because the host is one folder. It is to be looked
-  at again when the HTTP API is designed (#46): uploads, request validation
-  and login (#55) are where a framework such as Fastify (MIT) would start to
-  pay for itself. Status: **decided for the skeleton, open for #46.**
+- **HTTP framework: none.** The host uses Node's `node:http` with a table of
+  routes. This was looked at again for the HTTP API (#46), as planned. The
+  API turned out to need path parameters, a size-limited body, streamed
+  answers with ranges, typed errors and a description: about 400 lines in
+  `src/host`, comments included, with no dependency to license-check or keep current, and
+  nothing a framework would have made shorter by much. What would change
+  the answer: multipart uploads, login with sessions (#55), or request
+  validation growing past what the routes do by hand. A framework such as
+  Fastify (MIT) would then replace `src/host`; routes and schemas would
+  carry over. Status: **decided, and Michael's to overturn.**
+- **The API is our own JSON, not DICOMweb** (#46). Its clients are this
+  project's web and desktop applications, which need what QIDO-RS does not
+  have (how RT objects refer to each other), read whole Part 10 files (which
+  `packages/dicom` parses) and upload them one at a time. DICOMweb would add
+  the DICOM JSON model and multipart bodies for no client that exists. The
+  paths follow the same patient, study, series, instance order, and the
+  filters match as C-FIND does, so QIDO-RS, WADO-RS and STOW-RS can be added
+  beside it under their own prefix if a third-party DICOMweb client ever
+  needs the server. Other systems are served by DIMSE (#49 to #52). Status:
+  **decided.**
+- The API's description (OpenAPI 3.1) is made from the routes and served at
+  `/api/v1/openapi.json`; the specs hold every answer against its schemas.
+- A server listening on a loopback address refuses requests whose `Host`
+  header is another name, so that a web page cannot reach the PACS through
+  the user's browser by DNS rebinding.
 - The file store (#42) names an instance's files by the SHA-256 of its SOP
   Instance UID, so that paths hold no patient identifier and not the UID
   either. It keeps the bytes as an ordinary DICOM file beside a small record
