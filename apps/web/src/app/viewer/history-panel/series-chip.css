@@ -31,6 +31,7 @@
 }
 
 .chip-thumb {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -51,6 +52,31 @@
 .chip-icon {
   font-size: 22px;
   color: var(--muted);
+}
+
+/* How many structure sets come with the series: in a corner of the preview,
+   so that the line of text below keeps its width. */
+.chip-sets {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--glass-border);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .chip-meta {

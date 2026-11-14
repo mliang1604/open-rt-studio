@@ -247,6 +247,7 @@ describe('putting instances', () => {
       description: 'Synthetic CT',
       frameOfReferenceUid: RT.planningFrame,
       instances: 1,
+      structureSets: 0,
     });
     expect(await index.getStudy(studyUid(PLANNING))).toEqual({
       studyInstanceUid: studyUid(PLANNING),
@@ -697,6 +698,51 @@ describe('radiotherapy relationships', () => {
     }
     // Another frame: not its structure set.
     expect((await index.relatedToSeries(RT.followUpCt))!.structureSets).toEqual([]);
+  });
+
+  it('says with each series how many structure sets belong to it', async () => {
+    const index = await memory(syntheticRtDataset());
+    const counts = new Map<string, number>();
+    for (const study of [PLANNING, FOLLOW_UP]) {
+      for (const series of await index.findSeries({ studyInstanceUid: studyUid(study) })) {
+        // The count is of the very structure sets that are given with the series.
+        const related = (await index.relatedToSeries(series.seriesInstanceUid))!;
+        expect(series.structureSets, series.modality).toBe(related.structureSets.length);
+        expect((await index.getSeries(series.seriesInstanceUid))!.structureSets).toBe(
+          series.structureSets,
+        );
+        counts.set(series.seriesInstanceUid, series.structureSets);
+      }
+    }
+    expect(counts.get(RT.ct)).toBe(1);
+    expect(counts.get(RT.mr)).toBe(1);
+    expect(counts.get(RT.followUpCt)).toBe(0);
+  });
+
+  it('counts a structure set once that names both a series and its frame, and each of two', async () => {
+    const both = entry(PLANNING, 'RTSTRUCT', 11, 1, {
+      frame: false,
+      references: [
+        { relation: 'structure-set.series', targetUid: RT.ct },
+        { relation: 'structure-set.frame', targetUid: RT.planningFrame },
+      ],
+    });
+    const byFrame = entry(PLANNING, 'RTSTRUCT', 12, 1, {
+      frame: false,
+      references: [{ relation: 'structure-set.frame', targetUid: RT.planningFrame }],
+    });
+    const index = await memory([
+      entry(PLANNING, 'CT', SERIES.CT, 1),
+      entry(PLANNING, 'MR', SERIES.MR, 1),
+      both,
+    ]);
+    expect((await index.getSeries(RT.ct))!.structureSets).toBe(1);
+    expect((await index.getSeries(RT.mr))!.structureSets).toBe(1);
+
+    await index.putInstance(byFrame);
+    expect((await index.getSeries(RT.ct))!.structureSets).toBe(2);
+    await index.removeInstance(both.instance.uid);
+    expect((await index.getSeries(RT.ct))!.structureSets).toBe(1);
   });
 
   it('finds only the registration for the follow-up CT, and the planning objects for the MR in their frame', async () => {

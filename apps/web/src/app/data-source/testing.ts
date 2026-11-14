@@ -28,6 +28,7 @@ export function fakeSeries(uid: string, overrides: Partial<SeriesSummary> = {}):
     modality: 'CT',
     frameOfReferenceUid: null,
     imageCount: 1,
+    structureSets: 0,
     ...overrides,
   };
 }

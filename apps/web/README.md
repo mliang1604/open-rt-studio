@@ -129,7 +129,9 @@ Viewer (`src/app/viewer`):
   canvas. An overlay added to the viewport shows in captures once its selector
   is in the list at the top of `capture-overlays.ts`.
 - `history-panel/`: the patient timeline and tree with series chips. It
-  shows what the data source lists and asks the source for each preview.
+  shows what the data source lists and asks the source for each preview. The
+  chip of an image series says how many structure sets come with it ("RS 2"),
+  which is how a save to the server shows on the timeline.
 - `server-panel/`: the card for connecting to a server and choosing one of
   its patients. It is opened from the empty state or from the history bar,
   not from the toolbar, which has no room left at 1280 pixels. Nothing is

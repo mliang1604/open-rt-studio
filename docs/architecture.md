@@ -146,6 +146,10 @@ also builds on its own to `dist/` for consumers outside the workspace.
   in the viewer, and the stored one comes back with its series, as an
   imported structure set, the next time the series is loaded. The server has
   no way to delete yet, so a save cannot be taken back from the application.
+  A source says with each series how many structure sets it holds for it,
+  by the rule that decides which are shown on the series (same frame of
+  reference, or the series named); the server counts them in its series
+  list, so the timeline asks nothing per series.
 
 ## Desktop
 

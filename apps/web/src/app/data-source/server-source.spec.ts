@@ -52,6 +52,15 @@ function authored(label: string, sopInstanceUid?: string): ArrayBuffer {
   );
 }
 
+/** How many structure sets the source's timeline says a series has. */
+function countOn(source: ServerSource, seriesUid: string): number {
+  const series = (source.currentPatient()?.studies ?? [])
+    .flatMap((study) => study.series)
+    .find((one) => one.uid === seriesUid);
+  if (!series) throw new Error(`series ${seriesUid} is not listed`);
+  return series.structureSets;
+}
+
 interface Made {
   readonly server: FakeServer;
   readonly source: ServerSource;
@@ -304,6 +313,8 @@ describe('ServerSource', () => {
       const { source, server } = await withPatient();
       const before = await source.fetchSeries(COURSE.ct);
       expect(before.structureSets.map((set) => set.label)).not.toContain('Painted here');
+      const listedBefore = countOn(source, COURSE.ct);
+      expect(listedBefore).toBe(before.structureSets.length);
 
       expect(await source.save(dicom(authored('Painted here')))).toEqual({
         kind: 'stored',
@@ -311,10 +322,18 @@ describe('ServerSource', () => {
       });
       // One upload, as DICOM, asking the server to keep whatever it holds.
       expect(server.uploads).toEqual([{ mediaType: 'application/dicom', status: 201 }]);
-      expect(server.asked.at(-1)).toBe('/instances?onDifferent=keep');
+      expect(server.asked.filter((path) => path.startsWith('/instances?'))).toEqual([
+        '/instances?onDifferent=keep',
+      ]);
+
+      // The timeline was told: the CT has one structure set more, without the
+      // patient being chosen again.
+      expect(countOn(source, COURSE.ct)).toBe(listedBefore + 1);
 
       const after = await source.fetchSeries(COURSE.ct);
       expect(after.structureSets).toHaveLength(before.structureSets.length + 1);
+      // What the timeline says is how many come with the series.
+      expect(countOn(source, COURSE.ct)).toBe(after.structureSets.length);
       const saved = after.structureSets.find((set) => set.label === 'Painted here')!;
       expect(saved.referencedSeriesUids).toContain(COURSE.ct);
       expect(saved.rois.map((roi) => roi.name)).toEqual(
@@ -365,6 +384,30 @@ describe('ServerSource', () => {
       const refused = await source.save(dicom(new ArrayBuffer(200))).catch((e: unknown) => e);
       expect(refused).toBeInstanceOf(ServerError);
       expect((refused as ServerError).status).toBe(422);
+    });
+
+    it('stands when the timeline cannot be brought up to date afterwards', async () => {
+      const { source, server } = await withPatient();
+      const listed = source.currentPatient();
+      const fetcher = server.fetch;
+      // The upload goes through; every question after it fails.
+      let uploaded = false;
+      const flaky: typeof fetch = async (input, init) => {
+        if (uploaded) throw new TypeError('Failed to fetch');
+        const response = await fetcher(input, init);
+        if (init?.method === 'POST') uploaded = true;
+        return response;
+      };
+      const second = new ServerSource(ADDRESS, { fetch: flaky, parse: parseHere });
+      await second.refresh();
+      await second.selectPatient('1');
+      expect(await second.save(dicom(authored('Kept')))).toEqual({
+        kind: 'stored',
+        where: 'Server at 127.0.0.1:4300',
+      });
+      // The list is as it was, a save behind.
+      expect(second.currentPatient()).toEqual(listed);
+      expect(server.uploads).toEqual([{ mediaType: 'application/dicom', status: 201 }]);
     });
 
     it('says so when the server cannot be reached, and has saved nothing', async () => {

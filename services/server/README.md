@@ -309,7 +309,9 @@ the frame of reference it is in, as some name nothing else), the plans on
 those, the doses for those plans or structure sets, the registrations that connect it or its frame, and the other
 series that say they are in its frame (images and doses, and also a plan or a
 registration that names the frame; pick by modality). `referencesFrom` and `referencesTo` follow one relation
-in either direction.
+in either direction. A series record carries the number of those structure
+sets (`structureSets`), so that a list of series can say which have any
+without asking for each.
 
 - **Queries match as DICOM C-FIND does**, so that browse and DIMSE share
   them: `*` and `?` in text, date ranges such as `20260101-20260131`, lists

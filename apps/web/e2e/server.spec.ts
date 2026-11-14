@@ -88,6 +88,26 @@ async function captured(page: Page): Promise<string> {
   return Buffer.concat(chunks).toString('base64');
 }
 
+/**
+ * What each series chip says. For a dose the image count is left out: a
+ * multi-frame dose says its number of frames from files and "1 img" from the
+ * server, which is #201.
+ */
+async function chips(page: Page): Promise<string[]> {
+  return page.locator('app-series-chip').evaluateAll((all) =>
+    all.map((chip) => {
+      const text = (selector: string): string =>
+        [...chip.querySelectorAll(selector)].map((one) => one.textContent.trim()).join(' ');
+      return [
+        text('.chip-label'),
+        text('.chip-modality'),
+        text('.chip-modality') === 'RTDOSE' ? '' : text('.chip-count'),
+        text('.chip-sets [aria-hidden]'),
+      ].join(' | ');
+    }),
+  );
+}
+
 /** What is on screen of the series, in words and in pixels. */
 async function shown(page: Page): Promise<Record<string, unknown>> {
   // Settled: the status line names the volume.
@@ -111,6 +131,8 @@ async function shown(page: Page): Promise<Record<string, unknown>> {
     panes: await page.locator('.pane-tag').allInnerTexts(),
     structures: await page.locator('.roi-name').allInnerTexts(),
     timeline: await page.locator('.study-tile').allInnerTexts(),
+    // What each chip says of its series, the structure sets it has among it.
+    chips: await chips(page),
     probes,
     picture: await captured(page),
   };
@@ -144,6 +166,13 @@ test('a series stored on a server loads and displays as the same series loaded f
   expect(fromServer['panes']).toEqual(fromFiles['panes']);
   expect(fromServer['structures']).toEqual(fromFiles['structures']);
   expect(fromServer['timeline']).toEqual(fromFiles['timeline']);
+  expect(fromServer['chips']).toEqual(fromFiles['chips']);
+  // The phantom's structure set is in the frame of the planning CT and MR.
+  expect(fromFiles['chips']).toEqual([
+    'Planning CT | CT | 16 img | RS 1',
+    'T2-like MR | MR | 16 img | RS 1',
+    'Synthetic dose | RTDOSE |  | ',
+  ]);
   expect(fromServer['probes']).toEqual(fromFiles['probes']);
   // Pixel for pixel.
   expect(fromServer['picture']).toBe(fromFiles['picture']);
@@ -259,6 +288,9 @@ test('a structure painted on a server series is saved to the server, and comes b
     const names = page.locator('.roi-legend .roi-name');
     await expect(names).not.toHaveCount(0);
     const phantom = await names.allInnerTexts();
+    // The timeline says the CT has the phantom's structure set.
+    const onChip = page.locator('app-series-chip.loaded .chip-sets');
+    await expect(onChip).toHaveAttribute('title', '1 structure set');
 
     // Connected, the button saves to the server; there is nothing to save yet.
     const save = page.getByRole('button', { name: /save to server/i });
@@ -288,6 +320,7 @@ test('a structure painted on a server series is saved to the server, and comes b
     await expect(page.locator('.notice')).toContainText('could not be reached');
     await expect(save).toBeEnabled();
     expect(await structureSetsOf(own.address, ct)).toHaveLength(held.length);
+    await expect(onChip).toHaveAttribute('title', '1 structure set');
     await page.unroute('**/api/v1/instances?*');
 
     // Saved.
@@ -295,6 +328,9 @@ test('a structure painted on a server series is saved to the server, and comes b
     await expect(page.locator('.notice')).toContainText(`(Server at ${new URL(own.address).host})`);
     await expect(page.locator('.notice')).toContainText(/^\s*Saved “.+”/);
     await expect(save).toBeEnabled();
+    // The timeline shows it at once: the CT has one structure set more.
+    await expect(onChip).toHaveAttribute('title', '2 structure sets');
+    await expect(onChip).toContainText('RS 2');
 
     // The server holds one structure set more for the CT, and it is what was
     // painted: one structure, one closed outline, on the painted slice, around

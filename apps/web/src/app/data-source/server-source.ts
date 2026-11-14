@@ -87,6 +87,7 @@ interface ServerSeries {
   readonly description: string | null;
   readonly frameOfReferenceUid: string | null;
   readonly instances: number;
+  readonly structureSets: number;
 }
 interface ServerInstance {
   readonly sopInstanceUid: string;
@@ -230,6 +231,7 @@ export class ServerSource implements DataSource {
           modality: one.modality,
           frameOfReferenceUid: one.frameOfReferenceUid,
           imageCount: one.instances,
+          structureSets: one.structureSets,
         }));
       history[index] = {
         studyUid: study.studyInstanceUid,
@@ -351,6 +353,10 @@ export class ServerSource implements DataSource {
       headers: { 'Content-Type': DICOM_MEDIA },
       body: object.bytes,
     });
+    // The timeline says what the server holds for each series: ask again, so
+    // that it counts what was just saved. The save stands if this fails.
+    const patient = this.current();
+    if (patient) await this.selectPatient(patient.key).catch(() => undefined);
     return { kind: 'stored', where: this.label };
   }
 

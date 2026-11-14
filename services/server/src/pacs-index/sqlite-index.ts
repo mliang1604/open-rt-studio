@@ -128,7 +128,12 @@ const STUDY = `
 const SERIES = `
   SELECT s.series_uid, s.study_uid, s.modality, s.series_number, s.description,
     s.frame_of_reference_uid,
-    (SELECT count(*) FROM instance i WHERE i.series_uid = s.series_uid) AS instance_count
+    (SELECT count(*) FROM instance i WHERE i.series_uid = s.series_uid) AS instance_count,
+    -- The rule of relatedToSeries: named by series, or by the frame of reference.
+    (SELECT count(DISTINCT r.sop_instance_uid) FROM reference r
+      WHERE (r.target_uid = s.series_uid AND r.relation = 'structure-set.series')
+         OR (r.target_uid = s.frame_of_reference_uid AND r.relation = 'structure-set.frame')
+    ) AS structure_set_count
   FROM series s`;
 
 const INSTANCE = `
@@ -176,6 +181,7 @@ const toSeries = (row: Row): SeriesRecord => ({
   description: text(row['description']),
   frameOfReferenceUid: text(row['frame_of_reference_uid']),
   instances: Number(row['instance_count']),
+  structureSets: Number(row['structure_set_count']),
 });
 
 const toInstance = (row: Row): InstanceRecord => ({

@@ -110,6 +110,17 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
         });
       };
       const seriesOf = (uid: string) => held.filter((one) => one.header.series.uid === uid);
+      // The structure sets that name the series, or the frame of reference it is in.
+      const structureSetsOf = (uid: string): Held[] => {
+        const frame = seriesOf(uid)[0]?.header.series.frameOfReferenceUid ?? null;
+        return held.filter((one) =>
+          one.header.references.some(
+            (reference) =>
+              (reference.relation === 'structure-set.series' && reference.targetUid === uid) ||
+              (reference.relation === 'structure-set.frame' && reference.targetUid === frame),
+          ),
+        );
+      };
 
       let match: RegExpExecArray | null;
       if (path === '/instances' && init?.method === 'POST') {
@@ -183,6 +194,7 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
             description: one.description,
             frameOfReferenceUid: one.frameOfReferenceUid,
             instances: seriesOf(one.uid).length,
+            structureSets: structureSetsOf(one.uid).length,
           })),
         );
       }
@@ -192,13 +204,7 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
       }
       if ((match = /^\/series\/([\d.]+)\/related$/.exec(path))) {
         if (seriesOf(match[1]).length === 0) return missing();
-        // The structure sets that say they were drawn on this series.
-        const structureSets = held.filter(
-          (one) =>
-            one.header.series.modality === 'RTSTRUCT' &&
-            one.header.references.some((reference) => reference.targetUid === match![1]),
-        );
-        return json({ structureSets: structureSets.map(instance) });
+        return json({ structureSets: structureSetsOf(match[1]).map(instance) });
       }
       if ((match = /^\/instances\/([\d.]+)\/file$/.exec(path))) {
         const found = held.find((one) => one.header.sopInstanceUid === match![1]);
