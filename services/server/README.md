@@ -67,13 +67,16 @@ Anything else is 404, or 405 with an `Allow` header for a known path.
 - `src/store/`: where DICOM instances are kept (#42). `DicomStore` is the
   interface (`put`, `get` as a stream, `stat`, `exists`, `delete`, `verify`,
   all by SOP Instance UID); `openFileStore(directory)` is the one on disk and
-  `createMemoryStore()` one for tests. Nothing uses a store yet: ingest (#45)
-  will.
+  `createMemoryStore()` one for tests.
 - `src/pacs-index/`: what the server knows about the instances in its store
   (#43). `PacsIndex` is the interface, with nothing of a database in it;
   `openSqliteIndex(file)` is the SQLite one, on Node's own `node:sqlite`;
-  `migrations.ts` is the schema's history. Nothing uses an index yet: ingest
-  (#45) will.
+  `migrations.ts` is the schema's history.
+- `src/ingest/`: the one way an instance enters the PACS (#45).
+  `createIngest({ store, index })` gives `ingest(bytes)` and
+  `importFolder(directory)`. A core made with a store and an index
+  (`createCore({ pacs })`) has it as `core.pacs.ingest`, where each call is
+  work a shutdown waits for.
 - `src/config.ts`: the settings above, typed and checked.
 - `src/logger.ts`: the log.
 - `src/server.ts`: `startServer(config, logger)`, which makes a core, puts the
@@ -104,6 +107,42 @@ Anything else is 404, or 405 with an `Allow` header for a known path.
   it is touched.
 - One process opens a store at a time.
 
+## Ingest
+
+Every instance enters the same way, whether it is uploaded, received by
+C-STORE or read from a folder: its header is read with
+`@open-rt-studio/dicom` (the pixels are not), it is written to the store, and
+it is added to the index with the references it makes to other objects.
+
+| Outcome     | Meaning                                                            |
+| ----------- | ------------------------------------------------------------------ |
+| `stored`    | The PACS did not have it and now does                              |
+| `unchanged` | The PACS already had exactly these bytes; nothing was written      |
+| `replaced`  | The PACS had other bytes under this UID and was told to take these |
+| `refused`   | The PACS is as it was; a reason says why                           |
+
+- **Idempotent.** The same file again is `unchanged`, decided by SOP Instance
+  UID and SHA-256. Importing a folder twice leaves one copy.
+- **Different bytes under a UID the PACS has** are refused
+  (`different-content`) unless the caller asks for `onDifferent: 'replace'`.
+  A UID names one object; two contents under it mean something upstream
+  changed a file without renaming it, and the PACS does not pick a winner by
+  itself.
+- **Store first, index second, and back again on failure.** If the index
+  refuses or fails, a new instance is deleted from the store and a replaced
+  one gets its old bytes back. The index never names bytes that are not
+  there.
+- **After a crash** between the two writes, the store holds bytes the index
+  does not know. They are invisible until that file is ingested again, which
+  finishes the job. Nothing goes looking for them yet.
+- **Refusals**: `not-dicom`; `incomplete` (no SOP Class, SOP Instance, Study
+  or Series UID, as in a DICOMDIR); and the index's three conflicts, when a
+  file places a known instance, series or study somewhere else.
+- **A folder** is imported file by file, in the order of their paths, with a
+  count of files done after each. It can be cancelled between files; what
+  was ingested stays, and importing again picks up the rest. The summary
+  lists what was refused and what failed, by path relative to the folder.
+
 ## The index
 
 Patients, studies, series and instances, and how radiotherapy objects refer
@@ -133,7 +172,8 @@ be in the index: objects arrive in any order, and some never arrive.
 `relatedToSeries(uid)` answers the question the viewer asks of an image
 series: its structure sets, the plans on those, the doses for those plans or
 structure sets, the registrations that connect it or its frame, and the other
-series in its frame. `referencesFrom` and `referencesTo` follow one relation
+series that say they are in its frame (images and doses, and also a plan or a
+registration that names the frame; pick by modality). `referencesFrom` and `referencesTo` follow one relation
 in either direction.
 
 - **Queries match as DICOM C-FIND does**, so that browse and DIMSE share

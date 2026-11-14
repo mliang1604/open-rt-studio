@@ -168,6 +168,10 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   named relation, to the UID of an instance, a series or a frame of
   reference. The target has no foreign key, because objects arrive in any
   order. See [the server's README](../services/server/README.md#the-index).
+- Ingest (#45) is the one way in: header read with `packages/dicom`, then
+  the store, then the index, with the store put back if the index refuses.
+  It is idempotent by SOP Instance UID and SHA-256. Different bytes under a
+  UID the PACS holds are refused unless the caller asks for a replacement.
 - The server listens on `127.0.0.1` unless it is told otherwise, and warns
   when it is told otherwise, until there are accounts (#55).
 - Logs are JSON lines and carry no patient identifiers: an event is a fixed

@@ -185,7 +185,12 @@ export interface RelatedToSeries {
   readonly doses: readonly InstanceRecord[];
   /** Registrations that connect the series or its frame of reference to something. */
   readonly registrations: readonly InstanceRecord[];
-  /** Other series in the same frame of reference: they can be shown on this one as they are. */
+  /**
+   * Other series whose Frame of Reference UID is the same, whatever they are.
+   * Images and doses among them can be shown on this series as they are; a
+   * plan or a registration that names the frame is listed too, and it is for
+   * the caller to pick by modality.
+   */
   readonly sameFrame: readonly SeriesRecord[];
 }
 

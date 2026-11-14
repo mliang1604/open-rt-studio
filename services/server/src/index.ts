@@ -12,6 +12,7 @@ export {
   type CoreOptions,
   type Disposal,
   type Health,
+  type Pacs,
   type ServerCore,
 } from './core/core.js';
 export {
@@ -31,6 +32,18 @@ export {
   type ServerHost,
 } from './host/host.js';
 export { healthRoute, type Route, type RouteResponse } from './host/routes.js';
+export {
+  createIngest,
+  indexEntry,
+  type ImportOptions,
+  type ImportProgress,
+  type ImportSummary,
+  type Ingest,
+  type IngestOptions,
+  type IngestParts,
+  type IngestResult,
+  type RefusalReason,
+} from './ingest/ingest.js';
 export {
   LOG_LEVELS,
   REDACTED,
