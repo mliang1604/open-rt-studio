@@ -28,7 +28,13 @@ import {
   type AuditEntry,
   type ServerSourceOptions,
 } from './server-source';
-import { FAKE_LOGIN_ATTEMPTS, fakeServer, parseHere, type FakeServer } from './server-testing';
+import {
+  FAKE_LOGIN_ATTEMPTS,
+  fakeServer,
+  parseHere,
+  type FakeAccount,
+  type FakeServer,
+} from './server-testing';
 
 const ADDRESS = 'http://127.0.0.1:4300';
 const FILES = syntheticRtCourse();
@@ -829,5 +835,111 @@ describe('the audit log of a server (#213)', () => {
     await expect(none.source.auditLog()).rejects.toThrow(
       new ServerError('This server keeps no audit log: it runs without a data directory.', 404),
     );
+  });
+});
+
+describe('the accounts of a server (#219)', () => {
+  const ROOT = { name: 'root', password: 'the administrator’s password', role: 'admin' } as const;
+  const ADA = { name: 'ada', password: 'correct horse battery staple', role: 'user' } as const;
+  const GRACE = { name: 'grace', password: 'grace’s own long password', role: 'admin' } as const;
+  const NEXT = 'another long enough password';
+
+  async function loggedIn(
+    who: { name: string; password: string },
+    accounts: readonly FakeAccount[] = [ROOT, ADA],
+  ) {
+    const server = fakeServer(FILES, accounts);
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await source.logIn(who.name, who.password);
+    return { server, source };
+  }
+
+  it('are an administrator’s to manage, and no one’s on a server without them', async () => {
+    expect((await loggedIn(ROOT)).source.mayManageAccounts()).toBe(true);
+    expect((await loggedIn(ADA)).source.mayManageAccounts()).toBe(false);
+    const open = fakeServer(FILES);
+    const source = await connectToServer(ADDRESS, { fetch: open.fetch, parse: parseHere });
+    expect(source.mayManageAccounts()).toBe(false);
+  });
+
+  it('are listed by name, without anything of a password', async () => {
+    const { source } = await loggedIn(ROOT);
+    const accounts = await source.accounts();
+    expect(accounts.map(({ name, role, disabled }) => [name, role, disabled])).toEqual([
+      ['ada', 'user', false],
+      ['root', 'admin', false],
+    ]);
+    expect(JSON.stringify(accounts)).not.toContain('password');
+  });
+
+  it('are made, changed and removed', async () => {
+    const { server, source } = await loggedIn(ROOT);
+    await source.createAccount('lin', NEXT, 'user');
+    expect(server.accounts()).toContainEqual({ name: 'lin', role: 'user', disabled: false });
+    await source.changeAccount('lin', { role: 'admin', disabled: true });
+    expect(server.accounts()).toContainEqual({ name: 'lin', role: 'admin', disabled: true });
+    await source.changeAccount('lin', { password: `${NEXT}!` });
+    expect(server.passwordOf('lin')).toBe(`${NEXT}!`);
+    await source.removeAccount('lin');
+    expect(server.accounts().map((one) => one.name)).toEqual(['ada', 'root']);
+  });
+
+  it('say what the server refused, in its words', async () => {
+    const { source } = await loggedIn(ROOT);
+    await expect(source.createAccount('ada', NEXT, 'user')).rejects.toThrow(
+      'The server refused: There is an account of that name already.',
+    );
+    await expect(source.changeAccount('root', { disabled: true })).rejects.toThrow(
+      'The server refused: This is the only administrator who can log in. Make another first.',
+    );
+    await expect(source.removeAccount('no-one')).rejects.toMatchObject({ status: 404 });
+    // Still logged in: a refusal is not a login that ended.
+    expect(source.login()).toMatchObject({ kind: 'in', name: 'root' });
+  });
+
+  it('are refused to a user, who stays logged in', async () => {
+    const { source } = await loggedIn(ADA);
+    await expect(source.accounts()).rejects.toMatchObject({ status: 403 });
+    expect(source.login()).toMatchObject({ kind: 'in', name: 'ada' });
+  });
+
+  it('follow one’s own role when it is changed', async () => {
+    const { source } = await loggedIn(ROOT, [ROOT, GRACE]);
+    await source.changeAccount('grace', { role: 'user' });
+    expect(source.login()).toEqual({ kind: 'in', name: 'root', role: 'admin' });
+    await source.changeAccount('grace', { role: 'admin' });
+    await source.changeAccount('root', { role: 'user' });
+    expect(source.login()).toEqual({ kind: 'in', name: 'root', role: 'user' });
+    expect(source.mayManageAccounts()).toBe(false);
+    expect(source.mayReadAudit()).toBe(false);
+  });
+
+  it('end the login of one who disables their own account', async () => {
+    const { source } = await loggedIn(ROOT, [ROOT, GRACE]);
+    await source.changeAccount('root', { disabled: true });
+    await expect(source.accounts()).rejects.toMatchObject({ status: 401 });
+    expect(source.login()).toEqual({ kind: 'needed', ended: true });
+  });
+
+  it('change one’s own password with the current one, and keep this login', async () => {
+    const { server, source } = await loggedIn(ADA);
+    const elsewhere = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await elsewhere.logIn(ADA.name, ADA.password);
+    expect(server.tokens()).toHaveLength(2);
+
+    await expect(source.changeOwnPassword('not the password', NEXT)).rejects.toThrow(
+      'The server refused: The current password is not right.',
+    );
+    expect(server.passwordOf('ada')).toBe(ADA.password);
+    await expect(source.changeOwnPassword(ADA.password, 'short')).rejects.toThrow(
+      'The server refused: A password has at least 12 characters.',
+    );
+
+    await source.changeOwnPassword(ADA.password, NEXT);
+    expect(server.passwordOf('ada')).toBe(NEXT);
+    // This login stays; the other one of the account has ended.
+    expect(server.tokens()).toHaveLength(1);
+    expect(source.login()).toMatchObject({ kind: 'in', name: 'ada' });
+    await expect(source.findStudies()).resolves.toBeDefined();
   });
 });

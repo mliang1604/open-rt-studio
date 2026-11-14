@@ -402,7 +402,7 @@ describe('ServerPanel', () => {
 
     it('is offered to an administrator, and shown in place of the studies', async () => {
       const { click, host, text } = await loggedIn(ROOT);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Audit log']);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Audit log', 'Accounts']);
       expect(host.querySelector('app-audit-panel')).toBeNull();
       await click('Audit log');
       expect(host.querySelector('app-audit-panel')).not.toBeNull();
@@ -410,7 +410,7 @@ describe('ServerPanel', () => {
       expect(text('td.audit-action')).toEqual(['login']);
       // The card keeps the room it took for the studies.
       expect(host.classList.contains('wide')).toBe(true);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies']);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Accounts']);
       await click('Studies');
       expect(host.querySelector('app-audit-panel')).toBeNull();
       expect(text('.study-patient')).toHaveLength(2);
@@ -418,8 +418,41 @@ describe('ServerPanel', () => {
 
     it('is not offered to a user', async () => {
       const { host, server } = await loggedIn(ADA);
-      expect(labels(host)).toEqual(['Log out and disconnect']);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Your password']);
       expect(server.asked.some((path) => path.startsWith('/audit'))).toBe(false);
+    });
+
+    it('gives way to the accounts, and the accounts to it (#219)', async () => {
+      const { click, host, text } = await loggedIn(ROOT);
+      await click('Accounts');
+      expect(host.querySelector('app-accounts-panel')).not.toBeNull();
+      expect(host.querySelector('app-server-browser')).toBeNull();
+      expect(text('app-accounts-panel tbody th')).toEqual(['ada', 'root you']);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Audit log']);
+      await click('Audit log');
+      expect(host.querySelector('app-accounts-panel')).toBeNull();
+      expect(host.querySelector('app-audit-panel')).not.toBeNull();
+      await click('Accounts');
+      await click('Studies');
+      expect(host.querySelector('app-accounts-panel')).toBeNull();
+      expect(text('.study-patient')).toHaveLength(2);
+    });
+
+    it('offers a user their own password, and not the accounts', async () => {
+      const { click, host, server } = await loggedIn(ADA);
+      await click('Your password');
+      expect(host.querySelector('app-accounts-panel #own-password-title')).not.toBeNull();
+      expect(host.querySelector('app-accounts-panel table')).toBeNull();
+      expect(server.asked.some((path) => path.startsWith('/accounts'))).toBe(false);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies']);
+    });
+
+    it('goes back to the studies when the accounts are left by disconnecting', async () => {
+      const { click, host } = await loggedIn(ROOT);
+      await click('Accounts');
+      await click('Log out and disconnect');
+      expect(host.querySelector('app-accounts-panel')).toBeNull();
+      expect(host.querySelector('#server-address')).not.toBeNull();
     });
 
     it('is offered on a server without accounts, whose one user is every role', async () => {
