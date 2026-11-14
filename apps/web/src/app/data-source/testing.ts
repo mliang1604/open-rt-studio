@@ -15,7 +15,9 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SavedSeries,
   SaveOutcome,
+  SaveProgress,
   SeriesSummary,
 } from './data-source';
 
@@ -104,6 +106,19 @@ export class FakeDataSource implements DataSource {
   save(object: SavedObject): Promise<SaveOutcome> {
     this.saved.push(object);
     return this.saveAnswer();
+  }
+
+  /** Each series that was saved, whole. */
+  readonly savedSeries: SavedSeries[] = [];
+
+  /** What saving a series answers with. A spec may make it a rejection, or hold it. */
+  saveSeriesAnswer: (series: SavedSeries) => Promise<SaveOutcome> = () =>
+    Promise.resolve({ kind: 'downloaded' });
+
+  saveSeries(series: SavedSeries, onProgress?: SaveProgress): Promise<SaveOutcome> {
+    this.savedSeries.push(series);
+    onProgress?.(series.objects.length, series.objects.length);
+    return this.saveSeriesAnswer(series);
   }
 }
 

@@ -355,6 +355,16 @@
                   {{ layer.unplaced ? 'Register by hand' : 'Adjust by hand' }}
                 </button>
               }
+              @if (derivedSeries.card(layer.id); as card) {
+                <app-derived-series
+                  [card]="card"
+                  [image]="layer.label"
+                  (makeAsked)="derivedSeries.make(layer.id)"
+                  (saveAsked)="derivedSeries.save(layer.id)"
+                  (discardAsked)="derivedSeries.discard(layer.id)"
+                  [attr.data-derived-series]="layer.id"
+                />
+              }
             }
           </div>
         </div>

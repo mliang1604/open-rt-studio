@@ -167,6 +167,29 @@ describe('mergeLoad', () => {
     expect(result.series).toBe(current.series);
   });
 
+  it('keeps what the overlay’s series says of itself, without its slices (#89)', () => {
+    const current = fakeLoad('ct', 'frame-1');
+    const mr = { ...fakeLoad('mr', 'frame-1', 'MR'), series: [seriesWithSlices('mr', 'frame-1')] };
+
+    const once = mergeLoad(current, mr).result;
+    expect(once.overlaySeries!.map((one) => [one.uid, one.frameOfReferenceUid])).toEqual([
+      ['mr', 'frame-1'],
+    ]);
+    // The layer's volume holds the pixels already: they are not kept twice.
+    expect(once.overlaySeries![0].slices).toEqual([]);
+    expect(once.series).toBe(current.series);
+
+    // Another overlay is one more; the same series again is still one.
+    const pet = {
+      ...fakeLoad('pet', 'frame-1', 'PT'),
+      series: [seriesWithSlices('pet', 'frame-1')],
+    };
+    const twice = mergeLoad(once, pet).result;
+    expect(twice.overlaySeries!.map((one) => one.uid)).toEqual(['mr', 'pet']);
+    const again = mergeLoad(twice, mr).result;
+    expect(again.overlaySeries!.map((one) => one.uid)).toEqual(['pet', 'mr']);
+  });
+
   it('adds a series of another frame with no registration as a layer that is not drawn (#78)', () => {
     const current = fakeLoad('ct', 'frame-1');
     const incoming = fakeLoad('ct2', 'frame-2');

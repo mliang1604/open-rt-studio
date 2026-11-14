@@ -15,6 +15,7 @@ import {
 import { PatientCatalog } from '../patient-catalog';
 import { SeriesThumbnailCache, type SeriesThumbnail } from '../viewer/series-thumbnail';
 import { downloadBlob } from '../viewer/viewer-dom';
+import { zipStored } from './zip';
 import type {
   DataSource,
   FetchedSeries,
@@ -22,6 +23,8 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SavedSeries,
+  SaveProgress,
   SaveOutcome,
 } from './data-source';
 
@@ -102,6 +105,24 @@ export class LocalFilesSource implements DataSource {
     // Done before the promise is made, so the download starts in the same turn
     // as the click that asked for it.
     downloadBlob(new Blob([object.bytes], { type: object.mediaType }), object.filename);
+    return Promise.resolve({ kind: 'downloaded' });
+  }
+
+  /**
+   * The objects as one download: an archive with a folder of the series'
+   * name, the files in it as they are. Nothing is opened here: the archive
+   * is unpacked and its folder opened like any other files.
+   */
+  saveSeries(series: SavedSeries, onProgress?: SaveProgress): Promise<SaveOutcome> {
+    const parts = zipStored(
+      series.objects.map((object) => ({
+        name: `${series.name}/${object.filename}`,
+        bytes: object.bytes,
+      })),
+      series.made,
+    );
+    downloadBlob(new Blob(parts, { type: 'application/zip' }), `${series.name}.zip`);
+    onProgress?.(series.objects.length, series.objects.length);
     return Promise.resolve({ kind: 'downloaded' });
   }
 

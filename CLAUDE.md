@@ -25,7 +25,7 @@ application. Never commit patient data or real DICOM files
   (`src/app/viewer`) with controllers and stores beside it; newer pieces are
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
   `metadata-panel/`, `dvr-panel/`, `shortcut-help/`, `server-panel/`,
-  `server-browser/`, `audit-panel/`, `accounts-panel/`). The viewer route
+  `server-browser/`, `audit-panel/`, `accounts-panel/`, `derived-series/`). The viewer route
   is loaded on demand, so it is not in the initial bundle.
 - `services/server`: the Node server, a small PACS. `src/core` is the server
   without the network (no port, no environment), which the desktop
@@ -99,7 +99,8 @@ touches the server, the Dockerfile or `compose.yaml`.
   geometry lives in helpers both use.
 - **Patient data comes through `DATA_SOURCE`** (`apps/web/src/app/data-source`).
   The timeline and the load path inject it and know nothing of files or
-  servers. Do not inject `PatientCatalog` in new code; it is what the local
+  servers. What is made in the viewer is saved through it too (`save`,
+  `saveSeries`). Do not inject `PatientCatalog` in new code; it is what the local
   source holds.
 - **Packages have one entry point.** Import `@open-rt-studio/dicom`, not a
   file inside the package. Add new public names to the package's

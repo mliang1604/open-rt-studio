@@ -199,6 +199,15 @@ function stackByIndex(ordered: Slice[], sliceVoxels: number): Float32Array {
 const MAX_RESAMPLE_DEPTH_FACTOR = 16;
 
 /**
+ * How near a layer of the grid is to a slice, as a part of the gap to the
+ * next, for the layer to be that slice and no blend. Positions are written
+ * with a few decimals, so the layers of a uniform series that lies askew are
+ * a ten-millionth of a gap off their slices; blending by that would change
+ * values that were acquired, if only in their last digits.
+ */
+const ON_A_SLICE = 1e-4;
+
+/**
  * Resample the (position-sorted) slices onto a uniform through-plane axis of
  * pitch `sz`, spanning the slices' projection range. Each output layer is the
  * linear blend of the two source slices that bracket its position, so missing
@@ -236,9 +245,9 @@ function resampleAlongNormal(
     const t = clamp01(gap > 1e-6 ? (target - proj[src]) / gap : 0);
     const offset = k * sliceVoxels;
 
-    if (t <= 0) {
+    if (t <= ON_A_SLICE) {
       data.set(ordered[src].pixels, offset);
-    } else if (t >= 1) {
+    } else if (t >= 1 - ON_A_SLICE) {
       data.set(ordered[hiIndex].pixels, offset);
     } else {
       const lo = ordered[src].pixels;

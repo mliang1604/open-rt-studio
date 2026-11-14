@@ -53,6 +53,13 @@ export interface LoadResult {
   /** UID of the series whose slices were built into the base {@link layers} entry. */
   readonly selectedUid: string;
   /**
+   * The series the overlay layers were built from, when they are not among
+   * {@link series}: what each says of itself (whose it is, its study, its
+   * first image's elements), without its slices, which the layer's volume
+   * already holds. For what is made from a layer and must say where it is from.
+   */
+  readonly overlaySeries?: readonly Series[];
+  /**
    * The loaded volumes as an ordered layer registry, keyed by {@link Layer.id}.
    * A single-series load holds exactly one entry, role `'base'`, wrapping the
    * volume assembled from the selected series; fusion (CT + dose) and compare
@@ -332,8 +339,13 @@ export function mergeLoad(
   for (const one of registrations) {
     if (!known.some((kept) => kept.sopInstanceUid === one.sopInstanceUid)) known.push(one);
   }
+  const source = selectedSeries(incoming);
+  const overlaySeries = [
+    ...(current.overlaySeries ?? []).filter((one) => one.uid !== incoming.selectedUid),
+    ...(source ? [{ ...source, slices: [] }] : []),
+  ];
   return {
-    result: { ...current, layers: [...layers, overlay], registrations: known },
+    result: { ...current, layers: [...layers, overlay], registrations: known, overlaySeries },
     added: true,
     ...(found.kind === 'several' ? { choices: found.placements.length } : {}),
     ...(found.kind === 'none' ? { unplaced: true as const } : {}),

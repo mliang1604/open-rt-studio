@@ -1,0 +1,52 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+@let now = card();
+@switch (now.state) {
+  @case ('idle') {
+    <div class="actions">
+      <button
+        type="button"
+        (click)="makeAsked.emit()"
+        [disabled]="now.unavailable !== null || now.waiting"
+        data-derived="make"
+        title="Read this image onto the base image’s grid, as it is placed over it now, to save as a new DICOM series that says it is derived"
+      >
+        Resample to a new series…
+      </button>
+    </div>
+    @if (now.unavailable; as why) {
+      <p class="state" data-derived="unavailable">{{ why }}</p>
+    }
+  }
+  @case ('making') {
+    <p class="state" role="status" data-derived="making">Resampling…</p>
+    <div class="actions">
+      <button type="button" (click)="discardAsked.emit()" data-derived="cancel">Cancel</button>
+    </div>
+  }
+  @case ('ready') {
+    <p class="state" role="status" data-derived="summary">{{ now.summary }}</p>
+    <div class="actions">
+      <button
+        type="button"
+        (click)="saveAsked.emit()"
+        data-derived="save"
+        title="Save the resampled image as a new DICOM series: a download for opened files, an upload to a server"
+      >
+        Save series
+      </button>
+      <button
+        type="button"
+        (click)="discardAsked.emit()"
+        data-derived="discard"
+        title="Let go of the resampled image without saving it"
+      >
+        Discard
+      </button>
+    </div>
+  }
+  @case ('saving') {
+    <p class="state" role="status" data-derived="saving">Saving: {{ now.progress }}…</p>
+  }
+}

@@ -18,10 +18,13 @@ import type {
   PatientHistory,
   PatientSummary,
   SavedObject,
+  SavedSeries,
   SaveOutcome,
+  SaveProgress,
   SeriesSummary,
   StudySummary,
 } from './data-source';
+import { PartlySavedError } from './data-source';
 
 /** Where the server's API is, under its address. */
 const API = '/api/v1';
@@ -806,6 +809,42 @@ export class ServerSource implements DataSource {
    * save is refused and says so.
    */
   async save(object: SavedObject): Promise<SaveOutcome> {
+    await this.upload(object);
+    await this.listAgain();
+    return { kind: 'stored', where: this.label };
+  }
+
+  /**
+   * An upload for each object, one after another, so that the server is
+   * never asked to take a whole series at once. When one fails, those before
+   * it are on the server and stay there: the rejection says how many.
+   */
+  async saveSeries(series: SavedSeries, onProgress?: SaveProgress): Promise<SaveOutcome> {
+    const { objects } = series;
+    if (objects.some((object) => object.mediaType !== DICOM_MEDIA)) {
+      throw new Error('Only DICOM objects can be saved to a server.');
+    }
+    for (let kept = 0; kept < objects.length; kept++) {
+      try {
+        await this.upload(objects[kept]);
+      } catch (error) {
+        if (kept === 0) throw error;
+        // Some are kept: the timeline should show what the server now holds.
+        await this.listAgain();
+        throw new PartlySavedError(
+          kept,
+          objects.length,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      onProgress?.(kept + 1, objects.length);
+    }
+    await this.listAgain();
+    return { kind: 'stored', where: this.label };
+  }
+
+  /** Send one object for the server to keep, beside whatever it holds. */
+  private async upload(object: SavedObject): Promise<void> {
     if (object.mediaType !== DICOM_MEDIA) {
       throw new Error('Only DICOM objects can be saved to a server.');
     }
@@ -814,11 +853,15 @@ export class ServerSource implements DataSource {
       headers: { 'Content-Type': DICOM_MEDIA },
       body: object.bytes,
     });
-    // The timeline says what the server holds for each series: ask again, so
-    // that it counts what was just saved. The save stands if this fails.
+  }
+
+  /**
+   * The timeline says what the server holds for each series: ask again, so
+   * that it counts what was just saved. A save stands if this fails.
+   */
+  private async listAgain(): Promise<void> {
     const patient = this.current();
     if (patient) await this.selectPatient(patient).catch(() => undefined);
-    return { kind: 'stored', where: this.label };
   }
 
   /** One stored instance as a file, whole. */

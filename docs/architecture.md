@@ -708,8 +708,9 @@ frame of reference, which some systems may write.
 ## Resampling
 
 Putting one image on another image's grid, through a registration (epic #7).
-The engine is built (#88); nothing on screen uses it yet, and nothing is
-saved from it (#89 to #91).
+The engine is built (#88), and an image resampled with it is saved as a
+derived DICOM series (#89, below). Structures (#90) and the view of what was
+derived from what (#91) are to come.
 
 - **Which way.** Each voxel of the reference grid is given a value: its
   centre is taken to the source image by the registration, and the source is
@@ -743,10 +744,68 @@ saved from it (#89 to #91).
   result says which it was, and why not the GPU.
 - **Not there:** the source is one 3-D texture, so an image with a side past
   the GPU's limit (2048 as a rule) goes to the reference; the reference
-  runs in the page's own thread, not a worker; a result is an image in
-  memory with the source's meaning and the reference's grid
-  (`resampledVolume`), and is not yet labelled as derived anywhere, because
-  it is not yet shown or saved anywhere.
+  runs in the page's own thread, not a worker.
+
+Status: **decided, and Michael's to overturn**.
+
+### A resampled image as a derived series
+
+An overlay image is resampled onto the base image's grid, as it is placed
+over it, and saved as a new DICOM series (#89): `writeDerivedSeries` in
+`packages/dicom`, `viewer/derived-series` in the application.
+
+- **It says that it is derived.** Image Type is `DERIVED\SECONDARY`; the
+  Series Description begins `Resampled:`, so that it is still said where
+  only the start of a description is shown; the Derivation Description says
+  in words which series was resampled onto which grid, through which
+  registrations and which way each was taken, how many voxels lie outside
+  the source and what they were given, and that the software is not a
+  medical device and the result not for clinical use; the Derivation Code is
+  113085 (DCM), spatial resampling.
+- **It says what it is from.** The source series is in the Related Series
+  Sequence, the registration objects in the Source Instance Sequence. A
+  registration made by hand is in no object: its matrix is written into the
+  Derivation Description instead.
+- **Whose it is.** The series is on the base image's grid, so it is in the
+  base's frame of reference, and it is filed in the base's study, of the
+  base's patient. It has a Series Instance UID and SOP Instance UIDs of its
+  own. An image of another patient than the base's is not resampled.
+- **What kind of object.** A CT is written as CT images. An MR is written as
+  MR images when its source says how it was scanned, which the standard
+  requires of an MR image and which is not made up; otherwise, and for
+  anything else, the slices are Secondary Capture images that say where they
+  are. Of the scan, only what the standard asks of the kind of image is
+  said again, and only values that are what their kind allows.
+- **The values** are 16-bit integers with the source's rescale, so a value
+  between two that can be stored is rounded to the nearer; one that 16 bits
+  cannot hold is held to the nearest that can, and counted. Voxels outside
+  the source get the source's lowest value.
+- **Text.** The patient's name and ID are written as the bytes they were
+  read as, with the character set the base image declares. What is said of
+  the new series is plain ASCII.
+- **Two steps, each asked for.** The image is resampled and what was made is
+  said (its size, how much of it is outside the source, the kind of object);
+  then it is saved or let go. Saving is asked of the data source in the turn
+  of the click, as a browser wants of a download. What was made is let go of
+  when the images on screen change, since it would be saved as what is on
+  screen and no longer is.
+- **Where it goes** is the data source's to say (`saveSeries`): for opened
+  files, one ZIP archive of the slices in a folder, not compressed, written
+  here without a library; for a server, an upload for each slice, which the
+  audit log records like any other. When the server stops answering part of
+  the way, the notice says how many slices it has, and saving again sends
+  the very same slices, of which the server keeps those it has.
+- **A deformable registration with its field switched off** is not
+  resampled: the series would name the registration and not be by it.
+- **Not there:** written series were not checked with a DICOM validator and
+  were not opened in another system; a dose is not resampled this way (a
+  dose is no image series); only the base's grid can be resampled onto, and
+  only by linear interpolation; an archive is unpacked by the user before it
+  can be opened again; a series half saved to a server stays there until
+  the rest is sent, since nothing here deletes from a server; the reader
+  still takes a stack whose slices are stepped aslant (a tilted gantry) as
+  straight, so the writer, which writes such a grid as it is, has no reader
+  here that reads it back.
 
 Status: **decided, and Michael's to overturn**.
 
