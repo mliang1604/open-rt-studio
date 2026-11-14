@@ -18,7 +18,14 @@ export type Mat4 = readonly number[];
 
 export const IDENTITY_MAT4: Mat4 = Object.freeze([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
-/** What a matrix does besides moving and turning, as DICOM names it. */
+/**
+ * What a matrix does: only moves and turns (`rigid`), also scales by one
+ * factor in every direction (`rigid-scale`), or anything more (`affine`).
+ *
+ * The words are near DICOM's matrix types and not the same. DICOM's
+ * `RIGID_SCALE` also allows a different scale along each axis (an orthogonal
+ * matrix, nine degrees of freedom); such a matrix is `affine` here.
+ */
 export type MatrixKind = 'rigid' | 'rigid-scale' | 'affine';
 
 /**

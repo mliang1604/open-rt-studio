@@ -74,6 +74,16 @@ export {
 } from './registration.js';
 export { type Series, groupSeries, largestSeries, middleSlice } from './series.js';
 export {
+  type ReadRegistration,
+  type RegistrationItemProblem,
+  type SpatialRegistration,
+  type SpatialRegistrationContent,
+  type SpatialRegistrationWriteOptions,
+  SPATIAL_REGISTRATION_SOP_CLASS,
+  parseSpatialRegistration,
+  writeSpatialRegistration,
+} from './spatial-registration.js';
+export {
   type AuthoredRoi,
   type StructureExportOptions,
   buildStructureSet,

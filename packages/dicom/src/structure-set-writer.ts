@@ -2,6 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import {
+  MANUFACTURER,
+  concat,
+  decimals,
+  dicomDate,
+  dicomTime,
+  element,
+  generateUid,
+  integers,
+  p10File,
+  sequence,
+  text,
+  uid,
+} from './p10-encode.js';
 import type { Contour, Roi, StructureSet } from './types.js';
 
 /**
@@ -53,7 +67,7 @@ export function writeStructureSet(ss: StructureSet, opts: WriteOptions = {}): Ar
     roiContourSequence(ss.rois),
     rtRoiObservationsSequence(ss.rois),
   ]);
-  return p10File(dataSet, sopInstanceUid);
+  return p10File(dataSet, RTSTRUCT_SOP_CLASS, sopInstanceUid);
 }
 
 /** Options for {@link writeStructureSet}. */
@@ -82,25 +96,8 @@ export interface WriteOptions {
   readonly createdAt?: Date;
 }
 
-/** Manufacturer (0008,0070) written into every object this writer produces. */
-const MANUFACTURER = 'Open RT Studio';
-
-const two = (n: number): string => String(n).padStart(2, '0');
-
-/** A date as DICOM DA (`YYYYMMDD`), in local time. */
-function dicomDate(date: Date): string {
-  return `${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}`;
-}
-
-/** A time as DICOM TM (`HHMMSS`), in local time. */
-function dicomTime(date: Date): string {
-  return `${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`;
-}
-
 /** SOP Class UID identifying an RT Structure Set Storage object. */
 const RTSTRUCT_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.3';
-/** Explicit VR Little Endian — the transfer syntax this writer emits. */
-const EXPLICIT_VR_LE = '1.2.840.10008.1.2.1';
 
 // --- RTSTRUCT sequence assembly --------------------------------------------
 
@@ -192,133 +189,4 @@ function rtRoiObservationsSequence(rois: readonly Roi[]): Uint8Array {
       ]),
     ),
   );
-}
-
-// --- Explicit-VR-LE Part-10 encoding ---------------------------------------
-
-/** VRs that use the 2-reserved-byte + 4-byte-length header form. */
-const LONG_VRS = new Set(['OB', 'OW', 'OF', 'SQ', 'UT', 'UN']);
-
-/** Assemble a full P10 file: preamble + DICM + file meta group + data set. */
-function p10File(dataSet: Uint8Array, sopInstanceUid: string): ArrayBuffer {
-  const metaBody = concat([
-    element(0x0002, 0x0002, 'UI', uid(RTSTRUCT_SOP_CLASS)), // MediaStorageSOPClassUID
-    element(0x0002, 0x0003, 'UI', uid(sopInstanceUid)), // MediaStorageSOPInstanceUID
-    element(0x0002, 0x0010, 'UI', uid(EXPLICIT_VR_LE)), // TransferSyntaxUID
-  ]);
-  const groupLength = element(0x0002, 0x0000, 'UL', u32le(metaBody.length));
-  const file = concat([
-    new Uint8Array(128), // preamble
-    ascii('DICM'),
-    groupLength,
-    metaBody,
-    dataSet,
-  ]);
-  return file.buffer.slice(0, file.length) as ArrayBuffer;
-}
-
-/** Encode one Explicit-VR-LE data element. */
-function element(group: number, el: number, vr: string, value: Uint8Array): Uint8Array {
-  const header = new Uint8Array(LONG_VRS.has(vr) ? 12 : 8);
-  const view = new DataView(header.buffer);
-  view.setUint16(0, group, true);
-  view.setUint16(2, el, true);
-  header[4] = vr.charCodeAt(0);
-  header[5] = vr.charCodeAt(1);
-  if (LONG_VRS.has(vr)) {
-    view.setUint32(8, value.length, true); // bytes 6-7 reserved, left zero
-  } else {
-    view.setUint16(6, value.length, true);
-  }
-  return concat([header, value]);
-}
-
-/** Wrap item data sets into an SQ element with explicit (defined) lengths. */
-function sequence(group: number, el: number, itemBodies: Uint8Array[]): Uint8Array {
-  const body = concat(
-    itemBodies.map((item) => {
-      const header = new Uint8Array(8);
-      const view = new DataView(header.buffer);
-      view.setUint16(0, 0xfffe, true); // Item tag (FFFE,E000)
-      view.setUint16(2, 0xe000, true);
-      view.setUint32(4, item.length, true);
-      return concat([header, item]);
-    }),
-  );
-  return element(group, el, 'SQ', body);
-}
-
-function concat(parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
-}
-
-/** Pad to even length (every DICOM value): text VRs with a space, UIDs with a null. */
-function padEven(bytes: Uint8Array, padByte: number): Uint8Array {
-  return bytes.length % 2 === 0 ? bytes : concat([bytes, Uint8Array.of(padByte)]);
-}
-
-function ascii(s: string): Uint8Array {
-  return Uint8Array.from(s, (c) => c.charCodeAt(0));
-}
-
-/** A text value (SH/LO/CS/PN…), space-padded to even length. */
-function text(s: string): Uint8Array {
-  return padEven(ascii(s), 0x20);
-}
-
-/** A UID value, null-padded to even length. */
-function uid(s: string): Uint8Array {
-  return padEven(ascii(s), 0x00);
-}
-
-/** An Integer String (IS) value: backslash-separated integers, space-padded. */
-function integers(values: readonly number[]): Uint8Array {
-  return text(values.map((v) => String(Math.round(v))).join('\\'));
-}
-
-/** A Decimal String (DS) value: backslash-separated decimals, space-padded. */
-function decimals(values: readonly number[]): Uint8Array {
-  return text(values.map(formatDs).join('\\'));
-}
-
-/**
- * Format a number as a DICOM Decimal String (DS): plain decimal, no exponent,
- * at most 16 characters. Integers stay integral; fractions are written with
- * enough precision for sub-millimetre contour points and trailing zeros are
- * trimmed.
- */
-function formatDs(n: number): string {
-  if (!Number.isFinite(n)) return '0';
-  if (Number.isInteger(n) && Math.abs(n) < 1e15) return String(n);
-  let s = n.toFixed(6);
-  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
-  if (s.length <= 16) return s;
-  // Very large magnitudes: fall back to fewer fractional digits to fit 16 chars.
-  const intDigits = Math.trunc(Math.abs(n)).toString().length + (n < 0 ? 1 : 0);
-  return n.toFixed(Math.max(0, 15 - intDigits));
-}
-
-function u32le(value: number): Uint8Array {
-  const out = new Uint8Array(4);
-  new DataView(out.buffer).setUint32(0, value, true);
-  return out;
-}
-
-/**
- * Generate a fresh DICOM UID under the standard `2.25` (UUID-derived) root: a
- * run of random decimal digits, kept within the 64-character UID limit. Used for
- * the new object's SOP Instance UID when the caller supplies none.
- */
-function generateUid(): string {
-  let digits = '';
-  while (digits.length < 30) digits += Math.floor(Math.random() * 1e9).toString();
-  // No leading zero after the root, and stay under 64 chars.
-  return `2.25.${digits.slice(0, 30).replace(/^0+/, '') || '0'}`;
 }

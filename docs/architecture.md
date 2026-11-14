@@ -447,12 +447,30 @@ data and pure functions.
   two frames are the same. Two series in one frame are in place already; a
   registration between them could not tell its direction by its frames.
 
-Not there, and not assumed: how a DICOM Spatial Registration or Deformable
-Spatial Registration object fills this model, which of its frames is `from`.
-That is for the readers (#74, #75) to settle against the standard and the
-vendor files (#71). Status: **decided, and Michael's to overturn**, most of
-all refusing a registration within one frame of reference, which some
-systems may write.
+**Spatial Registration objects** (`spatial-registration.ts`, part of #74) are
+read into the model and written from it, as the standard has it (PS3.3
+C.20.2): the object is in a frame of its own, and each item's matrix takes
+a point of the item's frame into the object's. So an item is a transform
+from the item's frame to the object's frame, with the matrix as written.
+
+- The reader lists what it did not read, with the reason, and reads the
+  rest: an item that names only images and no frame, one with several
+  matrices (their order is not assumed until it is read from the standard's
+  equation and tested against a file), a matrix that mirrors or flattens,
+  and the object's own frame moved by other than the identity.
+- The writer refuses a transform that does not map into the object's frame;
+  it does not turn it round. It writes the object's own frame with the
+  identity first, then an item for each transform, frames by their UIDs and
+  no image references. It writes every element the standard requires as I
+  read the standard; it has not been checked with a validator.
+- A matrix element is written with as many digits as fit in sixteen
+  characters, twelve or more decimals for a rotation.
+
+Not there, and not assumed: what other systems' files do differently (the
+vendor spike, #71, needs Michael's sample files), and how a Deformable
+Spatial Registration object fills the model (#75). Status: **decided, and
+Michael's to overturn**, most of all refusing a registration within one
+frame of reference, which some systems may write.
 
 ## Native tools
 
