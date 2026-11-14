@@ -32,6 +32,24 @@ const card = (page: Page) => page.locator('app-server-panel');
 const rows = (page: Page) => card(page).locator('app-audit-panel tbody tr');
 
 test('an administrator reads, searches and saves the audit log', async ({ page }, testInfo) => {
+  // The files the page asks the server for, and those it was given: what the
+  // log is held against. Not a number written here: `pickSeries` picks again
+  // when the volume is not up within two seconds, and on a slow machine the
+  // second pick fetched the series a second time (33 downloads, not 17).
+  // A pick that replaces another abandons the files still on their way.
+  const files = { asked: 0, given: 0, abandoned: 0 };
+  const isFile = (url: string): boolean =>
+    /\/api\/v1\/instances\/[^/]+\/file$/.test(new URL(url).pathname);
+  page.on('request', (request) => {
+    if (request.method() === 'GET' && isFile(request.url())) files.asked++;
+  });
+  page.on('requestfinished', (request) => {
+    if (request.method() === 'GET' && isFile(request.url())) files.given++;
+  });
+  page.on('requestfailed', (request) => {
+    if (request.method() === 'GET' && isFile(request.url())) files.abandoned++;
+  });
+
   await preAcknowledge(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
@@ -57,13 +75,31 @@ test('an administrator reads, searches and saves the audit log', async ({ page }
   // one record, which counts them and names the patient.
   const downloads = rows(page).filter({ hasText: 'instance-download' });
   await expect(downloads).toHaveCount(3);
-  const download = downloads.filter({ hasText: 'times until' });
-  await expect(download).toHaveCount(1);
-  const said = await download.locator('.audit-when').innerText();
-  const times = Number(/(\d+) times until/.exec(said)?.[1]);
-  // Its sixteen files, and the one its preview was made from.
-  expect(times).toBeGreaterThanOrEqual(SLICES);
-  expect(times).toBeLessThanOrEqual(SLICES + 1);
+  /** How often each record says its thing was done. */
+  const counts = async (): Promise<number[]> =>
+    (await downloads.locator('.audit-when').allInnerTexts()).map((said) =>
+      Number(/(\d+) times until/.exec(said)?.[1] ?? 1),
+    );
+  // Every file the page was given is in the log, and nothing the page did
+  // not ask for; a file that was abandoned on its way may be in it or not.
+  // Asked again until no file is on its way: one may still be when the
+  // volume is first up.
+  await expect(async () => {
+    expect(files.given + files.abandoned).toBe(files.asked);
+    await card(page).getByRole('button', { name: 'Search' }).click();
+    await expect(downloads).toHaveCount(3);
+    const logged = (await counts()).reduce((sum, count) => sum + count, 0);
+    expect(logged).toBeGreaterThanOrEqual(files.given);
+    expect(logged).toBeLessThanOrEqual(files.asked);
+  }).toPass({ timeout: 15_000 });
+  // The series that was loaded is the record that counts most: the file its
+  // preview was made from, and its sixteen for each time it was loaded.
+  const all = await counts();
+  const times = Math.max(...all);
+  expect(times).toBeGreaterThanOrEqual(SLICES + 1);
+  if (files.abandoned === 0) expect((times - 1) % SLICES).toBe(0);
+  const download = downloads.nth(all.indexOf(times));
+  await expect(download.locator('.audit-when')).toContainText(`${times} times until`);
   await expect(download.locator('.audit-who')).toHaveText(ADMIN.name);
   await expect(download.locator('.audit-patient')).toHaveText(THORAX_PATIENT.id);
   await expect(download.locator('.audit-outcome')).toHaveText('ok');
@@ -106,9 +142,7 @@ test('an administrator reads, searches and saves the audit log', async ({ page }
   // The first thing that happened to this server: its account was made, by a command.
   expect(lines[1]).toContain(',command,account-create,ok,');
   expect(
-    lines.some((line) =>
-      new RegExp(`,(${SLICES}|${SLICES + 1}),${ADMIN.name},api,instance-download,ok,`).test(line),
-    ),
+    lines.some((line) => line.includes(`,${times},${ADMIN.name},api,instance-download,ok,`)),
   ).toBe(true);
   expect(lines.at(-1)).toContain(',audit-export,ok,');
 
