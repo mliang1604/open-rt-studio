@@ -5,7 +5,7 @@
 import type { Layer, Volume } from '@open-rt-studio/dicom';
 import type { VoxelProbe } from '@open-rt-studio/render';
 
-import { formatProbe } from './viewer-format';
+import { formatFieldReading, formatProbe } from './viewer-format';
 
 function volume(overrides: Partial<Volume> = {}): Volume {
   return {
@@ -64,6 +64,33 @@ describe('formatProbe', () => {
     };
     expect(formatProbe('Axial', PROBE, volume(), [{ layer: dose, sample }])).toBe(
       'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · value -784 HU · stored 240 · RTDOSE 35.7 Gy',
+    );
+  });
+});
+
+describe('what a field’s wash stands for under the cursor', () => {
+  it('is how far the field moves the place, in mm', () => {
+    expect(formatFieldReading({ kind: 'displacement', mm: 5.0990195 })).toBe('field moves 5.10 mm');
+    expect(formatFieldReading({ kind: 'displacement', mm: 0 })).toBe('field moves 0.00 mm');
+  });
+
+  it('is the Jacobian determinant, and says in words that the field folds', () => {
+    expect(formatFieldReading({ kind: 'jacobian', determinant: 0.874 })).toBe(
+      'Jacobian determinant 0.87',
+    );
+    expect(formatFieldReading({ kind: 'jacobian', determinant: -0.2 })).toBe(
+      'Jacobian determinant -0.20 (the field folds here)',
+    );
+    expect(formatFieldReading({ kind: 'jacobian', determinant: 0 })).toBe(
+      'Jacobian determinant 0.00 (the field folds here)',
+    );
+  });
+
+  it('comes last in the probe’s line, and is left out without one', () => {
+    const with_ = formatProbe('Axial', PROBE, volume(), [], { kind: 'displacement', mm: 2.5 });
+    expect(with_).toBe(`${formatProbe('Axial', PROBE, volume())} · field moves 2.50 mm`);
+    expect(formatProbe('Axial', PROBE, volume(), [], null)).toBe(
+      formatProbe('Axial', PROBE, volume()),
     );
   });
 });

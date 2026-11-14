@@ -31,8 +31,9 @@ import { mipStepScale } from './pan-zoom.js';
 // block at byte 192 (16-aligned): maskToTex mat4x4 (64) + maskOpacity,maskLutSize
 // (8) + 8 bytes pad = 80, to 272; then the deformation-field block at byte 272
 // (16-aligned): fieldToTex mat4x4 (64) + fieldToOverlay mat4x4 (64) + fieldLow
-// vec3 and fieldOn (16) + fieldHigh vec3 and 4 bytes pad (16) = 160. Total 432.
-export const PARAMS_SIZE = 432;
+// vec3 and fieldOn (16) + fieldHigh vec3 and fieldView (16) = 160, to 432; then
+// fieldViewScale, fieldViewOpacity (8) + 8 bytes pad. Total 448.
+export const PARAMS_SIZE = 448;
 /** Float offset of the overlay block (overlayToTex mat4 then window/opacity). */
 const OVERLAY_FLOATS = 28;
 /** Float offset of the label-mask block (maskToTex mat4 then opacity/LUT size). */
@@ -109,6 +110,16 @@ export interface SliceParams {
       /** The texture coordinates between which the field has vectors. */
       readonly low: Vec3;
       readonly high: Vec3;
+      /**
+       * What of the field is washed over the image, or nothing (see
+       * field-view.ts): the shader's code for the wash, the displacement at
+       * the top of the displacement wash's scale, and the wash's opacity.
+       */
+      readonly view?: {
+        readonly code: number;
+        readonly scaleMm: number;
+        readonly opacity: number;
+      } | null;
     } | null;
   } | null;
   /**
@@ -173,6 +184,11 @@ export function packSliceParams(p: SliceParams): ArrayBuffer {
       floats.set(field.low, FIELD_FLOATS + 32); // fieldLow, 100..102
       uints[FIELD_FLOATS + 35] = 1; // fieldOn, float 103 (u32)
       floats.set(field.high, FIELD_FLOATS + 36); // fieldHigh, 104..106
+      if (field.view) {
+        uints[FIELD_FLOATS + 39] = field.view.code; // fieldView, float 107 (u32)
+        floats[FIELD_FLOATS + 40] = field.view.scaleMm; // fieldViewScale, float 108
+        floats[FIELD_FLOATS + 41] = field.view.opacity; // fieldViewOpacity, float 109
+      }
     }
   }
   if (p.mask) {

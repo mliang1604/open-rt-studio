@@ -1,0 +1,101 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85em;
+}
+
+.kinds,
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kinds {
+  flex-wrap: wrap;
+}
+
+.name {
+  flex: none;
+  width: 52px;
+  color: var(--muted);
+}
+
+.value {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  padding: 3px 10px;
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+
+input[type='number'] {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 5px;
+}
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The bar lies on a mid grey, as the wash lies on the image: where the wash
+   is nothing the grey shows. */
+.bar {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background-color: #808080;
+  border: 1px solid var(--glass-border);
+}
+
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+
+.ends.words,
+.ends span:nth-child(2) {
+  color: var(--muted);
+}
+
+.fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.swatch {
+  flex: none;
+  width: 22px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+}
+
+.note {
+  margin: 0;
+  color: var(--muted);
+}

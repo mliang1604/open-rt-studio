@@ -87,13 +87,27 @@ export const SYNTHETIC_DEFORMATION = {
  * its middle. The file holds it at the grid's points, as 32-bit floats;
  * between them a reader interpolates, and is then near this and not on it.
  */
-export function syntheticDeformationMm(point: Triple): [number, number, number] {
+export function syntheticDeformationMm(point: Triple, strength = 1): [number, number, number] {
   const swell =
+    strength *
     Math.sin((Math.PI * (point[0] - ORIGIN[0])) / EXTENT[0]) *
     Math.sin((Math.PI * (point[1] - ORIGIN[1])) / EXTENT[1]) *
     Math.sin((Math.PI * (point[2] - ORIGIN[2])) / EXTENT[2]);
   return [AMPLITUDE[0] * swell, AMPLITUDE[1] * swell, AMPLITUDE[2] * swell];
 }
+
+/**
+ * A second synthetic registration that is deliberately bad: the same swell
+ * four times as strong, which is more than the grid can take without folding
+ * over. Its Jacobian determinant ({@link syntheticDeformationJacobian} with
+ * this strength) goes down to about −0.57, and is at or below 0 where the
+ * swell takes back more than it is given. For tests of showing a fold.
+ */
+export const SYNTHETIC_FOLDING = {
+  strength: 4,
+  sopInstanceUid: instanceUid(SYNTHETIC_FOLLOW_UP_STUDY, DEFORMABLE_SERIES_INDEX, 2),
+  description: 'Synthetic folding registration',
+} as const;
 
 /**
  * The Jacobian determinant of the synthetic registration at a place of the
@@ -102,7 +116,7 @@ export function syntheticDeformationMm(point: Triple): [number, number, number] 
  * is 1 plus that direction along the swell's gradient; the translation after
  * the field changes no volume.
  */
-export function syntheticDeformationJacobian(point: Triple): number {
+export function syntheticDeformationJacobian(point: Triple, strength = 1): number {
   const angle = [0, 1, 2].map((axis) => (Math.PI * (point[axis] - ORIGIN[axis])) / EXTENT[axis]);
   let along = 0;
   for (let axis = 0; axis < 3; axis++) {
@@ -110,7 +124,7 @@ export function syntheticDeformationJacobian(point: Triple): number {
     for (let other = 0; other < 3; other++) if (other !== axis) slope *= Math.sin(angle[other]);
     along += AMPLITUDE[axis] * slope;
   }
-  return 1 + along;
+  return 1 + strength * along;
 }
 
 /**
@@ -118,8 +132,8 @@ export function syntheticDeformationJacobian(point: Triple): number {
  * frame, in the follow-up frame: moved by the field, then by the translation
  * after it.
  */
-export function syntheticDeformedPoint(point: Triple): [number, number, number] {
-  const moved = syntheticDeformationMm(point);
+export function syntheticDeformedPoint(point: Triple, strength = 1): [number, number, number] {
+  const moved = syntheticDeformationMm(point, strength);
   const post = SYNTHETIC_DEFORMATION.postTranslation;
   return [
     point[0] + moved[0] + post[0],
@@ -133,7 +147,7 @@ export function syntheticDeformationGridPoint(i: number, j: number, k: number): 
   return [ORIGIN[0] + i * SPACING[0], ORIGIN[1] + j * SPACING[1], ORIGIN[2] + k * SPACING[2]];
 }
 
-function vectorBytes(): Uint8Array {
+function vectorBytes(strength: number): Uint8Array {
   const [nx, ny, nz] = DIMS;
   const out = new Uint8Array(nx * ny * nz * 12);
   const view = new DataView(out.buffer);
@@ -142,7 +156,8 @@ function vectorBytes(): Uint8Array {
   for (let k = 0; k < nz; k++) {
     for (let j = 0; j < ny; j++) {
       for (let i = 0; i < nx; i++) {
-        for (const part of syntheticDeformationMm(syntheticDeformationGridPoint(i, j, k))) {
+        const point = syntheticDeformationGridPoint(i, j, k);
+        for (const part of syntheticDeformationMm(point, strength)) {
           view.setFloat32(at, part, true);
           at += 4;
         }
@@ -164,14 +179,20 @@ function binary(values: readonly number[], width: 4 | 8): Uint8Array {
 /**
  * A Deformable Spatial Registration object for the synthetic registered
  * pair: in the planning CT's frame, with one item whose source is the
- * follow-up MR's frame. See the top of this file for what it says.
+ * follow-up MR's frame. See the top of this file for what it says. With
+ * `folding`, the deliberately bad one of {@link SYNTHETIC_FOLDING}: another
+ * object of the same series, between the same two frames.
  */
-export function syntheticDeformableRegistration(): SyntheticFile {
+export function syntheticDeformableRegistration(
+  options: { readonly folding?: boolean } = {},
+): SyntheticFile {
   const study = SYNTHETIC_FOLLOW_UP_STUDY;
+  const folding = options.folding === true;
+  const strength = folding ? SYNTHETIC_FOLDING.strength : 1;
   const [tx, ty, tz] = SYNTHETIC_DEFORMATION.postTranslation;
   const bytes = part10(
     DEFORMABLE_SPATIAL_REGISTRATION_SOP_CLASS,
-    SYNTHETIC_DEFORMATION.sopInstanceUid,
+    folding ? SYNTHETIC_FOLDING.sopInstanceUid : SYNTHETIC_DEFORMATION.sopInstanceUid,
     [
       ...identityElements(study),
       el(0x0008, 0x0060, 'CS', text('REG')), // Modality
@@ -179,7 +200,7 @@ export function syntheticDeformableRegistration(): SyntheticFile {
       el(0x0008, 0x103e, 'LO', text('Synthetic deformable registration')), // SeriesDescription
       el(0x0020, 0x000e, 'UI', uid(SYNTHETIC_DEFORMATION.series)), // SeriesInstanceUID
       el(0x0020, 0x0011, 'IS', numbers([DEFORMABLE_SERIES_INDEX])), // SeriesNumber
-      el(0x0020, 0x0013, 'IS', numbers([1])), // InstanceNumber
+      el(0x0020, 0x0013, 'IS', numbers([folding ? 2 : 1])), // InstanceNumber
       el(0x0020, 0x0052, 'UI', uid(frameOfReferenceUid(SYNTHETIC_STUDY))), // FrameOfReferenceUID
       // DeformableRegistrationSequence
       sequence(0x0064, 0x0002, [
@@ -192,7 +213,7 @@ export function syntheticDeformableRegistration(): SyntheticFile {
               el(0x0020, 0x0037, 'DS', numbers([1, 0, 0, 0, 1, 0])), // ImageOrientationPatient
               el(0x0064, 0x0007, 'UL', binary(DIMS, 4)), // GridDimensions
               el(0x0064, 0x0008, 'FD', binary(SPACING, 8)), // GridResolution
-              el(0x0064, 0x0009, 'OF', vectorBytes()), // VectorGridData
+              el(0x0064, 0x0009, 'OF', vectorBytes(strength)), // VectorGridData
             ],
           ]),
           // PostDeformationMatrixRegistrationSequence
@@ -211,11 +232,16 @@ export function syntheticDeformableRegistration(): SyntheticFile {
         ],
       ]),
       el(0x0070, 0x0080, 'CS', text(SYNTHETIC_DEFORMATION.label)), // ContentLabel
-      el(0x0070, 0x0081, 'LO', text(SYNTHETIC_DEFORMATION.description)), // ContentDescription
+      el(
+        0x0070,
+        0x0081,
+        'LO',
+        text(folding ? SYNTHETIC_FOLDING.description : SYNTHETIC_DEFORMATION.description),
+      ), // ContentDescription
     ],
   );
   return {
-    name: `synthetic-deformable-registration-s${study.index}.dcm`,
+    name: `synthetic-${folding ? 'folding' : 'deformable'}-registration-s${study.index}.dcm`,
     mimeType: 'application/dicom',
     bytes,
   };

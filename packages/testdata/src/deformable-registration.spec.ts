@@ -16,6 +16,7 @@ import {
 
 import {
   SYNTHETIC_DEFORMATION as FIELD,
+  SYNTHETIC_FOLDING as FOLDING,
   syntheticDeformableRegistration,
   syntheticDeformationGridPoint,
   syntheticDeformationJacobian,
@@ -167,5 +168,57 @@ describe('the synthetic deformable registration', () => {
     expect(again.grid.dims).toEqual(transform.grid.dims);
     expect(again.post).toEqual(transform.post);
     expect([again.from, again.to]).toEqual([transform.from, transform.to]);
+  });
+
+  it('has a second, deliberately bad object that folds where its formula says', () => {
+    const bad = parseDeformableRegistration(
+      buffer(syntheticDeformableRegistration({ folding: true })),
+    )!;
+    expect(bad.sopInstanceUid).toBe(FOLDING.sopInstanceUid);
+    expect(bad.sopInstanceUid).not.toBe(read.sopInstanceUid);
+    expect(bad.description).toBe(FOLDING.description);
+    expect(bad.registeredFrame).toBe(FIELD.registeredFrame);
+    const { transform } = bad.registrations[0];
+    if (transform.kind !== 'deformable') throw new Error('not a field');
+    expect(transform).toMatchObject(between);
+
+    // The same swell, four times as strong.
+    const [nx, ny, nz] = FIELD.gridDims;
+    const middle = syntheticDeformationGridPoint((nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2);
+    expect(syntheticDeformationMm(middle, FOLDING.strength)).toEqual(
+      syntheticDeformationMm(middle).map((part) => part * 4),
+    );
+    expect(mapPoint(transform, middle, between)).toEqual(
+      syntheticDeformedPoint(middle, FOLDING.strength),
+    );
+
+    // Its determinant by the formula: below 0 somewhere, and nowhere in the good one.
+    const found = jacobianDeterminants(transform.grid, transform.pre, transform.post);
+    let [folded, foldedByFormula, agree] = [0, 0, 0];
+    let least = Infinity;
+    for (let k = 0; k < nz; k++) {
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          const point = syntheticDeformationGridPoint(i, j, k);
+          const expected = syntheticDeformationJacobian(point, FOLDING.strength);
+          expect(syntheticDeformationJacobian(point)).toBeGreaterThan(0);
+          least = Math.min(least, expected);
+          const at = (k * ny + j) * nx + i;
+          if (expected <= 0) foldedByFormula++;
+          if (found[at] <= 0) folded++;
+          // Well away from 0 the grid's determinant and the formula's are on the same side of it.
+          if (Math.abs(expected) > 0.1) {
+            expect(found[at] <= 0, `vector ${i}, ${j}, ${k}`).toBe(expected <= 0);
+            agree++;
+          }
+        }
+      }
+    }
+    expect(least).toBeCloseTo(1 - (4 * Math.PI) / 8, 2);
+    expect(foldedByFormula).toBeGreaterThan(50);
+    expect(agree).toBeGreaterThan(1500);
+    const metrics = fieldMetrics(transform).jacobian!;
+    expect(metrics.foldedFraction).toBeCloseTo(folded / (nx * ny * nz), 9);
+    expect(Math.abs(folded - foldedByFormula)).toBeLessThan(foldedByFormula * 0.2);
   });
 });

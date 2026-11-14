@@ -112,6 +112,19 @@ export {
   roiScreenShapes,
   setIsShown,
 } from './roi-overlay.js';
+export {
+  DISPLACEMENT_FADE,
+  NO_FIELD_VIEW,
+  displacementLegendGradient,
+  displacementWash,
+  foldLegendBackground,
+  jacobianLegendGradient,
+  jacobianWash,
+  washOver,
+  type FieldView,
+  type FieldViewKind,
+  type Wash,
+} from './field-view.js';
 export { DEFAULT_CHECKER_CELLS, SliceRenderer } from './slice-renderer.js';
 export {
   type ColoredSurfaceMesh,

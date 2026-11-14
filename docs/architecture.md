@@ -627,6 +627,34 @@ pre`), which is what the registration is with nothing deformed. A point is
   round.
 - A deformable registration cannot be the start of a registration by hand
   other than by its matrices, and is not written by the viewer.
+- **What the field is doing, as a wash over the image** (part of #83). One
+  at a time, drawn by the slice shader where the field has a vector to go
+  by, over the picture and under painted structures:
+  - _Displacement_: how far the field moves each place, the length of the
+    vector the shader has already read. One hue, darker to lighter as it
+    grows, coming in from nothing over the first fifth of its scale. The
+    scale ends at the field's largest displacement taken up to a whole
+    millimetre, or where the user sets it.
+  - _Jacobian determinant_: read from a second texture, one texel to a
+    vector, of the determinants that `jacobianDeterminants` works out
+    (`packages/dicom/src/field-metrics.ts`). Blue below 1, red above, each
+    stronger the further from 1 and nothing at 1. **At or below 0 the field
+    folds**: magenta with dark stripes, at full strength whatever the
+    wash's strength, so that a fold is not told by its hue alone and cannot
+    be turned down.
+  - The colours are constants of `packages/render/src/field-view.ts`. The
+    shader's text is made from them, and so are the legends and the
+    functions the tests check colours with.
+  - **The probe says what the colour stands for** at the cursor: "field
+    moves 3.21 mm", or "Jacobian determinant 0.87", and "(the field folds
+    here)" at or below 0. It reads the same vectors and the same
+    determinants, between the grid's points as the shader does
+    (`sampleDeformation`, `sampleGridValues`). The viewer works the
+    determinants out once for a field and gives them to the renderer, so
+    the wash, the probe and the field's numbers (#84) are of one set of
+    values.
+  - A wash is of the field in use: with the field left out, or the overlay
+    hidden, there is none. It is not drawn in the 3D pane.
 
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), for the matrix object and

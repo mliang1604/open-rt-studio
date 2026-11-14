@@ -14,6 +14,7 @@ import {
   matrixTransform,
   pathMatrix,
   sampleDeformation,
+  sampleGridValues,
   samePath,
   transformPath,
   type DeformationGrid,
@@ -257,6 +258,35 @@ describe('a deformation field', () => {
     // One layer thick: only that plane has vectors.
     expect(sampleDeformation(grid, [0, 0, 1])).toBeNull();
     expect(sampleDeformation(grid, [10, 0, 0])).toBeNull();
+  });
+
+  it('reads a number known at each vector the way it reads the displacement', () => {
+    // The grid above, turned in the patient; the number at a vector is i + 10 j.
+    const grid: DeformationGrid = {
+      dims: [3, 2, 1],
+      origin: [0, 0, 0],
+      axes: [
+        [0, 1, 0],
+        [-1, 0, 0],
+        [0, 0, 1],
+      ],
+      spacing: [10, 10, 10],
+      vectors: new Float32Array(18),
+    };
+    const values = Float32Array.from([0, 1, 2, 10, 11, 12]);
+    expect(sampleGridValues(grid, values, [0, 20, 0])).toBe(2);
+    expect(sampleGridValues(grid, values, [-10, 10, 0])).toBe(11);
+    expect(sampleGridValues(grid, values, [-5, 5, 0])).toBeCloseTo(5.5, 9);
+    // Outside the grid: nothing.
+    expect(sampleGridValues(grid, values, [0, 0, 1])).toBeNull();
+    expect(sampleGridValues(grid, values, [10, 0, 0])).toBeNull();
+    // Beside a vector with no number: nothing; away from it, the numbers there are.
+    values[1] = NaN;
+    expect(sampleGridValues(grid, values, [0, 5, 0])).toBeNull();
+    expect(sampleGridValues(grid, values, [0, 10, 0])).toBeNull();
+    expect(sampleGridValues(grid, values, [-10, 20, 0])).toBe(12);
+    // The displacement is still read there: the numbers are not the vectors.
+    expect(sampleDeformation(grid, [0, 5, 0])).toEqual([0, 0, 0]);
   });
 
   it('says nothing where a vector it lies between is undefined', () => {

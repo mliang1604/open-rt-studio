@@ -220,10 +220,15 @@ export function deformableTransform(given: {
 const EDGE = 1e-6;
 
 /**
- * The grid's displacement at a position. Null outside the grid, and where a
- * vector that the position lies between is undefined (NaN).
+ * The vectors of a grid that a position lies between, each with its weight
+ * in what is read there: `visit(index of the vector, weight)` for those with
+ * a part in it. False outside the grid, where nothing is visited.
  */
-export function sampleDeformation(grid: DeformationGrid, position: Vec3): Vec3 | null {
+function betweenVectors(
+  grid: DeformationGrid,
+  position: Vec3,
+  visit: (vector: number, weight: number) => void,
+): boolean {
   const relative: Vec3 = [
     position[0] - grid.origin[0],
     position[1] - grid.origin[1],
@@ -237,13 +242,12 @@ export function sampleDeformation(grid: DeformationGrid, position: Vec3): Vec3 |
     let index =
       (relative[0] * along[0] + relative[1] * along[1] + relative[2] * along[2]) /
       grid.spacing[axis];
-    if (!(index >= -EDGE && index <= last + EDGE)) return null;
+    if (!(index >= -EDGE && index <= last + EDGE)) return false;
     index = Math.min(Math.max(index, 0), last);
     low[axis] = Math.min(Math.floor(index), Math.max(last - 1, 0));
     part[axis] = index - low[axis];
   }
   const [nx, ny, nz] = grid.dims;
-  const out = [0, 0, 0];
   for (let corner = 0; corner < 8; corner++) {
     const dx = corner & 1;
     const dy = (corner >> 1) & 1;
@@ -254,13 +258,43 @@ export function sampleDeformation(grid: DeformationGrid, position: Vec3): Vec3 |
     const i = Math.min(low[0] + dx, nx - 1);
     const j = Math.min(low[1] + dy, ny - 1);
     const k = Math.min(low[2] + dz, nz - 1);
-    const at = ((k * ny + j) * nx + i) * 3;
+    visit((k * ny + j) * nx + i, weight);
+  }
+  return true;
+}
+
+/**
+ * The grid's displacement at a position. Null outside the grid, and where a
+ * vector that the position lies between is undefined (NaN).
+ */
+export function sampleDeformation(grid: DeformationGrid, position: Vec3): Vec3 | null {
+  const out = [0, 0, 0];
+  const inside = betweenVectors(grid, position, (vector, weight) => {
+    const at = vector * 3;
     out[0] += weight * grid.vectors[at];
     out[1] += weight * grid.vectors[at + 1];
     out[2] += weight * grid.vectors[at + 2];
-  }
-  if (Number.isNaN(out[0]) || Number.isNaN(out[1]) || Number.isNaN(out[2])) return null;
+  });
+  if (!inside || Number.isNaN(out[0]) || Number.isNaN(out[1]) || Number.isNaN(out[2])) return null;
   return [out[0], out[1], out[2]];
+}
+
+/**
+ * A number that is known at each vector of a grid (one of `values` to a
+ * vector, in the grid's order), read at a position the way the grid's
+ * displacement is: between the vectors it lies among. Null outside the grid,
+ * and where one of those vectors has no number (NaN).
+ */
+export function sampleGridValues(
+  grid: DeformationGrid,
+  values: ArrayLike<number>,
+  position: Vec3,
+): number | null {
+  let out = 0;
+  const inside = betweenVectors(grid, position, (vector, weight) => {
+    out += weight * values[vector];
+  });
+  return !inside || Number.isNaN(out) ? null : out;
 }
 
 function applyTransform(transform: Transform, point: Vec3): Vec3 | null {

@@ -18,6 +18,8 @@ import {
   linkedSliceIndex,
   sliceCountFor,
   windowPresets,
+  type FieldView,
+  type FieldViewKind,
   type WindowLevel,
   type WindowPreset,
   COLORMAPS,
@@ -25,15 +27,26 @@ import {
 import {
   baseLayer,
   DEFAULT_OVERLAY_OPACITY,
+  jacobianDeterminants,
   Orientation,
+  sampleDeformation,
+  sampleGridValues,
+  transformPoint,
   type Layer,
   type LayerDisplay,
+  type Vec3,
   type Volume,
 } from '@open-rt-studio/dicom';
-import { LayersStore, layerLegend, type LayerLegendEntry } from './layers-store';
+import {
+  LayersStore,
+  fittingFieldScaleMm,
+  layerLegend,
+  type LayerLegendEntry,
+} from './layers-store';
 import { canShareWindow, CompareStore, type GroupNav } from './compare-store';
 import { type LoadState } from './load-controller';
 import { type PanePlacement } from './pane-placement';
+import type { FieldReading } from './viewer-format';
 import {
   type PerOrientation,
   type PerOrientationOblique,
@@ -327,6 +340,74 @@ export class LayersController {
   /** Replace one field of one group's independent nav (used by the unlinked handlers). */
   updateGroupNav(group: number, patch: Partial<GroupNav>): void {
     this.compareStore.updateGroupNav(group, patch);
+  }
+
+  /** The deformation field of the registration that places the active overlay, or null. */
+  readonly selectedField = computed(() => this.selectedOverlay()?.placement?.field ?? null);
+  /** The displacement wash's scale that fits that field, in mm; worked out once for a field. */
+  private readonly fittingScaleMm = computed(() => {
+    const field = this.selectedField();
+    return field ? fittingFieldScaleMm(field.grid) : 1;
+  });
+  /**
+   * What of the field is washed over the image (#83), as the renderer takes
+   * it: the kind and opacity the user chose, on the scale they set or the
+   * one that fits the field in use.
+   */
+  readonly fieldView = computed<FieldView>(() => ({
+    kind: this.layerStore.fieldViewKind(),
+    opacity: this.layerStore.fieldViewOpacity(),
+    maxMm: this.layerStore.fieldViewMaxMm() ?? this.fittingScaleMm(),
+  }));
+  /** Whether the displacement wash's scale is the one that fits the field, not one the user set. */
+  readonly fieldViewScaleFits = computed(() => this.layerStore.fieldViewMaxMm() === null);
+  /** The field's Jacobian determinant at each vector of its grid: worked out once for a field, when first read. */
+  private readonly fieldJacobian = computed(() => {
+    const field = this.selectedField();
+    return field ? jacobianDeterminants(field.grid, field.pre, field.post) : null;
+  });
+  /**
+   * The determinants the determinant wash is drawn from, or null while it is
+   * not shown: the renderer's wash and the readout under the cursor are of
+   * these same numbers.
+   */
+  readonly fieldViewDeterminants = computed(() =>
+    this.layerStore.fieldViewKind() === 'jacobian' ? this.fieldJacobian() : null,
+  );
+
+  /**
+   * What the wash on screen stands for at a point of the base image's frame:
+   * how far the field moves it, or the field's Jacobian determinant there,
+   * read between the grid's vectors as the shader reads it. Null with no wash
+   * on, with no field, and where the field has no vector to go by, which is
+   * where no wash is drawn.
+   */
+  fieldReading(basePoint: Vec3): FieldReading | null {
+    const field = this.selectedField();
+    const kind = this.layerStore.fieldViewKind();
+    if (!field || kind === 'none') return null;
+    const at = transformPoint(field.pre, basePoint);
+    const moved = sampleDeformation(field.grid, at);
+    if (!moved) return null;
+    if (kind === 'displacement') {
+      return { kind, mm: Math.hypot(moved[0], moved[1], moved[2]) };
+    }
+    const determinants = this.fieldJacobian();
+    const determinant = determinants ? sampleGridValues(field.grid, determinants, at) : null;
+    return determinant === null ? null : { kind, determinant };
+  }
+
+  setFieldViewKind(kind: FieldViewKind): void {
+    this.layerStore.setFieldViewKind(kind);
+  }
+
+  setFieldViewOpacity(opacity: number): void {
+    this.layerStore.setFieldViewOpacity(opacity);
+  }
+
+  /** Set the top of the displacement wash's scale in mm; null for the one that fits the field. */
+  setFieldViewMaxMm(maxMm: number | null): void {
+    this.layerStore.setFieldViewMaxMm(maxMm);
   }
 
   /** Whether the fusion controls apply: an overlay is active AND we're compositing. */

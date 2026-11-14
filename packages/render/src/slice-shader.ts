@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { FIELD_VIEW_WGSL } from './field-view.js';
+
 /**
  * WGSL for rendering a single planar slice out of a 3D volume texture, with a
  * DICOM window/level transform. The same shader serves axial, coronal and
@@ -63,6 +65,12 @@ struct Params {
   fieldLow : vec3<f32>,
   fieldOn : u32,
   fieldHigh : vec3<f32>,
+  // What of the field is washed over the image (field-view.ts): 0 nothing,
+  // 1 how far it moves each place, 2 its Jacobian determinant. Read where the
+  // field is read, and drawn only where the field has a vector to go by.
+  fieldView : u32,
+  fieldViewScale : f32,      // the displacement at the top of wash 1's scale, in mm
+  fieldViewOpacity : f32,    // how strongly a wash is laid over the image
 };
 
 @group(0) @binding(0) var volTex : texture_3d<f32>;
@@ -74,7 +82,8 @@ struct Params {
 @group(0) @binding(6) var maskSamp : sampler;           // nearest, for label ids
 @group(0) @binding(7) var maskLut : texture_1d<f32>;    // id -> RGBA display colour
 @group(0) @binding(8) var fieldTex : texture_3d<f32>;   // displacement xyz in mm, a: 1 where defined
-
+@group(0) @binding(9) var jacobianTex : texture_3d<f32>; // the field's determinant, g: 1 where it has one
+${FIELD_VIEW_WGSL}
 struct VSOut {
   @builtin(position) pos : vec4<f32>,
   @location(0) uv : vec2<f32>,
@@ -138,6 +147,18 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
     rgb = vec3<f32>(0.0);
   }
 
+  // The deformation field at this place of the pane: what it moves the place
+  // by, and whether it has a vector to go by here at all.
+  var mapped = true;
+  var moved = vec4<f32>(0.0);
+  var fcoord = vec3<f32>(0.0);
+  if (P.fieldOn != 0u) {
+    let at = (P.fieldToTex * vec4<f32>(u, plane.y, P.slicePos, 1.0)).xyz;
+    fcoord = clamp(at, P.fieldLow, P.fieldHigh);
+    moved = textureSampleLevel(fieldTex, volSamp, fcoord, 0.0);
+    mapped = all(at >= P.fieldLow) && all(at <= P.fieldHigh) && moved.a > 0.999;
+  }
+
   // Fusion overlay: sample the second volume at the same pane point via its own
   // affine, window it, and blend over the base. A colormap overlay (e.g. a dose
   // wash) maps the windowed value through overlayLut to colour; a grayscale one
@@ -149,11 +170,7 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
     // field moves the point to. Where the field has no vector to go by (outside
     // its grid, or beside an undefined vector) the overlay is not drawn. The
     // probe does the same on the CPU (pointToLayer / sampleDeformation).
-    var mapped = true;
     if (P.fieldOn != 0u) {
-      let fcoord = (P.fieldToTex * vec4<f32>(u, plane.y, P.slicePos, 1.0)).xyz;
-      let moved = textureSampleLevel(fieldTex, volSamp, clamp(fcoord, P.fieldLow, P.fieldHigh), 0.0);
-      mapped = all(fcoord >= P.fieldLow) && all(fcoord <= P.fieldHigh) && moved.a > 0.999;
       ocoord = ocoord + (P.fieldToOverlay * vec4<f32>(moved.xyz, 0.0)).xyz;
     }
     if (mapped && all(ocoord >= vec3<f32>(0.0)) && all(ocoord <= vec3<f32>(1.0))) {
@@ -188,6 +205,26 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
         amount = 1.0;
       }
       rgb = mix(rgb, orgb, amount);
+    }
+  }
+
+  // What the field is doing, washed over the picture so far (field-view.ts).
+  // Only where the field has a vector to go by; a determinant only where it
+  // has one. A fold is drawn at full strength whatever the wash's opacity.
+  if (P.fieldOn != 0u && P.fieldView != 0u && mapped) {
+    if (P.fieldView == 1u) {
+      let wash = displacementWash(length(moved.xyz), P.fieldViewScale);
+      rgb = mix(rgb, wash.rgb, clamp(wash.a * P.fieldViewOpacity, 0.0, 1.0));
+    } else {
+      let jacobian = textureSampleLevel(jacobianTex, volSamp, fcoord, 0.0);
+      if (jacobian.g > 0.999) {
+        if (jacobian.r <= 0.0) {
+          rgb = fieldFold(in.pos.xy);
+        } else {
+          let wash = jacobianWash(jacobian.r);
+          rgb = mix(rgb, wash.rgb, clamp(wash.a * P.fieldViewOpacity, 0.0, 1.0));
+        }
+      }
     }
   }
 

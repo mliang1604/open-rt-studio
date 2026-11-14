@@ -211,6 +211,14 @@ export class RenderController {
       }
       this.scheduleFrame();
     }, opts);
+    // What of the overlay's deformation field is washed over the image (#83).
+    effect(() => {
+      const renderer = d.renderer();
+      if (renderer) {
+        renderer.setFieldView(this.layersCtl.fieldView(), this.layersCtl.fieldViewDeterminants());
+      }
+      this.scheduleFrame();
+    }, opts);
     // Test seam: reflect the 3D-camera pan onto the canvas as data attributes.
     effect(() => {
       const el = d.canvas();

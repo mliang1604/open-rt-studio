@@ -77,9 +77,9 @@ describe('packSliceParams', () => {
     expect(uints[24]).toBe(0); // invert
   });
 
-  it('is 432 bytes and leaves overlay and mask opacity 0 when there is neither', () => {
+  it('is 448 bytes and leaves overlay and mask opacity 0 when there is neither', () => {
     const buffer = packSliceParams(base);
-    expect(buffer.byteLength).toBe(432);
+    expect(buffer.byteLength).toBe(448);
     // Overlay opacity lives at float 46; zero means the shader skips the overlay.
     expect(new Float32Array(buffer)[46]).toBe(0);
     // Mask opacity lives at float 64; zero means the shader skips the mask.

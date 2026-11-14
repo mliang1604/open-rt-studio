@@ -22,12 +22,32 @@ import {
   type PlacementStep,
   type RigidParams,
   type Volume,
+  summarizeDisplacement,
+  type DeformationGrid,
 } from '@open-rt-studio/dicom';
-import { DEFAULT_CHECKER_CELLS, type WindowLevel } from '@open-rt-studio/render';
+import {
+  DEFAULT_CHECKER_CELLS,
+  NO_FIELD_VIEW,
+  type FieldViewKind,
+  type WindowLevel,
+} from '@open-rt-studio/render';
 
 /** Checkerboard density bounds (cells across the image), shared by the slider. */
 const CHECKER_CELLS_MIN = 2;
 const CHECKER_CELLS_MAX = 30;
+
+/** The least and the most the top of the displacement wash's scale may be set to, in mm. */
+export const FIELD_VIEW_MAX_MM_MIN = 0.1;
+export const FIELD_VIEW_MAX_MM_MAX = 500;
+
+/**
+ * The scale that fits a field: its largest displacement, taken up to the
+ * next whole millimetre, and 1 mm for a field that moves less or nothing.
+ */
+export function fittingFieldScaleMm(grid: DeformationGrid): number {
+  const largest = summarizeDisplacement(grid)?.maxMm ?? 0;
+  return Math.min(FIELD_VIEW_MAX_MM_MAX, Math.max(1, Math.ceil(largest - 1e-6)));
+}
 
 /** One layer listed in the layers panel, with its display controls. */
 export interface LayerLegendEntry {
@@ -322,6 +342,16 @@ export class LayersStore {
   /** Checkerboard density in cells across the image (at zoom 1); the slider's value. */
   readonly checkerCells = signal(DEFAULT_CHECKER_CELLS);
 
+  /** What of a deformation field is washed over the image (#83): nothing, until asked. */
+  readonly fieldViewKind = signal<FieldViewKind>(NO_FIELD_VIEW.kind);
+  /** How strongly the wash is laid over the image, 0 to 1. */
+  readonly fieldViewOpacity = signal(NO_FIELD_VIEW.opacity);
+  /**
+   * The displacement at the top of the displacement wash's scale, in mm, when
+   * the user has set one; null for the scale that fits the field in use.
+   */
+  readonly fieldViewMaxMm = signal<number | null>(null);
+
   /**
    * Apply the current visibility / opacity / display overrides to the loaded layer
    * registry, producing the composed layers every consumer reads.
@@ -466,6 +496,29 @@ export class LayersStore {
     this.checkerCells.set(clamp(cells, CHECKER_CELLS_MIN, CHECKER_CELLS_MAX));
   }
 
+  /** Wash the field's displacement or its Jacobian determinant over the image, or nothing. */
+  setFieldViewKind(kind: FieldViewKind): void {
+    this.fieldViewKind.set(kind);
+  }
+
+  /** How strongly the field's wash is laid over the image, held between 0 and 1. */
+  setFieldViewOpacity(opacity: number): void {
+    if (Number.isFinite(opacity)) this.fieldViewOpacity.set(clamp(opacity, 0, 1));
+  }
+
+  /**
+   * The top of the displacement wash's scale in mm, held between
+   * {@link FIELD_VIEW_MAX_MM_MIN} and {@link FIELD_VIEW_MAX_MM_MAX}; null, or
+   * what is no number, for the scale that fits the field.
+   */
+  setFieldViewMaxMm(maxMm: number | null): void {
+    this.fieldViewMaxMm.set(
+      maxMm === null || !Number.isFinite(maxMm)
+        ? null
+        : clamp(maxMm, FIELD_VIEW_MAX_MM_MIN, FIELD_VIEW_MAX_MM_MAX),
+    );
+  }
+
   /**
    * Reset the fusion/layers state on a fresh base load: the per-layer overrides (an
    * added overlay starts visible, fully opaque, at its default display and window)
@@ -483,5 +536,8 @@ export class LayersStore {
     this._byHandDrag.set(null);
     this._rigidOnly.set(new Set());
     this.checkerboardEnabled.set(false);
+    this.fieldViewKind.set(NO_FIELD_VIEW.kind);
+    this.fieldViewOpacity.set(NO_FIELD_VIEW.opacity);
+    this.fieldViewMaxMm.set(null);
   }
 }

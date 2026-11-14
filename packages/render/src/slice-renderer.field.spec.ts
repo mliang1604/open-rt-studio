@@ -352,9 +352,9 @@ describe('packSliceParams with a field', () => {
     checkerSize: 10,
   };
 
-  it('is as long as the shader’s struct: the field block from byte 272 to 432', () => {
-    expect(PARAMS_SIZE).toBe(432);
-    expect(packSliceParams({ ...base, overlay: null }).byteLength).toBe(432);
+  it('is as long as the shader’s struct: the field block from byte 272 to 448', () => {
+    expect(PARAMS_SIZE).toBe(448);
+    expect(packSliceParams({ ...base, overlay: null }).byteLength).toBe(448);
   });
 
   it('packs the field block at float 68, and leaves it off without a field', () => {

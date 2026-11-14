@@ -61,6 +61,7 @@ import {
 import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
 import { FieldMetricsPanel } from './field-metrics/field-metrics-panel';
+import { FieldViewPanel } from './field-view/field-view-panel';
 import { LandmarkController } from './landmarks/landmark-controller';
 import { LandmarkMarkers } from './landmarks/landmark-markers';
 import { LandmarkPanel } from './landmarks/landmark-panel';
@@ -135,6 +136,7 @@ const MAX_ZOOM = 20;
     LandmarkMarkers,
     LandmarkPanel,
     FieldMetricsPanel,
+    FieldViewPanel,
   ],
   providers: [
     MeasurementStore,
