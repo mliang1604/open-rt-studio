@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { PatientCatalog, mergeStructureSets } from './patient-catalog';
+import { registrationObject } from './registration-testing';
 import type { Slice, StructureSet, Series } from '@open-rt-studio/dicom';
 
 /** A minimal structure set carrying just the fields the retention dedup reads. */
@@ -241,6 +242,25 @@ describe('PatientCatalog', () => {
     catalog.addStructureSets([structureSet('rt-a')]);
     catalog.addStructureSets([]);
     expect(catalog.structureSets()).toHaveLength(1);
+  });
+
+  it('keeps registration objects, each once, and lets go of them with their patient', () => {
+    const catalog = new PatientCatalog();
+    catalog.add([series('a')]);
+    const theirs = registrationObject('reg-1', 'f2', 'f1', undefined, { patientId: 'p1' });
+    const anothers = registrationObject('reg-2', 'f4', 'f3', undefined, { patientId: 'P2' });
+    catalog.addRegistrations([theirs, anothers]);
+    // The same file opened again.
+    catalog.addRegistrations([{ ...theirs }, { ...theirs }]);
+    catalog.addRegistrations([]);
+    expect(catalog.registrations()).toEqual([theirs, anothers]);
+
+    catalog.add([series('b', { patientId: 'P2' })]);
+    catalog.close('P2');
+    expect(catalog.registrations()).toEqual([theirs]);
+
+    catalog.clear();
+    expect(catalog.registrations()).toEqual([]);
   });
 
   it('clear() drops retained structure sets too (patient switch)', () => {

@@ -116,7 +116,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     clampZoom: (zoom) => Math.min(20, Math.max(0.5, zoom)),
     layers: () => [],
     isCompare: () => false,
-    selectedOverlay: () => null,
+    compareOverlay: () => null,
     layerWindow: () => ({ center: 50, width: 100 }),
     camera3d: camera,
     renderer: () => ({ sliceCount: () => 16 }) as unknown as SliceRenderer,

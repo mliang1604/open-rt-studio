@@ -16,6 +16,9 @@ import {
   normalize,
   scale,
   sub,
+  transformPoint,
+  transformVector,
+  type Mat4,
 } from '@open-rt-studio/dicom';
 import {
   invMul,
@@ -170,20 +173,37 @@ export function planeToTexMatrix(
  * OVERLAY volume's texture coordinates — for fusion compositing. The pane plane
  * (which patient FOV the pane shows) is defined by the base's bounds, but the
  * overlay has its own grid, so we take the base's pane basis (pane→patient) and
- * map it through the overlay's geometry. Both volumes must share the patient
- * frame of reference (validated at load); they need not share bounds or spacing.
+ * map it through the overlay's geometry. They need not share bounds or spacing.
+ *
+ * The two volumes are in one patient frame of reference unless `baseToOverlay`
+ * is given: a matrix (row by row, as the registration model has it) that maps
+ * the coordinates of a point **from the base's frame to the overlay's**. The
+ * overlay image is drawn into the base's frame, and for that each position of
+ * the base's plane is carried the other way, to where the overlay is to be
+ * read: the image goes one way and its coordinates the other. Exact for any
+ * matrix, since the plane stays a plane.
  */
 export function overlayPlaneToTexMatrix(
   baseVolume: Volume,
   overlayVolume: Volume,
   orientation: Orientation,
   rotation?: ObliqueRotation,
+  baseToOverlay?: Mat4,
 ): Float32Array {
   const baseGeom = resolveGeometry(baseVolume);
-  const basis = obliqueBasis(
+  const inBase = obliqueBasis(
     planeBasis(orientation, patientBounds(baseGeom, baseVolume.dims)),
     rotation,
   );
+  // The plane's corner is a position and its three axes are displacements.
+  const basis: PlaneBasis = baseToOverlay
+    ? {
+        origin: transformPoint(baseToOverlay, inBase.origin),
+        axisU: transformVector(baseToOverlay, inBase.axisU),
+        axisV: transformVector(baseToOverlay, inBase.axisV),
+        axisS: transformVector(baseToOverlay, inBase.axisS),
+      }
+    : inBase;
   return texAffineMatrix(basisToTex(basis, resolveGeometry(overlayVolume), overlayVolume.dims));
 }
 

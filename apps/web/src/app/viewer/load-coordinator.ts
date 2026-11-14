@@ -39,14 +39,33 @@ export type LoadOutcome =
   /** The series is already shown: nothing to load; `compare` may still open the columns. */
   | { readonly kind: 'noop'; readonly compare: boolean };
 
+/** Why a series was not fused, when it is not only that nothing connects it. */
+export type CantFuse =
+  /** More than one registration leads to it, and none is chosen for the user. */
+  | 'several-registrations'
+  /** It is placed by a registration, which the Compare layout does not show yet. */
+  | 'compare-through-registration';
+
 /**
  * Feedback when a held-modifier drop can't apply: ⌥ fuse and ⇧ compare both need a
- * series sharing the current scan's frame of reference, so a different study (or
- * nothing loaded to fuse against) degrades to this notice instead of replacing.
+ * series in the current scan's frame of reference, or one that a registration
+ * connects to it, so a different study (or nothing loaded to fuse against)
+ * degrades to this notice instead of replacing.
  */
-export function cantFuseMessage(intent: 'overlay' | 'compare'): string {
+export function cantFuseMessage(intent: 'overlay' | 'compare', why?: CantFuse): string {
   const action = intent === 'overlay' ? 'fuse' : 'compare';
-  return `Can’t ${action}: drop a series that shares the current scan’s frame of reference.`;
+  switch (why) {
+    case 'several-registrations':
+      return `Can’t ${action}: more than one registration connects this series to the current scan, and choosing between them is not there yet.`;
+    case 'compare-through-registration':
+      return 'Can’t compare through a registration yet. Hold ⌥ to fuse the series instead.';
+    case undefined:
+      return `Can’t ${action}: drop a series that shares the current scan’s frame of reference, or that an opened registration connects to it.`;
+    default: {
+      const exhaustive: never = why;
+      return exhaustive;
+    }
+  }
 }
 
 /**
@@ -55,7 +74,13 @@ export function cantFuseMessage(intent: 'overlay' | 'compare'): string {
  * Only the ⌥/⇧ paths reach here — a plain (primary) load replaces outright.
  */
 function outcomeForMerged(merged: MergedLoad, intent: 'overlay' | 'compare'): LoadOutcome {
-  if (!merged.added) return { kind: 'reject', message: cantFuseMessage(intent) };
+  if (!merged.added) return { kind: 'reject', message: cantFuseMessage(intent, merged.why) };
+  // The series that was added is the last layer. The Compare layout draws its
+  // second column on that image's own grid, which a registration does not
+  // line up with the base's: refused until it can be shown rightly.
+  if (intent === 'compare' && merged.result.layers.at(-1)?.placement) {
+    return { kind: 'reject', message: cantFuseMessage(intent, 'compare-through-registration') };
+  }
   return { kind: 'overlay', result: merged.result, compare: intent === 'compare' };
 }
 
@@ -63,7 +88,17 @@ function outcomeForMerged(merged: MergedLoad, intent: 'overlay' | 'compare'): Lo
 export interface CatalogOps {
   readonly add: (series: readonly Series[]) => void;
   readonly addStructureSets: (sets: LoadResult['allStructureSets']) => void;
+  readonly addRegistrations: (objects: LoadResult['registrations']) => void;
+  /** The registration objects held already that may be the current patient's. */
+  readonly registrations: () => LoadResult['registrations'];
 }
+
+/** Fold a load into the view, with the registrations that may place it. */
+export type Merge = (
+  current: LoadResult,
+  incoming: LoadResult,
+  registrations: LoadResult['registrations'],
+) => MergedLoad;
 
 /** Everything the file-load policy needs, injected so it can be tested without a GPU. */
 export interface FileLoadDeps {
@@ -79,15 +114,17 @@ export interface FileLoadDeps {
   readonly keepsOnePatient: (id: string | null, series: readonly Series[]) => boolean;
   /** Whether the batch holds nothing of the current patient, so that importing it leaves them. */
   readonly leavesPatient: (id: string | null, series: readonly Series[]) => boolean;
-  readonly merge: (current: LoadResult, incoming: LoadResult) => MergedLoad;
+  readonly merge: Merge;
   readonly catalog: CatalogOps;
 }
 
 /**
  * Decide how a freshly parsed file batch joins the view, mutating the patient
  * catalog as it goes. A held modifier (⌥/⇧) is an explicit fusion request: it
- * forces the overlay path against the current view, applying only to a
- * same-patient, same-frame series — else a graceful reject. A plain load is
+ * forces the overlay path against the current view, applying only to a series
+ * of the same patient that is in the same frame of reference, or that a
+ * registration in the batch or opened before connects to it — else a graceful
+ * reject. A plain load is
  * ingest-only (#241): it catalogues the series into the history *without*
  * displaying anything, leaving the user to pick which series to view.
  *
@@ -107,11 +144,16 @@ export function planFileLoad(deps: FileLoadDeps): LoadOutcome {
 
   if (intent !== 'primary') {
     const samePatient = keepsOnePatient(currentPatientId, result.series);
-    const merged = previous && samePatient ? merge(previous, result) : { result, added: false };
-    if (!merged.added) return { kind: 'reject', message: cantFuseMessage(intent) };
+    // The registrations that came in the batch, and those opened before it.
+    const known = [...result.registrations, ...catalog.registrations()];
+    const merged: MergedLoad =
+      previous && samePatient ? merge(previous, result, known) : { result, added: false };
+    const outcome = outcomeForMerged(merged, intent);
+    if (outcome.kind === 'reject') return outcome;
     catalog.add(result.series);
     catalog.addStructureSets(result.allStructureSets);
-    return { kind: 'overlay', result: merged.result, compare: intent === 'compare' };
+    catalog.addRegistrations(result.registrations);
+    return outcome;
   }
 
   const cleared = leavesPatient(currentPatientId, result.series);
@@ -121,6 +163,7 @@ export function planFileLoad(deps: FileLoadDeps): LoadOutcome {
   // they annotate still shows their contours — the ingest-only import (#241)
   // would otherwise drop them with the parsed batch.
   catalog.addStructureSets(result.allStructureSets);
+  catalog.addRegistrations(result.registrations);
   return { kind: 'imported', cleared };
 }
 
@@ -136,8 +179,12 @@ export interface SeriesLoadDeps {
    */
   readonly fetchSeries: (seriesUid: string) => Promise<FetchedSeries>;
   /** Build the series into a registry; may throw (the caller handles it). */
-  readonly loadSeries: (series: Series, known: LoadResult['allStructureSets']) => LoadResult;
-  readonly merge: (current: LoadResult, incoming: LoadResult) => MergedLoad;
+  readonly loadSeries: (
+    series: Series,
+    known: LoadResult['allStructureSets'],
+    registrations: LoadResult['registrations'],
+  ) => LoadResult;
+  readonly merge: Merge;
 }
 
 /**
@@ -145,7 +192,7 @@ export interface SeriesLoadDeps {
  * *replaces* the view, unloading every other image so the viewport shows exactly
  * the series the user chose (#241) — re-picking the current base simply reloads
  * it. A held modifier instead fuses: ⌥ overlays and ⇧ overlays-and-compares a
- * same-frame series, while an already-composited series is a no-op (⇧ still opens
+ * same-frame series (⌥ also one that a registration the source holds places), while an already-composited series is a no-op (⇧ still opens
  * the compare columns). Unlike a file load it never touches the catalog or
  * prompts — panel series are already known. The series comes from the data
  * source, which may take its time: the answer is a promise.
@@ -158,10 +205,12 @@ export async function planSeriesLoad(deps: SeriesLoadDeps): Promise<LoadOutcome>
   }
   // Every structure set the source holds for it (more than any one displayed
   // load's), so a primary pick puts an RTSTRUCT back by frame of reference.
-  const { series, structureSets } = await fetchSeries(seriesUid);
-  const incoming = loadSeries(series, structureSets);
+  const { series, structureSets, registrations } = await fetchSeries(seriesUid);
+  const incoming = loadSeries(series, structureSets, registrations);
   if (intent === 'primary') return { kind: 'replace', result: incoming };
-  const merged = previous ? merge(previous, incoming) : { result: incoming, added: false };
+  const merged: MergedLoad = previous
+    ? merge(previous, incoming, registrations)
+    : { result: incoming, added: false };
   return outcomeForMerged(merged, intent);
 }
 
@@ -196,10 +245,13 @@ export class LoadCoordinator {
       currentPatientId: this.files.currentPatientId(),
       keepsOnePatient: importKeepsOnePatient,
       leavesPatient: importLeavesPatient,
-      merge: (current, incoming) => this.loader.merge(current, incoming),
+      merge: (current, incoming, registrations) =>
+        this.loader.merge(current, incoming, registrations),
       catalog: {
         add: (series) => this.files.add(series),
         addStructureSets: (sets) => this.files.addStructureSets(sets),
+        addRegistrations: (objects) => this.files.addRegistrations(objects),
+        registrations: () => this.files.registrations(),
       },
     });
   }
@@ -220,8 +272,9 @@ export class LoadCoordinator {
       seriesUid,
       intent,
       fetchSeries: (uid) => this.source.fetchSeries(uid, options),
-      loadSeries: (s, known) => this.loader.loadSeries(s, known),
-      merge: (current, incoming) => this.loader.merge(current, incoming),
+      loadSeries: (s, known, registrations) => this.loader.loadSeries(s, known, registrations),
+      merge: (current, incoming, registrations) =>
+        this.loader.merge(current, incoming, registrations),
     });
   }
 }

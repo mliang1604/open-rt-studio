@@ -76,6 +76,8 @@ export interface RegistrationOptions {
   readonly fixed?: SyntheticStudy;
   /** Translation in mm from the moving frame to the fixed one. Default `[5, -3, 2]`. */
   readonly translation?: readonly [number, number, number];
+  /** The series of `study` the registration names as the image it moves. Default its CT. */
+  readonly movingSeriesIndex?: number;
 }
 
 /** The 4x4 matrix of a translation, row by row, as DICOM writes it. */
@@ -110,6 +112,7 @@ export function syntheticRegistration(options: RegistrationOptions = {}): Synthe
   const study = options.study ?? SYNTHETIC_FOLLOW_UP_STUDY;
   const fixed = options.fixed ?? SYNTHETIC_STUDY;
   const translation = options.translation ?? ([5, -3, 2] as const);
+  const moving = options.movingSeriesIndex ?? CT_SERIES_INDEX;
   const bytes = part10(
     SPATIAL_REGISTRATION_SOP_CLASS,
     instanceUid(study, REGISTRATION_SERIES_INDEX, 1),
@@ -118,9 +121,7 @@ export function syntheticRegistration(options: RegistrationOptions = {}): Synthe
       el(0x0008, 0x0060, 'CS', text('REG')), // Modality
       el(0x0008, 0x103e, 'LO', text('Synthetic registration')), // SeriesDescription
       // ReferencedSeriesSequence: the series of this study the registration is about.
-      sequence(0x0008, 0x1115, [
-        [el(0x0020, 0x000e, 'UI', uid(seriesUid(study, CT_SERIES_INDEX)))],
-      ]),
+      sequence(0x0008, 0x1115, [[el(0x0020, 0x000e, 'UI', uid(seriesUid(study, moving)))]]),
       // StudiesContainingOtherReferencedInstancesSequence: the other study's series.
       sequence(0x0008, 0x1200, [
         [

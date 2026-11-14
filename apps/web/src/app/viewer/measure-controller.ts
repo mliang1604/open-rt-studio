@@ -18,7 +18,7 @@ import {
   type Vec2,
   type PaneRect,
 } from '@open-rt-studio/render';
-import { Orientation, type Volume } from '@open-rt-studio/dicom';
+import { Orientation, pointBetweenLayers, type Volume } from '@open-rt-studio/dicom';
 import { MeasurementStore, type MeasureTool } from './measurement-store';
 import { placementAt, type PanePlacement } from './pane-placement';
 import { LayersController } from './layers-controller';
@@ -136,12 +136,16 @@ export class MeasureController {
     if (!sample) return null;
 
     // Read every other visible layer at the probed patient point (e.g. dose Gy
-    // under the CT HU). A layer that doesn't cover the point is dropped.
-    const others = this.layersCtl
-      .layers()
+    // under the CT HU). A layer that doesn't cover the point is dropped. A
+    // layer in another frame of reference is read where its registration puts
+    // the point: the same anatomy, at other coordinates.
+    const layers = this.layersCtl.layers();
+    const hovered = layers.find((layer) => layer.volume === hoveredVolume);
+    const others = layers
       .filter((layer) => layer.visible && layer.volume !== hoveredVolume)
       .flatMap((layer) => {
-        const s = sampleVolumeAtPatient(layer.volume, sample.patient);
+        const there = pointBetweenLayers(sample.patient, hovered?.placement, layer.placement);
+        const s = sampleVolumeAtPatient(layer.volume, there);
         return s ? [{ layer, sample: s }] : [];
       });
     return formatProbe(orientationName(orientation), sample, hoveredVolume, others);

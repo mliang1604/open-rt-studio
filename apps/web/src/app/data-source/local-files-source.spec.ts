@@ -7,6 +7,7 @@ import type { Series, Slice, StructureSet } from '@open-rt-studio/dicom';
 
 import { DATA_SOURCE, listedSeries } from './data-source';
 import { LocalFilesSource } from './local-files-source';
+import { registrationObject } from '../registration-testing';
 
 /** A parsed series with one small slice, enough to draw a preview from. */
 function series(uid: string, overrides: Partial<Series> = {}): Series {
@@ -100,6 +101,20 @@ describe('LocalFilesSource', () => {
     const fetched = await source.fetchSeries('1.1.1');
     expect(fetched.series).toBe(ct);
     expect(fetched.structureSets).toEqual(sets);
+  });
+
+  it('gives with a series the registrations that were opened, but not another patient’s', async () => {
+    source.add([series('1.1.1')]);
+    const theirs = registrationObject('reg-1', '1.8', '1.9', undefined, { patientId: 'SYN-0001' });
+    const unnamed = registrationObject('reg-2', '1.7', '1.9');
+    const anothers = registrationObject('reg-3', '1.6', '1.9', undefined, {
+      patientId: 'SYN-0002',
+    });
+    source.addRegistrations([theirs, unnamed, anothers]);
+    expect((await source.fetchSeries('1.1.1')).registrations).toEqual([theirs, unnamed]);
+    expect(source.registrations()).toEqual([theirs, unnamed]);
+    source.clear();
+    expect(source.registrations()).toEqual([]);
   });
 
   it('answers at once, without reporting progress', async () => {

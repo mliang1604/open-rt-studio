@@ -2,8 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { baseImageLayer, overlayImageLayer, type Layer, type Volume } from '@open-rt-studio/dicom';
-import { LayersStore, layerLegend } from './layers-store';
+import {
+  baseImageLayer,
+  findPlacement,
+  overlayImageLayer,
+  type Layer,
+  type LayerPlacement,
+  type Volume,
+} from '@open-rt-studio/dicom';
+import { registrationObject } from '../registration-testing';
+import { LayersStore, layerLegend, placementText } from './layers-store';
 
 function makeVolume(modality: string, windowCenter = 40, windowWidth = 400): Volume {
   return {
@@ -59,7 +67,74 @@ describe('layerLegend', () => {
   });
 });
 
+describe('a placement in words', () => {
+  const placed = (
+    base: string,
+    layer: string,
+    ...objects: Parameters<typeof findPlacement>[2]
+  ): LayerPlacement => {
+    const found = findPlacement(base, layer, objects);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    return found.placement;
+  };
+  const followUpToPlanning = registrationObject('reg', 'follow-up', 'planning', undefined, {
+    description: 'Follow-up to planning',
+  });
+
+  it('names the registration and says which way it was written', () => {
+    // As a file usually has it: this image's frame mapped into the base's.
+    expect(placementText(placed('planning', 'follow-up', followUpToPlanning))).toBe(
+      'Placed by registration “Follow-up to planning” (written this image → base)',
+    );
+    // The same registration with the two images the other way round.
+    expect(placementText(placed('follow-up', 'planning', followUpToPlanning))).toBe(
+      'Placed by registration “Follow-up to planning” (written base → this image)',
+    );
+  });
+
+  it('goes by the label when there is no description, and says so when there is neither', () => {
+    const labelled = registrationObject('reg', 'follow-up', 'planning');
+    expect(placementText(placed('planning', 'follow-up', labelled))).toContain('“REGISTRATION”');
+    const bare = registrationObject('reg', 'follow-up', 'planning', undefined, { label: null });
+    expect(placementText(placed('planning', 'follow-up', bare))).toContain('“unnamed”');
+  });
+
+  it('lists the registrations of a way with more than one', () => {
+    const mrToPlanning = registrationObject('reg-2', 'mr', 'planning', undefined, {
+      description: 'MR to planning',
+    });
+    expect(placementText(placed('follow-up', 'mr', followUpToPlanning, mrToPlanning))).toBe(
+      'Placed by 2 registrations in a row: “Follow-up to planning”, then “MR to planning”',
+    );
+  });
+
+  it('is in the legend row of a placed layer, and of no other', () => {
+    const placement = placed('planning', 'follow-up', followUpToPlanning);
+    const rows = layerLegend([
+      baseImageLayer('base', makeVolume('CT')),
+      overlayImageLayer('same-frame', makeVolume('MR')),
+      overlayImageLayer('placed', makeVolume('CT'), placement),
+    ]);
+    expect(rows.map((row) => row.placement)).toEqual([null, null, placementText(placement)]);
+  });
+});
+
 describe('LayersStore.apply', () => {
+  it('keeps a layer’s placement when it is overridden', () => {
+    const found = findPlacement('planning', 'follow-up', [
+      registrationObject('reg', 'follow-up', 'planning'),
+    ]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    const store = new LayersStore();
+    store.setOpacity('placed', 80);
+    const [, layer] = store.apply([
+      baseImageLayer('base', makeVolume('CT')),
+      overlayImageLayer('placed', makeVolume('CT'), found.placement),
+    ]);
+    expect(layer.opacity).toBeCloseTo(0.8);
+    expect(layer.placement).toBe(found.placement);
+  });
+
   it('returns the layers unchanged when there are no overrides', () => {
     const store = new LayersStore();
     const layers = registry();

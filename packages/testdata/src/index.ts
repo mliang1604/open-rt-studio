@@ -31,6 +31,12 @@ export {
 } from './image-series.js';
 export { SYNTHETIC_PATIENT_STUDIES, syntheticPatient } from './patient.js';
 export {
+  SYNTHETIC_REGISTERED_PAIR,
+  registeredMrValueAtCtVoxel,
+  syntheticRegisteredPair,
+  type RegisteredPair,
+} from './registered-pair.js';
+export {
   SYNTHETIC_RT_COURSE,
   syntheticRegistration,
   syntheticRtCourse,

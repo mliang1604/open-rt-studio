@@ -6,9 +6,11 @@
 
 import {
   parseFileAsync,
+  parseSpatialRegistration,
   parseStructureSet,
   UnsupportedDicomError,
   type Slice,
+  type SpatialRegistration,
   type StructureSet,
 } from '@open-rt-studio/dicom';
 
@@ -30,7 +32,8 @@ export interface ParseRequest {
  * same without the name. On success each slice's pixel buffer is transferred
  * back, not copied. `structureSets` holds the file's RTSTRUCT when it is one
  * (its contour points carry no pixel buffers, so they are cloned, not
- * transferred); empty otherwise.
+ * transferred); empty otherwise. `registrations` likewise holds the file's
+ * Spatial Registration object when it is one.
  */
 export type ParseResponse =
   | {
@@ -38,6 +41,7 @@ export type ParseResponse =
       readonly ok: true;
       readonly slices: Slice[];
       readonly structureSets: StructureSet[];
+      readonly registrations: SpatialRegistration[];
     }
   | {
       readonly id: number;
@@ -61,9 +65,16 @@ addEventListener('message', async (event: MessageEvent<ParseRequest>) => {
     const slices = await parseFileAsync(name, buffer);
     const structureSet = slices.length === 0 ? parseStructureSet(name, buffer) : null;
     const structureSets = structureSet ? [structureSet] : [];
+    // Neither an image nor a structure set: a registration object, perhaps.
+    const registration =
+      slices.length === 0 && !structureSet ? parseSpatialRegistration(buffer) : null;
+    const registrations = registration ? [registration] : [];
     // Transfer each frame's pixel buffer back instead of cloning it.
     const transfer = slices.map((slice) => slice.pixels.buffer);
-    postMessage({ id, ok: true, slices, structureSets } satisfies ParseResponse, transfer);
+    postMessage(
+      { id, ok: true, slices, structureSets, registrations } satisfies ParseResponse,
+      transfer,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const reason = error instanceof UnsupportedDicomError ? error.reason : message;

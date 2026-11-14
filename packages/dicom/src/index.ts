@@ -74,6 +74,14 @@ export {
 } from './registration.js';
 export { type Series, groupSeries, largestSeries, middleSlice } from './series.js';
 export {
+  type LayerPlacement,
+  type PlacementSearch,
+  type PlacementStep,
+  findPlacement,
+  pointBetweenLayers,
+  registrationsOfPatient,
+} from './layer-placement.js';
+export {
   type ReadRegistration,
   type RegistrationItemProblem,
   type SpatialRegistration,

@@ -4,9 +4,11 @@
 
 import { Injectable, computed, inject } from '@angular/core';
 import {
+  registrationsOfPatient,
   structureSetsForSeries,
   structureSetsOfPatient,
   type Series,
+  type SpatialRegistration,
   type StructureSet,
 } from '@open-rt-studio/dicom';
 
@@ -87,7 +89,8 @@ export class LocalFilesSource implements DataSource {
     // Likewise the structure sets: those read from another patient's files
     // are not among what the view is given, whatever UIDs they share.
     const structureSets = structureSetsOfPatient(this.catalog.structureSets(), series.patientId);
-    return Promise.resolve({ series, structureSets });
+    const registrations = registrationsOfPatient(this.catalog.registrations(), series.patientId);
+    return Promise.resolve({ series, structureSets, registrations });
   }
 
   thumbnail(seriesUid: string): SeriesThumbnail {
@@ -134,6 +137,16 @@ export class LocalFilesSource implements DataSource {
   /** Take in structure sets parsed from files, for the series they belong to. */
   addStructureSets(sets: readonly StructureSet[]): void {
     this.catalog.addStructureSets(sets);
+  }
+
+  /** Take in Spatial Registration objects parsed from files. */
+  addRegistrations(objects: readonly SpatialRegistration[]): void {
+    this.catalog.addRegistrations(objects);
+  }
+
+  /** The registration objects that may be the patient's the source is on. */
+  registrations(): readonly SpatialRegistration[] {
+    return registrationsOfPatient(this.catalog.registrations(), this.catalog.currentPatientId());
   }
 
   /** Forget everything that was imported. */

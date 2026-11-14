@@ -9,6 +9,8 @@ import {
   applyLayerOverrides,
   type Layer,
   type LayerDisplay,
+  type LayerPlacement,
+  type PlacementStep,
 } from '@open-rt-studio/dicom';
 import { DEFAULT_CHECKER_CELLS, type WindowLevel } from '@open-rt-studio/render';
 
@@ -32,6 +34,33 @@ export interface LayerLegendEntry {
   readonly opacityPercent: number;
   /** Selected display: `'grayscale'` or a colormap name, for the `<select>`. */
   readonly displayValue: string;
+  /**
+   * For a layer in another frame of reference: which registration places it
+   * over the base, and which way that registration was written. Null for a
+   * layer in the base's frame.
+   */
+  readonly placement: string | null;
+}
+
+/** The name a registration goes by: its description, else its label. */
+function registrationName(step: PlacementStep): string {
+  return step.description?.trim() || step.label?.trim() || 'unnamed';
+}
+
+/**
+ * A placement in words: the registration's name, and the direction it was
+ * written in. A file usually registers a secondary image to the primary:
+ * from this image's frame to the base's.
+ */
+export function placementText(placement: LayerPlacement): string {
+  const { steps } = placement;
+  if (steps.length === 1) {
+    const [step] = steps;
+    const written = step.inverted ? 'this image → base' : 'base → this image';
+    return `Placed by registration “${registrationName(step)}” (written ${written})`;
+  }
+  const names = steps.map((step) => `“${registrationName(step)}”`).join(', then ');
+  return `Placed by ${steps.length} registrations in a row: ${names}`;
 }
 
 /** Project the composed layers into panel rows (base first), each with its controls. */
@@ -44,6 +73,7 @@ export function layerLegend(layers: readonly Layer[]): LayerLegendEntry[] {
     visible: layer.visible,
     opacityPercent: Math.round(layer.opacity * 100),
     displayValue: layer.display.kind === 'grayscale' ? 'grayscale' : layer.display.name,
+    placement: layer.placement ? placementText(layer.placement) : null,
   }));
 }
 

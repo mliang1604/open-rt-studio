@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import type { Slice, StructureSet } from '@open-rt-studio/dicom';
+import type { Slice, SpatialRegistration, StructureSet } from '@open-rt-studio/dicom';
 import type { ParseRequest, ParseResponse } from './parse.worker';
 
 /** Reports parse progress: files finished out of the total selected. */
@@ -16,12 +16,14 @@ export interface SkippedFile {
 }
 
 /**
- * What a batch parse yields: image slices and any RTSTRUCTs, in file order, and
- * the files that could not be read, also in file order.
+ * What a batch parse yields: image slices, any RTSTRUCTs and any Spatial
+ * Registration objects, in file order, and the files that could not be read,
+ * also in file order.
  */
 export interface ParsedFiles {
   readonly slices: Slice[];
   readonly structureSets: StructureSet[];
+  readonly registrations: SpatialRegistration[];
   readonly skipped: SkippedFile[];
 }
 
@@ -78,7 +80,7 @@ export async function parseFilesInWorkers(
   if (signal?.aborted) throw abortError();
   const total = files.length;
   onProgress?.(0, total);
-  if (total === 0) return { slices: [], structureSets: [], skipped: [] };
+  if (total === 0) return { slices: [], structureSets: [], registrations: [], skipped: [] };
 
   // One result bucket per file, filled at the file's original index so the
   // flattened output preserves selection order despite out-of-order completion.
@@ -124,6 +126,7 @@ export async function parseFilesInWorkers(
   return {
     slices: perFile.flatMap((r) => r.slices),
     structureSets: perFile.flatMap((r) => r.structureSets),
+    registrations: perFile.flatMap((r) => r.registrations),
     skipped: perFile.flatMap((r) => r.skipped),
   };
 }
@@ -153,9 +156,19 @@ function parseInWorker(
       if (data.id !== id) return; // not this request's response
       cleanup();
       if (data.ok) {
-        resolve({ slices: data.slices, structureSets: data.structureSets, skipped: [] });
+        resolve({
+          slices: data.slices,
+          structureSets: data.structureSets,
+          registrations: data.registrations,
+          skipped: [],
+        });
       } else {
-        resolve({ slices: [], structureSets: [], skipped: [{ name, reason: data.reason }] });
+        resolve({
+          slices: [],
+          structureSets: [],
+          registrations: [],
+          skipped: [{ name, reason: data.reason }],
+        });
       }
     };
     const onError = (event: ErrorEvent) => {

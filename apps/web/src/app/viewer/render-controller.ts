@@ -172,7 +172,16 @@ export class RenderController {
       const renderer = d.renderer();
       const overlay = this.layersCtl.selectedOverlay();
       const opacity = overlay ? overlay.opacity : 0;
-      if (renderer) renderer.setOverlay(overlay?.volume ?? null, opacity, overlay?.display);
+      // An overlay in another frame of reference is read through the
+      // registration that places it: from the base's frame to its own.
+      if (renderer) {
+        renderer.setOverlay(
+          overlay?.volume ?? null,
+          opacity,
+          overlay?.display,
+          overlay?.placement?.baseToLayer,
+        );
+      }
       this.scheduleFrame();
     }, opts);
     // Upload / re-upload / clear the authored label mask. Reads the store's
@@ -354,8 +363,9 @@ export class RenderController {
     if (!renderer || !volume) return null;
 
     // The overlay column windows on its own per-layer window/level, falling back
-    // to its volume's default.
-    const overlay = this.layersCtl.selectedOverlay();
+    // to its volume's default. What these panes are told of the overlay is
+    // for the Compare columns only, so it is the overlay Compare shows.
+    const overlay = this.layersCtl.compareOverlay();
     return composePaneViews({
       panes: d.panes(),
       dpr: d.viewport().dpr,

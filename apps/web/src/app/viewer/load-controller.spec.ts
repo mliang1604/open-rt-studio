@@ -52,6 +52,7 @@ function built(series: Series): LoadResult {
     layers: [baseImageLayer(series.uid, volume())],
     structureSets: [],
     allStructureSets: [],
+    registrations: [],
     fileCount: 1,
     sliceCount: 1,
   };

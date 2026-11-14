@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import type { Series } from '@open-rt-studio/dicom';
+import { registrationObject } from '../registration-testing';
 import type { LoadResult, MergedLoad } from '../volume-loader';
 import {
   cantFuseMessage,
@@ -19,6 +20,7 @@ function result(...layerIds: string[]): LoadResult {
     series: [{ uid: layerIds[0] ?? 'series' }],
     layers: layerIds.map((id) => ({ id })),
     allStructureSets: [],
+    registrations: [],
   } as unknown as LoadResult;
 }
 
@@ -28,17 +30,24 @@ const INCOMING = result('incoming');
 interface RecordingCatalog extends CatalogOps {
   adds: number;
   structureSetAdds: number;
+  /** The registration objects it was given to keep, batch after batch. */
+  registrationAdds: LoadResult['registrations'][];
 }
-function recordingCatalog(): RecordingCatalog {
+function recordingCatalog(held: LoadResult['registrations'] = []): RecordingCatalog {
   return {
     adds: 0,
     structureSetAdds: 0,
+    registrationAdds: [],
     add() {
       this.adds += 1;
     },
     addStructureSets() {
       this.structureSetAdds += 1;
     },
+    addRegistrations(objects) {
+      this.registrationAdds.push(objects);
+    },
+    registrations: () => held,
   };
 }
 
@@ -64,6 +73,13 @@ describe('cantFuseMessage', () => {
     expect(cantFuseMessage('overlay')).toContain('fuse');
     expect(cantFuseMessage('compare')).toContain('compare');
     expect(cantFuseMessage('overlay')).toContain('frame of reference');
+    expect(cantFuseMessage('overlay')).toContain('registration');
+    expect(cantFuseMessage('overlay', 'several-registrations')).toMatch(
+      /^Can’t fuse: more than one registration/,
+    );
+    expect(cantFuseMessage('compare', 'compare-through-registration')).toMatch(
+      /^Can’t compare through a registration yet/,
+    );
   });
 });
 
@@ -190,6 +206,78 @@ describe('planFileLoad — held modifier', () => {
     expect(outcome).toEqual({ kind: 'overlay', result: INCOMING, compare: true });
   });
 
+  describe('with registrations (#76)', () => {
+    const inBatch = registrationObject('in-batch', 'f2', 'f1');
+    const openedBefore = registrationObject('opened-before', 'f3', 'f1');
+    const batch = { ...INCOMING, registrations: [inBatch] } as LoadResult;
+    /** A merged result whose added layer a registration placed. */
+    const placed = { ...batch, layers: [{ id: 'base' }, { id: 'over', placement: {} }] };
+
+    it('gives the merge the registrations of the batch and those opened before, and keeps the batch’s', () => {
+      const catalog = recordingCatalog([openedBefore]);
+      let given: unknown;
+      const outcome = planFileLoad(
+        fileDeps({
+          intent: 'overlay',
+          previous: result('base'),
+          result: batch,
+          merge: (_c, i, registrations) => {
+            given = registrations;
+            return merged(i, true);
+          },
+          catalog,
+        }),
+      );
+      expect(outcome).toEqual({ kind: 'overlay', result: batch, compare: false });
+      expect(given).toEqual([inBatch, openedBefore]);
+      expect(catalog.registrationAdds).toEqual([[inBatch]]);
+    });
+
+    it('keeps the registrations of a plain import', () => {
+      const catalog = recordingCatalog();
+      planFileLoad(fileDeps({ result: batch, catalog }));
+      expect(catalog.registrationAdds).toEqual([[inBatch]]);
+    });
+
+    it('keeps nothing of a batch it refused', () => {
+      const catalog = recordingCatalog();
+      const outcome = planFileLoad(
+        fileDeps({
+          intent: 'overlay',
+          previous: result('base'),
+          result: batch,
+          merge: (_c, i) => ({ result: i, added: false, why: 'several-registrations' }),
+          catalog,
+        }),
+      );
+      expect(outcome).toEqual({
+        kind: 'reject',
+        message: cantFuseMessage('overlay', 'several-registrations'),
+      });
+      expect(catalog.registrationAdds).toEqual([]);
+      expect(catalog.adds).toBe(0);
+    });
+
+    it('fuses (⌥) a series a registration placed, and refuses to compare (⇧) it', () => {
+      const deps = {
+        previous: result('base'),
+        result: batch,
+        merge: () => merged(placed as unknown as LoadResult, true),
+      };
+      expect(planFileLoad(fileDeps({ ...deps, intent: 'overlay' }))).toEqual({
+        kind: 'overlay',
+        result: placed,
+        compare: false,
+      });
+      const catalog = recordingCatalog();
+      expect(planFileLoad(fileDeps({ ...deps, intent: 'compare', catalog }))).toEqual({
+        kind: 'reject',
+        message: cantFuseMessage('compare', 'compare-through-registration'),
+      });
+      expect(catalog.adds).toBe(0);
+    });
+  });
+
   it('rejects (never prompts, never catalogs) when the series cannot fuse', () => {
     const catalog = recordingCatalog();
     const outcome = planFileLoad(
@@ -222,7 +310,7 @@ function seriesDeps(overrides: Partial<SeriesLoadDeps>): SeriesLoadDeps {
     previous: null,
     seriesUid: 'incoming',
     intent: 'primary',
-    fetchSeries: () => Promise.resolve({ series: FETCHED, structureSets: [] }),
+    fetchSeries: () => Promise.resolve({ series: FETCHED, structureSets: [], registrations: [] }),
     loadSeries: () => INCOMING,
     merge: (_c, incoming) => ({ result: incoming, added: false }),
     ...overrides,
@@ -283,7 +371,7 @@ describe('planSeriesLoad', () => {
         seriesUid: '1.2.3',
         fetchSeries: (uid) => {
           asked.push(uid);
-          return Promise.resolve({ series: FETCHED, structureSets: [] });
+          return Promise.resolve({ series: FETCHED, structureSets: [], registrations: [] });
         },
         loadSeries: (series) => {
           built = series;
@@ -304,7 +392,8 @@ describe('planSeriesLoad', () => {
     await planSeriesLoad(
       seriesDeps({
         previous: null,
-        fetchSeries: () => Promise.resolve({ series: FETCHED, structureSets: retained }),
+        fetchSeries: () =>
+          Promise.resolve({ series: FETCHED, structureSets: retained, registrations: [] }),
         loadSeries: (_s, known) => {
           knownSeen = known;
           return INCOMING;
@@ -312,6 +401,42 @@ describe('planSeriesLoad', () => {
       }),
     );
     expect(knownSeen).toBe(retained);
+  });
+
+  it('builds and merges with the registrations the source gave (#76)', async () => {
+    const registrations = [registrationObject('reg', 'f2', 'f1')];
+    const seen: unknown[] = [];
+    await planSeriesLoad(
+      seriesDeps({
+        previous: result('base'),
+        intent: 'overlay',
+        fetchSeries: () => Promise.resolve({ series: FETCHED, structureSets: [], registrations }),
+        loadSeries: (_s, _known, given) => {
+          seen.push(given);
+          return INCOMING;
+        },
+        merge: (_c, i, given) => {
+          seen.push(given);
+          return merged(i, true);
+        },
+      }),
+    );
+    expect(seen).toEqual([registrations, registrations]);
+  });
+
+  it('refuses to compare (⇧) a panel series that a registration placed', async () => {
+    const placed = { ...INCOMING, layers: [{ id: 'base' }, { id: 'over', placement: {} }] };
+    const outcome = await planSeriesLoad(
+      seriesDeps({
+        previous: result('base'),
+        intent: 'compare',
+        merge: () => merged(placed as unknown as LoadResult, true),
+      }),
+    );
+    expect(outcome).toEqual({
+      kind: 'reject',
+      message: cantFuseMessage('compare', 'compare-through-registration'),
+    });
   });
 
   it('fuses a same-frame series as an overlay under ⌥', async () => {
