@@ -199,3 +199,22 @@ describe('LayersController and an overlay placed by a registration (#76)', () =>
     expect(controller.groupLayer(1)).toBe(base());
   });
 });
+
+describe('LayersController pane tags (#230)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('gives each column its own slice and count, linked or not', () => {
+    const { controller } = setup('CT');
+    // Linked: the second column is at the plane the first is at.
+    expect(controller.paneSliceLabel(0, 0)).toBe('1 / 4');
+    expect(controller.paneSliceLabel(1, 0)).toBe('1 / 4');
+
+    // Unlinked, the second column goes to its third slice by itself.
+    controller.toggleCompareLinked();
+    controller.updateGroupNav(1, { sliceIndices: [2, 0, 0] });
+    expect(controller.paneSliceLabel(1, 0)).toBe('3 / 4');
+    expect(controller.paneSliceLabel(0, 0)).toBe('1 / 4');
+    // The other orientations of that column stay where they were.
+    expect(controller.paneSliceLabel(1, 1)).toBe('1 / 4');
+  });
+});

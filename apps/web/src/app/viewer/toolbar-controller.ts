@@ -249,10 +249,16 @@ export class ToolbarController {
     }
   }
 
-  paneSliceLabel(orientation: Orientation): string {
+  /**
+   * A pane's slice position for its tag ("7 / 12"), of the column the pane is
+   * in (#230). Only while the renderer holds a volume: after the graphics
+   * device is lost the data is still in memory, but nothing is drawn, and the
+   * tag must not say that a slice is.
+   */
+  paneSliceLabel(group: number, orientation: Orientation): string {
     const renderer = this.deps!.renderer();
-    const count = renderer ? renderer.sliceCount(orientation) : 0;
-    return count > 0 ? `${this.deps!.sliceIndices()[orientation] + 1} / ${count}` : '–';
+    if (!renderer || renderer.sliceCount(orientation) <= 0) return '–';
+    return this.layersCtl.paneSliceLabel(group, orientation);
   }
 
   /** Step the viewport to the next layout (3-pane → 4-pane → 3D-only → …). */

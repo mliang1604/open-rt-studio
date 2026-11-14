@@ -287,8 +287,8 @@ test('Compare shows the registered image in the base’s planes: both columns ar
   await expect(linkToggle).toHaveAttribute('data-linked', 'false');
   await hoverVoxel(page, mrColumn, 12, 16);
   await page.mouse.wheel(0, 100);
-  // The pane's tag names the first column's slice, so the column's own is
-  // read from the probe: the MR's slice, and the registration's one more.
+  // The column's own slice, from the probe: the MR's slice, and the
+  // registration's one more.
   await hoverVoxel(page, mrColumn, 12, 17);
   const own = /^Axial · voxel \((\d+), (\d+), (\d+)\) .* · value (-?\d+) · CT (-?\d+) HU$/;
   await expect.poll(async () => Number(own.exec(await probe.innerText())?.[3]) + sz).not.toBe(z);
@@ -301,6 +301,9 @@ test('Compare shows the registered image in the base’s planes: both columns ar
   expect([i, j]).toEqual([12 - sx, 17 - sy]);
   expect(mr).toBe(registeredMrValueAtCtVoxel(12, 17, scrolled));
   expect(ct).toBe(syntheticCtValue(12, scrolled, PAIR.size));
+  // Each column's tag names its own slice (#230).
+  expect(await sliceOf(mrColumn)).toBe(scrolled);
+  expect(await sliceOf(ctColumn)).toBe(z);
   // The first column stayed where it was.
   await hoverVoxel(page, ctColumn, 12, 17);
   await expect(probe).toHaveText(new RegExp(`^Axial · voxel \\(12, 17, ${z}\\) `));
