@@ -633,6 +633,21 @@ export class ServerSource implements DataSource {
   }
 
   /**
+   * What else may keep a server from being reached, that the address itself
+   * shows. A browser gives no reason for a request that failed, so the
+   * reasons are told, each where it can apply.
+   */
+  private unreachableBecause(): string {
+    const secure = new URL(this.address).protocol === 'https:';
+    if (secure) return ' Or this browser does not trust its certificate.';
+    // A page served over HTTPS may call plain HTTP only on this machine.
+    const here = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(this.address).hostname);
+    return globalThis.location?.protocol === 'https:' && !here
+      ? ' Or it is an http address, which a page served over https may not call: give its https address.'
+      : '';
+  }
+
+  /**
    * Ask the API: GET, unless `init` says otherwise. Rejects with a
    * {@link ServerError} unless the answer is a success.
    */
@@ -652,7 +667,7 @@ export class ServerSource implements DataSource {
       if (isAbortError(error)) throw error;
       // A browser gives no reason; these are the two there are.
       throw new ServerError(
-        `The server at ${this.host} could not be reached. It may not be running, or it may not allow this page (its allowedOrigins setting).`,
+        `The server at ${this.host} could not be reached. It may not be running, or it may not allow this page (its allowedOrigins setting).${this.unreachableBecause()}`,
         null,
         true,
       );

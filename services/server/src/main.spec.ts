@@ -4,7 +4,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,7 @@ import { syntheticCtSeries } from '@open-rt-studio/testdata';
 
 import { openSqliteAuditStore } from './audit/audit-store.js';
 import { createAuditLog } from './audit/audit.js';
+import { testCertificate } from './tls-testing.js';
 import { SERVER_VERSION } from './version.js';
 
 // The server as a process, built: `npm test` builds it first (pretest).
@@ -305,6 +307,54 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
       await rm(directory, { recursive: true, force: true, maxRetries: 5 });
     }
   }, 20_000);
+
+  it('speaks HTTPS when it is given a certificate and its key', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'open-rt-studio-tls-'));
+    try {
+      const made = testCertificate();
+      await writeFile(join(directory, 'cert.pem'), made.cert);
+      await writeFile(join(directory, 'key.pem'), made.key);
+      const server = run({
+        ...OPEN,
+        OPEN_RT_STUDIO_TLS_CERT: join(directory, 'cert.pem'),
+        OPEN_RT_STUDIO_TLS_KEY: join(directory, 'key.pem'),
+      });
+      const port = await listeningPort(server);
+      expect(server.log()).toContainEqual(
+        expect.objectContaining({ event: 'listening', tls: true }),
+      );
+      const status = await new Promise<number>((resolve, reject) => {
+        httpsRequest({ host: '127.0.0.1', port, path: '/health', ca: made.cert }, (response) => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        })
+          .on('error', reject)
+          .end();
+      });
+      expect(status).toBe(200);
+      server.child.kill('SIGTERM');
+      expect(await server.exited).toBe(0);
+
+      // A key that is not the certificate's: said at once, and nothing is started.
+      await writeFile(join(directory, 'key.pem'), testCertificate().key);
+      const wrong = run({
+        ...OPEN,
+        OPEN_RT_STUDIO_TLS_CERT: join(directory, 'cert.pem'),
+        OPEN_RT_STUDIO_TLS_KEY: join(directory, 'key.pem'),
+      });
+      expect(await wrong.exited).toBe(2);
+      expect(wrong.stderr()).toBe('The certificate and the key do not belong together.\n');
+      expect(wrong.log()).toEqual([]);
+
+      const half = run({ ...OPEN, OPEN_RT_STUDIO_TLS_CERT: join(directory, 'cert.pem') });
+      expect(await half.exited).toBe(2);
+      expect(half.stderr()).toContain(
+        'set both OPEN_RT_STUDIO_TLS_CERT and OPEN_RT_STUDIO_TLS_KEY',
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+    }
+  }, 30_000);
 
   it('does not start on a wrong setting: it says which, and exits with 2', async () => {
     const server = run({ OPEN_RT_STUDIO_PORT: 'eighty' });

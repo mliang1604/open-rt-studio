@@ -64,6 +64,8 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_MAX_UPLOAD_BYTES: '1048576',
       OPEN_RT_STUDIO_JOB_CONCURRENCY: '4',
       OPEN_RT_STUDIO_ALLOWED_ORIGINS: 'http://localhost:4200, https://Example.org',
+      OPEN_RT_STUDIO_TLS_CERT: ' /etc/open-rt-studio/cert.pem ',
+      OPEN_RT_STUDIO_TLS_KEY: '/etc/open-rt-studio/key.pem',
     });
     // Port 0 asks the operating system for a free port; it is a valid setting.
     expect(config).toEqual({
@@ -76,7 +78,29 @@ describe('resolveConfig', () => {
       maxUploadBytes: 1_048_576,
       jobConcurrency: 4,
       allowedOrigins: ['http://localhost:4200', 'https://example.org'],
+      tlsCert: '/etc/open-rt-studio/cert.pem',
+      tlsKey: '/etc/open-rt-studio/key.pem',
     });
+  });
+
+  it('speaks HTTP unless it is given a certificate and its key, and takes both or neither', () => {
+    expect(DEFAULT_CONFIG).toMatchObject({ tlsCert: null, tlsKey: null });
+    expect(resolveConfig({ tlsCert: 'cert.pem', tlsKey: 'key.pem' })).toMatchObject({
+      tlsCert: 'cert.pem',
+      tlsKey: 'key.pem',
+    });
+    const both = new ConfigError(
+      'HTTPS takes a certificate and its key: set both OPEN_RT_STUDIO_TLS_CERT and OPEN_RT_STUDIO_TLS_KEY, or neither.',
+    );
+    expect(() => resolveConfig({ tlsCert: 'cert.pem' })).toThrow(both);
+    expect(() => resolveConfig(undefined, { OPEN_RT_STUDIO_TLS_KEY: 'key.pem' })).toThrow(both);
+    // One from the file and one from the environment are both.
+    expect(
+      resolveConfig({ tlsCert: 'cert.pem' }, { OPEN_RT_STUDIO_TLS_KEY: 'key.pem' }).tlsKey,
+    ).toBe('key.pem');
+    expect(() => resolveConfig({ tlsCert: 5, tlsKey: 'key.pem' })).toThrow(
+      new ConfigError('The config file\'s "tlsCert" must be the path of a file, or null.'),
+    );
   });
 
   it('keeps the PACS in memory unless it is given a directory', () => {
@@ -172,7 +196,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins.',
+        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey.',
       ),
     );
   });

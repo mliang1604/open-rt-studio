@@ -280,12 +280,26 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
     held only while the form is filled in. A login that ends while the
     viewer is in use (401) is noticed at the next request: what is on screen
     stays, and the server card asks for the login again.
-  - Not there: HTTPS (#57), identity providers. The
+  - Not there: identity providers. The
     account store is behind an interface (`AccountStore`) and logins behind
     another (`Accounts`), which is where a provider would go.
 
   Status: **decided, and Michael's to overturn**, the default of `auth` most
   of all: `npm start` with no settings no longer starts a server.
+
+- **HTTPS** (#57, the API's half). The server takes a certificate and its
+  key (`tlsCert`, `tlsKey`) and then speaks HTTPS only, TLS 1.2 or later, on
+  Node's `node:https`. The certificate is checked at start (readable, a
+  certificate, its key, in its time) and a wrong one stops the server with a
+  message, because a client is told nothing useful by a failed handshake. A
+  reverse proxy in front is the other way and is documented beside it; the
+  server cannot tell that one is there, so it warns (`no-tls`) whenever it
+  listens beyond this machine without a certificate, and does not refuse.
+  No `Strict-Transport-Security`: it binds the host name, not the port.
+  TLS for DIMSE waits for DIMSE.
+
+  Status: **decided, and Michael's to overturn**: warning and not refusing
+  when a reachable server has no certificate.
 
 - **Who did what** (#56). An audit log in a SQLite file of its own
   (`audit.sqlite`), apart from the application log: the one holds
