@@ -26,7 +26,12 @@ application. Never commit patient data or real DICOM files
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
   `metadata-panel/`, `dvr-panel/`, `shortcut-help/`). The viewer route is
   loaded on demand, so it is not in the initial bundle.
-- `apps/desktop`, `services/server`, `native/`: placeholders until M2 and M3.
+- `services/server`: the Node server. `src/core` is the server without the
+  network (no port, no environment), which the desktop application will
+  embed; `src/host` is HTTP on `node:http` in front of it. Logs carry no
+  patient identifiers: log a route, a count or a duration, never a name, an
+  ID or the address that was asked for.
+- `apps/desktop`, `native/`: placeholders until M2 and M3.
 - `docs/`: architecture, license headers, test data policy, and the parity
   audit against dicom-workspace.
 - `scripts/`: repository checks run by CI.
@@ -41,6 +46,8 @@ All commands run from the repository root. Node 24.15 or newer is required
 
 - Install: `npm ci` (not `npm install`, which rewrites the lockfile).
 - Run the app: `npm start` (dev server on http://localhost:4200)
+- Run the server: `npm run build -w @open-rt-studio/server`, then
+  `npm start -w @open-rt-studio/server` (http://127.0.0.1:4300/health)
 - Lint: `npm run lint` (ESLint, the license-header check and the guard
   against committed DICOM files)
 - Format check: `npm run format:check` (fix with `npm run format`)

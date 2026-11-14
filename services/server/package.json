@@ -2,6 +2,26 @@
   "name": "@open-rt-studio/server",
   "version": "0.0.0",
   "private": true,
-  "description": "Node server and PACS. Starts in milestone M2 (issue #41).",
-  "license": "MPL-2.0"
+  "description": "Node server and PACS for Open RT Studio. Not for clinical use.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/main.js",
+    "pretest": "tsc -b && tsc -p tsconfig.spec.json",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2"
+  }
 }

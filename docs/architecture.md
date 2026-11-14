@@ -36,23 +36,23 @@ to acknowledge it before the viewer opens.
 
 Status is **decided** unless a row says otherwise.
 
-| Area             | Decision                                                                                                                                                                                                       |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Web client       | Angular 22: standalone components, zoneless change detection, signals with `ChangeDetectionStrategy.OnPush`.                                                                                                   |
-| Rendering        | WebGPU with WGSL shaders. There is no WebGL or canvas-2D fallback for image rendering; when WebGPU is missing the app explains why and what to do.                                                             |
-| Desktop          | Electron for macOS, Windows and Linux. It hosts the same web client. A **standalone mode** runs without any server by embedding the server core in the main process.                                           |
-| Server           | TypeScript on Node. The core (store, index, ingest, jobs) is a library that runs both as the network service and inside Electron.                                                                              |
-| PACS             | Our own, not Orthanc: a filesystem DICOM store with an index in SQLite (standalone and small installs) or PostgreSQL (server installs).                                                                        |
-| DICOM networking | DIMSE (C-ECHO, C-STORE, C-FIND, C-MOVE, C-GET) through a permissively licensed library, chosen by the spike in #40.                                                                                            |
-| Heavy compute    | C++ command-line tools built on ITK and elastix (registration, resampling), started by the server as jobs. **No Python at runtime.**                                                                           |
-| AI models        | ONNX Runtime, later (contouring spikes #121 and #122).                                                                                                                                                         |
-| Hosting          | GitHub only: Actions for CI, Pages for the web client, Releases for desktop installers, GHCR for the server image.                                                                                             |
-| License          | MPL 2.0. No GPL or AGPL dependencies. See [license-headers.md](license-headers.md).                                                                                                                            |
-| Data             | Synthetic or clearly shareable public data only; never patient data. See [test-data.md](test-data.md).                                                                                                         |
-| Captures         | PNG and video captures are left clean: no not-for-clinical-use mark is drawn into them, and their file names and contents carry no patient name or ID (#148).                                                  |
-| Languages        | TypeScript (strict) everywhere outside `native/`; C++ in `native/`.                                                                                                                                            |
-| Package manager  | npm workspaces. `npm ci` in CI; the lockfile is committed and CI fails if it drifts.                                                                                                                           |
-| Tests            | Vitest for unit tests (specs sit next to the code as `*.spec.ts`), Playwright for end-to-end tests. CI runners have no GPU, so tests must pass without WebGPU and anything that needs it must skip explicitly. |
+| Area             | Decision                                                                                                                                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web client       | Angular 22: standalone components, zoneless change detection, signals with `ChangeDetectionStrategy.OnPush`.                                                                                                                 |
+| Rendering        | WebGPU with WGSL shaders. There is no WebGL or canvas-2D fallback for image rendering; when WebGPU is missing the app explains why and what to do.                                                                           |
+| Desktop          | Electron for macOS, Windows and Linux. It hosts the same web client. A **standalone mode** runs without any server by embedding the server core in the main process.                                                         |
+| Server           | TypeScript on Node. The core (store, index, ingest, jobs) is a library that runs both as the network service and inside Electron. HTTP is served with Node's own `node:http`, with no framework ([below](#server-and-pacs)). |
+| PACS             | Our own, not Orthanc: a filesystem DICOM store with an index in SQLite (standalone and small installs) or PostgreSQL (server installs).                                                                                      |
+| DICOM networking | DIMSE (C-ECHO, C-STORE, C-FIND, C-MOVE, C-GET) through a permissively licensed library, chosen by the spike in #40.                                                                                                          |
+| Heavy compute    | C++ command-line tools built on ITK and elastix (registration, resampling), started by the server as jobs. **No Python at runtime.**                                                                                         |
+| AI models        | ONNX Runtime, later (contouring spikes #121 and #122).                                                                                                                                                                       |
+| Hosting          | GitHub only: Actions for CI, Pages for the web client, Releases for desktop installers, GHCR for the server image.                                                                                                           |
+| License          | MPL 2.0. No GPL or AGPL dependencies. See [license-headers.md](license-headers.md).                                                                                                                                          |
+| Data             | Synthetic or clearly shareable public data only; never patient data. See [test-data.md](test-data.md).                                                                                                                       |
+| Captures         | PNG and video captures are left clean: no not-for-clinical-use mark is drawn into them, and their file names and contents carry no patient name or ID (#148).                                                                |
+| Languages        | TypeScript (strict) everywhere outside `native/`; C++ in `native/`.                                                                                                                                                          |
+| Package manager  | npm workspaces. `npm ci` in CI; the lockfile is committed and CI fails if it drifts.                                                                                                                                         |
+| Tests            | Vitest for unit tests (specs sit next to the code as `*.spec.ts`), Playwright for end-to-end tests. CI runners have no GPU, so tests must pass without WebGPU and anything that needs it must skip explicitly.               |
 
 ## Repository layout
 
@@ -92,6 +92,8 @@ These are enforced by lint where possible.
 - `packages/testdata` depends only on `packages/dicom`.
 - `apps/*` and `services/*` may depend on packages. Packages never import from
   `apps/` or `services/`.
+- `services/server` has no Angular and does not import `packages/render` or
+  anything from `apps/`.
 - `apps/web` talks to `services/server` over HTTP only; it does not import
   server code.
 
@@ -135,6 +137,24 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   backends behind another, with an index schema that knows RT relationships
   (plan, dose, structure set, registration, image).
 - HTTP API for the client; DIMSE for other systems.
+- The server is split in two (#41). The **core** (`services/server/src/core`)
+  opens no port and reads no environment; it is what the desktop application
+  embeds. The **host** (`services/server/src/host`) puts HTTP in front of a
+  core and is the only code that knows about HTTP.
+- **HTTP framework: none, for now.** The host uses Node's `node:http` with a
+  small table of routes. The reasons: the skeleton answers one endpoint; the
+  core must run inside Electron without a network stack; and every dependency
+  the server takes is one more to license-check and keep current. This is
+  the cheap choice to undo, because the host is one folder. It is to be looked
+  at again when the HTTP API is designed (#46): uploads, request validation
+  and login (#55) are where a framework such as Fastify (MIT) would start to
+  pay for itself. Status: **decided for the skeleton, open for #46.**
+- The server listens on `127.0.0.1` unless it is told otherwise, and warns
+  when it is told otherwise, until there are accounts (#55).
+- Logs are JSON lines and carry no patient identifiers: an event is a fixed
+  word, a request is logged by its route and not by the address asked for,
+  and a field whose name says it identifies a person is written as
+  `[redacted]`.
 - Job framework: submit, status, progress, cancel. Jobs run the native
   command-line tools as child processes.
 
