@@ -9,10 +9,11 @@ import {
   syntheticCtValue,
   syntheticRegisteredPair,
 } from '@open-rt-studio/testdata';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
 import { fuseChipByDrag } from './fixtures/load';
+import { chipOf } from './fixtures/registered-pair';
 import { startTestServer, type TestServer } from './fixtures/server';
 import { openServerCard, studyRows } from './fixtures/server-card';
 
@@ -35,23 +36,6 @@ test.afterAll(async () => {
 });
 
 const card = (page: Page) => page.locator('app-server-panel');
-
-/** The chip of the series of a modality, in whichever study has it; the study is opened. */
-async function chipOf(page: Page, modality: string): Promise<Locator> {
-  const tile = page
-    .locator('.study-tile')
-    .filter({ has: page.locator('.modality-badge', { hasText: new RegExp(`^${modality}$`) }) })
-    .first();
-  await expect(tile).toBeVisible({ timeout: 30_000 });
-  if ((await tile.getAttribute('aria-expanded')) !== 'true') await tile.click();
-  await expect(tile).toHaveAttribute('aria-expanded', 'true');
-  const chip = page
-    .locator('app-series-chip')
-    .filter({ has: page.locator('.chip-modality', { hasText: new RegExp(`^${modality}$`) }) })
-    .first();
-  await expect(chip).toBeVisible();
-  return chip;
-}
 
 test('a registration on the server places a series of another frame, and its fetch is in the audit log', async ({
   page,

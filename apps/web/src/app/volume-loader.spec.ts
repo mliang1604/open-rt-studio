@@ -167,14 +167,25 @@ describe('mergeLoad', () => {
     expect(result.series).toBe(current.series);
   });
 
-  it('replaces when the frames of reference differ (a new study)', () => {
+  it('adds a series of another frame with no registration as a layer that is not drawn (#78)', () => {
     const current = fakeLoad('ct', 'frame-1');
     const incoming = fakeLoad('ct2', 'frame-2');
 
-    const { result, added } = mergeLoad(current, incoming);
+    const merged = mergeLoad(current, incoming);
 
-    expect(added).toBe(false);
-    expect(result).toBe(incoming);
+    expect(merged.added).toBe(true);
+    expect(merged.unplaced).toBe(true);
+    expect(merged.choices).toBeUndefined();
+    const layer = merged.result.layers[1];
+    // Nothing says where the one frame is in the other, and none is guessed.
+    expect(layer).toMatchObject({
+      id: 'ct2',
+      role: 'overlay',
+      visible: false,
+      frames: { baseFrame: 'frame-1', layerFrame: 'frame-2' },
+    });
+    expect(layer.placement).toBeUndefined();
+    expect(layer.placementChoices).toBeUndefined();
   });
 
   it('adds a series of another frame that one registration connects, placed by it (#76)', () => {
@@ -204,13 +215,34 @@ describe('mergeLoad', () => {
     ).not.toHaveProperty('placement');
   });
 
-  it('replaces a series of another frame that no registration connects', () => {
+  it('does not place a series by a registration of other frames', () => {
     const registration = registrationObject('reg', 'frame-2', 'frame-1');
-    const incoming = fakeLoad('other', 'frame-3');
-    expect(mergeLoad(fakeLoad('planning', 'frame-1'), incoming, [registration])).toEqual({
-      result: incoming,
-      added: false,
-    });
+    const merged = mergeLoad(fakeLoad('planning', 'frame-1'), fakeLoad('other', 'frame-3'), [
+      registration,
+    ]);
+    expect(merged.unplaced).toBe(true);
+    expect(merged.result.layers[1].placement).toBeUndefined();
+  });
+
+  it('places a series that was waiting, when it is dropped again with its registration', () => {
+    const current = fakeLoad('planning', 'frame-1');
+    const waiting = mergeLoad(current, fakeLoad('follow-up', 'frame-2'));
+    expect(waiting.unplaced).toBe(true);
+
+    const registration = registrationObject('reg', 'frame-2', 'frame-1', shiftMatrix(5, -3, 2));
+    const again = mergeLoad(waiting.result, fakeLoad('follow-up', 'frame-2'), [registration]);
+
+    // One layer of the series, not two, and placed.
+    expect(again.unplaced).toBeUndefined();
+    expect(again.result.layers.map((l) => l.id)).toEqual(['planning', 'follow-up']);
+    expect(again.result.layers[1]).toMatchObject({ visible: true });
+    expect(again.result.layers[1].placement!.steps[0].sopInstanceUid).toBe('reg');
+    expect(again.result.layers[1].frames).toBeUndefined();
+
+    // Dropped again with still no registration, it still waits, once.
+    const still = mergeLoad(waiting.result, fakeLoad('follow-up', 'frame-2'));
+    expect(still.result.layers.map((l) => l.id)).toEqual(['planning', 'follow-up']);
+    expect(still.unplaced).toBe(true);
   });
 
   it('does not choose between two registrations: the layer waits for the user to', () => {

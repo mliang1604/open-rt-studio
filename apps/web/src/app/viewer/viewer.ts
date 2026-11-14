@@ -22,7 +22,7 @@ import {
   NO_OBLIQUE,
   focusPatientPoint,
 } from '@open-rt-studio/render';
-import { Orientation, clamp } from '@open-rt-studio/dicom';
+import { Orientation, clamp, type Series } from '@open-rt-studio/dicom';
 import { RecentStore } from '../recent-store';
 import { PreferencesStore } from '../preferences-store';
 import { hostBrowser, hostOs, modifierLabel } from '../platform';
@@ -60,6 +60,8 @@ import {
 } from './editable-structures-store';
 import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
+import { ManualRegistration } from './manual-registration/manual-registration';
+import { ManualRegistrationController } from './manual-registration/manual-registration-controller';
 import { LayersController } from './layers-controller';
 import { ToolbarController, LAYOUT_MODES } from './toolbar-controller';
 import { StatusController } from './status-controller';
@@ -122,6 +124,7 @@ const MAX_ZOOM = 20;
     ImportReportCard,
     PaintedStructures,
     ServerPanel,
+    ManualRegistration,
   ],
   providers: [
     MeasurementStore,
@@ -141,6 +144,7 @@ const MAX_ZOOM = 20;
     BrushController,
     ToolSwitch,
     LayersController,
+    ManualRegistrationController,
     ToolbarController,
     StatusController,
     CprStore,
@@ -180,6 +184,7 @@ export class Viewer {
   protected readonly roiCtl = inject(RoiController);
   /** Owns the brush/eraser structures-editing gesture and its settings; wired in the constructor. */
   protected readonly brushCtl = inject(BrushController);
+  protected readonly manualRegistration = inject(ManualRegistrationController);
   /** The painted structures, for the list of them under Structures. */
   protected readonly structures = inject(EditableStructuresStore);
   protected readonly cpr = inject(CprStore);
@@ -399,6 +404,13 @@ export class Viewer {
   /** Whether the current layout includes any MPR pane (drives swap/flip enablement). */
   protected readonly hasMprPane = computed(() => this.panes().some((pane) => pane.kind === 'mpr'));
 
+  /** The series of the base image on screen, or null when there is none. */
+  private baseSeries(): Series | null {
+    const state = this.load();
+    if (state.status !== 'ready') return null;
+    return state.result.series.find((s) => s.uid === state.result.selectedUid) ?? null;
+  }
+
   constructor() {
     // Seed the 3D pane's projection mode from the persisted preference before any
     // effect or the template reads it (the store defaults to MIP otherwise).
@@ -599,11 +611,11 @@ export class Viewer {
       obliques: this.obliques,
       sliceIndices: this.sliceIndices,
       sagittalFlipped: () => this.sagittalFlipped(),
-      baseSeries: () => {
-        const state = this.load();
-        if (state.status !== 'ready') return null;
-        return state.result.series.find((s) => s.uid === state.result.selectedUid) ?? null;
-      },
+      baseSeries: () => this.baseSeries(),
+      notify: (message, problem) => this.loadCtl.showNotice(message, problem),
+    });
+    this.manualRegistration.init({
+      baseSeries: () => this.baseSeries(),
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
     });
 

@@ -513,6 +513,24 @@ of reference over a series of another, as a fusion overlay.
   and another may be chosen after. The choice is a per-layer override in
   the layers store, like visibility and opacity, and a new load starts
   without one.
+- **A registration can be made by hand (#78).** A series of the same patient
+  in another frame of reference that no registration places is taken as a
+  layer all the same, and not drawn: nothing says where one frame is in the
+  other, and no place is guessed. The layers panel offers to register it by
+  hand, and to adjust by hand a layer that a registration places. The
+  registration is six numbers (`RigidParams` in `packages/dicom`): a shift
+  along the patient's left, back and head, and turns about those axes
+  through the moving image's middle, about x first, then y, then z. It
+  begins at the registration that places the layer when that one only moves
+  and turns, and otherwise with the image's middle on the base's, which is a
+  place to start from and no more. While it is there it goes before any
+  registration from a file (`applyLayerOverrides`), and the picture, the
+  Compare column and the probe follow each number. It is in the viewer only
+  until it is saved: as a DICOM Spatial Registration object from the layer's
+  frame to the base's, filed in the base image's study, through the data
+  source (a download for opened files, an upload for a server, where it
+  comes back with either series). A new load of the base lets go of what
+  was not saved, without asking.
 
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), and how a Deformable
