@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
+  findPlacement,
   groupSeries,
   parseStructureSet,
   readInstanceHeader,
@@ -318,19 +319,38 @@ describe('ServerSource', () => {
     expect(fetched.structureSets[0].referencedSeriesUids).toContain(COURSE.ct);
   });
 
+  it('fetches with a series the registrations that connect its frame with another (#228)', async () => {
+    const { source } = await withPatient();
+    // The course's registration is filed in the follow-up study and maps the
+    // follow-up frame into the planning frame: it names both.
+    for (const uid of [COURSE.ct, COURSE.followUpCt]) {
+      const { registrations } = await source.fetchSeries(uid);
+      expect(registrations.map((one) => one.sopInstanceUid)).toEqual([COURSE.registration]);
+      expect(registrations[0].registeredFrame).toBe(COURSE.planningFrame);
+      expect(
+        registrations[0].registrations.map(({ transform }) => [transform.from, transform.to]),
+      ).toEqual([[COURSE.followUpFrame, COURSE.planningFrame]]);
+    }
+    // With them the follow-up CT has a place over the planning CT.
+    const { registrations } = await source.fetchSeries(COURSE.followUpCt);
+    const found = findPlacement(COURSE.planningFrame, COURSE.followUpFrame, registrations);
+    expect(found.kind).toBe('placed');
+  });
+
   it('reports each file as it arrives, and downloads a few at a time', async () => {
     const { source, server } = await withPatient({ parallel: 2 });
     const progress: [number, number][] = [];
     await source.fetchSeries(COURSE.ct, {
       onProgress: (loaded, total) => progress.push([loaded, total]),
     });
-    // Three slices and the structure set.
+    // Three slices, the structure set, and the registration that names the CT's frame.
     expect(progress).toEqual([
-      [0, 4],
-      [1, 4],
-      [2, 4],
-      [3, 4],
-      [4, 4],
+      [0, 5],
+      [1, 5],
+      [2, 5],
+      [3, 5],
+      [4, 5],
+      [5, 5],
     ]);
     expect(server.mostAtOnce()).toBe(2);
   });
@@ -347,7 +367,7 @@ describe('ServerSource', () => {
     await expect(fetching).rejects.toMatchObject({ name: 'AbortError' });
     server.hold(false);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    // The one that was under way; the other three were never asked for.
+    // The one that was under way; the other four were never asked for.
     expect(server.asked.filter((path) => path.endsWith('/file'))).toHaveLength(1);
 
     const already = new AbortController();
@@ -363,7 +383,7 @@ describe('ServerSource', () => {
     const error = await source.fetchSeries(COURSE.ct).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ServerError);
     expect((error as ServerError).message).toBe(
-      'The connection to the server was lost: 2 of 4 files had arrived. Nothing was loaded.',
+      'The connection to the server was lost: 2 of 5 files had arrived. Nothing was loaded.',
     );
     // It did not go on asking for the rest.
     expect(server.asked.filter((path) => path.endsWith('/file'))).toHaveLength(3);

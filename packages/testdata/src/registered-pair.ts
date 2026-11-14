@@ -20,7 +20,7 @@ import {
   type SyntheticFile,
 } from './identity.js';
 import { syntheticCtSeries, syntheticMrSeries, syntheticMrValue } from './image-series.js';
-import { syntheticRegistration } from './rt-course.js';
+import { REGISTRATION_SERIES_INDEX, syntheticRegistration } from './rt-course.js';
 
 const SIZE = 32;
 const COUNT = 12;
@@ -43,6 +43,8 @@ export const SYNTHETIC_REGISTERED_PAIR = {
   followUpFrame: frameOfReferenceUid(SYNTHETIC_FOLLOW_UP_STUDY),
   ct: seriesUid(SYNTHETIC_STUDY, CT_SERIES_INDEX),
   mr: seriesUid(SYNTHETIC_FOLLOW_UP_STUDY, MR_SERIES_INDEX),
+  /** The series the registration objects are filed in, in the follow-up study. */
+  registrationSeries: seriesUid(SYNTHETIC_FOLLOW_UP_STUDY, REGISTRATION_SERIES_INDEX),
   mrOrigin: MR_ORIGIN,
   /**
    * Voxel `(i, j, k)` of the MR is, by the registration, at voxel

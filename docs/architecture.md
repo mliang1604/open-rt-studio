@@ -472,7 +472,9 @@ of reference over a series of another, as a fusion overlay.
 - Registration objects are read from files like structure sets: by the parse
   worker, kept for the session in the patient catalog, and given with a
   fetched series by the data source (`FetchedSeries.registrations`). The
-  server source gives none yet (#228).
+  server lists, with a series, the registrations that name it or its frame
+  of reference (`/series/{uid}/related`), and the server source fetches and
+  reads them beside the structure sets (#228).
 - A series joins the view as an overlay when it is in the base's frame, or
   when a way of the known registrations leads from the base's frame to its
   own (`findPlacement`). With several equally short ways none is chosen for
