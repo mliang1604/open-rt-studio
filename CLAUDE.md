@@ -29,7 +29,9 @@ application. Never commit patient data or real DICOM files
 - `services/server`: the Node server, a small PACS. `src/core` is the server
   without the network (no port, no environment), which the desktop
   application will embed; `src/store` keeps instances, `src/pacs-index`
-  knows them (SQLite through `node:sqlite`), `src/ingest` is the one way in;
+  knows them (SQLite through `node:sqlite`), `src/ingest` is the one way in,
+  `src/jobs` runs command-line workers (a job kind is registered in code and
+  builds the command; never take a program from a request);
   `src/host` is HTTP on `node:http` and `src/api` the routes it serves. A
   route carries its own description, from which the OpenAPI document is made. Logs carry no
   patient identifiers: log a route, a count or a duration, never a name, an

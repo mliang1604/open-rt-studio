@@ -108,26 +108,35 @@ export function schemaVersion(db: DatabaseSync): number {
  * Bring a database's schema to `target` (the latest by default), one step at
  * a time, each step in a transaction of its own: a step is applied whole or
  * not at all, and the version moves with it. Says where it began and ended.
+ *
+ * The index's own steps by default. Another database of the server (the job
+ * store) gives its steps, the number that marks its files, and what to call
+ * it in an error.
  */
 export function migrate(
   db: DatabaseSync,
   target: number = LATEST_VERSION,
   migrations: readonly Migration[] = MIGRATIONS,
+  database: { readonly applicationId: number; readonly noun: string } = {
+    applicationId: APPLICATION_ID,
+    noun: 'index',
+  },
 ): { readonly from: number; readonly to: number } {
   const from = schemaVersion(db);
+  const { applicationId, noun } = database;
+  const article = /^[aeiou]/.test(noun) ? 'an' : 'a';
+  const foreign = `The database holds something else; it is not ${article} ${noun}.`;
   if (from === 0) {
     const objects = db.prepare('SELECT count(*) AS n FROM sqlite_schema').get() as { n: number };
-    if (objects.n > 0) {
-      throw new IndexVersionError('The database holds something else; it is not an index.');
-    }
-    db.exec(`PRAGMA application_id = ${APPLICATION_ID}`);
-  } else if (pragma(db, 'application_id') !== APPLICATION_ID) {
-    throw new IndexVersionError('The database holds something else; it is not an index.');
+    if (objects.n > 0) throw new IndexVersionError(foreign);
+    db.exec(`PRAGMA application_id = ${applicationId}`);
+  } else if (pragma(db, 'application_id') !== applicationId) {
+    throw new IndexVersionError(foreign);
   }
   const latest = migrations[migrations.length - 1].version;
   if (from > latest) {
     throw new IndexVersionError(
-      `The index was made by a newer version (schema ${from}; this one knows up to ${latest}).`,
+      `The ${noun} was made by a newer version (schema ${from}; this one knows up to ${latest}).`,
     );
   }
   for (const step of migrations) {

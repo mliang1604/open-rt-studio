@@ -45,6 +45,7 @@ code 2).
 | `shutdownTimeoutMs` | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS` | `10000`     | How long a stop waits for requests, and then for the core's work                                                         |
 | `dataDir`           | `OPEN_RT_STUDIO_DATA_DIR`            | none        | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops |
 | `maxUploadBytes`    | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`    | `536870912` | The largest instance an upload may hold                                                                                  |
+| `jobConcurrency`    | `OPEN_RT_STUDIO_JOB_CONCURRENCY`     | `1`         | How many jobs run at once; the rest wait their turn                                                                      |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -76,6 +77,12 @@ routes, so what is served is what is described.
 | `GET /api/v1/instances/{uid}/file`   | Its DICOM file, streamed; `Range` and `If-None-Match` are honoured |
 | `POST /api/v1/instances`             | Upload one DICOM file as `application/dicom`                       |
 | `GET /api/v1/openapi.json`           | The description                                                    |
+| `GET /api/v1/job-kinds`              | The kinds of job this server can run                               |
+| `GET /api/v1/jobs`                   | Jobs, the latest first; `status` filters                           |
+| `POST /api/v1/jobs`                  | Submit a job: `{"kind": "...", "inputs": {...}}`                   |
+| `GET /api/v1/jobs/{id}`              | One job: status, progress, result                                  |
+| `GET /api/v1/jobs/{id}/log`          | The last lines its worker wrote                                    |
+| `POST /api/v1/jobs/{id}/cancel`      | Stop it                                                            |
 
 ```sh
 curl -X POST -H 'Content-Type: application/dicom' --data-binary @slice.dcm \
@@ -128,6 +135,10 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   (#43). `PacsIndex` is the interface, with nothing of a database in it;
   `openSqliteIndex(file)` is the SQLite one, on Node's own `node:sqlite`;
   `migrations.ts` is the schema's history.
+- `src/jobs/`: heavy work done by command-line programs the server starts
+  and watches (#58). `job.ts` is the model and the worker's line protocol,
+  `job-store.ts` writes jobs down in SQLite, `job-manager.ts` queues them
+  and runs their workers. See [Jobs](#jobs).
 - `src/ingest/`: the one way an instance enters the PACS (#45).
   `createIngest({ store, index })` gives `ingest(bytes)` and
   `importFolder(directory)`. A core made with a store and an index
@@ -198,6 +209,57 @@ it is added to the index with the references it makes to other objects.
   count of files done after each. It can be cancelled between files; what
   was ingested stays, and importing again picks up the rest. The summary
   lists what was refused and what failed, by path relative to the folder.
+
+## Jobs
+
+Heavy work (registration first, in M3) is done by command-line programs that
+the server starts as child processes and watches. The framework is here; the
+server has **no job kinds of its own yet**, so `GET /api/v1/job-kinds`
+answers an empty list until the native tools register theirs.
+
+- **A kind is code, not a request.** A `JobKind` has a name, checks the
+  inputs it is given and turns them into a program and its arguments. Kinds
+  are handed to `startServer(config, logger, { jobKinds })` (or
+  `createJobManager({ kinds })`) when the server starts. A request names a
+  kind and gives inputs; it cannot name a program. A kind must never take
+  the program, or a path outside what it allows, from its inputs.
+- **A worker is started without a shell**, in a directory of its own
+  (`<dataDir>/jobs/<job id>/`), with nothing on standard input and an
+  environment that holds only `PATH`.
+- **A worker reports on standard output**, in lines that begin with `@`:
+
+  ```
+  @progress 0.25 Reading the fixed image
+  @result {"transform": "transform.tfm", "metric": -0.83}
+  ```
+
+  `@progress` is a number from 0 to 1 and, after it, what is being done.
+  `@result` is one JSON object; the last one is the job's result. Every
+  other line, and all of standard error, is the job's log, of which the last
+  1000 lines are kept. Exit code 0 is success.
+
+- **Statuses**: `queued`, `running`, then `succeeded`, `failed` or
+  `cancelled`. A failed job says why: `exit-code`, `timed-out` (a kind may
+  set a limit), `interrupted` or `could-not-start`.
+- **Stopping a worker** (cancel, timeout, server stop) is `SIGTERM`, and
+  `SIGKILL` five seconds later if it is still there.
+- **Across a restart.** Jobs are written down in `<dataDir>/jobs.sqlite` as
+  they change. When the server stops, its running workers are stopped and
+  their jobs fail as `interrupted`; a job that was running when the server
+  died is marked the same at the next start. Jobs that were waiting are put
+  back in the queue. Nothing is run again by itself: whether to resubmit an
+  interrupted job is the caller's decision. Without a data directory, jobs
+  are kept in memory and work in a temporary directory that goes with the
+  server.
+- **What is not there yet**: an endpoint to fetch the files a worker wrote
+  (a kind is expected to ingest its outputs into the PACS, and to report
+  their UIDs as its result); clearing up old jobs and their directories;
+  stopping the children of a worker that starts processes of its own. On
+  Windows a worker cannot be asked to stop, only killed.
+
+A job's inputs and log are kept in the job store and given by the API as they
+are, and a worker may well write a patient's name. The server's own log has
+only the kind of a job and how it ended.
 
 ## The index
 

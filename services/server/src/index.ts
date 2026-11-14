@@ -49,6 +49,30 @@ export {
   type ApiOptions,
 } from './api/api-routes.js';
 export { openApiDocument } from './api/openapi.js';
+export { jobRoutes } from './api/job-routes.js';
+export { createJobManager, type JobManager, type JobManagerOptions } from './jobs/job-manager.js';
+export {
+  JOB_MIGRATIONS,
+  openSqliteJobStore,
+  type JobQuery,
+  type JobStore,
+} from './jobs/job-store.js';
+export {
+  InvalidJobInputError,
+  JOB_STATUSES,
+  JobsStoppedError,
+  UnknownJobKindError,
+  readWorkerLine,
+  type Job,
+  type JobCommand,
+  type JobFailure,
+  type JobKind,
+  type JobLogLine,
+  type JobStatus,
+  type JsonObject,
+  type JsonValue,
+  type WorkerLine,
+} from './jobs/job.js';
 export {
   createIngest,
   indexEntry,
@@ -107,7 +131,7 @@ export {
   openSqliteIndex,
   type SqliteIndexOptions,
 } from './pacs-index/sqlite-index.js';
-export { startServer, type RunningServer } from './server.js';
+export { startServer, type RunningServer, type ServerParts } from './server.js';
 export {
   EmptyInstanceError,
   InstanceNotFoundError,

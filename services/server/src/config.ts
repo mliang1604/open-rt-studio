@@ -27,6 +27,8 @@ export interface ServerConfig {
   readonly dataDir: string | null;
   /** The largest instance an upload may hold, in bytes. */
   readonly maxUploadBytes: number;
+  /** How many jobs run at once; the rest wait their turn. */
+  readonly jobConcurrency: number;
 }
 
 export const DEFAULT_CONFIG: ServerConfig = {
@@ -36,6 +38,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   shutdownTimeoutMs: 10_000,
   dataDir: null,
   maxUploadBytes: 512 * 1024 * 1024,
+  jobConcurrency: 1,
 };
 
 /** The environment variable naming a JSON config file. */
@@ -49,6 +52,7 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   shutdownTimeoutMs: 'OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS',
   dataDir: 'OPEN_RT_STUDIO_DATA_DIR',
   maxUploadBytes: 'OPEN_RT_STUDIO_MAX_UPLOAD_BYTES',
+  jobConcurrency: 'OPEN_RT_STUDIO_JOB_CONCURRENCY',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -88,6 +92,10 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       typeof value === 'number' && Number.isInteger(value) && value >= 1
         ? { value }
         : { wrong: 'must be a whole number of bytes, 1 or more' },
+    jobConcurrency: (value) =>
+      typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 64
+        ? { value }
+        : { wrong: 'must be a whole number from 1 to 64' },
   };
 
 /** The keys that are numbers, which the environment gives as text. */
@@ -95,6 +103,7 @@ const NUMERIC: ReadonlySet<keyof ServerConfig> = new Set([
   'port',
   'shutdownTimeoutMs',
   'maxUploadBytes',
+  'jobConcurrency',
 ]);
 
 const KEYS = Object.keys(DEFAULT_CONFIG) as (keyof ServerConfig)[];

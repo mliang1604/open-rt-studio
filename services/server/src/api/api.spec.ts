@@ -495,11 +495,17 @@ describe('the API description', () => {
           'GET /instances/{sopInstanceUid}/file',
           'POST /instances',
           'GET /openapi.json',
+          'GET /job-kinds',
+          'GET /jobs',
+          'POST /jobs',
+          'GET /jobs/{jobId}',
+          'GET /jobs/{jobId}/log',
+          'POST /jobs/{jobId}/cancel',
         ].map((line) => line.replace(' /', ` ${API_PREFIX}/`)),
       ].sort(),
     );
     // Nothing is described that is not served.
-    expect(described).toHaveLength(13);
+    expect(described).toHaveLength(19);
   });
 
   it('names every part of a path as a parameter, and only schemas that exist', async () => {

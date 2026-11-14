@@ -195,8 +195,18 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   word, a request is logged by its route and not by the address asked for,
   and a field whose name says it identifies a person is written as
   `[redacted]`.
-- Job framework: submit, status, progress, cancel. Jobs run the native
-  command-line tools as child processes.
+- Jobs (#58) run command-line programs as child processes: a queue with a
+  concurrency limit, progress and a result read from the worker's standard
+  output (`@progress`, `@result` lines), a log, timeouts and cancellation.
+  **What can be run is decided in code**: a job kind is registered when the
+  server starts, checks its inputs and builds the command; a request can
+  only name a kind. Workers start without a shell, in a directory of their
+  own, with only `PATH` in their environment. Jobs are written down in a
+  SQLite database of their own (`jobs.sqlite`, beside the index, so that
+  the index can move to PostgreSQL without them). A job that was running
+  when the server stopped is failed as `interrupted`, not run again; waiting
+  jobs are queued again. The manager has nothing of HTTP in it and runs the
+  same inside Electron.
 
 ## Native tools
 
