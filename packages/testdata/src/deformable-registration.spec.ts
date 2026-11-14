@@ -4,6 +4,8 @@
 
 import {
   deformableTransform,
+  fieldMetrics,
+  jacobianDeterminants,
   mapPoint,
   parseDeformableRegistration,
   parseSpatialRegistration,
@@ -16,6 +18,7 @@ import {
   SYNTHETIC_DEFORMATION as FIELD,
   syntheticDeformableRegistration,
   syntheticDeformationGridPoint,
+  syntheticDeformationJacobian,
   syntheticDeformationMm,
   syntheticDeformedPoint,
 } from './deformable-registration.js';
@@ -99,6 +102,42 @@ describe('the synthetic deformable registration', () => {
     }
     expect(mapPoint(transform, [-1, 5, 5], between)).toBeNull();
     expect(mapPoint(transform, [5, 5, 12.5], between)).toBeNull();
+  });
+
+  it('has the Jacobian determinant its formula gives, as the field metrics work it out (#84)', () => {
+    const { transform } = read.registrations[0];
+    if (transform.kind !== 'deformable') throw new Error('not a field');
+    const [nx, ny, nz] = FIELD.gridDims;
+    const found = jacobianDeterminants(transform.grid, transform.pre, transform.post);
+    let [least, most] = [Infinity, -Infinity];
+    for (let k = 0; k < nz; k++) {
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          const expected = syntheticDeformationJacobian(syntheticDeformationGridPoint(i, j, k));
+          least = Math.min(least, expected);
+          most = Math.max(most, expected);
+          // From neighbours 2 mm either side, a sine's slope comes out a
+          // little flat: by 0.02 at most here. At the faces there is one
+          // neighbour only, and the slope is that of the first 2 mm.
+          const inside = i > 0 && j > 0 && k > 0 && i < nx - 1 && j < ny - 1 && k < nz - 1;
+          const at = (k * ny + j) * nx + i;
+          expect(Math.abs(found[at] - expected), `vector ${i}, ${j}, ${k}`).toBeLessThan(
+            inside ? 0.02 : 0.08,
+          );
+        }
+      }
+    }
+    // The formula's own: a swell of at most 4 mm over 32 mm, π · 4 / 32 either way of 1.
+    expect(least).toBeCloseTo(1 - Math.PI / 8, 2);
+    expect(most).toBeCloseTo(1 + Math.PI / 8, 2);
+
+    const { jacobian, displacement } = fieldMetrics(transform);
+    expect(jacobian).toMatchObject({ count: nx * ny * nz, undefinedCount: 0, foldedFraction: 0 });
+    expect(Math.abs(jacobian!.min - least)).toBeLessThan(0.02);
+    expect(Math.abs(jacobian!.max - most)).toBeLessThan(0.02);
+    expect(jacobian!.mean).toBeCloseTo(1, 2);
+    // The longest vector is the one in the middle of the grid: (4, −3, 1) mm.
+    expect(displacement!.maxMm).toBeCloseTo(Math.hypot(4, -3, 1), 5);
   });
 
   it('without its field says what the pair’s rigid registration says, turned round', () => {

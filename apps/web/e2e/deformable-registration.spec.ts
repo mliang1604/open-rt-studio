@@ -7,10 +7,14 @@ import {
   SYNTHETIC_REGISTERED_PAIR as PAIR,
   registeredMrValueAtCtVoxel,
   syntheticDeformableRegistration,
+  syntheticDeformationGridPoint,
+  syntheticDeformationJacobian,
   syntheticDeformationMm,
   syntheticDeformedPoint,
   syntheticMrValue,
   syntheticRegisteredPair,
+  syntheticRois,
+  syntheticRtStruct,
 } from '@open-rt-studio/testdata';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
@@ -164,5 +168,149 @@ test('a landmark’s error under a deformation field is measured in the compared
   expect(moved).toBeGreaterThan(2);
   const shown = Number((await row.locator('.distance').innerText()).replace(' mm', ''));
   expect(Math.abs(shown - moved)).toBeLessThan(0.2);
+  expectNoProblems(problems);
+});
+
+// What the field says of itself (#84). The synthetic field is a formula, and
+// so is its Jacobian determinant; the panel's numbers are worked out from the
+// grid's vectors, each from its neighbours 2 mm away, which is within 0.02 of
+// the formula inside the grid and a little more at its faces.
+
+/** The formula's determinant and displacement at each point of the grid that `inside` takes. */
+function formulaOverGrid(
+  inside: (point: readonly [number, number, number]) => boolean = () => true,
+) {
+  const [nx, ny, nz] = FIELD.gridDims;
+  const found = { count: 0, least: Infinity, most: -Infinity, furthest: 0 };
+  for (let k = 0; k < nz; k++) {
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const point = syntheticDeformationGridPoint(i, j, k);
+        if (!inside(point)) continue;
+        const determinant = syntheticDeformationJacobian(point);
+        found.count++;
+        found.least = Math.min(found.least, determinant);
+        found.most = Math.max(found.most, determinant);
+        found.furthest = Math.max(found.furthest, Math.hypot(...syntheticDeformationMm(point)));
+      }
+    }
+  }
+  return found;
+}
+
+const fieldPanel = (page: Page): Locator => page.locator('app-field-metrics-panel');
+
+/** The value beside a name in one of the panel's tables, as a number. */
+async function fieldValue(page: Page, table: string, name: string): Promise<number> {
+  const row = fieldPanel(page).locator(`[${table}] tbody tr`).filter({ hasText: name });
+  await expect(row).toHaveCount(1);
+  return Number.parseFloat(await row.locator('td').innerText());
+}
+
+test('a deformation field is measured: its Jacobian determinant and how far it moves things, over the whole of it and inside a structure', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  const pair = syntheticRegisteredPair();
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importFiles(page, [
+    ...pair.planningCt,
+    ...pair.followUpMr,
+    syntheticDeformableRegistration(),
+    syntheticRtStruct(PAIR.count),
+  ]);
+  await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
+  await showCt(page);
+  // Nothing to measure until an image is placed by a field.
+  await expect(fieldPanel(page)).toHaveCount(0);
+  await fuseChipByDrag(page, await chipOf(page, 'MR'));
+  await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
+
+  // Measured when asked for, not before.
+  const panel = fieldPanel(page);
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('table')).toHaveCount(0);
+  await panel.locator('[data-field-measure]').click();
+
+  // The whole field: the formula's least and most, and no fold.
+  const whole = formulaOverGrid();
+  await expect(panel.locator('[data-field-folding]')).toHaveText(
+    'The field does not fold: the determinant is above 0 at every vector.',
+  );
+  await expect(panel.locator('[data-field-jacobian] tbody th')).toHaveText([
+    'Smallest',
+    '1st percentile',
+    'Mean',
+    '99th percentile',
+    'Largest',
+    'Above 2',
+  ]);
+  const near = 0.02 + 0.005;
+  expect(
+    Math.abs((await fieldValue(page, 'data-field-jacobian', 'Smallest')) - whole.least),
+  ).toBeLessThan(near);
+  expect(
+    Math.abs((await fieldValue(page, 'data-field-jacobian', 'Largest')) - whole.most),
+  ).toBeLessThan(near);
+  expect(Math.abs((await fieldValue(page, 'data-field-jacobian', 'Mean')) - 1)).toBeLessThan(near);
+  // The vectors themselves are the formula's: the longest is (4, −3, 1) mm.
+  expect(whole.furthest).toBeCloseTo(Math.hypot(4, 3, 1), 6);
+  expect(await fieldValue(page, 'data-field-displacement', 'Largest')).toBeCloseTo(
+    whole.furthest,
+    2,
+  );
+  const [nx, ny, nz] = FIELD.gridDims;
+  await expect(panel).toContainText(`the field’s grid (${nx} × ${ny} × ${nz}, every 2 × 2 × 2 mm)`);
+  await expect(panel).toContainText(
+    'Shows whether the deformation is physically plausible, not whether it is right.',
+  );
+  // A value, and what it was measured on; nothing says whether it is good.
+  expect(await panel.innerText()).not.toMatch(/pass|fail|accept|tolerance|within limits/i);
+
+  // Inside a structure: a circle of 4 mm about (13, 18) on the slices from 2
+  // to 9 mm. Which of the grid's vectors are in it depends on the voxels at
+  // its edge, so the numbers are held between those of the vectors surely in
+  // it (within 3 mm) and those that may be (within 5 mm).
+  const roi = syntheticRois(PAIR.count)[1];
+  const within = (radius: number) => (point: readonly [number, number, number]) =>
+    Math.hypot(point[0] - roi.center[0], point[1] - roi.center[1]) <= radius &&
+    point[2] >= roi.zs[0] &&
+    point[2] <= roi.zs.at(-1)!;
+  const [surely, maybe] = [
+    formulaOverGrid(within(roi.radius - 1)),
+    formulaOverGrid(within(roi.radius + 1)),
+  ];
+  expect(surely.count).toBeGreaterThan(8);
+
+  await panel.locator('[data-field-region]').selectOption({ label: roi.name });
+  // The whole field's numbers are not shown as the structure's.
+  await expect(panel.locator('table')).toHaveCount(0);
+  await panel.locator('[data-field-measure]').click();
+  await expect(panel.locator('[data-field-folding]')).toHaveText(
+    `The field does not fold inside “${roi.name}”: the determinant is above 0 at every vector there.`,
+  );
+  const said = /Of the (\d+) of its (\d+) vectors that lie inside/.exec(await panel.innerText())!;
+  expect(Number(said[2])).toBe(nx * ny * nz);
+  expect(Number(said[1])).toBeGreaterThanOrEqual(surely.count);
+  expect(Number(said[1])).toBeLessThanOrEqual(maybe.count);
+  const least = await fieldValue(page, 'data-field-jacobian', 'Smallest');
+  const most = await fieldValue(page, 'data-field-jacobian', 'Largest');
+  const furthest = await fieldValue(page, 'data-field-displacement', 'Largest');
+  expect(least).toBeGreaterThan(maybe.least - near);
+  expect(least).toBeLessThan(surely.least + near);
+  expect(most).toBeLessThan(maybe.most + near);
+  expect(most).toBeGreaterThan(surely.most - near);
+  expect(furthest).toBeLessThan(maybe.furthest + 0.006);
+  expect(furthest).toBeGreaterThan(surely.furthest - 0.006);
+  // Not the whole field's numbers again: the field's steepest places are not in the structure.
+  expect(maybe.least).toBeGreaterThan(whole.least + 2 * near);
+  expect(least).toBeGreaterThan(whole.least + near);
+
+  // With the field left out there is no field in use, and nothing of it shown.
+  await page.locator('.layer-panel [data-deformation]').click();
+  await expect(fieldPanel(page)).toHaveCount(0);
   expectNoProblems(problems);
 });

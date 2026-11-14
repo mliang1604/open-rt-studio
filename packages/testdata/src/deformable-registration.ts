@@ -96,6 +96,24 @@ export function syntheticDeformationMm(point: Triple): [number, number, number] 
 }
 
 /**
+ * The Jacobian determinant of the synthetic registration at a place of the
+ * planning frame: the factor by which it changes a small volume there. The
+ * field is one direction times a swell, so the determinant of `I + ∇field`
+ * is 1 plus that direction along the swell's gradient; the translation after
+ * the field changes no volume.
+ */
+export function syntheticDeformationJacobian(point: Triple): number {
+  const angle = [0, 1, 2].map((axis) => (Math.PI * (point[axis] - ORIGIN[axis])) / EXTENT[axis]);
+  let along = 0;
+  for (let axis = 0; axis < 3; axis++) {
+    let slope = (Math.PI / EXTENT[axis]) * Math.cos(angle[axis]);
+    for (let other = 0; other < 3; other++) if (other !== axis) slope *= Math.sin(angle[other]);
+    along += AMPLITUDE[axis] * slope;
+  }
+  return 1 + along;
+}
+
+/**
  * Where the synthetic deformable registration puts a place of the planning
  * frame, in the follow-up frame: moved by the field, then by the translation
  * after it.

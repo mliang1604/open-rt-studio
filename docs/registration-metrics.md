@@ -135,7 +135,7 @@ it.
   its views.
 - #84 (field-based metrics): the Jacobian determinant's numbers first;
   inverse consistency second, only when both directions exist; harmonic
-  energy last.
+  energy last. The first is built: see "Field measures as built".
 - #85 (landmarks): as planned; add the count of landmarks and the
   per-landmark table.
 - #86 (contour metrics): lead with surface distances (mean, 95th
@@ -210,9 +210,61 @@ reference is refused. Landmarks are not kept by the server, and are let go
 of when another base image is shown.
 
 Not done: a point is where the click was on the slice on screen, to no
-finer than the picture; nothing snaps to an edge or a centre. Only rigid
-and affine registrations are measured, as only those are applied. The
+finer than the picture; nothing snaps to an edge or a centre. Under a
+deformation field the error is measured in the compared image's frame, not
+the base image's, since a field maps one way (#77; the panel says so). The
 numbers were not compared with another program's.
+
+## Field measures as built
+
+What #84 measures is stated in `packages/dicom/src/field-metrics.ts`, and
+with the numbers where they are shown. In short:
+
+- **The Jacobian determinant** is worked out at each vector of the field's
+  grid. The change of the field along each of the grid's three directions is
+  taken from the vector's neighbours: half the difference of the two on
+  either side, or at a face of the grid the difference to the one neighbour
+  there is. The determinant is that of `I + ∇field`, times the determinants
+  of the matrices before and after the field. That is the gradient at the
+  grid's points, not of what is read between them.
+- Its numbers: the smallest and largest, the mean, the 1st and 99th
+  percentiles (by nearest rank), and the part above 2. Whether the field
+  folds is said in a sentence: "The field folds in 0.3 % of its volume: the
+  determinant is at or below 0 at N of M vectors", or that it does not fold.
+  A part that is there is never rounded to nothing ("under 0.1 %").
+- **The displacement** is the length of each vector in mm: the mean, the
+  95th percentile and the largest. It is of the field alone; the
+  registration's matrices move the image besides, and the panel says so.
+- A percentage is of the grid's vectors, each standing for the same volume.
+  A vector that is undefined, or that needs an undefined neighbour, has no
+  determinant, and how many there are is said.
+- **Inside a structure** of the base image the same numbers are of the
+  vectors that lie in it: those whose place falls in a voxel of the image
+  that the structure fills (filled as for a comparison of structures). The
+  panel says how many vectors that is, of how many. A field coarser than a
+  structure may have few vectors in it or none, and then the panel says that
+  there is nothing to measure there.
+- "Shows whether the deformation is physically plausible, not whether it is
+  right." is under the numbers. No value is shown as passed or failed, and no
+  range from the literature is shown beside one.
+
+The numbers are worked out when asked for, of the field that places the
+image on screen, and are shown only for that field and that structure. With
+the field left out ("Deformation off") no field is in use and the panel is
+not shown.
+
+Tested against fields with a known determinant: nothing moved, everything
+moved alike, a field `A · p` (det(I + A), also on a grid tilted in the
+patient), a squeeze along one axis, a sine swell, a field that turns back on
+itself, and the synthetic field of `packages/testdata`, whose determinant is
+a formula (`syntheticDeformationJacobian`): the grid's numbers are within
+0.02 of it inside the grid.
+
+Not done: inverse consistency, which needs a registration each way; harmonic
+or bending energy; the determinant as a map (#83). A structure of the
+compared image is not offered, only those of the base image. The numbers
+were not compared with another program's. A large field is measured in the
+page's own thread, as structures are compared (#237).
 
 ## Sources
 

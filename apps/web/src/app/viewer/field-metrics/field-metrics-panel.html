@@ -1,0 +1,76 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (choices().length > 0 && volume()) {
+  <label>
+    <span>Inside</span>
+    <select
+      [value]="key()"
+      (change)="choose($any($event.target).value)"
+      data-field-region
+      title="Measure the whole field, or the part of it inside a structure of this image"
+    >
+      <option value="" [selected]="key() === ''">The whole field</option>
+      @for (choice of choices(); track choice.key) {
+        <option [value]="choice.key" [selected]="choice.key === key()">{{ choice.label }}</option>
+      }
+    </select>
+  </label>
+}
+@if (found(); as found) {
+  @if (empty()) {
+    <p class="folding" data-field-folding>
+      No vector of the field’s grid lies inside “{{ region()!.name }}”, so there is nothing to
+      measure there.
+    </p>
+  } @else if (folding(); as sentence) {
+    <p class="folding" data-field-folding>{{ sentence }}</p>
+  } @else {
+    <p class="folding" data-field-folding>
+      No determinant could be worked out: every vector is undefined, or beside one that is.
+    </p>
+  }
+  @if (jacobian().length > 0) {
+    <table data-field-jacobian>
+      <caption>
+        Jacobian determinant
+      </caption>
+      <tbody>
+        @for (row of jacobian(); track row.name) {
+          <tr>
+            <th scope="row">{{ row.name }}</th>
+            <td>{{ row.value }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+  @if (displacement().length > 0) {
+    <table data-field-displacement>
+      <caption>
+        Displacement
+      </caption>
+      <tbody>
+        @for (row of displacement(); track row.name) {
+          <tr>
+            <th scope="row">{{ row.name }}</th>
+            <td>{{ row.value }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+  @for (note of notes(); track $index) {
+    <p class="note">{{ note }}</p>
+  }
+} @else {
+  <button
+    type="button"
+    (click)="measure()"
+    data-field-measure
+    title="Work out the Jacobian determinant of the deformation field and how far it moves things"
+  >
+    Measure the field
+  </button>
+}

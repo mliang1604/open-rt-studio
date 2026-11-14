@@ -25,6 +25,17 @@ export {
   type InstanceRelation,
   readInstanceHeader,
 } from './instance-header.js';
+export {
+  type DisplacementSummary,
+  type FieldMetrics,
+  type FieldRegion,
+  type JacobianSummary,
+  fieldMetrics,
+  fieldVectorsInRoi,
+  jacobianDeterminants,
+  summarizeDisplacement,
+  summarizeJacobian,
+} from './field-metrics.js';
 export { f32ToF16, floatsToHalf } from './half.js';
 export {
   type DirtyBox,
