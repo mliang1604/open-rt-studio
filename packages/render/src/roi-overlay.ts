@@ -9,12 +9,19 @@ import {
   classifyContour,
   crossSectionOutline,
   decimate,
+  displayedSlicePos,
   projectContour,
   type ContourCoords,
   type ContourPolyline,
   type CrossSectionRow,
 } from './contours.js';
-import type { ObliqueRotation } from './reslice.js';
+import {
+  buildContourStack,
+  cutContourStack,
+  type ContourStack,
+  type StackContour,
+} from './contour-stack.js';
+import { isOblique, type ObliqueRotation } from './reslice.js';
 
 /**
  * The RTSTRUCT ROI contour overlay chain, as pure functions over plain inputs.
@@ -44,6 +51,12 @@ export interface RoiContourCoords {
   /** The ROI's display colour as a CSS colour (overrides applied later). */
   readonly baseColor: string;
   readonly contours: readonly ContourCoords[];
+  /**
+   * The contours arranged for cutting with a tilted plane; set only for a pane
+   * that is tilted. An untilted pane is either parallel or at right angles to
+   * the contours and goes by {@link classifyContour}.
+   */
+  readonly stack?: ContourStack;
 }
 
 /** One ROI's contour geometry for a pane, in plane `(u, v)` — pan/zoom-independent. */
@@ -131,18 +144,31 @@ export function roiContourCoords(
 
   for (const orientation of orientations) {
     const rotation = obliques[orientation];
+    const tilted = isOblique(rotation);
     const rois: RoiContourCoords[] = [];
     sets.forEach((ss, setIndex) => {
       for (const roi of ss.rois) {
         const contours: ContourCoords[] = [];
+        const stacked: StackContour[] = [];
         for (const contour of roi.contours) {
           const closed =
             contour.geometricType !== 'OPEN_PLANAR' && contour.geometricType !== 'POINT';
           const projected = projectContour(volume, orientation, contour.points, closed, rotation);
-          if (projected) contours.push(projected);
+          if (!projected) continue;
+          contours.push(projected);
+          if (tilted) stacked.push({ points: contour.points, coords: projected });
         }
         if (contours.length) {
-          rois.push({ setIndex, roiNumber: roi.number, baseColor: rgbColor(roi.color), contours });
+          const stack = tilted
+            ? buildContourStack(volume, orientation, rotation, stacked, volume.spacing[2])
+            : null;
+          rois.push({
+            setIndex,
+            roiNumber: roi.number,
+            baseColor: rgbColor(roi.color),
+            contours,
+            ...(stack ? { stack } : {}),
+          });
         }
       }
     });
@@ -199,13 +225,21 @@ export function roiPlaneShapes(
 
       const loops: ContourPolyline[] = [];
       const rows: CrossSectionRow[] = [];
-      for (const c of roi.contours) {
-        const res = classifyContour(c, volume, orientation, sliceIndex);
-        if (!res) continue;
-        if (res.kind === 'loop') {
-          loops.push({ points: decimate(res.points, decimateTolerance), closed: res.closed });
-        } else {
-          rows.push(res.row);
+      if (roi.stack) {
+        // A tilted pane: cut the stack of contours with the plane.
+        const slicePos = displayedSlicePos(volume, orientation, sliceIndex);
+        for (const { points, closed } of cutContourStack(roi.stack, slicePos)) {
+          loops.push({ points: decimate(points, decimateTolerance), closed });
+        }
+      } else {
+        for (const c of roi.contours) {
+          const res = classifyContour(c, volume, orientation, sliceIndex);
+          if (!res) continue;
+          if (res.kind === 'loop') {
+            loops.push({ points: decimate(res.points, decimateTolerance), closed: res.closed });
+          } else {
+            rows.push(res.row);
+          }
         }
       }
 

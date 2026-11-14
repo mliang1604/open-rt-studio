@@ -95,6 +95,15 @@ function slicePosBand(
     : { slicePos0: 0.5, half: 0.5 };
 }
 
+/** The through-plane position (`slicePos`, 0→1) of the slice a pane displays. */
+export function displayedSlicePos(
+  volume: Volume,
+  orientation: Orientation,
+  sliceIndex: number,
+): number {
+  return slicePosBand(volume, orientation, sliceIndex).slicePos0;
+}
+
 /**
  * Crossing points where a polygon (given in plane `(u, v, slicePos)` coordinates)
  * pierces the plane `slicePos = slicePos0`. Each polygon edge straddling the
