@@ -1,0 +1,93 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<div class="kinds" role="group" aria-label="Show on the image">
+  <span class="name">Show</span>
+  @for (choice of kinds; track choice.kind) {
+    <button
+      type="button"
+      [class.active]="view().kind === choice.kind"
+      [attr.aria-pressed]="view().kind === choice.kind"
+      [attr.data-field-view]="choice.kind"
+      [title]="choice.title"
+      (click)="kindChange.emit(choice.kind)"
+    >
+      {{ choice.label }}
+    </button>
+  }
+</div>
+
+@if (view().kind !== 'none') {
+  <label class="row">
+    <span class="name">Strength</span>
+    <input
+      type="range"
+      min="0"
+      max="100"
+      step="1"
+      [value]="opacityPercent()"
+      (input)="onOpacity($event)"
+      data-field-view-opacity
+      aria-label="Strength of the colour over the image"
+      [title]="'Strength of the colour over the image: ' + opacityPercent() + ' %'"
+    />
+    <span class="value">{{ opacityPercent() }} %</span>
+  </label>
+}
+
+@if (view().kind === 'displacement') {
+  <div class="legend" data-field-legend="displacement">
+    <div class="bar" [style.background-image]="displacementGradient" aria-hidden="true"></div>
+    <div class="ends">
+      <span>0 mm</span>
+      <span>how far a place is moved</span>
+      <span data-field-scale-end>{{ scaleEnd() }}{{ scaleFits() ? '' : ' (set)' }}</span>
+    </div>
+  </div>
+  <label class="row">
+    <span class="name">Scale to</span>
+    <input
+      type="number"
+      min="0.1"
+      max="500"
+      step="0.5"
+      [value]="scaleFits() ? '' : view().maxMm"
+      [placeholder]="view().maxMm"
+      (change)="onMaxMm($event)"
+      data-field-scale
+      aria-label="Displacement at the top of the scale, in mm"
+      title="The displacement at the top of the scale, in mm. Empty: the largest in this field, to the next whole millimetre"
+    />
+    <span class="value">mm</span>
+  </label>
+  <p class="note">
+    More than the top of the scale is drawn as the top. Where the field has no vector, nothing is
+    drawn.
+  </p>
+}
+
+@if (view().kind === 'jacobian') {
+  <div class="legend" data-field-legend="jacobian">
+    <div class="bar" [style.background-image]="jacobianGradient" aria-hidden="true"></div>
+    <div class="ends">
+      <span>0</span>
+      <span>1</span>
+      <span>2 and more</span>
+    </div>
+    <div class="ends words">
+      <span>compression</span>
+      <span>no change</span>
+      <span>expansion</span>
+    </div>
+    <div class="fold">
+      <span class="swatch" [style.background]="foldBackground" aria-hidden="true"></span>
+      <span data-field-fold-legend>Striped: the field folds (determinant at or below 0)</span>
+    </div>
+  </div>
+  <p class="note">
+    The determinant is the factor by which a small volume changes. A fold is drawn at full strength
+    whatever the strength above. Shows whether the deformation is physically plausible, not whether
+    it is right.
+  </p>
+}

@@ -176,7 +176,11 @@ export class MeasureController {
         const s = readAt(layer);
         return s ? [{ layer, sample: s }] : [];
       });
-    return formatProbe(orientationName(orientation), first, firstVolume, others);
+    // What the field's wash stands for here, when one is on. The point is the
+    // base image's when the pane is laid out on the base's grid, which is
+    // where a wash is drawn.
+    const field = hovered?.placement ? null : this.layersCtl.fieldReading(sample.patient);
+    return formatProbe(orientationName(orientation), first, firstVolume, others, field);
   });
 
   /** Wire the controller to the component's view state. Called once. */

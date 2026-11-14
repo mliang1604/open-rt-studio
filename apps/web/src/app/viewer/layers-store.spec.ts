@@ -18,7 +18,13 @@ import {
 } from '@open-rt-studio/dicom';
 import { registrationObject } from '../registration-testing';
 import { shiftMatrix } from '../registration-testing';
-import { LayersStore, layerLegend, placementChoiceText, placementText } from './layers-store';
+import {
+  LayersStore,
+  fittingFieldScaleMm,
+  layerLegend,
+  placementChoiceText,
+  placementText,
+} from './layers-store';
 
 function makeVolume(modality: string, windowCenter = 40, windowWidth = 400): Volume {
   return {
@@ -573,5 +579,65 @@ describe('a registration made by hand (#78)', () => {
     store.reset();
     expect(store.byHand().size).toBe(0);
     expect(store.byHandDrag()).toBeNull();
+  });
+});
+
+describe('what of a deformation field is shown (#83)', () => {
+  it('is nothing until asked, and is held to what a wash can take', () => {
+    const store = new LayersStore();
+    expect(store.fieldViewKind()).toBe('none');
+    expect(store.fieldViewOpacity()).toBe(0.6);
+    expect(store.fieldViewMaxMm()).toBeNull();
+
+    store.setFieldViewKind('jacobian');
+    expect(store.fieldViewKind()).toBe('jacobian');
+    store.setFieldViewOpacity(1.4);
+    expect(store.fieldViewOpacity()).toBe(1);
+    store.setFieldViewOpacity(-0.2);
+    expect(store.fieldViewOpacity()).toBe(0);
+    store.setFieldViewOpacity(Number.NaN);
+    expect(store.fieldViewOpacity()).toBe(0);
+
+    store.setFieldViewMaxMm(25);
+    expect(store.fieldViewMaxMm()).toBe(25);
+    store.setFieldViewMaxMm(0);
+    expect(store.fieldViewMaxMm()).toBe(0.1);
+    store.setFieldViewMaxMm(1e6);
+    expect(store.fieldViewMaxMm()).toBe(500);
+    store.setFieldViewMaxMm(Number.NaN);
+    expect(store.fieldViewMaxMm()).toBeNull();
+  });
+
+  it('goes back to nothing when a new base is loaded', () => {
+    const store = new LayersStore();
+    store.setFieldViewKind('displacement');
+    store.setFieldViewOpacity(0.9);
+    store.setFieldViewMaxMm(25);
+    store.reset();
+    expect(store.fieldViewKind()).toBe('none');
+    expect(store.fieldViewOpacity()).toBe(0.6);
+    expect(store.fieldViewMaxMm()).toBeNull();
+  });
+
+  it('fits a scale to a field: its largest displacement, up to the next whole millimetre', () => {
+    const grid = (vectors: number[]) => ({
+      dims: [vectors.length / 3, 1, 1] as const,
+      origin: [0, 0, 0] as const,
+      axes: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ] as const,
+      spacing: [1, 1, 1] as const,
+      vectors: Float32Array.from(vectors),
+    });
+    // (4, −3, 1): 5.1 mm.
+    expect(fittingFieldScaleMm(grid([0, 0, 0, 4, -3, 1]))).toBe(6);
+    // A whole number of millimetres is its own scale.
+    expect(fittingFieldScaleMm(grid([3, 4, 0]))).toBe(5);
+    // A field that moves little or nothing, or has no vector defined: 1 mm.
+    expect(fittingFieldScaleMm(grid([0.2, 0, 0]))).toBe(1);
+    expect(fittingFieldScaleMm(grid([0, 0, 0]))).toBe(1);
+    expect(fittingFieldScaleMm(grid([NaN, NaN, NaN]))).toBe(1);
   });
 });

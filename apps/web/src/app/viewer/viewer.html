@@ -442,6 +442,13 @@
       >
         <summary class="tool-group-label">Deformation field</summary>
         <div class="tool-group-body">
+          <app-field-view-panel
+            [view]="layersCtl.fieldView()"
+            [scaleFits]="layersCtl.fieldViewScaleFits()"
+            (kindChange)="layersCtl.setFieldViewKind($event)"
+            (opacityChange)="layersCtl.setFieldViewOpacity($event)"
+            (maxMmChange)="layersCtl.setFieldViewMaxMm($event)"
+          />
           <app-field-metrics-panel
             [field]="field"
             [choices]="roiCtl.compareChoices()"

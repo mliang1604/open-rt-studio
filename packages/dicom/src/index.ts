@@ -80,6 +80,7 @@ export {
   matrixTransform,
   pathMatrix,
   sampleDeformation,
+  sampleGridValues,
   samePath,
   transformPath,
 } from './registration.js';

@@ -9,6 +9,7 @@ import {
   type LabelVolume,
   type Volume,
 } from '@open-rt-studio/dicom';
+import { JACOBIAN_CHANNELS, jacobianTexels } from './field-view.js';
 import type { PaneRect } from './layout.js';
 
 /**
@@ -190,6 +191,31 @@ export function createFieldTexture(
   return texture;
 }
 
+/**
+ * Allocate an `rg16float` 3D texture for a field's Jacobian determinant, one
+ * texel to a vector of its grid, and upload it (see `jacobianTexels`).
+ */
+export function createJacobianTexture(
+  device: GPUDevice,
+  dims: readonly [number, number, number],
+  determinants: Float32Array,
+): GPUTexture {
+  const [width, height, depth] = dims;
+  const texture = device.createTexture({
+    dimension: '3d',
+    size: { width, height, depthOrArrayLayers: depth },
+    format: 'rg16float',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture(
+    { texture },
+    jacobianTexels(determinants),
+    { bytesPerRow: width * JACOBIAN_CHANNELS * BYTES_PER_HALF, rowsPerImage: height },
+    { width, height, depthOrArrayLayers: depth },
+  );
+  return texture;
+}
+
 /** The views/buffer an MPR slice pane binds: base + overlay + mask textures, LUTs, params. */
 export interface SliceBindResources {
   readonly sampler: GPUSampler;
@@ -208,11 +234,17 @@ export interface SliceBindResources {
    * view when there is none; the shader does not read it then.
    */
   readonly field: GPUTextureView;
+  /**
+   * The field's Jacobian determinant (binding 9). The base view until it is
+   * asked for; the shader reads it only for the determinant wash.
+   */
+  readonly jacobian: GPUTextureView;
 }
 
 /**
  * The MPR slice bind group (base 0, sampler 1, params 2, overlay 3, colormap LUT 4,
- * mask texture 5, nearest mask sampler 6, mask LUT 7, deformation field 8).
+ * mask texture 5, nearest mask sampler 6, mask LUT 7, deformation field 8, its
+ * Jacobian determinant 9).
  */
 export function sliceBindGroup(
   device: GPUDevice,
@@ -231,6 +263,7 @@ export function sliceBindGroup(
       { binding: 6, resource: r.maskSampler },
       { binding: 7, resource: r.maskLut },
       { binding: 8, resource: r.field },
+      { binding: 9, resource: r.jacobian },
     ],
   });
 }

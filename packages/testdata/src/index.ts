@@ -31,6 +31,7 @@ export {
 } from './image-series.js';
 export {
   SYNTHETIC_DEFORMATION,
+  SYNTHETIC_FOLDING,
   syntheticDeformableRegistration,
   syntheticDeformationGridPoint,
   syntheticDeformationJacobian,

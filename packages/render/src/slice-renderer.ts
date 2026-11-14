@@ -19,6 +19,7 @@ import {
   DEFAULT_COLORMAP,
   type Colormap,
 } from './colormap.js';
+import { NO_FIELD_VIEW, fieldViewCode, type FieldView } from './field-view.js';
 import type { PaneRect, Vec2 } from './layout.js';
 import {
   fieldPlaneToTexMatrix,
@@ -51,6 +52,7 @@ import { MIP_PARAMS_SIZE, PARAMS_SIZE, packMipParams, packSliceParams } from './
 import { aspectScale, clampRect } from './pan-zoom.js';
 import {
   createFieldTexture,
+  createJacobianTexture,
   createLabelTexture,
   createVolumeTexture,
   encodeFrame,
@@ -174,6 +176,17 @@ export class SliceRenderer {
   private overlayField: PlacementField | null = null;
   private fieldTexture: GPUTexture | null = null;
   private fieldMatrices: readonly Float32Array[] | null = null;
+  /** What of the field is washed over the image (field-view.ts). */
+  private fieldView: FieldView = NO_FIELD_VIEW;
+  /**
+   * The field's Jacobian determinant as it was given with the view, one to a
+   * vector, and the texture that holds it. The texture is there only while
+   * what was given is of the field in use: as many numbers as the field has
+   * vectors.
+   */
+  private jacobianValues: Float32Array | null = null;
+  private jacobianTexture: GPUTexture | null = null;
+  private jacobianUploaded: Float32Array | null = null;
   /** Overlay matrices on its OWN bounds, for drawing it standalone (Compare). */
   private overlayOwnMatrices: readonly Float32Array[] | null = null;
   /** Composite opacity of the overlay over the base, 0 when no overlay. */
@@ -309,6 +322,8 @@ export class SliceRenderer {
     const maskLutView = this.maskLut.createView({ dimension: '1d' });
     // No field: the base view again, which the shader does not read (fieldOn 0).
     const fieldView = this.fieldTexture?.createView() ?? baseView;
+    // The same for its determinant, which is read only for the determinant wash.
+    const jacobianView = this.jacobianTexture?.createView() ?? baseView;
     const layout = this.pipeline.getBindGroupLayout(0);
     for (const slot of this.slots) {
       slot.bindGroup = sliceBindGroup(this.device, layout, {
@@ -321,6 +336,7 @@ export class SliceRenderer {
         maskSampler: this.maskSampler,
         maskLut: maskLutView,
         field: fieldView,
+        jacobian: jacobianView,
       });
     }
   }
@@ -370,6 +386,9 @@ export class SliceRenderer {
 
   /** Drop the overlay's deformation field (texture + matrices). */
   private clearField(): void {
+    this.jacobianTexture?.destroy();
+    this.jacobianTexture = null;
+    this.jacobianUploaded = null;
     this.fieldTexture?.destroy();
     this.fieldTexture = null;
     this.overlayField = null;
@@ -394,13 +413,16 @@ export class SliceRenderer {
       this.fieldTexture = createFieldTexture(this.device, field.grid.dims, field.grid.vectors);
     }
     this.overlayField = field;
+    // The determinant that was given is of one field: kept if it can be of
+    // this one, and given again by whoever knows the field has changed.
+    const jacobianChanged = this.takeJacobian();
     const base = this.volume;
     this.fieldMatrices = base
       ? [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal].map((orientation) =>
           fieldPlaneToTexMatrix(base, field, orientation),
         )
       : null;
-    return !sameGrid;
+    return !sameGrid || jacobianChanged;
   }
 
   /** Drop the label mask (texture + opacity), so the panes draw without it. */
@@ -582,6 +604,42 @@ export class SliceRenderer {
     );
     this.takeField(field ?? null);
     this.rebuildMprBindGroups();
+  }
+
+  /**
+   * What of the overlay's deformation field is washed over the image: how far
+   * it moves each place, its Jacobian determinant, or nothing. Kept when the
+   * overlay or its field changes, and shown whenever a field is in use.
+   *
+   * The determinant wash needs `determinants`: the field's Jacobian
+   * determinant at each vector of its grid, in the grid's order
+   * (`jacobianDeterminants` of the dicom package). Whoever calls this works
+   * them out, once for a field, so that the wash, the readout under the
+   * cursor and the field's numbers are of the same values. Without them, or
+   * with as many as are not the field's, that wash shows nothing.
+   */
+  setFieldView(view: FieldView, determinants: Float32Array | null = null): void {
+    this.fieldView = view;
+    this.jacobianValues = view.kind === 'jacobian' ? determinants : null;
+    if (this.takeJacobian()) this.rebuildMprBindGroups();
+  }
+
+  /**
+   * Bring the determinant's texture in line with what was given and the field
+   * in use: uploaded when the numbers are new and as many as the field has
+   * vectors, let go of when they are not. Gives whether the texture changed.
+   */
+  private takeJacobian(): boolean {
+    const field = this.overlayField;
+    const values = this.jacobianValues;
+    const [nx, ny, nz] = field?.grid.dims ?? [0, 0, 0];
+    const fits = field !== null && values !== null && values.length === nx * ny * nz;
+    if (fits && this.jacobianUploaded === values) return false;
+    const had = this.jacobianTexture !== null;
+    this.jacobianTexture?.destroy();
+    this.jacobianTexture = fits ? createJacobianTexture(this.device, [nx, ny, nz], values) : null;
+    this.jacobianUploaded = fits ? values : null;
+    return had || fits;
   }
 
   /** The orthogonal panes' matrices for an overlay, through its registration if it has one. */
@@ -779,6 +837,7 @@ export class SliceRenderer {
       maskLut: this.maskLut.createView({ dimension: '1d' }),
       // Not read either: this column draws the overlay on its own grid.
       field: view,
+      jacobian: view,
     });
   }
 
@@ -792,6 +851,15 @@ export class SliceRenderer {
         : this.fieldMatrices[view.orientation],
       toOverlay: fieldToOverlayTexMatrix(this.overlayVolume, field.post),
       ...fieldTexBounds(field.grid.dims),
+      view:
+        this.fieldView.kind === 'none' ||
+        (this.fieldView.kind === 'jacobian' && !this.jacobianTexture)
+          ? null
+          : {
+              code: fieldViewCode(this.fieldView.kind),
+              scaleMm: this.fieldView.maxMm,
+              opacity: this.fieldView.opacity,
+            },
     };
   }
 

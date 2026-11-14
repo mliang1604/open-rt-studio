@@ -7,14 +7,17 @@ import { TestBed } from '@angular/core/testing';
 import {
   baseImageLayer,
   findPlacement,
+  jacobianDeterminants,
+  manualPlacement,
   overlayImageLayer,
+  type DeformationGrid,
   type Layer,
   type LayerPlacement,
   type Volume,
 } from '@open-rt-studio/dicom';
 import { LayoutMode, NO_OBLIQUE } from '@open-rt-studio/render';
 
-import { registrationObject } from '../registration-testing';
+import { registrationObject, shiftMatrix } from '../registration-testing';
 import type { LoadResult } from '../volume-loader';
 import { CompareStore } from './compare-store';
 import { LayersController } from './layers-controller';
@@ -216,5 +219,111 @@ describe('LayersController pane tags (#230)', () => {
     expect(controller.paneSliceLabel(0, 0)).toBe('1 / 4');
     // The other orientations of that column stay where they were.
     expect(controller.paneSliceLabel(1, 1)).toBe('1 / 4');
+  });
+});
+
+describe('LayersController and what a deformation field is doing (#83)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  /**
+   * A grid of 5 × 3 × 3 vectors 2 mm apart from the origin, whose x part is
+   * `along(x)` of its place.
+   */
+  function gridOf(along: (x: number) => number): DeformationGrid {
+    const vectors = new Float32Array(5 * 3 * 3 * 3);
+    for (let n = 0; n < 45; n++) vectors[n * 3] = along((n % 5) * 2);
+    return {
+      dims: [5, 3, 3],
+      origin: [0, 0, 0],
+      axes: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      spacing: [2, 2, 2],
+      vectors,
+    };
+  }
+  /** A placement through `grid`, after a matrix that moves the base's points 2 mm along x. */
+  function through(grid: DeformationGrid): LayerPlacement {
+    const pre = shiftMatrix(2, 0, 0);
+    const plain = manualPlacement('planning', 'follow-up', shiftMatrix(0, 0, 0));
+    return {
+      ...plain,
+      steps: [{ ...plain.steps[0], byHand: false, deformable: true }],
+      field: { pre, grid, post: plain.baseToLayer },
+    };
+  }
+  /** A squeeze to three quarters along x: 0.75 everywhere, moving a place by a quarter of its x. */
+  const SQUEEZE = gridOf((x) => -0.25 * x);
+
+  it('shows nothing of the field until asked, on the scale that fits the field', () => {
+    const { controller } = setup('MR', through(SQUEEZE));
+    expect(controller.selectedField()?.grid).toBe(SQUEEZE);
+    // The field moves a place by 2 mm at most: a scale to 2 mm.
+    expect(controller.fieldView()).toEqual({ kind: 'none', opacity: 0.6, maxMm: 2 });
+    expect(controller.fieldViewScaleFits()).toBe(true);
+    expect(controller.fieldViewDeterminants()).toBeNull();
+    expect(controller.fieldReading([2, 2, 2])).toBeNull();
+  });
+
+  it('takes a scale the user sets, and goes back to the fitting one', () => {
+    const { controller } = setup('MR', through(SQUEEZE));
+    controller.setFieldViewKind('displacement');
+    controller.setFieldViewOpacity(0.9);
+    controller.setFieldViewMaxMm(12.5);
+    expect(controller.fieldView()).toEqual({ kind: 'displacement', opacity: 0.9, maxMm: 12.5 });
+    expect(controller.fieldViewScaleFits()).toBe(false);
+    controller.setFieldViewMaxMm(null);
+    expect(controller.fieldView().maxMm).toBe(2);
+    expect(controller.fieldViewScaleFits()).toBe(true);
+  });
+
+  it('reads how far the field moves a point of the base, after the matrix before the field', () => {
+    const { controller } = setup('MR', through(SQUEEZE));
+    controller.setFieldViewKind('displacement');
+    // The base's x = 2 is the grid's x = 4, where the field moves by 1 mm; between vectors, between.
+    expect(controller.fieldReading([2, 2, 2])).toEqual({ kind: 'displacement', mm: 1 });
+    const between = controller.fieldReading([3, 1, 3]);
+    expect(between).toMatchObject({ kind: 'displacement' });
+    expect((between as { mm: number }).mm).toBeCloseTo(1.25, 6);
+    // Outside the grid, where no wash is drawn: nothing.
+    expect(controller.fieldReading([7, 2, 2])).toBeNull();
+    // The determinants are not worked out for this wash.
+    expect(controller.fieldViewDeterminants()).toBeNull();
+  });
+
+  it('gives the renderer the determinants its wash is of, and reads the same under the cursor', () => {
+    // Still up to the grid's x = 4, then taking back twice what it is given: a fold.
+    const fold = gridOf((x) => (x <= 4 ? 0 : -2 * (x - 4)));
+    const placement = through(fold);
+    const { controller } = setup('MR', placement);
+    controller.setFieldViewKind('jacobian');
+    const determinants = controller.fieldViewDeterminants()!;
+    expect([...determinants]).toEqual([
+      ...jacobianDeterminants(fold, placement.field!.pre, placement.field!.post),
+    ]);
+    // Along a row: no change, half the turn at the vector between, then the fold.
+    expect([...determinants.slice(0, 5)]).toEqual([1, 1, 0, -1, -1]);
+    // Worked out once for a field: the same numbers when asked again.
+    controller.setFieldViewOpacity(0.3);
+    expect(controller.fieldViewDeterminants()).toBe(determinants);
+
+    // The base's x is the grid's less 2.
+    expect(controller.fieldReading([0, 2, 2])).toEqual({ kind: 'jacobian', determinant: 1 });
+    expect(controller.fieldReading([4, 2, 2])).toEqual({ kind: 'jacobian', determinant: -1 });
+    expect(controller.fieldReading([1, 2, 2])).toEqual({ kind: 'jacobian', determinant: 0.5 });
+  });
+
+  it('has nothing to show for an overlay placed by a matrix', () => {
+    const found = findPlacement('planning', 'follow-up', [
+      registrationObject('reg', 'follow-up', 'planning'),
+    ]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    const { controller } = setup('MR', found.placement);
+    controller.setFieldViewKind('jacobian');
+    expect(controller.selectedField()).toBeNull();
+    expect(controller.fieldViewDeterminants()).toBeNull();
+    expect(controller.fieldReading([1, 1, 1])).toBeNull();
   });
 });

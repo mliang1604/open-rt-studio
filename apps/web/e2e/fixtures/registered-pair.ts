@@ -39,22 +39,82 @@ export async function showCt(page: Page): Promise<void> {
   );
 }
 
+/** What the probe says of a deformation field's wash, when one is on. */
+export interface FieldRead {
+  /** How far the field moves the place, in mm (the displacement wash). */
+  readonly mm?: number;
+  /** The field's Jacobian determinant there (the determinant wash). */
+  readonly determinant?: number;
+  /** Whether the probe says that the field folds there. */
+  readonly folds?: boolean;
+}
+
+/** What the probe says at a place of the pane. */
+export interface ProbeRead {
+  readonly voxel: [number, number, number];
+  readonly ct: number;
+  readonly mr: number | null;
+  /** Null with no wash on, and where the field has no vector to go by. */
+  readonly field: FieldRead | null;
+}
+
 /** What the probe says at a place of the main (axial) pane, in fractions of its width and height. */
-export async function probeAt(
-  page: Page,
-  fx: number,
-  fy: number,
-): Promise<{ voxel: [number, number, number]; ct: number; mr: number | null }> {
+export async function probeAt(page: Page, fx: number, fy: number): Promise<ProbeRead> {
   const pane = page.locator('.pane-overlay .pane').first();
   const box = (await pane.boundingBox())!;
   await page.mouse.move(box.x + box.width * fx, box.y + box.height * fy);
   const probe = page.locator('.probe');
   await expect(probe).toBeVisible();
   const text = await probe.innerText();
-  const match = /voxel \((\d+), (\d+), (\d+)\).* · value (-?\d+) HU(?: · MR (-?\d+))?$/.exec(text);
+  const match =
+    /voxel \((\d+), (\d+), (\d+)\).* · value (-?\d+) HU(?: · MR (-?\d+))?(?: · field moves (\d+\.\d+) mm| · Jacobian determinant (-?\d+\.\d+)( \(the field folds here\))?)?$/.exec(
+      text,
+    );
   expect(match, `unexpected probe text: ${text}`).not.toBeNull();
   const [x, y, z, ct] = match!.slice(1, 5).map(Number);
-  return { voxel: [x, y, z], ct, mr: match![5] === undefined ? null : Number(match![5]) };
+  const field: FieldRead | null =
+    match![6] !== undefined
+      ? { mm: Number(match![6]) }
+      : match![7] !== undefined
+        ? { determinant: Number(match![7]), folds: match![8] !== undefined }
+        : null;
+  return {
+    voxel: [x, y, z],
+    ct,
+    mr: match![5] === undefined ? null : Number(match![5]),
+    field,
+  };
+}
+
+/**
+ * The colour of the page as it is shown at a place, 0 to 255: the mean of
+ * the three by three pixels about it. The pointer is moved off the picture
+ * first.
+ */
+export async function pixelAt(
+  page: Page,
+  at: { x: number; y: number },
+): Promise<[number, number, number]> {
+  await page.mouse.move(2, 2);
+  const shot = await page.screenshot({
+    clip: { x: Math.round(at.x) - 1, y: Math.round(at.y) - 1, width: 3, height: 3 },
+  });
+  return page.evaluate(async (base64) => {
+    const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const sum = [0, 0, 0];
+    for (let i = 0; i < pixels.length; i += 4) {
+      sum[0] += pixels[i];
+      sum[1] += pixels[i + 1];
+      sum[2] += pixels[i + 2];
+    }
+    const count = pixels.length / 4;
+    return [sum[0] / count, sum[1] / count, sum[2] / count] as [number, number, number];
+  }, shot.toString('base64'));
 }
 
 /** The axial pane: the first, and the large one. */
@@ -77,11 +137,7 @@ export async function voxelPoint(
 }
 
 /** What the probe reads at the centre of a voxel of the CT's axial slice on screen. */
-export async function probeAtVoxel(
-  page: Page,
-  x: number,
-  y: number,
-): Promise<{ voxel: [number, number, number]; ct: number; mr: number | null }> {
+export async function probeAtVoxel(page: Page, x: number, y: number): Promise<ProbeRead> {
   const box = (await axial(page).boundingBox())!;
   const point = await voxelPoint(page, x, y);
   const read = await probeAt(page, (point.x - box.x) / box.width, (point.y - box.y) / box.height);

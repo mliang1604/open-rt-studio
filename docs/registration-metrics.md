@@ -132,7 +132,10 @@ it.
 ## What follows for the issues
 
 - #83 (field visualisation): the Jacobian determinant map comes first of
-  its views.
+  its views. Built with the displacement wash; see "A registration by a
+  deformation field in the viewer" in `architecture.md`. The map has no
+  limits drawn on it either: its legend says compression, no change,
+  expansion, and that stripes are a fold.
 - #84 (field-based metrics): the Jacobian determinant's numbers first;
   inverse consistency second, only when both directions exist; harmonic
   energy last. The first is built: see "Field measures as built".
@@ -261,7 +264,7 @@ a formula (`syntheticDeformationJacobian`): the grid's numbers are within
 0.02 of it inside the grid.
 
 Not done: inverse consistency, which needs a registration each way; harmonic
-or bending energy; the determinant as a map (#83). A structure of the
+or bending energy. A structure of the
 compared image is not offered, only those of the base image. The numbers
 were not compared with another program's. A large field is measured in the
 page's own thread, as structures are compared (#237).

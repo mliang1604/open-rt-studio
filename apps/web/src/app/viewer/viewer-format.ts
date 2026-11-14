@@ -33,11 +33,27 @@ function formatMm(value: number): string {
  * (towards the back) and S (towards the head). It is left out for a volume
  * with no recorded geometry, where there is no patient frame to state it in.
  */
+/**
+ * What a deformation field's wash stands for at a place: how far the field
+ * moves it, or the field's Jacobian determinant there.
+ */
+export type FieldReading =
+  | { readonly kind: 'displacement'; readonly mm: number }
+  | { readonly kind: 'jacobian'; readonly determinant: number };
+
+/** A field's reading as the probe says it; a fold is said in words. */
+export function formatFieldReading(reading: FieldReading): string {
+  if (reading.kind === 'displacement') return `field moves ${reading.mm.toFixed(2)} mm`;
+  const value = `Jacobian determinant ${reading.determinant.toFixed(2)}`;
+  return reading.determinant <= 0 ? `${value} (the field folds here)` : value;
+}
+
 export function formatProbe(
   name: string,
   probe: VoxelProbe,
   volume: Volume,
   others: ReadonlyArray<{ readonly layer: Layer; readonly sample: VoxelProbe }> = [],
+  field: FieldReading | null = null,
 ): string {
   const [x, y, z] = probe.voxel;
   const unit = modalityUnit(volume.modality);
@@ -52,7 +68,8 @@ export function formatProbe(
     })
     .join('');
   const position = volume.geometry ? ` · LPS (${probe.patient.map(formatMm).join(', ')}) mm` : '';
-  return `${name} · voxel (${x}, ${y}, ${z})${position} · value ${value}${stored}${overlays}`;
+  const fieldText = field ? ` · ${formatFieldReading(field)}` : '';
+  return `${name} · voxel (${x}, ${y}, ${z})${position} · value ${value}${stored}${overlays}${fieldText}`;
 }
 
 /** Join pane-local points into an SVG polyline `points` string. */
