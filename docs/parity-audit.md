@@ -166,7 +166,7 @@ are not regressions. Each has an issue.
 | #151  | Filled display of imported structures (added since, with a fill opacity)                                                                      | #104         |
 | #152  | Rename, recolour and delete for painted structures; listing them under Structures                                                             | #105         |
 | #155  | Tree view expansion remembered (added since)                                                                                                  | #33          |
-| #156  | Reopening a recent selection without picking the files again                                                                                  | #34          |
+| #156  | Reopening a recent selection without picking the files again (added since, for a folder or a single file in Chromium browsers)                | #34          |
 | #157  | Probe position in patient millimetres (added since)                                                                                           | #21          |
 
 #148 asked whether captured images and video should carry a

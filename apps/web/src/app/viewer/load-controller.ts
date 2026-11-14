@@ -4,6 +4,14 @@
 
 import { DestroyRef, Injectable, inject, type WritableSignal, signal } from '@angular/core';
 import { describeSelection, RecentStore, type RecentEntry } from '../recent-store';
+import { RecentHandles } from '../recent-handles';
+import {
+  droppedHandle,
+  ensureReadable,
+  filePickers,
+  filesOf,
+  type AccessHandle,
+} from '../file-access';
 import { demoPatient, demoPlanningCt } from '../demo-data';
 import { PatientCatalog } from '../patient-catalog';
 import { PreferencesStore } from '../preferences-store';
@@ -112,6 +120,7 @@ export class LoadController {
   private readonly catalog = inject(PatientCatalog);
   private readonly loadCoordinator = inject(LoadCoordinator);
   private readonly recentStore = inject(RecentStore);
+  private readonly handles = inject(RecentHandles);
   private readonly preferencesStore = inject(PreferencesStore);
   private readonly layersCtl = inject(LayersController);
   private readonly roiCtl = inject(RoiController);
@@ -217,8 +226,78 @@ export class LoadController {
       if (series) this.loadSeriesFromPanel(series, intent);
       return;
     }
+    // Both read the drop's items, which are gone after the first await.
+    const handle = droppedHandle(event.dataTransfer);
     const { files, entry } = await readDropped(event.dataTransfer);
-    if (files.length > 0) await this.loadFiles(files, entry, intent);
+    if (files.length === 0) return;
+    const imported = await this.loadFiles(files, entry, intent);
+    if (imported && entry) await this.keepHandle(entry, await handle);
+  }
+
+  /**
+   * Open folder: with the browser's directory picker where there is one, which
+   * gives a handle the Recent list can reopen; otherwise with the folder input.
+   */
+  async openFolder(input: HTMLInputElement): Promise<void> {
+    const pick = filePickers().directory;
+    if (!pick) {
+      input.click();
+      return;
+    }
+    let handle: AccessHandle;
+    try {
+      handle = await pick();
+    } catch (error) {
+      // Dismissed: nothing to do. Anything else (the browser would not show
+      // its picker) and the input opens instead, so the button never does nothing.
+      if (!isAbortError(error)) input.click();
+      return;
+    }
+    await this.loadFromHandle(handle, { label: handle.name, kind: 'folder' });
+  }
+
+  /** Open files: with the browser's file picker where there is one, else the file input. */
+  async openFiles(input: HTMLInputElement): Promise<void> {
+    const pick = filePickers().files;
+    if (!pick) {
+      input.click();
+      return;
+    }
+    let picked: AccessHandle[];
+    try {
+      picked = await pick();
+    } catch (error) {
+      if (!isAbortError(error)) input.click(); // as in openFolder
+      return;
+    }
+    const files = (await Promise.all(picked.map(filesOf))).flat();
+    if (files.length === 0) return;
+    const entry = describeSelection(files);
+    const imported = await this.loadFiles(files, entry);
+    // One file can be reopened from its handle. Several would each ask for
+    // permission again, so a set of files is picked again instead.
+    if (imported && picked.length === 1) await this.keepHandle(entry, picked[0]);
+  }
+
+  /** Whether choosing a recent entry reopens it, without the picker. */
+  reopens(entry: RecentEntry): boolean {
+    return this.handles.has(entry);
+  }
+
+  /** Read everything under a handle and import it; the handle is kept for the Recent list. */
+  private async loadFromHandle(handle: AccessHandle, entry: RecentEntry): Promise<boolean> {
+    const files = await filesOf(handle);
+    if (files.length === 0) {
+      this.flashNotice(`There are no files in ${handle.name}.`);
+      return false;
+    }
+    const imported = await this.loadFiles(files, entry);
+    if (imported) await this.keepHandle(entry, handle);
+    return imported;
+  }
+
+  private async keepHandle(entry: RecentEntry, handle: AccessHandle | null): Promise<void> {
+    if (handle) await this.handles.keep(entry, handle, this.recentStore.entries());
   }
 
   /**
@@ -303,15 +382,43 @@ export class LoadController {
   }
 
   /**
-   * Re-pick a recent entry. Browsers can't silently re-read a path, so this just
-   * re-opens the matching picker (folder or files) for the user to re-select.
+   * Reopen a recent entry. With a handle kept for it ({@link RecentHandles}),
+   * its files are read again, after the browser's permission prompt if this is
+   * a new session. Without one the matching picker opens for the user to select
+   * it again, which is all a browser without the File System Access API allows.
    */
-  onRecentPick(event: Event, folderInput: HTMLInputElement, filesInput: HTMLInputElement): void {
+  async onRecentPick(
+    event: Event,
+    folderInput: HTMLInputElement,
+    filesInput: HTMLInputElement,
+  ): Promise<void> {
     if (!(event.target instanceof HTMLSelectElement)) return;
     const entry = this.recentStore.entries()[Number(event.target.value)];
     event.target.selectedIndex = 0; // back to the "Recent…" placeholder so re-picking fires
     if (!entry) return;
-    (entry.kind === 'folder' ? folderInput : filesInput).click();
+    const repick = () => (entry.kind === 'folder' ? folderInput : filesInput).click();
+    // Decided without waiting for anything: a picker opens only in direct
+    // answer to the user's choice.
+    if (!this.handles.has(entry)) {
+      repick();
+      return;
+    }
+    const handle = await this.handles.handleFor(entry);
+    if (!handle) {
+      this.flashNotice(`${entry.label} has to be picked again.`);
+      return;
+    }
+    if (!(await ensureReadable(handle))) {
+      this.flashNotice(`Access to ${entry.label} was not given, so it was not opened.`);
+      return;
+    }
+    try {
+      await this.loadFromHandle(handle, { label: entry.label, kind: entry.kind });
+    } catch {
+      // Moved, renamed or deleted since: the handle leads nowhere now.
+      await this.handles.forget(entry);
+      this.flashNotice(`${entry.label} is no longer where it was. Pick it again.`);
+    }
   }
 
   /**

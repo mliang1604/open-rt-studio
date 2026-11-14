@@ -5,7 +5,7 @@
 <header class="toolbar" aria-label="Viewer controls">
   <strong class="brand">Open RT Studio</strong>
 
-  <button type="button" (click)="folderInput.click()">Open folder…</button>
+  <button type="button" (click)="loadCtl.openFolder(folderInput)">Open folder…</button>
   <input
     #folderInput
     type="file"
@@ -15,19 +15,22 @@
     (change)="loadCtl.onFilesSelected($event)"
   />
 
-  <button type="button" (click)="filesInput.click()">Open files…</button>
+  <button type="button" (click)="loadCtl.openFiles(filesInput)">Open files…</button>
   <input #filesInput type="file" multiple hidden (change)="loadCtl.onFilesSelected($event)" />
 
   @if (recent().length) {
     <label
       class="ctrl"
-      title="Re-open a recently loaded folder or file set — browsers can't silently re-read files, so this re-triggers the picker"
+      title="Reopen a recent folder or file. Where the browser kept access to it, it opens after one permission prompt; an entry marked “pick again” opens the picker instead"
     >
       Recent
       <select (change)="loadCtl.onRecentPick($event, folderInput, filesInput)">
         <option value="" disabled selected>Recent…</option>
         @for (entry of recent(); track $index; let i = $index) {
-          <option [value]="i">{{ entry.label }}{{ entry.overlay ? ' (overlay)' : '' }}</option>
+          <option [value]="i">
+            {{ entry.label }}{{ entry.overlay ? ' (overlay)' : ''
+            }}{{ loadCtl.reopens(entry) ? '' : ' · pick again' }}
+          </option>
         }
       </select>
     </label>
