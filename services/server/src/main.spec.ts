@@ -4,7 +4,12 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { syntheticCtSeries } from '@open-rt-studio/testdata';
 
 import { SERVER_VERSION } from './version.js';
 
@@ -86,6 +91,8 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
       server.child.kill(signal);
       expect(await server.exited).toBe(0);
       expect(server.log().map((entry) => entry['event'])).toEqual([
+        'pacs-in-memory',
+        'index-opened',
         'listening',
         'request',
         'stopping',
@@ -101,7 +108,9 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
   it('listens on this machine only unless told otherwise', async () => {
     const server = run({ OPEN_RT_STUDIO_PORT: '0' });
     await listeningPort(server);
-    expect(server.log()[0]).toMatchObject({ event: 'listening', host: '127.0.0.1' });
+    expect(server.log()).toContainEqual(
+      expect.objectContaining({ event: 'listening', host: '127.0.0.1' }),
+    );
     expect(server.log().some((entry) => entry['event'] === 'reachable-without-login')).toBe(false);
   }, 20_000);
 
@@ -115,6 +124,47 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
     );
   }, 20_000);
 
+  it('says that nothing is kept when it has no data directory', async () => {
+    const server = run({ OPEN_RT_STUDIO_PORT: '0' });
+    await listeningPort(server);
+    expect(server.log()[0]).toMatchObject({ level: 'warn', event: 'pacs-in-memory' });
+  }, 20_000);
+
+  it('keeps what was uploaded in its data directory, across a restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'open-rt-studio-data-'));
+    try {
+      const environment = { OPEN_RT_STUDIO_PORT: '0', OPEN_RT_STUDIO_DATA_DIR: directory };
+      const [slice] = syntheticCtSeries(1, 16);
+
+      const first = run(environment);
+      const port = await listeningPort(first);
+      expect(first.log().some((entry) => entry['event'] === 'pacs-in-memory')).toBe(false);
+      const uploaded = await fetch(`http://127.0.0.1:${port}/api/v1/instances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/dicom' },
+        body: slice.bytes,
+      });
+      expect(uploaded.status).toBe(201);
+      const { sopInstanceUid } = (await uploaded.json()) as { sopInstanceUid: string };
+      first.child.kill('SIGTERM');
+      expect(await first.exited).toBe(0);
+      expect((await readdir(directory)).sort()).toEqual(
+        expect.arrayContaining(['index.sqlite', 'store']),
+      );
+
+      const second = run(environment);
+      const again = await listeningPort(second);
+      const counts = await fetch(`http://127.0.0.1:${again}/api/v1/counts`);
+      expect(await counts.json()).toEqual({ patients: 1, studies: 1, series: 1, instances: 1 });
+      const file = await fetch(`http://127.0.0.1:${again}/api/v1/instances/${sopInstanceUid}/file`);
+      expect(new Uint8Array(await file.arrayBuffer())).toEqual(slice.bytes);
+      second.child.kill('SIGTERM');
+      expect(await second.exited).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('does not start on a wrong setting: it says which, and exits with 2', async () => {
     const server = run({ OPEN_RT_STUDIO_PORT: 'eighty' });
     expect(await server.exited).toBe(2);
@@ -127,8 +177,10 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
     const port = await listeningPort(first);
     const second = run({ OPEN_RT_STUDIO_PORT: String(port) });
     expect(await second.exited).toBe(1);
-    expect(second.log()).toMatchObject([
-      { level: 'error', event: 'start-failed', errorName: 'Error' },
-    ]);
+    expect(second.log().at(-1)).toMatchObject({
+      level: 'error',
+      event: 'start-failed',
+      errorName: 'Error',
+    });
   }, 20_000);
 });

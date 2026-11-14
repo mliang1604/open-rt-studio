@@ -251,7 +251,7 @@ export async function openFileStore(
       }
     },
 
-    async get(sopInstanceUid) {
+    async get(sopInstanceUid, part) {
       assertUid(sopInstanceUid);
       return inTurn(sopInstanceUid, async () => {
         const kept = await record(sopInstanceUid);
@@ -259,7 +259,7 @@ export async function openFileStore(
         // Opened here, within the turn: a reader that has the file open keeps
         // reading the bytes it began with if the instance is replaced.
         const handle = await open(join(root, instancePaths(sopInstanceUid).data(kept.sha256)), 'r');
-        return handle.createReadStream();
+        return handle.createReadStream(part);
       });
     },
 
