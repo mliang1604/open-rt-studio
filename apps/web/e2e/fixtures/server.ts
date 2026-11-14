@@ -3,7 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import type { SyntheticFile } from '@open-rt-studio/testdata';
 
@@ -18,15 +20,27 @@ export interface TestServer {
   stop(): Promise<void>;
 }
 
+export interface TestServerOptions {
+  /**
+   * An account for the server to have. With one, the server asks for a login
+   * as it does by default; without, it runs with no login at all.
+   */
+  readonly account?: { readonly name: string; readonly password: string };
+}
+
 let built = false;
 
 /**
- * Start the real server (`services/server`) on a free port of this machine,
- * keeping what it is given in memory. It is built first, once, so that
- * `npm run e2e` needs no step before it. `allowedOrigins` are the pages that
- * may use it from a browser; none unless given.
+ * Start the real server (`services/server`) on a free port of this machine.
+ * It is built first, once, so that `npm run e2e` needs no step before it.
+ * `allowedOrigins` are the pages that may use it from a browser; none unless
+ * given. Without an account it keeps what it is given in memory; with one,
+ * in a temporary directory that is removed when it stops.
  */
-export async function startTestServer(allowedOrigins: readonly string[] = []): Promise<TestServer> {
+export async function startTestServer(
+  allowedOrigins: readonly string[] = [],
+  options: TestServerOptions = {},
+): Promise<TestServer> {
   if (!built) {
     execFileSync(
       process.execPath,
@@ -35,21 +49,30 @@ export async function startTestServer(allowedOrigins: readonly string[] = []): P
     );
     built = true;
   }
-  const child: ChildProcess = spawn(
-    process.execPath,
-    [resolve(ROOT, 'services/server/dist/main.js')],
-    {
-      env: {
-        PATH: process.env['PATH'],
-        OPEN_RT_STUDIO_PORT: '0',
-        // No login: the viewer has no login screen yet (#55), and the server
-        // is on this machine only, which is where it allows that.
-        OPEN_RT_STUDIO_AUTH: 'none',
-        OPEN_RT_STUDIO_ALLOWED_ORIGINS: allowedOrigins.join(','),
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  const main = resolve(ROOT, 'services/server/dist/main.js');
+  const { account } = options;
+  // A server with accounts keeps them in a data directory, which goes when it stops.
+  const directory = account ? await mkdtemp(join(tmpdir(), 'open-rt-studio-e2e-')) : null;
+  const environment: Record<string, string | undefined> = {
+    PATH: process.env['PATH'],
+    OPEN_RT_STUDIO_PORT: '0',
+    OPEN_RT_STUDIO_ALLOWED_ORIGINS: allowedOrigins.join(','),
+    // Without an account to log in with: no login, which the server allows
+    // because it is on this machine only.
+    ...(directory ? { OPEN_RT_STUDIO_DATA_DIR: directory } : { OPEN_RT_STUDIO_AUTH: 'none' }),
+  };
+  if (account) {
+    // As an administrator of a server makes the first account: with the
+    // command, the password on standard input.
+    execFileSync(process.execPath, [main, 'account', 'add', account.name, '--admin'], {
+      env: environment,
+      input: `${account.password}\n`,
+    });
+  }
+  const child: ChildProcess = spawn(process.execPath, [main], {
+    env: environment,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let said = '';
   let complaints = '';
   child.stderr!.setEncoding('utf8').on('data', (chunk: string) => (complaints += chunk));
@@ -73,13 +96,28 @@ export async function startTestServer(allowedOrigins: readonly string[] = []): P
   });
   const address = `http://127.0.0.1:${port}`;
 
+  /** The token of a login as the account, for what the fixture itself asks of the server. */
+  let token: Promise<string> | null = null;
+  const login = async (): Promise<string> => {
+    const response = await fetch(`${address}/api/v1/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(account),
+    });
+    if (!response.ok) throw new Error(`The test server refused the login: ${response.status}`);
+    return ((await response.json()) as { token: string }).token;
+  };
+
   return {
     address,
     async upload(files) {
+      const authorization: Record<string, string> = account
+        ? { Authorization: `Bearer ${await (token ??= login())}` }
+        : {};
       for (const file of files) {
         const response = await fetch(`${address}/api/v1/instances`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/dicom' },
+          headers: { 'Content-Type': 'application/dicom', ...authorization },
           body: new Blob([file.bytes.slice().buffer]),
         });
         if (!response.ok) {
@@ -87,11 +125,13 @@ export async function startTestServer(allowedOrigins: readonly string[] = []): P
         }
       }
     },
-    stop: () =>
-      new Promise<void>((done) => {
+    async stop() {
+      await new Promise<void>((done) => {
         if (child.exitCode !== null) return done();
         child.once('exit', () => done());
         child.kill('SIGTERM');
-      }),
+      });
+      if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+    },
   };
 }

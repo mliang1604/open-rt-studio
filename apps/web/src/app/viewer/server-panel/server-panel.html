@@ -7,15 +7,69 @@
   <button type="button" (click)="closed.emit()" title="Close this card">Close</button>
 </div>
 
-@if (server(); as connected) {
-  <p class="server-state" role="status">Connected: {{ connected.label }}.</p>
+@if (loginOf(); as asking) {
+  <!-- The server wants to know who is asking before it shows anything. -->
+  <p class="server-state" role="status">
+    @if (ended()) {
+      Your login at {{ asking.label }} has ended. Log in again to go on.
+    } @else {
+      {{ asking.label }} asks for a login.
+    }
+  </p>
+  <form class="server-login" (submit)="onLogin($event)">
+    <label for="server-name">Name</label>
+    <input
+      id="server-name"
+      type="text"
+      spellcheck="false"
+      autocapitalize="none"
+      autocomplete="username"
+      [value]="name()"
+      (input)="onName($event)"
+    />
+    <label for="server-password">Password</label>
+    <input
+      #passwordField
+      id="server-password"
+      type="password"
+      autocomplete="current-password"
+      [value]="password()"
+      (input)="onPassword($event)"
+    />
+    <div class="server-actions">
+      <button type="submit" [disabled]="busy()">{{ busy() ? 'Logging in…' : 'Log in' }}</button>
+      @if (waiting()) {
+        <button type="button" (click)="onOtherServer()" title="Go back to the server's address">
+          Another server
+        </button>
+      } @else {
+        <button
+          type="button"
+          (click)="onDisconnect()"
+          title="Go back to opened files. The viewport is emptied"
+        >
+          Disconnect
+        </button>
+      }
+    </div>
+  </form>
+  <p class="server-note">
+    Your password goes to the server and is not kept in this browser. You are logged out when you
+    disconnect or reload the page.
+  </p>
+} @else if (server(); as connected) {
+  <p class="server-state" role="status">{{ connectedLine() }}</p>
   <div class="server-actions">
     <button
       type="button"
       (click)="onDisconnect()"
-      title="Go back to opened files. The viewport is emptied"
+      [title]="
+        loggedInAs()
+          ? 'Log out and go back to opened files. The viewport is emptied'
+          : 'Go back to opened files. The viewport is emptied'
+      "
     >
-      Disconnect
+      {{ loggedInAs() ? 'Log out and disconnect' : 'Disconnect' }}
     </button>
   </div>
   <app-server-browser

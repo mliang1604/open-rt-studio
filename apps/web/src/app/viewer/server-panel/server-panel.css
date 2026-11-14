@@ -55,6 +55,16 @@ form {
   min-width: 0;
 }
 
+/* Name and password, one under the other. */
+.server-login input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.server-login .server-actions {
+  margin-top: 4px;
+}
+
 p {
   margin: 0;
 }

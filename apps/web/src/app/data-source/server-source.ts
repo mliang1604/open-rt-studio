@@ -57,6 +57,16 @@ export class ServerError extends Error {
 }
 
 /** What a caller may replace: the network and the parser, in specs. */
+/**
+ * Who the viewer is to a server: the server has no accounts and answers
+ * anyone (`none`); it wants a login (`needed`, and `ended` when one that was
+ * in force no longer is); or the viewer is logged in.
+ */
+export type ServerLogin =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'needed'; readonly ended: boolean }
+  | { readonly kind: 'in'; readonly name: string; readonly role: string };
+
 export interface ServerSourceOptions {
   readonly fetch?: typeof fetch;
   readonly parse?: typeof parseFilesInWorkers;
@@ -246,6 +256,16 @@ export class ServerSource implements DataSource {
   private readonly files = new Map<string, number>();
   /** Which patient was asked for last; an answer for an earlier one is dropped. */
   private selection = 0;
+  /**
+   * The token of the login, sent with every request. It is kept here, in
+   * memory, and nowhere else: not in the browser's storage, where it would
+   * outlast the page and be readable by anything else that runs in it.
+   * Reloading the page logs out.
+   */
+  private token: string | null = null;
+  private readonly loginState = signal<ServerLogin>({ kind: 'none' });
+  /** Whether the server wants a login, and who is logged in. */
+  readonly login = this.loginState.asReadonly();
 
   /** The patients listed: the first {@link PATIENTS_LISTED} by name. */
   readonly patients = this.listed.asReadonly();
@@ -263,6 +283,95 @@ export class ServerSource implements DataSource {
     this.fetcher = options.fetch ?? ((input, init) => fetch(input, init));
     this.parse = options.parse ?? parseFilesInWorkers;
     this.parallel = Math.max(1, options.parallel ?? PARALLEL);
+  }
+
+  /**
+   * Ask the server who it takes the viewer for: {@link login} then says
+   * whether it wants a login. Rejects when it cannot be reached, or is not an
+   * Open RT Studio server.
+   */
+  async greet(signal?: AbortSignal): Promise<void> {
+    let said: { account: { name: string; role: string } | null };
+    try {
+      said = await this.json('/session', signal);
+    } catch (error) {
+      if (!(error instanceof ServerError)) throw error;
+      // ask() has noted that a login is needed.
+      if (error.status === 401) return;
+      // A server from before there were accounts has no such route, and no login.
+      if (error.status !== 404) throw error;
+      this.loginState.set({ kind: 'none' });
+      return;
+    }
+    const account = said.account;
+    this.loginState.set(
+      account ? { kind: 'in', name: account.name, role: account.role } : { kind: 'none' },
+    );
+  }
+
+  /**
+   * Log in, and list the server's patients. Rejects with what to tell the
+   * user: a wrong name or password, a name that is locked, a server that
+   * cannot be reached. The password is sent and not kept.
+   */
+  async logIn(name: string, password: string, signal?: AbortSignal): Promise<void> {
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.address}${API}/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, password }),
+        signal,
+      });
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      throw new ServerError(`The server at ${this.host} could not be reached.`, null, true);
+    }
+    if (response.status === 401) {
+      throw new ServerError('The name or the password is not right.', 401);
+    }
+    if (response.status === 429) {
+      const seconds = Number(response.headers.get('Retry-After'));
+      throw new ServerError(
+        `Too many wrong passwords for this name. ${waitSentence(seconds)}`,
+        429,
+      );
+    }
+    let said: { token?: string; account?: { name: string; role: string } };
+    try {
+      said = (await response.json()) as typeof said;
+    } catch {
+      said = {};
+    }
+    if (!response.ok || typeof said.token !== 'string' || !said.account) {
+      throw new ServerError(
+        `The server answered the login with status ${response.status}.`,
+        response.status,
+      );
+    }
+    this.token = said.token;
+    this.loginState.set({ kind: 'in', name: said.account.name, role: said.account.role });
+    await this.refresh(signal);
+  }
+
+  /**
+   * Log out: the token is forgotten here at once, and the server is told to
+   * end it. If the server cannot be told, the token ends there by itself
+   * when it has not been used for a while.
+   */
+  async logOut(): Promise<void> {
+    const token = this.token;
+    if (token === null) return;
+    this.token = null;
+    this.loginState.set({ kind: 'needed', ended: false });
+    try {
+      await this.fetcher(`${this.address}${API}/session`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Nothing to do about it from here.
+    }
   }
 
   /** Ask the server for its patients. Rejects when it cannot be reached or refuses. */
@@ -529,8 +638,16 @@ export class ServerSource implements DataSource {
    */
   private async ask(path: string, signal?: AbortSignal, init: RequestInit = {}): Promise<Response> {
     let response: Response;
+    const token = this.token;
     try {
-      response = await this.fetcher(`${this.address}${API}${path}`, { ...init, signal });
+      response = await this.fetcher(`${this.address}${API}${path}`, {
+        ...init,
+        headers: {
+          ...(init?.headers as Record<string, string> | undefined),
+          ...(token === null ? {} : { Authorization: `Bearer ${token}` }),
+        },
+        signal,
+      });
     } catch (error) {
       if (isAbortError(error)) throw error;
       // A browser gives no reason; these are the two there are.
@@ -541,6 +658,21 @@ export class ServerSource implements DataSource {
       );
     }
     if (response.ok) return response;
+    if (response.status === 401) {
+      // The server wants a login: there was none, or the one there was has
+      // ended (logged out elsewhere, not used for too long, account disabled).
+      const ended = token !== null;
+      if (this.token === token) {
+        this.token = null;
+        this.loginState.set({ kind: 'needed', ended });
+      }
+      throw new ServerError(
+        ended
+          ? `Your login at ${this.host} has ended. Choose "Server…" to log in again.`
+          : `The server at ${this.host} asks for a login.`,
+        401,
+      );
+    }
     let said = '';
     try {
       said = ((await response.json()) as { message?: string }).message ?? '';
@@ -554,15 +686,25 @@ export class ServerSource implements DataSource {
   }
 }
 
+/** "Try again in 30 seconds.", from what a server's `Retry-After` said. */
+function waitSentence(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return 'Try again in a while.';
+  if (seconds < 90) return `Try again in ${Math.ceil(seconds)} seconds.`;
+  return `Try again in ${Math.ceil(seconds / 60)} minutes.`;
+}
+
 /**
- * Reach a server and list its patients. Rejects when there is no Open RT
- * Studio server at the address, or it does not let this page in.
+ * Reach a server. One without accounts has its patients listed at once; one
+ * that wants a login is returned as it is ({@link ServerSource.login} says
+ * so), to be logged in to with {@link ServerSource.logIn}. Rejects when there
+ * is no Open RT Studio server at the address, or it does not let this page in.
  */
 export async function connectToServer(
   typed: string,
   options: ServerSourceOptions = {},
 ): Promise<ServerSource> {
   const source = new ServerSource(serverAddress(typed), options);
-  await source.refresh();
+  await source.greet();
+  if (source.login().kind !== 'needed') await source.refresh();
   return source;
 }

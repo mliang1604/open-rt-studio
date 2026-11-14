@@ -273,6 +273,13 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
     name can keep its owner out for as long as they keep trying; an address
     is easier to change than a name is to guess. Kept in memory, so a
     restart forgets it.
+  - **The viewer keeps the token in memory only**: not in `localStorage`,
+    `sessionStorage` or a cookie, where it would outlast the page and be
+    readable by any script that got to run in it. Reloading the page logs
+    out, and Disconnect tells the server to end the session. The password is
+    held only while the form is filled in. A login that ends while the
+    viewer is in use (401) is noticed at the next request: what is on screen
+    stays, and the server card asks for the login again.
   - Not there: HTTPS (#57), an audit log (#56), identity providers. The
     account store is behind an interface (`AccountStore`) and logins behind
     another (`Accounts`), which is where a provider would go.
