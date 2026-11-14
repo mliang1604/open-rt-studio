@@ -35,9 +35,11 @@ const JOB_ID: ParameterDoc = {
 };
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/** The job a request names, noted for the audit record. */
 function idOf(request: RouteRequest): string {
   const id = request.params['jobId'];
   if (!ID.test(id)) throw new HttpError(400, 'invalid-id', 'That is not a job id.');
+  request.audit({ object: id });
   return id;
 }
 
@@ -67,6 +69,7 @@ export function jobRoutes(jobs: JobManager): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/job-kinds`,
+      audit: false,
       handle: () => ({ status: 200, body: { items: jobs.kinds } }),
       doc: {
         tag: 'Jobs',
@@ -79,6 +82,7 @@ export function jobRoutes(jobs: JobManager): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/jobs`,
+      audit: 'job-read',
       handle: (request) => {
         const get = queryOf(request, listParameters);
         const status = get('status');
@@ -119,6 +123,7 @@ export function jobRoutes(jobs: JobManager): Route[] {
     {
       method: 'POST',
       path: `${API_PREFIX}/jobs`,
+      audit: 'job-start',
       handle: async (request) => {
         queryOf(request, []);
         const media = (request.header('content-type') ?? '').split(';')[0].trim().toLowerCase();
@@ -148,8 +153,11 @@ export function jobRoutes(jobs: JobManager): Route[] {
         ) {
           throw invalid();
         }
+        request.audit({ detail: kind });
         try {
-          return { status: 202, body: await jobs.submit(kind, inputs as JsonObject) };
+          const job = await jobs.submit(kind, inputs as JsonObject);
+          request.audit({ object: job.id });
+          return { status: 202, body: job };
         } catch (error) {
           if (error instanceof UnknownJobKindError) {
             throw new HttpError(400, 'unknown-kind', error.message);
@@ -185,6 +193,7 @@ export function jobRoutes(jobs: JobManager): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/jobs/:jobId`,
+      audit: 'job-read',
       handle: (request) => ({ status: 200, body: found(jobs.get(idOf(request))) }),
       doc: {
         tag: 'Jobs',
@@ -200,6 +209,7 @@ export function jobRoutes(jobs: JobManager): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/jobs/:jobId/log`,
+      audit: 'job-read',
       handle: (request) => {
         const id = idOf(request);
         const limit = whole(queryOf(request, logParameters)('limit'), 'limit', 200, MAX_LIMIT);
@@ -219,6 +229,7 @@ export function jobRoutes(jobs: JobManager): Route[] {
     {
       method: 'POST',
       path: `${API_PREFIX}/jobs/:jobId/cancel`,
+      audit: 'job-cancel',
       handle: (request) => ({ status: 200, body: found(jobs.cancel(idOf(request))) }),
       doc: {
         tag: 'Jobs',

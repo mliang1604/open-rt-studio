@@ -5,6 +5,8 @@
 import { ACCOUNT_USAGE, runAccountCommand } from './account-cli.js';
 import { openSqliteAccountStore } from './accounts/account-store.js';
 import { createAccounts, type Accounts } from './accounts/accounts.js';
+import { openSqliteAuditStore } from './audit/audit-store.js';
+import { createAuditLog, type AuditLog } from './audit/audit.js';
 
 // The command's own logic, with the passwords handed to it. That it reads
 // them from standard input, and works on the data directory a server has
@@ -22,6 +24,12 @@ interface Ran {
 }
 
 let accounts: Accounts;
+/** Where the command writes what it did, in the tests that give it one. */
+let audit: AuditLog | null = null;
+afterEach(() => {
+  audit?.close();
+  audit = null;
+});
 beforeEach(() => {
   accounts = createAccounts({
     store: openSqliteAccountStore(':memory:'),
@@ -40,15 +48,20 @@ async function run(
   const err: string[] = [];
   const prompts: string[] = [];
   const left = [...passwords];
-  const code = await runAccountCommand(args, accounts, {
-    out: (line) => out.push(line),
-    err: (line) => err.push(line),
-    interactive,
-    readPassword: (prompt) => {
-      prompts.push(prompt);
-      return Promise.resolve(left.shift() ?? '');
+  const code = await runAccountCommand(
+    args,
+    accounts,
+    {
+      out: (line) => out.push(line),
+      err: (line) => err.push(line),
+      interactive,
+      readPassword: (prompt) => {
+        prompts.push(prompt);
+        return Promise.resolve(left.shift() ?? '');
+      },
     },
-  });
+    audit ? { log: audit, osUser: 'operator' } : undefined,
+  );
   return { code, out, err, prompts };
 }
 
@@ -196,5 +209,92 @@ describe('the other commands', () => {
     [['enable', 'ada', 'now']],
   ])('does not understand %j', async (args) => {
     expect(await run(args)).toMatchObject({ code: 2, out: [], err: ACCOUNT_USAGE });
+  });
+});
+
+describe('with an audit log', () => {
+  beforeEach(() => {
+    audit = createAuditLog({ store: openSqliteAuditStore(':memory:') });
+  });
+  const records = () => [...audit!.all()];
+
+  it('writes down what was done to which account, as done by a command, and by whom on the machine', async () => {
+    await run(['add', 'Root', '--admin'], [PASSWORD]);
+    await run(['add', 'ada'], [PASSWORD]);
+    await run(['role', 'ada', 'admin']);
+    await run(['disable', 'ada']);
+    await run(['enable', 'ada']);
+    await run(['password', 'ada'], [OTHER_PASSWORD]);
+    await run(['list']);
+    await run(['remove', 'ada']);
+    const command = { actor: null, origin: 'command', outcome: 'ok', patientId: null };
+    expect(records()).toMatchObject([
+      {
+        ...command,
+        action: 'account-create',
+        object: 'root',
+        detail: 'role=admin os-user=operator',
+      },
+      { ...command, action: 'account-create', object: 'ada', detail: 'role=user os-user=operator' },
+      {
+        ...command,
+        action: 'account-change',
+        object: 'ada',
+        detail: 'role=admin os-user=operator',
+      },
+      {
+        ...command,
+        action: 'account-change',
+        object: 'ada',
+        detail: 'disabled=true os-user=operator',
+      },
+      {
+        ...command,
+        action: 'account-change',
+        object: 'ada',
+        detail: 'disabled=false os-user=operator',
+      },
+      { ...command, action: 'account-change', object: 'ada', detail: 'password os-user=operator' },
+      { ...command, action: 'accounts-list', object: null, detail: 'os-user=operator' },
+      { ...command, action: 'account-remove', object: 'ada', detail: 'os-user=operator' },
+    ]);
+    const all = JSON.stringify(records());
+    expect(all).not.toContain(PASSWORD);
+    expect(all).not.toContain(OTHER_PASSWORD);
+  });
+
+  it('writes down what could not be done, and how it ended', async () => {
+    await run(['add', 'root', '--admin'], [PASSWORD]);
+    await run(['add', 'root'], [PASSWORD]);
+    await run(['add', 'ada'], ['short']);
+    await run(['add', 'ada'], [PASSWORD, OTHER_PASSWORD], true);
+    await run(['remove', 'nobody']);
+    await run(['role', 'nobody', 'admin']);
+    await run(['remove', 'root']);
+    expect(records().slice(1)).toMatchObject([
+      { action: 'account-create', object: 'root', outcome: 'rejected', count: 1 },
+      // A password too short, then two that differ: the same thing, refused twice.
+      { action: 'account-create', object: 'ada', outcome: 'rejected', count: 2 },
+      { action: 'account-remove', object: 'nobody', outcome: 'not-found' },
+      { action: 'account-change', object: 'nobody', outcome: 'not-found' },
+      { action: 'account-remove', object: 'root', outcome: 'rejected' },
+    ]);
+  });
+
+  it('writes nothing for a command it did not understand', async () => {
+    expect((await run(['promote', 'ada'])).code).toBe(2);
+    expect((await run(['remove'])).code).toBe(2);
+    expect(records()).toEqual([]);
+  });
+
+  it('says so, and fails, when what it did could not be written down', async () => {
+    audit!.close();
+    const made = await run(['add', 'ada'], [PASSWORD]);
+    expect(made).toMatchObject({
+      code: 1,
+      out: ['Made ada (user).'],
+      err: ['This could not be written to the audit log.'],
+    });
+    // Closed already; the afterEach closes it again, which does nothing.
   });
 });

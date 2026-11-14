@@ -21,6 +21,8 @@ export function openApiDocument(
   routes: readonly Route[],
   options: {
     /** Whether the server has accounts, and its routes ask for a login. */ readonly login?: boolean;
+    /** Whether the server keeps an audit log: then each route says what it is recorded as. */
+    readonly audit?: boolean;
   } = {},
 ): Record<string, unknown> {
   const paths: Record<string, Record<string, unknown>> = {};
@@ -50,6 +52,8 @@ export function openApiDocument(
         ? { security: (route.access ?? 'user') === 'public' ? [] : [{ token: [] }] }
         : {}),
       ...(options.login && route.access === 'admin' ? { 'x-role': 'admin' } : {}),
+      // What the audit log calls a request to this route; false when it keeps none.
+      ...(options.audit ? { 'x-audit': route.audit ?? 'request' } : {}),
       summary: doc.summary,
       ...(doc.description ? { description: doc.description } : {}),
       parameters: (doc.parameters ?? []).map((parameter) => ({
@@ -80,7 +84,11 @@ export function openApiDocument(
         (options.login
           ? 'Log in with `POST /api/v1/session` and send the token it gives with every request; ' +
             'a route marked `x-role: admin` is for administrators.'
-          : 'This server has no accounts: whoever can reach it can use this API.'),
+          : 'This server has no accounts: whoever can reach it can use this API.') +
+        (options.audit
+          ? ' Requests are written to an audit log, as the action `x-audit` names; `false` ' +
+            'marks the few that are not.'
+          : ''),
       license: { name: 'MPL-2.0', identifier: 'MPL-2.0' },
     },
     paths,

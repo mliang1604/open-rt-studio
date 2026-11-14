@@ -40,7 +40,12 @@ application. Never commit patient data or real DICOM files
   server: accounts, roles and sessions. A route answers only a logged-in
   user unless it sets `access` (`public` or `admin`); leave it out for
   anything that reads or changes what the server holds. Account names,
-  passwords and tokens are never logged.
+  passwords and tokens are never logged. `src/audit` is who did what: the
+  host writes an audit record for every request unless the route says
+  `audit: false`; a new route names its `audit` action, tells the record
+  whose data it touched with `request.audit(...)`, and gets a call in
+  `src/log-identifiers.spec.ts`, which searches the application log for
+  identifiers.
 - `apps/desktop`, `native/`: placeholders until M2 and M3.
 - `docs/`: architecture, license headers, test data policy, and the parity
   audit against dicom-workspace.

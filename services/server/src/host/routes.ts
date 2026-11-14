@@ -5,7 +5,23 @@
 import type { Readable } from 'node:stream';
 
 import type { Session } from '../accounts/accounts.js';
+import type { AuditAction } from '../audit/audit-store.js';
 import type { ServerCore } from '../core/core.js';
+
+/**
+ * What a route says for the audit record of its request, beyond what the
+ * host knows already (who asked, which route, how it ended): whose data it
+ * was, and what else is worth keeping. Null takes back what was said.
+ */
+export interface AuditNote {
+  /** Who did it, when that is not the session's account: the account a login was for. */
+  actor?: string | null;
+  patientId?: string | null;
+  studyUid?: string | null;
+  seriesUid?: string | null;
+  object?: string | null;
+  detail?: string | null;
+}
 
 /** What a route is asked with. */
 export interface RouteRequest {
@@ -21,6 +37,12 @@ export interface RouteRequest {
   readonly session: Session | null;
   /** The token the request came with, when it stands for a session. */
   readonly token: string | null;
+  /**
+   * Say something for the audit record of this request. It may be called
+   * more than once, as more is known; the record is written when the route
+   * has answered or thrown, and before anything is sent.
+   */
+  audit(note: AuditNote): void;
   /**
    * The request's body, read whole. Rejects with a 413 {@link HttpError}
    * when it is longer than `maxBytes`.
@@ -88,6 +110,14 @@ export interface Route {
    * one part and names it: `/api/v1/studies/:studyUid/series`.
    */
   readonly path: string;
+  /**
+   * What the audit log calls a request to this route. Left out, the request
+   * is recorded all the same, as a `request` named by the route's pattern:
+   * a route is audited unless it says `false`, which is for what touches no
+   * one's data and changes nothing (the health of the server, its
+   * description).
+   */
+  readonly audit?: AuditAction | false;
   handle(request: RouteRequest): RouteResponse | Promise<RouteResponse>;
   readonly doc?: RouteDoc;
 }
@@ -143,6 +173,7 @@ export function healthRoute(core: ServerCore): Route {
     path: '/health',
     // What watches the server (a container's health check) has no login.
     access: 'public',
+    audit: false,
     handle: () => {
       const health = core.health();
       return { status: health.status === 'ok' ? 200 : 503, body: health };

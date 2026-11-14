@@ -37,6 +37,8 @@ export interface ApiOptions {
   readonly described?: readonly Route[];
   /** Whether the server has accounts, for the description to say how to log in. */
   readonly login?: boolean;
+  /** Whether the server keeps an audit log, for the description to say what is recorded. */
+  readonly audit?: boolean;
 }
 
 export const LIMIT: ParameterDoc = {
@@ -88,6 +90,26 @@ export function queryOf(request: RouteRequest, known: readonly ParameterDoc[]) {
     }
   }
   return (name: string): string | undefined => request.query.get(name) ?? undefined;
+}
+
+/**
+ * What was searched for, for the audit record: the parameters of these names
+ * that were given, as JSON. Null when none was.
+ */
+export function searched(
+  get: (name: string) => string | undefined,
+  names: readonly string[],
+): string | null {
+  const given = names.flatMap((name) => {
+    const value = get(name);
+    return value === undefined || value === '' ? [] : [[name, value] as const];
+  });
+  return given.length === 0 ? null : JSON.stringify(Object.fromEntries(given));
+}
+
+/** A value that was searched for whole, with no wildcard in it; null otherwise. */
+export function exactly(value: string | undefined): string | null {
+  return value === undefined || value === '' || /[*?]/.test(value) ? null : value;
 }
 
 export function whole(
@@ -246,10 +268,46 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     },
   ];
 
+  // What a route tells the audit log of whose data it touched. A UID is noted
+  // as it was asked for, before it is known whether the server has it: a
+  // request for what is not there is recorded too.
+  const patientOf = async (studyInstanceUid: string): Promise<string | null> =>
+    (await index.getStudy(studyInstanceUid))?.patientId ?? null;
+  const studyFor = async (request: RouteRequest, uid: string) => {
+    request.audit({ studyUid: uid });
+    const study = found(await index.getStudy(uid));
+    request.audit({ patientId: study.patientId });
+    return study;
+  };
+  const seriesFor = async (request: RouteRequest, uid: string) => {
+    request.audit({ seriesUid: uid });
+    const series = found(await index.getSeries(uid));
+    request.audit({
+      studyUid: series.studyInstanceUid,
+      patientId: await patientOf(series.studyInstanceUid),
+    });
+    return series;
+  };
+  // An instance that is found is recorded by its series, so that the files
+  // of a series, fetched one after another, are one record with a count.
+  const instanceFor = async (request: RouteRequest, uid: string) => {
+    request.audit({ object: uid });
+    const instance = found(await index.getInstance(uid));
+    request.audit({
+      object: null,
+      seriesUid: instance.seriesInstanceUid,
+      studyUid: instance.studyInstanceUid,
+      patientId: await patientOf(instance.studyInstanceUid),
+    });
+    return instance;
+  };
+
   const routes: Route[] = [
     {
       method: 'GET',
       path: `${API_PREFIX}/counts`,
+      // Numbers, of no one in particular.
+      audit: false,
       handle: async () => ({ status: 200, body: await index.counts() }),
       doc: {
         tag: 'Browse',
@@ -260,8 +318,13 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/patients`,
+      audit: 'patients-list',
       handle: (request) => {
         const get = queryOf(request, patientParameters);
+        request.audit({
+          patientId: exactly(get('patientId')),
+          detail: searched(get, ['patientId', 'name']),
+        });
         return listOf(pageOf(get), (page) =>
           index.findPatients({ patientId: get('patientId'), name: get('name'), ...page }),
         );
@@ -279,9 +342,16 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/studies`,
+      audit: 'studies-search',
       handle: (request) => {
         const get = queryOf(request, studyParameters);
         const key = get('patientKey');
+        request.audit({
+          patientId: exactly(get('patientId')),
+          detail: searched(get, [
+            ...['patientId', 'patientName', 'date', 'accessionNumber', 'description', 'modality'],
+          ]),
+        });
         const order = get('order') ?? 'newest';
         if (!isStudyOrder(order)) {
           throw new HttpError(
@@ -290,8 +360,8 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
             `order must be one of: ${STUDY_ORDERS.join(', ')}.`,
           );
         }
-        return listOf(pageOf(get), (page) =>
-          index.findStudies({
+        return listOf(pageOf(get), async (page) => {
+          const studies = await index.findStudies({
             order,
             patientKey:
               key === undefined ? undefined : whole(key, 'patientKey', 0, Number.MAX_SAFE_INTEGER),
@@ -302,8 +372,13 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
             description: get('description'),
             modality: get('modality'),
             ...page,
-          }),
-        );
+          });
+          // The studies of one patient, asked for by the server's key for them.
+          if (key !== undefined && studies.length > 0) {
+            request.audit({ patientId: studies[0].patientId });
+          }
+          return studies;
+        });
       },
       doc: {
         tag: 'Browse',
@@ -319,9 +394,10 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/studies/:studyUid`,
+      audit: 'study-read',
       handle: async (request) => ({
         status: 200,
-        body: found(await index.getStudy(uidOf(request, 'studyUid'))),
+        body: await studyFor(request, uidOf(request, 'studyUid')),
       }),
       doc: {
         tag: 'Browse',
@@ -337,11 +413,12 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/studies/:studyUid/series`,
+      audit: 'study-read',
       handle: async (request) => {
         const studyInstanceUid = uidOf(request, 'studyUid');
         const get = queryOf(request, seriesParameters);
         const page = pageOf(get);
-        found(await index.getStudy(studyInstanceUid));
+        await studyFor(request, studyInstanceUid);
         return listOf(page, (part) =>
           index.findSeries({ studyInstanceUid, modality: get('modality'), ...part }),
         );
@@ -360,9 +437,10 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/series/:seriesUid`,
+      audit: 'series-read',
       handle: async (request) => ({
         status: 200,
-        body: found(await index.getSeries(uidOf(request, 'seriesUid'))),
+        body: await seriesFor(request, uidOf(request, 'seriesUid')),
       }),
       doc: {
         tag: 'Browse',
@@ -378,10 +456,11 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/series/:seriesUid/instances`,
+      audit: 'series-read',
       handle: async (request) => {
         const seriesInstanceUid = uidOf(request, 'seriesUid');
         const page = pageOf(queryOf(request, instanceParameters));
-        found(await index.getSeries(seriesInstanceUid));
+        await seriesFor(request, seriesInstanceUid);
         return listOf(page, (part) => index.findInstances({ seriesInstanceUid, ...part }));
       },
       doc: {
@@ -400,10 +479,12 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/series/:seriesUid/related`,
-      handle: async (request) => ({
-        status: 200,
-        body: found(await index.relatedToSeries(uidOf(request, 'seriesUid'))),
-      }),
+      audit: 'series-read',
+      handle: async (request) => {
+        const uid = uidOf(request, 'seriesUid');
+        await seriesFor(request, uid);
+        return { status: 200, body: found(await index.relatedToSeries(uid)) };
+      },
       doc: {
         tag: 'Browse',
         summary: 'The radiotherapy objects that belong to an image series',
@@ -420,9 +501,10 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/instances/:sopInstanceUid`,
+      audit: 'instance-read',
       handle: async (request) => {
         const uid = uidOf(request, 'sopInstanceUid');
-        const instance = found(await index.getInstance(uid));
+        const instance = await instanceFor(request, uid);
         return { status: 200, body: { ...instance, references: await index.referencesFrom(uid) } };
       },
       doc: {
@@ -439,9 +521,10 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/instances/:sopInstanceUid/file`,
+      audit: 'instance-download',
       handle: async (request) => {
         const uid = uidOf(request, 'sopInstanceUid');
-        const instance = found(await index.getInstance(uid));
+        const instance = await instanceFor(request, uid);
         // The checksum names the content: a caller that has these bytes need not fetch them again.
         const etag = `"${instance.sha256}"`;
         const headers = {
@@ -492,6 +575,7 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
     {
       method: 'POST',
       path: `${API_PREFIX}/instances`,
+      audit: 'instance-upload',
       handle: async (request) => {
         const get = queryOf(request, uploadParameters);
         const onDifferent = get('onDifferent') ?? 'keep';
@@ -514,6 +598,8 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
           if (!(error instanceof CoreStoppingError)) throw error;
           throw new HttpError(503, 'stopping', 'The server is stopping and takes no uploads.');
         }
+        // What became of it: stored, unchanged, replaced, or why not.
+        request.audit({ detail: result.outcome === 'refused' ? result.reason : result.outcome });
         if (result.outcome === 'refused') {
           const unreadable = result.reason === 'not-dicom' || result.reason === 'incomplete';
           throw new HttpError(
@@ -523,6 +609,15 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
               ? 'The body is not a DICOM file that can be filed.'
               : 'The server holds this differently, and has kept what it had.',
           );
+        }
+        // Recorded by its series, as a download is.
+        const filed = await index.getInstance(result.sopInstanceUid);
+        if (filed) {
+          request.audit({
+            seriesUid: filed.seriesInstanceUid,
+            studyUid: filed.studyInstanceUid,
+            patientId: await patientOf(filed.studyInstanceUid),
+          });
         }
         return {
           status: result.outcome === 'stored' ? 201 : 200,
@@ -565,12 +660,14 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
   const description: Route = {
     method: 'GET',
     path: `${API_PREFIX}/openapi.json`,
+    audit: false,
     // What the API is, not what the server holds: a client reads it to find the login.
     access: 'public',
     handle: () => ({
       status: 200,
       body: openApiDocument([...(options.described ?? []), ...routes, description], {
         login: options.login ?? false,
+        audit: options.audit ?? false,
       }),
     }),
     doc: {

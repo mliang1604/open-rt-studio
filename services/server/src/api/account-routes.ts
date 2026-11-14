@@ -96,12 +96,17 @@ export function accountRoutes(accounts: Accounts): Route[] {
       method: 'POST',
       path: `${API_PREFIX}/session`,
       access: 'public',
+      audit: 'login',
       async handle(request) {
         const body = await fields(request, ['name', 'password']);
-        const result = await accounts.login(
-          textOf(body.name, 'The name'),
-          textOf(body.password, 'The password'),
-        );
+        const name = textOf(body.name, 'The name');
+        const result = await accounts.login(name, textOf(body.password, 'The password'));
+        // Whose login it was, when the name is an account's. What was typed
+        // in place of a name may be a password, and is not kept.
+        request.audit({
+          actor: result.ok ? result.session.account.name : (accounts.get(name)?.name ?? null),
+          detail: result.ok || result.reason !== 'locked' ? null : 'locked',
+        });
         if (result.ok) {
           return { status: 200, body: { token: result.token, ...sessionBody(result.session) } };
         }
@@ -139,6 +144,8 @@ export function accountRoutes(accounts: Accounts): Route[] {
     {
       method: 'GET',
       path: `${API_PREFIX}/session`,
+      // Asking who one is touches no one's data.
+      audit: false,
       handle(request) {
         queryOf(request, []);
         return { status: 200, body: sessionBody(request.session!) };
@@ -155,6 +162,7 @@ export function accountRoutes(accounts: Accounts): Route[] {
     {
       method: 'DELETE',
       path: `${API_PREFIX}/session`,
+      audit: 'logout',
       handle(request) {
         queryOf(request, []);
         accounts.logout(request.token!);
@@ -169,6 +177,7 @@ export function accountRoutes(accounts: Accounts): Route[] {
     {
       method: 'PUT',
       path: `${API_PREFIX}/session/password`,
+      audit: 'password-change',
       async handle(request) {
         const body = await fields(request, ['current', 'next']);
         const { name } = request.session!.account;
@@ -208,6 +217,7 @@ export function accountRoutes(accounts: Accounts): Route[] {
       method: 'GET',
       path: `${API_PREFIX}/accounts`,
       access: 'admin',
+      audit: 'accounts-list',
       handle(request) {
         queryOf(request, []);
         return { status: 200, body: { accounts: accounts.list() } };
@@ -226,14 +236,14 @@ export function accountRoutes(accounts: Accounts): Route[] {
       method: 'POST',
       path: `${API_PREFIX}/accounts`,
       access: 'admin',
+      audit: 'account-create',
       async handle(request) {
         const body = await fields(request, ['name', 'password', 'role']);
+        const name = textOf(body.name, 'The name');
+        const role = roleOf(body.role ?? 'user');
+        request.audit({ object: name, detail: `role=${role}` });
         try {
-          const account = await accounts.add(
-            textOf(body.name, 'The name'),
-            textOf(body.password, 'The password'),
-            roleOf(body.role ?? 'user'),
-          );
+          const account = await accounts.add(name, textOf(body.password, 'The password'), role);
           return { status: 201, body: account };
         } catch (error) {
           return refused(error);
@@ -256,8 +266,10 @@ export function accountRoutes(accounts: Accounts): Route[] {
       method: 'PUT',
       path: `${API_PREFIX}/accounts/:name`,
       access: 'admin',
+      audit: 'account-change',
       async handle(request) {
         const name = request.params['name'];
+        request.audit({ object: name });
         const body = await fields(request, ['role', 'disabled', 'password']);
         if (body.disabled !== undefined && typeof body.disabled !== 'boolean') {
           throw invalid('"disabled" is true or false.');
@@ -269,6 +281,15 @@ export function accountRoutes(accounts: Accounts): Route[] {
           body.password === undefined ? undefined : textOf(body.password, 'The password');
         const weak = password === undefined ? null : passwordProblem(password);
         if (weak) throw new HttpError(400, 'weak-password', weak);
+        // What was asked to change. That a password was, and never what to.
+        request.audit({
+          detail:
+            [
+              ...(role === undefined ? [] : [`role=${role}`]),
+              ...(body.disabled === undefined ? [] : [`disabled=${body.disabled}`]),
+              ...(password === undefined ? [] : ['password']),
+            ].join(' ') || null,
+        });
         if (!accounts.get(name)) throw noSuchAccount();
         try {
           if (role !== undefined) accounts.setRole(name, role);
@@ -303,7 +324,9 @@ export function accountRoutes(accounts: Accounts): Route[] {
       method: 'DELETE',
       path: `${API_PREFIX}/accounts/:name`,
       access: 'admin',
+      audit: 'account-remove',
       handle(request) {
+        request.audit({ object: request.params['name'] });
         queryOf(request, []);
         try {
           if (!accounts.remove(request.params['name'])) throw noSuchAccount();
@@ -339,6 +362,7 @@ export function openSessionRoute(): Route {
     method: 'GET',
     path: `${API_PREFIX}/session`,
     access: 'public',
+    audit: false,
     handle(request) {
       queryOf(request, []);
       return { status: 200, body: { account: null, expiresAt: null } };

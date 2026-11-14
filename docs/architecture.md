@@ -280,12 +280,50 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
     held only while the form is filled in. A login that ends while the
     viewer is in use (401) is noticed at the next request: what is on screen
     stays, and the server card asks for the login again.
-  - Not there: HTTPS (#57), an audit log (#56), identity providers. The
+  - Not there: HTTPS (#57), identity providers. The
     account store is behind an interface (`AccountStore`) and logins behind
     another (`Accounts`), which is where a provider would go.
 
   Status: **decided, and Michael's to overturn**, the default of `auth` most
   of all: `npm start` with no settings no longer starts a server.
+
+- **Who did what** (#56). An audit log in a SQLite file of its own
+  (`audit.sqlite`), apart from the application log: the one holds
+  identifiers and is for an administrator, the other holds none and is for
+  whoever runs the machine. What was decided, and why:
+  - **The host writes the record, not each route.** A route says what a
+    request to it is called (`audit`) and adds whose data it touched; who
+    asked and how it ended the host knows. A route that says nothing is
+    recorded anyway, as a `request`: forgetting must not leave a hole, the
+    same reasoning as for `access`. Five routes say `audit: false`, and a
+    test lists them.
+  - **Written before the answer, and no answer without it.** A read whose
+    record cannot be written gives nothing away. The cost is that a full
+    disk stops the server answering, and that an upload is stored before it
+    is known that the record failed. The other way round (answer first, log
+    after) loses records exactly when something is wrong.
+  - **The same thing done again is counted on one record**, for as long as
+    it recurs within 5 minutes and for an hour at most, and files are
+    recorded by their series. Otherwise loading one series is 300 records
+    and the log is unreadable. What is lost: which files, and the time of
+    each. A count costs one `UPDATE` (0.2 ms a request on the machine this
+    was measured on).
+  - **Append-only by the file's own rules.** Triggers refuse `DELETE`, and
+    any `UPDATE` but a count going up. That guards against a bug or a hasty
+    hand, not against someone who can write the file; there is no chain of
+    hashes and no copy elsewhere.
+  - **A failed login names the account only when the name is one.** What is
+    typed in the name field by mistake is sometimes a password.
+  - **Searches are recorded with what was searched for.** Who looked for
+    whom is what the log is for. It means the log holds patient names that
+    were typed, and must be guarded like the data.
+  - **Requests without a login are not recorded.** Anyone can send them, and
+    recording them would let anyone fill the disk.
+  - Not there: retention and clearing of old records and a screen in the
+    viewer (#213), DIMSE events (#212), a second copy off the machine.
+
+  Status: **decided, and Michael's to overturn**, most of all the choice to
+  stop answering when the log cannot be written.
 
 - The file store (#42) names an instance's files by the SHA-256 of its SOP
   Instance UID, so that paths hold no patient identifier and not the UID
