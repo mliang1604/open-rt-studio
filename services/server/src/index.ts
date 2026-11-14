@@ -123,6 +123,7 @@ export {
   type Relation,
   type SeriesQuery,
   type SeriesRecord,
+  type StudyOrder,
   type StudyQuery,
   type StudyRecord,
 } from './pacs-index/pacs-index.js';

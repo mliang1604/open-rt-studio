@@ -3,13 +3,18 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { syntheticRtCourse, SYNTHETIC_STUDY } from '@open-rt-studio/testdata';
+import {
+  SYNTHETIC_FOLLOW_UP_STUDY,
+  syntheticRtCourse,
+  SYNTHETIC_STUDY,
+} from '@open-rt-studio/testdata';
 
 import { ActiveDataSource } from '../../data-source/active-data-source';
 import type { DataSource } from '../../data-source/data-source';
 import { connectToServer, ServerSource } from '../../data-source/server-source';
 import { fakeServer, parseHere, type FakeServer } from '../../data-source/server-testing';
 import { PreferencesStore } from '../../preferences-store';
+import { studyDateLabel } from '../server-browser/server-browser';
 import { DEFAULT_SERVER_ADDRESS, ServerPanel } from './server-panel';
 
 interface Rendered {
@@ -90,16 +95,26 @@ describe('ServerPanel', () => {
     expect(tried).toEqual([]);
   });
 
-  it('connects, lists the patients, and remembers the address', async () => {
-    const { click, type, said, text, tried } = await render();
+  it('connects, lists the studies on the server, and remembers the address', async () => {
+    const { click, type, said, text, tried, host } = await render();
+    expect(host.classList.contains('wide')).toBe(false);
     type('127.0.0.1:4300');
     await click('Connect');
     expect(tried).toEqual(['127.0.0.1:4300']);
     expect(said).toEqual(['use Server at 127.0.0.1:4300']);
     expect(text('.server-state')).toEqual(['Connected: Server at 127.0.0.1:4300.']);
-    expect(text('.server-patient-name')).toEqual([SYNTHETIC_STUDY.patient.name]);
-    expect(text('.server-patient-id')).toEqual([SYNTHETIC_STUDY.patient.id]);
-    expect(text('.server-patient-count')).toEqual(['2 studies']);
+    // The study browser, with both studies of the one patient, the latest first.
+    expect(text('.study-patient')).toEqual([
+      SYNTHETIC_STUDY.patient.name,
+      SYNTHETIC_STUDY.patient.name,
+    ]);
+    expect(text('.study-id')).toEqual([SYNTHETIC_STUDY.patient.id, SYNTHETIC_STUDY.patient.id]);
+    expect(text('.study-date')).toEqual([
+      studyDateLabel(SYNTHETIC_FOLLOW_UP_STUDY.date),
+      studyDateLabel(SYNTHETIC_STUDY.date),
+    ]);
+    // The card takes the room for it.
+    expect(host.classList.contains('wide')).toBe(true);
     expect(TestBed.inject(PreferencesStore).preferences().serverAddress).toBe(
       'http://127.0.0.1:4300',
     );
@@ -132,7 +147,10 @@ describe('ServerPanel', () => {
     expect(said.slice(1)).toEqual(['leave patient', 'closed']);
     const source = TestBed.inject(ActiveDataSource).source() as ServerSource;
     expect(source.currentPatient()?.studies).toHaveLength(2);
-    expect(host.querySelector('.server-patient')!.getAttribute('aria-current')).toBe('true');
+    // Both rows are that patient's, and say so.
+    expect(
+      [...host.querySelectorAll('.browser-study')].map((row) => row.getAttribute('aria-current')),
+    ).toEqual(['true', 'true']);
 
     // The same patient again: what is on screen is theirs, and stays.
     await click(SYNTHETIC_STUDY.patient.name);
@@ -147,10 +165,16 @@ describe('ServerPanel', () => {
     expect(host.querySelector('input')!.value).toBe('http://127.0.0.1:4300');
   });
 
-  it('asks the server again on Refresh', async () => {
-    const { click, server } = await render();
+  it('turns to a patient who is not among the first listed by name', async () => {
+    // What the browser is for: a patient is reached through a study of theirs.
+    const { click, fixture } = await render();
     await click('Connect');
-    await click('Refresh');
-    expect(server.asked).toEqual(['/patients?limit=200', '/patients?limit=200']);
+    const source = TestBed.inject(ActiveDataSource).source() as ServerSource;
+    const [study] = (await source.findStudies()).studies;
+    // As if the list of patients had not reached this one.
+    (source as unknown as { listed: { set(value: unknown[]): void } }).listed.set([]);
+    await fixture.whenStable();
+    await click(SYNTHETIC_STUDY.patient.name);
+    expect(source.currentPatient()?.key).toBe(study.patient.key);
   });
 });

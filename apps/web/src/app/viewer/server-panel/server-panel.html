@@ -10,7 +10,6 @@
 @if (server(); as connected) {
   <p class="server-state" role="status">Connected: {{ connected.label }}.</p>
   <div class="server-actions">
-    <button type="button" (click)="onRefresh()" [disabled]="busy()">Refresh</button>
     <button
       type="button"
       (click)="onDisconnect()"
@@ -19,32 +18,12 @@
       Disconnect
     </button>
   </div>
-
-  @if (connected.patients().length === 0) {
-    <p class="server-note">The server holds no patients.</p>
-  } @else {
-    <ul class="server-patients" aria-label="Patients on the server">
-      @for (patient of connected.patients(); track patient.key) {
-        <li>
-          <button
-            type="button"
-            class="server-patient"
-            [class.active]="patient.key === chosenKey()"
-            [attr.aria-current]="patient.key === chosenKey() ? 'true' : null"
-            [disabled]="busy()"
-            (click)="onPatient(patient.key)"
-          >
-            <span class="server-patient-name">{{ patient.name || 'No name' }}</span>
-            <span class="server-patient-id">{{ patient.patientId || 'No ID' }}</span>
-            <span class="server-patient-count">{{ studiesLabel(patient.studies) }}</span>
-          </button>
-        </li>
-      }
-    </ul>
-    @if (connected.morePatients()) {
-      <p class="server-note">Only the first {{ listedAtMost }} patients by name are listed.</p>
-    }
-  }
+  <app-server-browser
+    [server]="connected"
+    [chosenKey]="chosenKey()"
+    [disabled]="busy()"
+    (choose)="onPatient($event)"
+  />
 } @else {
   <form (submit)="onConnect($event)">
     <label for="server-address">Address of an Open RT Studio server</label>

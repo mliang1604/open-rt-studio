@@ -13,9 +13,10 @@ import {
 } from '@angular/core';
 
 import { ActiveDataSource } from '../../data-source/active-data-source';
-import type { DataSource } from '../../data-source/data-source';
-import { connectToServer, PATIENTS_LISTED, ServerSource } from '../../data-source/server-source';
+import type { DataSource, PatientSummary } from '../../data-source/data-source';
+import { connectToServer, ServerSource } from '../../data-source/server-source';
 import { PreferencesStore } from '../../preferences-store';
+import { ServerBrowser } from '../server-browser/server-browser';
 
 /** The address a server listens on unless it was told otherwise. */
 export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
@@ -34,9 +35,16 @@ export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
 @Component({
   selector: 'app-server-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [ServerBrowser],
   templateUrl: './server-panel.html',
   styleUrls: ['../panel-card.css', './server-panel.css'],
-  host: { class: 'server-panel', role: 'dialog', 'aria-labelledby': 'server-panel-title' },
+  host: {
+    class: 'server-panel',
+    role: 'dialog',
+    'aria-labelledby': 'server-panel-title',
+    // Connected, the card holds the study browser and takes the room for it.
+    '[class.wide]': 'server() !== null',
+  },
 })
 export class ServerPanel {
   private readonly sources = inject(ActiveDataSource);
@@ -51,7 +59,6 @@ export class ServerPanel {
   readonly leavePatient = output<void>();
   readonly closed = output<void>();
 
-  protected readonly listedAtMost = PATIENTS_LISTED;
   protected readonly address = signal(
     this.preferences.preferences().serverAddress ?? DEFAULT_SERVER_ADDRESS,
   );
@@ -88,24 +95,15 @@ export class ServerPanel {
     this.use.emit(null);
   }
 
-  protected async onRefresh(): Promise<void> {
-    const server = this.server();
-    if (server) await this.attempt(() => server.refresh());
-  }
-
   /** Turn the timeline to a patient, and close: the history panel is where to go next. */
-  protected async onPatient(key: string): Promise<void> {
+  protected async onPatient(patient: PatientSummary): Promise<void> {
     const server = this.server();
     if (!server || this.busy()) return;
     await this.attempt(async () => {
-      if (key !== this.chosenKey()) this.leavePatient.emit();
-      await server.selectPatient(key);
+      if (patient.key !== this.chosenKey()) this.leavePatient.emit();
+      await server.selectPatient(patient);
       this.closed.emit();
     });
-  }
-
-  protected studiesLabel(count: number): string {
-    return `${count} ${count === 1 ? 'study' : 'studies'}`;
   }
 
   /** Do something that asks the server, showing that it is under way and what went wrong. */

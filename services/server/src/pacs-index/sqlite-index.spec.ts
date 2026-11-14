@@ -589,6 +589,68 @@ describe('finding', () => {
     expect(await dates('20270101-')).toEqual([]);
   });
 
+  it('lists studies in the order asked for, with the undated last', async () => {
+    const index = await populated();
+    // A study with no date, of the patient whose name sorts first.
+    const undated = entry(otherStudy(77, ALPHA.patient, '20260101'), 'CT', SERIES.CT, 1);
+    await index.putInstance({ ...undated, study: { ...undated.study, date: null, time: null } });
+    const listed = async (order?: 'newest' | 'oldest' | 'patient') =>
+      (await index.findStudies({ order })).map((study) => [study.patientName, study.date]);
+
+    const newest = await listed();
+    expect(newest.map(([, date]) => date)).toEqual([
+      '20260316',
+      '20260210',
+      '20260105',
+      '20251224',
+      null,
+    ]);
+    expect(await listed('newest')).toEqual(newest);
+    expect((await listed('oldest')).map(([, date]) => date)).toEqual([
+      '20251224',
+      '20260105',
+      '20260210',
+      '20260316',
+      null,
+    ]);
+    // By name without regard to case; within a patient the latest first.
+    const byPatient = await listed('patient');
+    expect(byPatient.map(([name]) => name)).toEqual([
+      'ALPHA^Anna',
+      'ALPHA^Anna',
+      'beta^Bo [test] 100%',
+      'SYNTHETIC^PHANTOM',
+      'SYNTHETIC^PHANTOM',
+    ]);
+    expect(byPatient[1][1]).toBeNull();
+    const synthetic = byPatient.slice(3).map(([, date]) => date as string);
+    expect(synthetic[0] > synthetic[1]).toBe(true);
+  });
+
+  it('gives the same order from one part of a list to the next', async () => {
+    const index = await populated();
+    for (const order of ['newest', 'oldest', 'patient'] as const) {
+      const whole = (await index.findStudies({ order })).map((study) => study.studyInstanceUid);
+      const parts: string[] = [];
+      for (let offset = 0; offset < whole.length; offset += 2) {
+        parts.push(
+          ...(await index.findStudies({ order, limit: 2, offset })).map(
+            (study) => study.studyInstanceUid,
+          ),
+        );
+      }
+      expect(parts, order).toEqual(whole);
+    }
+  });
+
+  it('refuses an order there is not, and makes no SQL of it', async () => {
+    const index = await populated();
+    for (const order of ['sideways', 'constructor', 'newest; DROP TABLE study']) {
+      await expect(index.findStudies({ order: order as never })).rejects.toThrow(InvalidQueryError);
+    }
+    expect((await index.counts()).studies).toBe(4);
+  });
+
   it('finds studies by patient, UID, accession number, description and modality', async () => {
     const index = await populated();
     const uids = async (query: Parameters<PacsIndex['findStudies']>[0]) =>

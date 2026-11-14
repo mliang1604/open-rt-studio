@@ -122,6 +122,10 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
         );
       };
 
+      // A number for each patient, in the order their files came.
+      const patientIds = [...new Set(held.map((one) => one.header.patient.id))];
+      const keyOf = (one: Held): number => patientIds.indexOf(one.header.patient.id) + 1;
+
       let match: RegExpExecArray | null;
       if (path === '/instances' && init?.method === 'POST') {
         if (uploadsLost) throw new TypeError('Failed to fetch');
@@ -163,23 +167,45 @@ export function fakeServer(files: readonly SyntheticFile[]): FakeServer {
         return answer({ outcome: 'stored', sopInstanceUid: uid }, 201);
       }
       if (path === '/patients') {
-        const [{ header }] = held;
-        const studies = new Set(held.map((one) => one.header.study.uid)).size;
-        return page([
-          { patientKey: 1, patientId: header.patient.id, name: header.patient.name, studies },
-        ]);
+        return page(
+          patientIds
+            .map((id, index) => {
+              const theirs = held.filter((one) => one.header.patient.id === id);
+              return {
+                patientKey: index + 1,
+                patientId: id,
+                name: theirs[0].header.patient.name,
+                studies: new Set(theirs.map((one) => one.header.study.uid)).size,
+              };
+            })
+            .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+        );
       }
       if (path === '/studies') {
-        const studies = new Map(held.map((one) => [one.header.study.uid, one.header.study]));
-        // The server lists the latest first.
+        // Of the search only the patient, the order and the part asked for are
+        // honoured: what a search finds is the real server's to say, and is
+        // tested against it. What was asked is in `asked`.
+        const patientKey = url.searchParams.get('patientKey');
+        const first = new Map(held.map((one) => [one.header.study.uid, one]));
+        const latestFirst = [...first.values()]
+          .filter((one) => patientKey === null || String(keyOf(one)) === patientKey)
+          .sort((a, b) => (b.header.study.date ?? '').localeCompare(a.header.study.date ?? ''));
+        const ordered =
+          url.searchParams.get('order') === 'oldest' ? latestFirst.reverse() : latestFirst;
         return page(
-          [...studies.values()]
-            .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
-            .map((study) => ({
-              studyInstanceUid: study.uid,
-              date: study.date,
-              description: study.description,
-            })),
+          ordered.map((one) => {
+            const inStudy = held.filter((file) => file.header.study.uid === one.header.study.uid);
+            return {
+              studyInstanceUid: one.header.study.uid,
+              patientKey: keyOf(one),
+              patientId: one.header.patient.id,
+              patientName: one.header.patient.name,
+              date: one.header.study.date,
+              description: one.header.study.description,
+              modalities: [...new Set(inStudy.map((file) => file.header.series.modality))].sort(),
+              series: new Set(inStudy.map((file) => file.header.series.uid)).size,
+            };
+          }),
         );
       }
       if ((match = /^\/studies\/([\d.]+)\/series$/.exec(path))) {

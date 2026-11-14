@@ -223,6 +223,9 @@ describe('browse', () => {
       (await made.json<PageOf<{ studyInstanceUid: string }>>(`/studies?${query}`)).items.map(
         (study) => study.studyInstanceUid,
       );
+    expect(await uids('order=oldest')).toEqual([COURSE.planningStudy, COURSE.followUpStudy]);
+    expect(await uids('order=newest')).toEqual([COURSE.followUpStudy, COURSE.planningStudy]);
+    expect(await uids('order=patient')).toEqual([COURSE.followUpStudy, COURSE.planningStudy]);
     expect(await uids(`date=${SYNTHETIC_STUDY.date}`)).toEqual([COURSE.planningStudy]);
     expect(await uids('date=20260201-')).toEqual([COURSE.followUpStudy]);
     expect(await uids('modality=RTDOSE')).toEqual([COURSE.planningStudy]);
@@ -356,6 +359,8 @@ describe('browse', () => {
     ['/patients?surname=x', 400, 'unknown-parameter'],
     ['/studies?date=yesterday', 400, 'invalid-query'],
     ['/studies?patientKey=abc', 400, 'invalid-parameter'],
+    ['/studies?order=sideways', 400, 'invalid-parameter'],
+    ['/studies?order=constructor', 400, 'invalid-parameter'],
     ['/nothing', 404, 'not-found'],
   ])('answers %s with %i %s', async (path, status, error) => {
     const body = await made.json(path, status);

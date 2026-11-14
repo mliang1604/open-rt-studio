@@ -132,11 +132,18 @@ Viewer (`src/app/viewer`):
   shows what the data source lists and asks the source for each preview. The
   chip of an image series says how many structure sets come with it ("RS 2"),
   which is how a save to the server shows on the timeline.
-- `server-panel/`: the card for connecting to a server and choosing one of
-  its patients. It is opened from the empty state or from the history bar,
-  not from the toolbar, which has no room left at 1280 pixels. Nothing is
-  contacted until Connect is pressed; the address is remembered, and is not
-  connected to by itself.
+- `server-panel/`: the card for connecting to a server. It is opened from
+  the empty state or from the history bar, not from the toolbar, which has no
+  room left at 1280 pixels. Nothing is contacted until Connect is pressed;
+  the address is remembered, and is not connected to by itself. Connected,
+  it holds the study browser.
+- `server-browser/`: the studies on the server, to search (patient name,
+  Patient ID, study dates, modality), to order and to page through, twenty at
+  a time. Choosing a study turns the timeline to its patient. A search is
+  sent when it is asked for, not as it is typed, and is kept nowhere. Its
+  end-to-end tests (`e2e/server-browser.spec.ts`) run against the real server
+  seeded with `syntheticPopulation()`: what a search finds is the server's to
+  say.
 - `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
   the data source and then built. A fetch that takes time shows progress, and
   is abandoned by a later pick, by Cancel or by an import.

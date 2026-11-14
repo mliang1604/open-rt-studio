@@ -1,0 +1,168 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  /* The list lays itself out by the width of the card, not of the window. */
+  container-type: inline-size;
+}
+
+p {
+  margin: 0;
+}
+
+/* The search: fields side by side, wrapping where the card is narrow. */
+.browser-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 110px;
+  min-width: 0;
+}
+
+.field.wide {
+  flex-basis: 160px;
+}
+
+label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+input,
+select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* As the cards' inputs are, for a select, which the shared styles leave out. */
+select {
+  padding: 5px 9px;
+  font: inherit;
+  color: var(--text);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.browser-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.browser-note {
+  color: var(--muted);
+}
+
+.browser-problem {
+  color: #ff9d8a;
+}
+
+/* One row of the list and the line of column names above it share a grid. */
+.browser-columns,
+.browser-study {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.5fr) minmax(0, 1fr) 86px minmax(0, 1.4fr)
+    minmax(0, 1fr) 62px;
+  gap: 0 10px;
+  align-items: center;
+}
+
+.browser-columns {
+  padding: 0 11px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.browser-studies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.browser-studies[aria-busy='true'] {
+  opacity: 0.6;
+}
+
+.browser-study {
+  width: 100%;
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+
+.browser-study.active {
+  border-color: var(--accent);
+}
+
+.browser-study span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.study-patient {
+  font-weight: 600;
+}
+
+.study-id,
+.study-description,
+.study-modalities,
+.study-series {
+  color: var(--muted);
+}
+
+.study-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.study-series {
+  text-align: right;
+}
+
+.browser-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+}
+
+/* Narrow: the patient, the date and the modalities; the rest is in the row's label. */
+@container (max-width: 560px) {
+  .browser-columns,
+  .browser-study {
+    grid-template-columns: minmax(0, 1.4fr) 86px minmax(0, 1fr);
+  }
+
+  .browser-columns span:nth-child(2),
+  .browser-columns span:nth-child(4),
+  .browser-columns span:nth-child(6),
+  .study-id,
+  .study-description,
+  .study-series {
+    display: none;
+  }
+}

@@ -13,6 +13,8 @@
   gap: 8px;
   width: min(380px, calc(100% - 24px));
   max-height: calc(100% - 24px);
+  /* The browser inside is what shrinks and scrolls when the card is too tall. */
+  min-height: 0;
   padding: 12px;
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
@@ -65,48 +67,7 @@ p {
   color: #ff9d8a;
 }
 
-.server-patients {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.server-patient {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 10px;
-  width: 100%;
-  text-align: left;
-  border-radius: var(--radius-sm);
-}
-
-.server-patient.active {
-  border-color: var(--accent);
-}
-
-.server-patient-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.server-patient-id {
-  grid-column: 1;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.server-patient-count {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: center;
-  color: var(--muted);
+/* With the study browser in it. */
+:host(.wide) {
+  width: min(860px, calc(100% - 24px));
 }

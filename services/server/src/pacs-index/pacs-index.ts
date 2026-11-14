@@ -167,7 +167,16 @@ export interface PatientQuery extends Page {
   readonly name?: string;
 }
 
+/**
+ * The order a list of studies comes in: the latest first (`newest`, the
+ * default), the earliest first (`oldest`), or by patient name and, for one
+ * patient, the latest first (`patient`). Undated studies are last in each.
+ */
+export const STUDY_ORDERS = ['newest', 'oldest', 'patient'] as const;
+export type StudyOrder = (typeof STUDY_ORDERS)[number];
+
 export interface StudyQuery extends Page {
+  readonly order?: StudyOrder;
   readonly patientKey?: number;
   readonly patientId?: string;
   readonly patientName?: string;

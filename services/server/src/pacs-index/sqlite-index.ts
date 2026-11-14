@@ -21,6 +21,7 @@ import {
   type Reference,
   type Relation,
   type SeriesRecord,
+  type StudyOrder,
   type StudyRecord,
 } from './pacs-index.js';
 
@@ -151,6 +152,13 @@ const PATIENT = `
 
 const STUDY_ORDER =
   'ORDER BY st.study_date DESC NULLS LAST, st.study_time DESC NULLS LAST, st.study_uid';
+// Each ends in the UID, so that the order is the same from one page to the next.
+const STUDY_ORDER_SQL: Readonly<Record<StudyOrder, string>> = {
+  newest: STUDY_ORDER,
+  oldest: 'ORDER BY st.study_date NULLS LAST, st.study_time NULLS LAST, st.study_uid',
+  patient: `ORDER BY p.name COLLATE NOCASE NULLS LAST, p.patient_id, p.patient_key,
+    st.study_date DESC NULLS LAST, st.study_time DESC NULLS LAST, st.study_uid`,
+};
 const SERIES_ORDER = 'ORDER BY s.series_number NULLS LAST, s.series_uid';
 const INSTANCE_ORDER = 'ORDER BY i.instance_number NULLS LAST, i.sop_instance_uid';
 const PATIENT_ORDER = 'ORDER BY p.name COLLATE NOCASE NULLS LAST, p.patient_id, p.patient_key';
@@ -501,7 +509,13 @@ export async function openSqliteIndex(
           query.modality,
         );
       }
-      const sql = `${STUDY} ${conditions.where()} ${STUDY_ORDER} ${conditions.page(query)}`;
+      // Only an order from the list becomes SQL; anything else is refused here
+      // too, whatever a caller has checked.
+      const wanted = query.order ?? 'newest';
+      if (!Object.hasOwn(STUDY_ORDER_SQL, wanted)) {
+        throw new InvalidQueryError('The order is not one there is.');
+      }
+      const sql = `${STUDY} ${conditions.where()} ${STUDY_ORDER_SQL[wanted]} ${conditions.page(query)}`;
       return all(sql, ...conditions.values).map(toStudy);
     },
 

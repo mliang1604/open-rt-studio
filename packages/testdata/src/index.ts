@@ -64,6 +64,13 @@ export {
   type SyntheticRoi,
 } from './rtstruct.js';
 export {
+  POPULATION_PATIENTS,
+  populationPatient,
+  populationStudies,
+  syntheticPopulation,
+  type PopulationStudy,
+} from './population.js';
+export {
   syntheticThoraxPatient,
   THORAX,
   THORAX_CT_TEXTURE,
