@@ -405,6 +405,55 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   jobs are queued again. The manager has nothing of HTTP in it and runs the
   same inside Electron.
 
+## Registrations
+
+The model every user of a registration shares (#73): the viewer, resampling,
+dose summation and the readers and writers of registration files. It is in
+`packages/dicom` (`registration.ts`, with the matrices in `mat4.ts`), plain
+data and pure functions.
+
+- **A transform maps the coordinates of a point from one frame of reference
+  to another.** It names both: `from` and `to`. Given where something is in
+  `from`, it says where the same anatomy is in `to`.
+- **Nothing is called fixed or moving, source or target.** Those words mean
+  opposite things for a point and for an image. To carry a contour or a
+  crosshair from frame A to frame B, map A to B. To resample an image that
+  lives in B onto a grid in A, each position of the grid is mapped A to B as
+  well, to find what to read there: the image goes one way and its
+  coordinates the other.
+- **A transform is never applied backwards without anyone noticing.**
+  Whoever maps a point says from which frame to which (`mapPoint`), and is
+  refused when the transform does not go that way. Turning one round is a
+  step of its own (`invertTransform`).
+- **Two kinds.** A matrix: `p_to = matrix · p_from`, 4×4, row by row as
+  DICOM writes it, millimetres; it knows whether it is rigid, rigid with a
+  scale, or affine. A deformation field: `q = pre · p_from`, then
+  `p_to = post · (q + field(q))`, the field a grid of displacement vectors
+  read by trilinear interpolation.
+- **Outside its grid a field says nothing**, and a point there is not mapped
+  (`null`). It is never extended.
+- **Inversion**: exact for a matrix. Not available for a deformation field:
+  none is approximated, and whoever computes a registration both ways gives
+  two transforms.
+- **Composition**: two matrices are a matrix; a matrix before or after a
+  field goes into the field's matrix on that side; both exact. Two fields
+  are not one field and stay a path of two steps.
+- **The registry finds the ways between two frames** that take the fewest
+  steps, a matrix either way and a field only as given. When there is more
+  than one it gives them all and picks none: two registrations between the
+  same frames may disagree, and which is meant is the user's to say.
+- **Refused**: a matrix that mirrors (it would swap left and right) or
+  flattens, a grid with a number that is not finite, and a transform whose
+  two frames are the same. Two series in one frame are in place already; a
+  registration between them could not tell its direction by its frames.
+
+Not there, and not assumed: how a DICOM Spatial Registration or Deformable
+Spatial Registration object fills this model, which of its frames is `from`.
+That is for the readers (#74, #75) to settle against the standard and the
+vendor files (#71). Status: **decided, and Michael's to overturn**, most of
+all refusing a registration within one frame of reference, which some
+systems may write.
+
 ## Native tools
 
 A CMake project in `native/` builds small command-line programs on ITK and

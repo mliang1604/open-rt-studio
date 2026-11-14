@@ -37,8 +37,41 @@ export {
   paintLabels,
 } from './label-volume.js';
 export { UnsupportedDicomError, parseFile, parseFileAsync } from './loader.js';
+export {
+  IDENTITY_MAT4,
+  type Mat4,
+  type MatrixKind,
+  invertMat4,
+  matrixKind,
+  matrixProblem,
+  multiplyMat4,
+  rigidMat4,
+  transformPoint,
+  transformVector,
+} from './mat4.js';
 export { clamp, clamp01, clampIndex } from './math.js';
 export { type DicomMetadata, type RawTag, extractMetadata, formatDicomDate } from './metadata.js';
+export {
+  type DeformableTransform,
+  type DeformationGrid,
+  type FrameUid,
+  type MatrixTransform,
+  type PathSearch,
+  type RegistrationRegistry,
+  type Transform,
+  type TransformPath,
+  RegistrationError,
+  composeTransforms,
+  createRegistrationRegistry,
+  deformableTransform,
+  invertTransform,
+  mapPoint,
+  matrixTransform,
+  pathMatrix,
+  sampleDeformation,
+  samePath,
+  transformPath,
+} from './registration.js';
 export { type Series, groupSeries, largestSeries, middleSlice } from './series.js';
 export {
   type AuthoredRoi,
