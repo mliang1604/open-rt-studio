@@ -11,6 +11,7 @@ import {
   type LabelVolume,
   type Mat4,
   type PlacementField,
+  type Vec3,
 } from '@open-rt-studio/dicom';
 import {
   colormap,
@@ -19,7 +20,14 @@ import {
   DEFAULT_COLORMAP,
   type Colormap,
 } from './colormap.js';
-import { NO_FIELD_VIEW, fieldViewCode, type FieldView } from './field-view.js';
+import {
+  GRID_LINE_PIXELS,
+  NO_FIELD_VIEW,
+  fieldViewCode,
+  gridAxesInPlane,
+  type FieldView,
+} from './field-view.js';
+import { planeExtentMm } from './plane-basis.js';
 import type { PaneRect, Vec2 } from './layout.js';
 import {
   fieldPlaneToTexMatrix,
@@ -178,6 +186,8 @@ export class SliceRenderer {
   private fieldMatrices: readonly Float32Array[] | null = null;
   /** What of the field is washed over the image (field-view.ts). */
   private fieldView: FieldView = NO_FIELD_VIEW;
+  /** The distance between the deformed grid's lines in mm of the overlay, or null for no grid. */
+  private fieldGridSpacingMm: number | null = null;
   /**
    * The field's Jacobian determinant as it was given with the view, one to a
    * vector, and the texture that holds it. The texture is there only while
@@ -625,6 +635,16 @@ export class SliceRenderer {
   }
 
   /**
+   * Draw the deformed grid: a regular grid of the overlay, with lines every
+   * `spacingMm` along its axes, where the field puts it in the base's planes.
+   * Null, or what is no length, for no grid. Kept like the field's view.
+   */
+  setFieldGrid(spacingMm: number | null): void {
+    this.fieldGridSpacingMm =
+      spacingMm !== null && Number.isFinite(spacingMm) && spacingMm > 0 ? spacingMm : null;
+  }
+
+  /**
    * Bring the determinant's texture in line with what was given and the field
    * in use: uploaded when the numbers are new and as many as the field has
    * vectors, let go of when they are not. Gives whether the texture changed.
@@ -841,15 +861,47 @@ export class SliceRenderer {
     });
   }
 
-  /** What the shader needs of the overlay's deformation field for one pane, or null without one. */
-  private fieldParams(volume: Volume, view: MprPaneView) {
+  /**
+   * What the shader needs of the overlay's deformation field for one pane, or
+   * null without one. `overlayMatrix` is the pane's matrix into the overlay's
+   * texture, and `mmPerPixel` what a framebuffer pixel of the pane is across,
+   * for the deformed grid: its lines are a set number of pixels wide.
+   */
+  private fieldParams(
+    volume: Volume,
+    view: MprPaneView,
+    overlayMatrix: ArrayLike<number>,
+    mmPerPixel: number,
+  ) {
     const field = this.overlayField;
-    if (!field || !this.overlayVolume || !this.fieldMatrices || !this.fieldTexture) return null;
+    const overlay = this.overlayVolume;
+    if (!field || !overlay || !this.fieldMatrices || !this.fieldTexture) return null;
+    const sizeMm: Vec3 = [
+      overlay.dims[0] * overlay.spacing[0],
+      overlay.dims[1] * overlay.spacing[1],
+      overlay.dims[2] * overlay.spacing[2],
+    ];
+    const grid =
+      this.fieldGridSpacingMm === null
+        ? null
+        : {
+            spacingMm: this.fieldGridSpacingMm,
+            halfWidthMm: (GRID_LINE_PIXELS / 2) * mmPerPixel,
+            sizeMm,
+            // A step through the pane's plane, along the overlay's axes in mm:
+            // the matrix's third column, which is what slicePos is multiplied by.
+            axes: gridAxesInPlane([
+              overlayMatrix[8] * sizeMm[0],
+              overlayMatrix[9] * sizeMm[1],
+              overlayMatrix[10] * sizeMm[2],
+            ]),
+          };
     return {
+      grid,
       toTex: isOblique(view.rotation)
         ? fieldPlaneToTexMatrix(volume, field, view.orientation, view.rotation)
         : this.fieldMatrices[view.orientation],
-      toOverlay: fieldToOverlayTexMatrix(this.overlayVolume, field.post),
+      toOverlay: fieldToOverlayTexMatrix(overlay, field.post),
       ...fieldTexBounds(field.grid.dims),
       view:
         this.fieldView.kind === 'none' ||
@@ -916,9 +968,14 @@ export class SliceRenderer {
             // then scale by the pane zoom so the pattern tracks the anatomy (the
             // shader divides framebuffer coords by this).
             checkerSize: (rect.width / Math.max(this.overlayCheckerCells, 1)) * zoom,
-            field: this.fieldParams(volume, view),
+            field: null as ReturnType<SliceRenderer['fieldParams']>,
           }
         : null;
+    if (overlay) {
+      const mmPerPixel =
+        (planeExtentMm(volume, view.orientation)[0] * (scaleX / zoom)) / Math.max(rect.width, 1);
+      overlay.field = this.fieldParams(volume, view, overlay.matrix, mmPerPixel);
+    }
 
     // The label mask shares the base grid, so it samples through the very same
     // (possibly oblique) reslice matrix as the slice — no separate co-registration.

@@ -91,3 +91,58 @@
     it is right.
   </p>
 }
+
+<div class="kinds" role="group" aria-label="Draw over the image">
+  <span class="name">Draw</span>
+  <button
+    type="button"
+    [class.active]="grid()"
+    [attr.aria-pressed]="grid()"
+    data-field-grid
+    title="Draw the compared image’s regular grid where the deformation field puts it"
+    (click)="gridToggle.emit()"
+  >
+    Grid
+  </button>
+  <button
+    type="button"
+    [class.active]="arrows()"
+    [attr.aria-pressed]="arrows()"
+    data-field-arrows-toggle
+    title="Draw the deformation field as arrows"
+    (click)="arrowsToggle.emit()"
+  >
+    Arrows
+  </button>
+</div>
+
+@if (grid()) {
+  <label class="row">
+    <span class="name">Lines every</span>
+    <input
+      type="number"
+      min="0.1"
+      max="500"
+      step="1"
+      [value]="gridSpacingFits() ? '' : gridSpacingMm()"
+      [placeholder]="gridSpacingMm()"
+      (change)="onGridSpacing($event)"
+      data-field-grid-spacing
+      aria-label="Distance between the grid’s lines, in mm"
+      title="The distance between the grid’s lines, in mm of the compared image. Empty: about an eighth of its longest side"
+    />
+    <span class="value">mm</span>
+  </label>
+  <p class="note" data-field-grid-note>
+    A regular grid of the compared image, every {{ gridSpacing() }} from its corner, where the field
+    puts it. Even and straight where nothing is deformed; lines crowd where the field compresses,
+    part where it expands, and cross where it folds.
+  </p>
+}
+
+@if (arrows()) {
+  <p class="note" data-field-arrows-note>
+    Each arrow goes from a place to where the field reads the compared image for it, at the image’s
+    own scale. Only the part in the plane is drawn.
+  </p>
+}

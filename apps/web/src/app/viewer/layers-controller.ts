@@ -18,6 +18,7 @@ import {
   linkedSliceIndex,
   sliceCountFor,
   windowPresets,
+  fittingGridSpacingMm,
   type FieldView,
   type FieldViewKind,
   type WindowLevel,
@@ -27,11 +28,13 @@ import {
 import {
   baseLayer,
   DEFAULT_OVERLAY_OPACITY,
+  invertMat4,
   jacobianDeterminants,
   Orientation,
   sampleDeformation,
   sampleGridValues,
   transformPoint,
+  transformVector,
   type Layer,
   type LayerDisplay,
   type Vec3,
@@ -374,6 +377,59 @@ export class LayersController {
   readonly fieldViewDeterminants = computed(() =>
     this.layerStore.fieldViewKind() === 'jacobian' ? this.fieldJacobian() : null,
   );
+
+  /** The grid spacing that fits the overlay: about an eighth of its longest side. */
+  private readonly fittingGridMm = computed(() => {
+    const volume = this.selectedOverlay()?.volume;
+    return volume
+      ? fittingGridSpacingMm(volume.dims.map((count, axis) => count * volume.spacing[axis]))
+      : 1;
+  });
+  /** Whether the deformed grid is drawn (aliases the store). */
+  readonly fieldGridOn = this.layerStore.fieldGrid;
+  /** The distance between the deformed grid's lines, in mm: the user's, or the one that fits. */
+  readonly fieldGridSpacingMm = computed(
+    () => this.layerStore.fieldGridSpacingMm() ?? this.fittingGridMm(),
+  );
+  readonly fieldGridSpacingFits = computed(() => this.layerStore.fieldGridSpacingMm() === null);
+  /** The spacing as the renderer takes it: null while no grid is drawn. */
+  readonly fieldGridDrawn = computed(() =>
+    this.layerStore.fieldGrid() ? this.fieldGridSpacingMm() : null,
+  );
+  /** Whether the field is drawn as arrows (aliases the store). */
+  readonly fieldArrowsOn = this.layerStore.fieldArrows;
+
+  toggleFieldGrid(): void {
+    this.layerStore.toggleFieldGrid();
+  }
+
+  setFieldGridSpacingMm(mm: number | null): void {
+    this.layerStore.setFieldGridSpacingMm(mm);
+  }
+
+  toggleFieldArrows(): void {
+    this.layerStore.toggleFieldArrows();
+  }
+
+  /** The field's matrix before it, turned round: from the field's grid back to the base's frame. */
+  private readonly fieldToBase = computed(() => {
+    const field = this.selectedField();
+    return field ? invertMat4(field.pre) : null;
+  });
+
+  /**
+   * The field's displacement at a point of the base image's frame, as a
+   * vector of that frame in mm: what is added to the point before the
+   * registration's matrices alone would take it to where the compared image
+   * is read for it. Null with no field, and where it has no vector to go by.
+   */
+  fieldDisplacementAt(basePoint: Vec3): Vec3 | null {
+    const field = this.selectedField();
+    const toBase = this.fieldToBase();
+    if (!field || !toBase) return null;
+    const moved = sampleDeformation(field.grid, transformPoint(field.pre, basePoint));
+    return moved ? transformVector(toBase, moved) : null;
+  }
 
   /**
    * What the wash on screen stands for at a point of the base image's frame:

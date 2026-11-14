@@ -351,6 +351,12 @@ export class LayersStore {
    * the user has set one; null for the scale that fits the field in use.
    */
   readonly fieldViewMaxMm = signal<number | null>(null);
+  /** Draw the deformed grid: the compared image's regular grid where the field puts it. */
+  readonly fieldGrid = signal(false);
+  /** The distance between the grid's lines in mm when the user has set one; null for the one that fits the image. */
+  readonly fieldGridSpacingMm = signal<number | null>(null);
+  /** Draw the field as arrows over the panes. */
+  readonly fieldArrows = signal(false);
 
   /**
    * Apply the current visibility / opacity / display overrides to the loaded layer
@@ -506,6 +512,26 @@ export class LayersStore {
     if (Number.isFinite(opacity)) this.fieldViewOpacity.set(clamp(opacity, 0, 1));
   }
 
+  toggleFieldGrid(): void {
+    this.fieldGrid.update((on) => !on);
+  }
+
+  /**
+   * The distance between the deformed grid's lines in mm, held to the bounds
+   * a scale has; null, or what is no number, for the one that fits the image.
+   */
+  setFieldGridSpacingMm(mm: number | null): void {
+    this.fieldGridSpacingMm.set(
+      mm === null || !Number.isFinite(mm)
+        ? null
+        : clamp(mm, FIELD_VIEW_MAX_MM_MIN, FIELD_VIEW_MAX_MM_MAX),
+    );
+  }
+
+  toggleFieldArrows(): void {
+    this.fieldArrows.update((on) => !on);
+  }
+
   /**
    * The top of the displacement wash's scale in mm, held between
    * {@link FIELD_VIEW_MAX_MM_MIN} and {@link FIELD_VIEW_MAX_MM_MAX}; null, or
@@ -539,5 +565,8 @@ export class LayersStore {
     this.fieldViewKind.set(NO_FIELD_VIEW.kind);
     this.fieldViewOpacity.set(NO_FIELD_VIEW.opacity);
     this.fieldViewMaxMm.set(null);
+    this.fieldGrid.set(false);
+    this.fieldGridSpacingMm.set(null);
+    this.fieldArrows.set(false);
   }
 }

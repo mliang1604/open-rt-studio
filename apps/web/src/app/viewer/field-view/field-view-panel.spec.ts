@@ -124,4 +124,61 @@ describe('FieldViewPanel', () => {
     type('[data-field-view-opacity]', '25', 'input');
     expect(opacities).toEqual([1, 0.25]);
   });
+
+  it('offers the deformed grid and the arrows beside any wash, each said in words when on', () => {
+    const { fixture, host } = setup({ kind: 'none', maxMm: 6, opacity: 0.6 });
+    const grid = host.querySelector<HTMLButtonElement>('[data-field-grid]')!;
+    const arrows = host.querySelector<HTMLButtonElement>('[data-field-arrows-toggle]')!;
+    expect(grid.getAttribute('aria-pressed')).toBe('false');
+    expect(arrows.getAttribute('aria-pressed')).toBe('false');
+    expect(host.querySelector('[data-field-grid-spacing]')).toBeNull();
+    expect(host.querySelector('[data-field-grid-note]')).toBeNull();
+    expect(host.querySelector('[data-field-arrows-note]')).toBeNull();
+
+    let [grids, arrowed] = [0, 0];
+    fixture.componentInstance.gridToggle.subscribe(() => grids++);
+    fixture.componentInstance.arrowsToggle.subscribe(() => arrowed++);
+    grid.click();
+    arrows.click();
+    arrows.click();
+    expect([grids, arrowed]).toEqual([1, 2]);
+
+    fixture.componentRef.setInput('grid', true);
+    fixture.componentRef.setInput('arrows', true);
+    fixture.componentRef.setInput('gridSpacingMm', 5);
+    fixture.detectChanges();
+    expect(grid.getAttribute('aria-pressed')).toBe('true');
+    expect(host.querySelector('[data-field-grid-note]')!.textContent).toContain(
+      'every 5 mm from its corner',
+    );
+    expect(host.querySelector('[data-field-grid-note]')!.textContent).toContain(
+      'cross where it folds',
+    );
+    expect(host.querySelector('[data-field-arrows-note]')!.textContent).toContain(
+      'Only the part in the plane is drawn.',
+    );
+  });
+
+  it('takes a distance between the grid’s lines, or none for the one that fits', () => {
+    const { fixture, host, type } = setup({ kind: 'none', maxMm: 6, opacity: 0.6 });
+    const spacings: (number | null)[] = [];
+    fixture.componentInstance.gridSpacingChange.subscribe((mm) => spacings.push(mm));
+    fixture.componentRef.setInput('grid', true);
+    fixture.componentRef.setInput('gridSpacingMm', 5);
+    fixture.detectChanges();
+    const box = host.querySelector<HTMLInputElement>('[data-field-grid-spacing]')!;
+    // The fitting distance is what an empty box means.
+    expect(box.value).toBe('');
+    expect(box.placeholder).toBe('5');
+    type('[data-field-grid-spacing]', '2.5', 'change');
+    type('[data-field-grid-spacing]', '', 'change');
+    type('[data-field-grid-spacing]', '-1', 'change');
+    expect(spacings).toEqual([2.5, null, null]);
+
+    fixture.componentRef.setInput('gridSpacingMm', 2.5);
+    fixture.componentRef.setInput('gridSpacingFits', false);
+    fixture.detectChanges();
+    expect(box.value).toBe('2.5');
+    expect(host.querySelector('[data-field-grid-note]')!.textContent).toContain('every 2.5 mm');
+  });
 });

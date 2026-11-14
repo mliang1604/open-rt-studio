@@ -32,8 +32,9 @@ import { mipStepScale } from './pan-zoom.js';
 // (8) + 8 bytes pad = 80, to 272; then the deformation-field block at byte 272
 // (16-aligned): fieldToTex mat4x4 (64) + fieldToOverlay mat4x4 (64) + fieldLow
 // vec3 and fieldOn (16) + fieldHigh vec3 and fieldView (16) = 160, to 432; then
-// fieldViewScale, fieldViewOpacity (8) + 8 bytes pad. Total 448.
-export const PARAMS_SIZE = 448;
+// fieldViewScale, fieldViewOpacity, fieldGridSpacing, fieldGridHalfWidth (16),
+// to 448; then fieldGridMm vec3 (16) and fieldGridAxes vec3 (16). Total 480.
+export const PARAMS_SIZE = 480;
 /** Float offset of the overlay block (overlayToTex mat4 then window/opacity). */
 const OVERLAY_FLOATS = 28;
 /** Float offset of the label-mask block (maskToTex mat4 then opacity/LUT size). */
@@ -120,6 +121,18 @@ export interface SliceParams {
         readonly scaleMm: number;
         readonly opacity: number;
       } | null;
+      /**
+       * The deformed grid, or nothing: the distance between its lines and
+       * half a line's width, in mm of the overlay; the overlay's size in mm
+       * along its texture axes; and 1 for each axis that has lines in this
+       * pane.
+       */
+      readonly grid?: {
+        readonly spacingMm: number;
+        readonly halfWidthMm: number;
+        readonly sizeMm: Vec3;
+        readonly axes: Vec3;
+      } | null;
     } | null;
   } | null;
   /**
@@ -188,6 +201,12 @@ export function packSliceParams(p: SliceParams): ArrayBuffer {
         uints[FIELD_FLOATS + 39] = field.view.code; // fieldView, float 107 (u32)
         floats[FIELD_FLOATS + 40] = field.view.scaleMm; // fieldViewScale, float 108
         floats[FIELD_FLOATS + 41] = field.view.opacity; // fieldViewOpacity, float 109
+      }
+      if (field.grid) {
+        floats[FIELD_FLOATS + 42] = field.grid.spacingMm; // fieldGridSpacing, float 110
+        floats[FIELD_FLOATS + 43] = field.grid.halfWidthMm; // fieldGridHalfWidth, float 111
+        floats.set(field.grid.sizeMm, FIELD_FLOATS + 44); // fieldGridMm, 112..114
+        floats.set(field.grid.axes, FIELD_FLOATS + 48); // fieldGridAxes, 116..118
       }
     }
   }

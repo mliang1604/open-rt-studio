@@ -117,6 +117,32 @@ export async function pixelAt(
   }, shot.toString('base64'));
 }
 
+/**
+ * The colours of the page along a row of pixels, 0 to 255, from `x` for
+ * `width` pixels. The pointer is moved off the picture first.
+ */
+export async function pixelRow(
+  page: Page,
+  at: { x: number; y: number },
+  width: number,
+): Promise<[number, number, number][]> {
+  await page.mouse.move(2, 2);
+  const shot = await page.screenshot({
+    clip: { x: Math.round(at.x), y: Math.round(at.y), width, height: 1 },
+  });
+  return page.evaluate(async (base64) => {
+    const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    const pixels = context.getImageData(0, 0, bitmap.width, 1).data;
+    const row: [number, number, number][] = [];
+    for (let i = 0; i < pixels.length; i += 4) row.push([pixels[i], pixels[i + 1], pixels[i + 2]]);
+    return row;
+  }, shot.toString('base64'));
+}
+
 /** The axial pane: the first, and the large one. */
 export const axialPane = (page: Page): Locator => page.locator('.pane-overlay .pane').first();
 const axial = axialPane;

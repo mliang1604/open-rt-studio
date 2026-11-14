@@ -655,6 +655,24 @@ pre`), which is what the registration is with nothing deformed. A point is
     values.
   - A wash is of the field in use: with the field left out, or the overlay
     hidden, there is none. It is not drawn in the 3D pane.
+- **The deformed grid and the arrows** (the rest of #83), over a wash or
+  without one:
+  - _The grid_ is a regular grid of the compared image, drawn by the shader
+    where the field puts it in the base's planes: a place is on a line when
+    the place it is read from in the compared image is a whole number of
+    spacings from that image's corner along one of its axes
+    (`onGridLine`, the same arithmetic on the CPU for the tests). Lines are
+    a pixel and a half wide at any zoom. Each pane draws the two axes that
+    lie most in its plane (`gridAxesInPlane`); the third would paint areas,
+    not lines. The spacing is about an eighth of the compared image's
+    longest side, as 1, 2 or 5 times a power of ten, or what the user sets.
+  - _The arrows_ are drawn by the page over each pane, a set number of
+    pixels apart: from a place to where the field reads the compared image
+    for it, with the displacement taken back into the base's frame through
+    the matrix before the field. They are at the image's own scale, so an
+    arrow is as long on screen as the place is moved in the plane; what is
+    moved through the plane is not drawn. On a small image shown large the
+    arrows of a strong field run over one another.
 
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), for the matrix object and

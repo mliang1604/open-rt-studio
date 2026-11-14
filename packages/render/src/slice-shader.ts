@@ -71,6 +71,15 @@ struct Params {
   fieldView : u32,
   fieldViewScale : f32,      // the displacement at the top of wash 1's scale, in mm
   fieldViewOpacity : f32,    // how strongly a wash is laid over the image
+  // The deformed grid (field-view.ts): lines every fieldGridSpacing mm of the
+  // overlay, 0 for none, each fieldGridHalfWidth mm to either side. fieldGridMm
+  // is the overlay's size in mm along its three texture axes, which turns a
+  // texture coordinate into mm from its corner; fieldGridAxes has 1 for the two
+  // axes that have lines in this pane.
+  fieldGridSpacing : f32,
+  fieldGridHalfWidth : f32,
+  fieldGridMm : vec3<f32>,
+  fieldGridAxes : vec3<f32>,
 };
 
 @group(0) @binding(0) var volTex : texture_3d<f32>;
@@ -225,6 +234,16 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
           rgb = mix(rgb, wash.rgb, clamp(wash.a * P.fieldViewOpacity, 0.0, 1.0));
         }
       }
+    }
+  }
+
+  // The deformed grid, over the wash: the overlay's regular grid where the
+  // field puts it in this plane.
+  if (P.fieldOn != 0u && P.fieldGridSpacing > 0.0 && mapped) {
+    let read = (P.overlayToTex * vec4<f32>(u, plane.y, P.slicePos, 1.0)).xyz
+      + (P.fieldToOverlay * vec4<f32>(moved.xyz, 0.0)).xyz;
+    if (onGridLine(read * P.fieldGridMm, P.fieldGridAxes, P.fieldGridSpacing, P.fieldGridHalfWidth)) {
+      rgb = gridOver(rgb);
     }
   }
 

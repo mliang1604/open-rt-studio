@@ -10,13 +10,22 @@ import {
   syntheticDeformableRegistration,
   syntheticDeformationJacobian,
   syntheticDeformationMm,
+  syntheticDeformedPoint,
   syntheticRegisteredPair,
 } from '@open-rt-studio/testdata';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
 import { fuseChipByDrag, importFiles } from './fixtures/load';
-import { chipOf, pixelAt, probeAtVoxel, showCt, voxelPoint } from './fixtures/registered-pair';
+import {
+  axialPane,
+  chipOf,
+  pixelAt,
+  pixelRow,
+  probeAtVoxel,
+  showCt,
+  voxelPoint,
+} from './fixtures/registered-pair';
 
 // What a deformation field is doing, washed over the image (#83). The
 // synthetic field is a formula, and so is its Jacobian determinant. At the
@@ -245,5 +254,148 @@ test('the Jacobian wash shows where a deliberately bad field folds, and the prob
   // The good field of the same pair does not fold anywhere, and the probe never says it does.
   expect(all.every(([x, y]) => syntheticDeformationJacobian([x, y, SLICE]) > 0)).toBe(true);
   expect(FIELD.description).not.toBe(FOLDING.description);
+  expectNoProblems(problems);
+});
+
+test('the field’s arrows go from each place to where the formula says it is read', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page, syntheticDeformableRegistration());
+  await expect(page.locator('[data-field-arrow]')).toHaveCount(0);
+  await view(page).locator('[data-field-arrows-toggle]').click();
+  await expect(view(page).locator('[data-field-arrows-note]')).toContainText(
+    'Only the part in the plane is drawn.',
+  );
+
+  // The axial pane's arrows. Its image is a centred square of the CT's 32 mm.
+  const box = (await axialPane(page).boundingBox())!;
+  const side = Math.min(box.width, box.height);
+  const pxPerMm = side / PAIR.size;
+  const drawing = page.locator('svg[data-field-arrows]').first();
+  await expect(drawing.locator('[data-field-arrow]').first()).toBeVisible();
+  const arrows = await drawing
+    .locator('[data-field-arrow]')
+    .evaluateAll((all) =>
+      all.map((one) =>
+        ['x', 'y', 'dx', 'dy', 'mm'].map((name) => Number(one.getAttribute(`data-${name}`))),
+      ),
+    );
+  expect(arrows.length).toBeGreaterThan(100);
+
+  let longest = 0;
+  for (const [x, y, dx, dy, mm] of arrows) {
+    // The tail's place in the CT, in mm: its voxels are 1 mm, the first at 0.
+    const place: [number, number, number] = [
+      (x - (box.width - side) / 2) / pxPerMm - 0.5,
+      (y - (box.height - side) / 2) / pxPerMm - 0.5,
+      SLICE,
+    ];
+    const moved = syntheticDeformationMm(place);
+    // Between the grid's vectors the field is within 0.15 mm of the formula.
+    const where = `arrow at ${place[0].toFixed(1)}, ${place[1].toFixed(1)}`;
+    expect(Math.abs(dx - moved[0] * pxPerMm), where).toBeLessThan(0.2 * pxPerMm);
+    expect(Math.abs(dy - moved[1] * pxPerMm), where).toBeLessThan(0.2 * pxPerMm);
+    expect(Math.abs(mm - Math.hypot(...moved)), where).toBeLessThan(0.2);
+    // No arrow where the field has no vector: its grid begins at 0 mm.
+    expect(place[0]).toBeGreaterThanOrEqual(-0.01);
+    expect(place[1]).toBeGreaterThanOrEqual(-0.01);
+    longest = Math.max(longest, mm);
+  }
+  // The longest are near the middle, where the formula moves a place 5.1 mm.
+  expect(longest).toBeGreaterThan(4.8);
+  expect(longest).toBeLessThan(5.2);
+
+  // Arrows are in the other planes too, and go with the field.
+  expect(await page.locator('svg[data-field-arrows]').count()).toBe(3);
+  await page.locator('.layer-panel [data-deformation]').click();
+  await expect(page.locator('[data-field-arrow]')).toHaveCount(0);
+  expectNoProblems(problems);
+});
+
+test('the deformed grid’s lines are where the formula puts the compared image’s grid', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page, syntheticDeformableRegistration());
+  const grid = view(page).locator('[data-field-grid]');
+  await expect(grid).toHaveAttribute('aria-pressed', 'false');
+
+  // A row of the picture a little off a row of voxel centres, across the image.
+  const rowVoxel = 10.3;
+  const first = await voxelPoint(page, 1, 0);
+  const last = await voxelPoint(page, 30, 0);
+  const at = { x: first.x, y: (await voxelPoint(page, 0, rowVoxel)).y };
+  const width = Math.round(last.x - first.x);
+  const pxPerMm = (last.x - first.x) / 29;
+  const readable = await pixelsReadable(page);
+  const without = readable ? await pixelRow(page, at, width) : [];
+
+  await grid.click();
+  await expect(grid).toHaveAttribute('aria-pressed', 'true');
+  // The spacing fits the compared image: about an eighth of its 32 mm.
+  const spacing = 5;
+  await expect(view(page).locator('[data-field-grid-spacing]')).toHaveAttribute(
+    'placeholder',
+    String(spacing),
+  );
+  await expect(view(page).locator('[data-field-grid-note]')).toContainText(
+    `every ${spacing} mm from its corner`,
+  );
+
+  if (readable) {
+    const withGrid = await pixelRow(page, at, width);
+    // Where a pixel is read from in the MR, in mm from its corner, by the formula.
+    const readFrom = (pixel: number): [number, number] => {
+      const x = 1 + (Math.round(at.x) + pixel + 0.5 - first.x) / pxPerMm;
+      const y = rowVoxel + (Math.round(at.y) + 0.5 - at.y) / pxPerMm;
+      const inMr = syntheticDeformedPoint([x, y, SLICE]);
+      return [inMr[0] - PAIR.mrOrigin[0] + 0.5, inMr[1] - PAIR.mrOrigin[1] + 0.5];
+    };
+    const toLine = (mm: number): number =>
+      Math.abs(mm / spacing - Math.round(mm / spacing)) * spacing;
+    const changed = withGrid.map(
+      (seen, i) => Math.abs(seen[0] - without[i][0]) + Math.abs(seen[1] - without[i][1]) > 30,
+    );
+    // Every pixel the grid changed is on a line by the formula: within the
+    // line's width, a pixel, and what the grid's field differs from the formula by.
+    const lit = changed.flatMap((on, pixel) => (on ? [pixel] : []));
+    expect(lit.length).toBeGreaterThan(4);
+    for (const pixel of lit) {
+      const [alongX, alongY] = readFrom(pixel);
+      expect(Math.min(toLine(alongX), toLine(alongY)), `pixel ${pixel}`).toBeLessThan(0.35);
+    }
+    // And every line the formula says the row crosses (those of the MR's x,
+    // which the row cuts across) is drawn there, to within three pixels.
+    const crossings: number[] = [];
+    for (let pixel = 1; pixel < width; pixel++) {
+      const [before, now] = [readFrom(pixel - 1)[0] / spacing, readFrom(pixel)[0] / spacing];
+      // A line is at each whole number of spacings: crossed where the whole part changes.
+      if (Math.floor(before) !== Math.floor(now)) crossings.push(pixel);
+    }
+    expect(crossings.length).toBeGreaterThanOrEqual(4);
+    for (const pixel of crossings) {
+      const near = lit.some((one) => Math.abs(one - pixel) <= 3);
+      expect(near, `a line at pixel ${pixel} of ${width}; drawn at ${lit.join(', ')}`).toBe(true);
+    }
+    // The lines are not evenly apart: the field squeezes one side and stretches the other.
+    const gaps = crossings.slice(1).map((pixel, i) => pixel - crossings[i]);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeGreaterThan(0.5 * pxPerMm);
+
+    // A distance the user sets: more lines.
+    await view(page).locator('[data-field-grid-spacing]').fill('2');
+    await view(page).locator('[data-field-grid-spacing]').press('Enter');
+    await expect(view(page).locator('[data-field-grid-note]')).toContainText('every 2 mm');
+    const finer = await pixelRow(page, at, width);
+    const litFiner = finer.filter(
+      (seen, i) => Math.abs(seen[0] - without[i][0]) + Math.abs(seen[1] - without[i][1]) > 30,
+    ).length;
+    expect(litFiner).toBeGreaterThan(lit.length * 1.5);
+
+    // Off again: the picture as it was.
+    await grid.click();
+    const after = await pixelRow(page, at, width);
+    after.forEach((seen, i) => expect(Math.abs(seen[1] - without[i][1])).toBeLessThan(4));
+  }
   expectNoProblems(problems);
 });

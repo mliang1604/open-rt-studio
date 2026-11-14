@@ -33,6 +33,13 @@ const KINDS: readonly KindChoice[] = [
   },
 ];
 
+/** The length typed into a box, in mm; null when it is empty or no length. */
+function lengthOf(event: Event): number | null {
+  const text = (event.target as HTMLInputElement).value.trim();
+  const value = Number(text);
+  return text === '' || !Number.isFinite(value) || value <= 0 ? null : value;
+}
+
 /** A length in mm as a scale's end says it: whole when it is whole, else to one place. */
 export function scaleEndText(mm: number): string {
   return `${Number.isInteger(mm) ? mm : mm.toFixed(1)} mm`;
@@ -55,12 +62,23 @@ export class FieldViewPanel {
   readonly view = input.required<FieldView>();
   /** Whether the displacement scale is the one that fits the field, not one the user set. */
   readonly scaleFits = input(true);
+  /** Whether the deformed grid is drawn, and the distance between its lines in mm. */
+  readonly grid = input(false);
+  readonly gridSpacingMm = input(5);
+  /** Whether that distance is the one that fits the image, not one the user set. */
+  readonly gridSpacingFits = input(true);
+  /** Whether the field is drawn as arrows. */
+  readonly arrows = input(false);
 
   readonly kindChange = output<FieldViewKind>();
   /** The opacity asked for, 0 to 1. */
   readonly opacityChange = output<number>();
   /** The top of the displacement scale asked for, in mm; null for the one that fits the field. */
   readonly maxMmChange = output<number | null>();
+  readonly gridToggle = output<void>();
+  /** The distance between the grid's lines asked for, in mm; null for the one that fits the image. */
+  readonly gridSpacingChange = output<number | null>();
+  readonly arrowsToggle = output<void>();
 
   protected readonly kinds = KINDS;
   protected readonly opacityPercent = computed(() => Math.round(this.view().opacity * 100));
@@ -73,10 +91,15 @@ export class FieldViewPanel {
     this.opacityChange.emit(Number((event.target as HTMLInputElement).value) / 100);
   }
 
+  protected readonly gridSpacing = computed(() => scaleEndText(this.gridSpacingMm()));
+
   protected onMaxMm(event: Event): void {
-    const text = (event.target as HTMLInputElement).value.trim();
-    const value = Number(text);
     // Emptied, or no length: back to the scale that fits the field.
-    this.maxMmChange.emit(text === '' || !Number.isFinite(value) || value <= 0 ? null : value);
+    this.maxMmChange.emit(lengthOf(event));
+  }
+
+  protected onGridSpacing(event: Event): void {
+    // Emptied, or no length: back to the spacing that fits the image.
+    this.gridSpacingChange.emit(lengthOf(event));
   }
 }

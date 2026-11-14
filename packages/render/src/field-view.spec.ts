@@ -18,16 +18,20 @@ import {
   DISPLACEMENT_HIGH,
   DISPLACEMENT_LOW,
   FIELD_VIEW_WGSL,
+  GRID_LINE_PIXELS,
   JACOBIAN_COMPRESSION,
   JACOBIAN_EXPANSION,
   JACOBIAN_FOLD,
   displacementLegendGradient,
   displacementWash,
   fieldViewCode,
+  fittingGridSpacingMm,
   foldLegendBackground,
+  gridAxesInPlane,
   jacobianLegendGradient,
   jacobianTexels,
   jacobianWash,
+  onGridLine,
   washOver,
 } from './field-view.js';
 import { PARAMS_SIZE, packSliceParams } from './slice-params.js';
@@ -126,6 +130,64 @@ describe('the legends', () => {
   });
 });
 
+describe('the deformed grid', () => {
+  it('has a line where a place is read from a whole number of spacings along an axis', () => {
+    const both = [1, 1, 0];
+    // 5 mm apart, lines 0.1 mm to either side.
+    expect(onGridLine([10, 3, 7], both, 5, 0.1)).toBe(true);
+    expect(onGridLine([10.09, 3, 7], both, 5, 0.1)).toBe(true);
+    expect(onGridLine([9.91, 3, 7], both, 5, 0.1)).toBe(true);
+    expect(onGridLine([10.11, 3, 7], both, 5, 0.1)).toBe(false);
+    expect(onGridLine([12.5, 3, 7], both, 5, 0.1)).toBe(false);
+    // Along the second axis too; at the image's corner; and before it.
+    expect(onGridLine([12.5, 15, 7], both, 5, 0.1)).toBe(true);
+    expect(onGridLine([0.05, 2, 7], both, 5, 0.1)).toBe(true);
+    expect(onGridLine([-5.05, 2, 7], both, 5, 0.1)).toBe(true);
+  });
+
+  it('has no lines for the axis through the pane’s plane, and none without a spacing', () => {
+    // 20 mm along the third axis would be a line, were that axis drawn.
+    expect(onGridLine([12.5, 3, 20], [1, 1, 0], 5, 0.1)).toBe(false);
+    expect(onGridLine([12.5, 3, 20], [1, 0, 1], 5, 0.1)).toBe(true);
+    expect(onGridLine([10, 15, 20], [1, 1, 1], 0, 0.1)).toBe(false);
+  });
+
+  it('draws the two axes that lie most in a pane’s plane', () => {
+    // An axial pane of an image that lies straight: a step through it goes along the third axis.
+    expect(gridAxesInPlane([0, 0, 24])).toEqual([1, 1, 0]);
+    expect(gridAxesInPlane([0, -32, 0])).toEqual([1, 0, 1]);
+    expect(gridAxesInPlane([32, 0, 0])).toEqual([0, 1, 1]);
+    // Tilted: the axis the step goes furthest along is the one left out.
+    expect(gridAxesInPlane([3, -20, 9])).toEqual([1, 0, 1]);
+  });
+
+  it('fits a spacing to an image: about an eighth of its longest side, as 1, 2 or 5 times a power of ten', () => {
+    expect(fittingGridSpacingMm([32, 32, 12])).toBe(5);
+    expect(fittingGridSpacingMm([400, 400, 300])).toBe(50);
+    expect(fittingGridSpacingMm([150, 100, 80])).toBe(20);
+    expect(fittingGridSpacingMm([14, 9, 3])).toBe(2);
+    // As near one as the other: the finer.
+    expect(fittingGridSpacingMm([12, 9, 3])).toBe(1);
+    expect(fittingGridSpacingMm([6, 6, 6])).toBeCloseTo(0.5, 9);
+    expect(fittingGridSpacingMm([0, 0, 0])).toBe(1);
+    expect(fittingGridSpacingMm([Number.NaN, 1, 1])).toBe(1);
+  });
+
+  it('is the same arithmetic in the shader, drawn where the field has a vector', () => {
+    expect(FIELD_VIEW_WGSL).toContain('let cell = mm / spacing;');
+    expect(FIELD_VIEW_WGSL).toContain('let off = abs(cell - round(cell)) * spacing;');
+    expect(FIELD_VIEW_WGSL).toContain(
+      'return any((off < vec3<f32>(halfWidth)) & (axes > vec3<f32>(0.5)));',
+    );
+    expect(FIELD_VIEW_WGSL).toContain('mix(rgb, vec3<f32>(0.4000, 0.9500, 0.8500), 0.8500)');
+    expect(SLICE_SHADER).toContain('if (P.fieldOn != 0u && P.fieldGridSpacing > 0.0 && mapped) {');
+    // Read where the overlay is read: its own matrix, and the field's displacement.
+    expect(SLICE_SHADER).toMatch(
+      /let read = \(P\.overlayToTex \* vec4<f32>\(u, plane\.y, P\.slicePos, 1\.0\)\)\.xyz\s+\+ \(P\.fieldToOverlay \* vec4<f32>\(moved\.xyz, 0\.0\)\)\.xyz;/,
+    );
+  });
+});
+
 describe('the shader’s washes', () => {
   it('are made from the same numbers as the functions here', () => {
     expect(FIELD_VIEW_WGSL).toContain(
@@ -215,6 +277,28 @@ describe('packSliceParams with a field view', () => {
     expect([...new Float32Array(buffer).slice(108, 112)]).toEqual([12.5, 0.75, 0, 0]);
   });
 
+  it('packs the grid after the view: its spacing and half width, then the overlay’s size and its axes', () => {
+    const buffer = packSliceParams({
+      ...pane,
+      overlay: {
+        ...overlay,
+        field: {
+          ...field,
+          grid: { spacingMm: 5, halfWidthMm: 0.25, sizeMm: [32, 30, 12], axes: [1, 0, 1] },
+        },
+      },
+    });
+    const floats = new Float32Array(buffer);
+    expect([...floats.slice(110, 112)]).toEqual([5, 0.25]);
+    expect([...floats.slice(112, 115)]).toEqual([32, 30, 12]);
+    expect([...floats.slice(116, 119)]).toEqual([1, 0, 1]);
+    // No view with it: the view's code stays off.
+    expect(new Uint32Array(buffer)[107]).toBe(0);
+    // And no grid without one.
+    const none = new Float32Array(packSliceParams({ ...pane, overlay: { ...overlay, field } }));
+    expect([...none.slice(110, 120)]).toEqual(new Array(10).fill(0));
+  });
+
   it('leaves the view off without one, and without a field', () => {
     for (const given of [{ ...field, view: null }, field, null]) {
       const buffer = packSliceParams({ ...pane, overlay: { ...overlay, field: given } });
@@ -241,6 +325,9 @@ describe('SliceRenderer with a field view', () => {
   function fakeGpu() {
     /** Of each pane drawn: `fieldView` (u32 at float 107), its scale and its opacity. */
     const panes: { view: number; scaleMm: number; opacity: number }[] = [];
+    /** Of each pane drawn: the grid's spacing and half width, the overlay's size and the axes drawn. */
+    const grids: { spacingMm: number; halfWidthMm: number; sizeMm: number[]; axes: number[] }[] =
+      [];
     const textures: Made[] = [];
     /** What is bound at binding 9 by each bind group made, newest last. */
     const bound: { of: Made }[] = [];
@@ -294,6 +381,12 @@ describe('SliceRenderer with a field view', () => {
             scaleMm: floats[108],
             opacity: floats[109],
           });
+          grids.push({
+            spacingMm: floats[110],
+            halfWidthMm: floats[111],
+            sizeMm: [...floats.slice(112, 115)],
+            axes: [...floats.slice(116, 119)],
+          });
         },
         writeTexture: (to: { texture: { made: Made } }, data: ArrayBufferView) => {
           to.texture.made.written = data;
@@ -309,7 +402,7 @@ describe('SliceRenderer with a field view', () => {
       context: { getCurrentTexture: () => ({ createView: () => ({}) }) },
     } as unknown as GpuContext;
     const jacobians = (): Made[] => textures.filter((one) => one.format === 'rg16float');
-    return { gpu, panes, jacobians, bound };
+    return { gpu, panes, grids, jacobians, bound };
   }
 
   function volume(dims: [number, number, number]): Volume {
@@ -459,6 +552,43 @@ describe('SliceRenderer with a field view', () => {
     expect(two.jacobians()).toHaveLength(2);
     expect(two.bound.at(-1)!.of).toBe(two.jacobians()[1]);
     expect(two.drawn().view).toBe(2);
+  });
+
+  it('draws the deformed grid when given a spacing: lines a set number of pixels wide, for the axes in the pane', () => {
+    const { renderer, grids } = setup();
+    const gridOf = (view: PaneView) => {
+      grids.length = 0;
+      renderer.renderPanes([view]);
+      return grids[0];
+    };
+    expect(gridOf(AXIAL).spacingMm).toBe(0);
+
+    renderer.setFieldGrid(5);
+    const axial = gridOf(AXIAL);
+    expect(axial.spacingMm).toBe(5);
+    // The overlay is 6 × 6 × 2 voxels of 1 mm.
+    expect(axial.sizeMm).toEqual([6, 6, 2]);
+    expect(axial.axes).toEqual([1, 1, 0]);
+    // The base's 8 mm across 100 pixels: a line of 1.5 pixels is 0.06 mm to either side.
+    expect(axial.halfWidthMm).toBeCloseTo((GRID_LINE_PIXELS / 2) * 0.08, 6);
+    // Zoomed in twice, a pixel is half as much of the image.
+    expect(gridOf({ ...AXIAL, zoom: 2 } as PaneView).halfWidthMm).toBeCloseTo(
+      (GRID_LINE_PIXELS / 2) * 0.04,
+      6,
+    );
+    expect(gridOf({ ...AXIAL, orientation: Orientation.Coronal } as PaneView).axes).toEqual([
+      1, 0, 1,
+    ]);
+    expect(gridOf({ ...AXIAL, orientation: Orientation.Sagittal } as PaneView).axes).toEqual([
+      0, 1, 1,
+    ]);
+
+    // No length is no grid; and there is none without a field.
+    renderer.setFieldGrid(0);
+    expect(gridOf(AXIAL).spacingMm).toBe(0);
+    renderer.setFieldGrid(5);
+    renderer.setOverlay(overlay, 0.5, undefined, IDENTITY_MAT4, null);
+    expect(gridOf(AXIAL).spacingMm).toBe(0);
   });
 
   it('lets go of the determinant with the field, and shows it again with the field', () => {
