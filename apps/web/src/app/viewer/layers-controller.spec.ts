@@ -4,9 +4,17 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { baseImageLayer, overlayImageLayer, type Layer, type Volume } from '@open-rt-studio/dicom';
+import {
+  baseImageLayer,
+  findPlacement,
+  overlayImageLayer,
+  type Layer,
+  type LayerPlacement,
+  type Volume,
+} from '@open-rt-studio/dicom';
 import { LayoutMode, NO_OBLIQUE } from '@open-rt-studio/render';
 
+import { registrationObject } from '../registration-testing';
 import type { LoadResult } from '../volume-loader';
 import { CompareStore } from './compare-store';
 import { LayersController } from './layers-controller';
@@ -32,10 +40,10 @@ function volumeOf(modality: string, windowCenter: number, windowWidth: number): 
   };
 }
 
-function setup(overlayModality: string | null) {
+function setup(overlayModality: string | null, placement?: LayerPlacement) {
   const base = baseImageLayer('base', volumeOf('CT', 40, 400));
   const overlay = overlayModality
-    ? overlayImageLayer('over', volumeOf(overlayModality, 600, 1200))
+    ? overlayImageLayer('over', volumeOf(overlayModality, 600, 1200), placement)
     : null;
   const layers: Layer[] = overlay ? [base, overlay] : [base];
   const load = signal<LoadState>({
@@ -149,5 +157,37 @@ describe('LayersController window/level in Compare', () => {
     const { controller } = setup(null);
     expect(controller.canShareWindow()).toBe(false);
     expect(controller.windowShared()).toBe(false);
+  });
+});
+
+describe('LayersController and an overlay placed by a registration (#76)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  function placement(): LayerPlacement {
+    const found = findPlacement('planning', 'follow-up', [
+      registrationObject('reg', 'follow-up', 'planning'),
+    ]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    return found.placement;
+  }
+
+  it('is the fusion overlay, and not what Compare shows in its second column', () => {
+    const { controller, base, overlay, activeGroup } = setup('CT', placement());
+    expect(controller.selectedOverlay()).toBe(overlay());
+    expect(controller.compareOverlay()).toBeNull();
+    expect(controller.compareLacksOverlay()).toBe(true);
+    // The second column falls back to the base, as with no overlay at all:
+    // its volume, its window, and nothing to share a window with.
+    expect(controller.groupVolume(1)).toBe(base().volume);
+    activeGroup.set(1);
+    expect(controller.activeWlLayer()).toBe(base());
+    expect(controller.canShareWindow()).toBe(false);
+  });
+
+  it('leaves an overlay in the base’s own frame as Compare had it', () => {
+    const { controller, overlay } = setup('CT');
+    expect(controller.compareOverlay()).toBe(overlay());
+    expect(controller.compareLacksOverlay()).toBe(false);
+    expect(controller.groupVolume(1)).toBe(overlay().volume);
   });
 });

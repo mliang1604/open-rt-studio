@@ -405,7 +405,8 @@ describe('ServerSource', () => {
 
   it('says so when a series holds nothing that can be shown', async () => {
     const { source } = await withPatient({
-      parse: () => Promise.resolve({ slices: [], structureSets: [], skipped: [] }),
+      parse: () =>
+        Promise.resolve({ slices: [], structureSets: [], registrations: [], skipped: [] }),
     });
     await expect(source.fetchSeries(COURSE.ct)).rejects.toThrow(
       'No DICOM image slices were found in that series.',

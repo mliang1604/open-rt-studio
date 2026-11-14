@@ -9,6 +9,7 @@ import {
   type Volume,
   clearDirty,
   type LabelVolume,
+  type Mat4,
 } from '@open-rt-studio/dicom';
 import {
   colormap,
@@ -62,6 +63,13 @@ import type { MipPaneView, MprPaneView, PaneView } from './pane-view.js';
 
 // Public surface kept stable as this module was split into focused siblings;
 // callers continue to import these geometry/packing helpers from './slice-renderer'.
+/** Whether two registrations place an overlay alike: both none, or the same numbers. */
+function sameMatrix(a: Mat4 | null, b: Mat4 | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || a.length !== b.length) return false;
+  return a.every((value, i) => value === b[i]);
+}
+
 export {
   defaultSlabThicknessMm,
   isDvr,
@@ -141,6 +149,11 @@ export class SliceRenderer {
   private overlayTexture: GPUTexture | null = null;
   /** Overlay co-registration matrices (base pane plane → overlay grid), or null. */
   private overlayMatrices: readonly Float32Array[] | null = null;
+  /**
+   * The registration the overlay is placed by: a matrix that maps a point of
+   * the base's frame into the overlay's. Null when the two share a frame.
+   */
+  private overlayRegistration: Mat4 | null = null;
   /** Overlay matrices on its OWN bounds, for drawing it standalone (Compare). */
   private overlayOwnMatrices: readonly Float32Array[] | null = null;
   /** Composite opacity of the overlay over the base, 0 when no overlay. */
@@ -325,6 +338,7 @@ export class SliceRenderer {
     this.overlayTexture = null;
     this.overlayVolume = null;
     this.overlayMatrices = null;
+    this.overlayRegistration = null;
     this.overlayOwnMatrices = null;
     this.overlayOpacity = 0;
     this.overlayColormap = false;
@@ -440,10 +454,21 @@ export class SliceRenderer {
    * through a colormap per `display`. Uploads only the overlay texture (and its
    * colormap LUT) and rebuilds the MPR bind groups; the base volume, its matrices
    * and the view state are untouched (unlike {@link setVolume}). The overlay
-   * shares the patient frame but has its own grid, so it carries its own
-   * per-orientation plane→texture matrices.
+   * has its own grid, so it carries its own per-orientation plane→texture
+   * matrices.
+   *
+   * The overlay is in the base's patient frame unless `baseToOverlay` is
+   * given: the matrix of a registration that maps the coordinates of a point
+   * from the base's frame to the overlay's (see {@link overlayPlaneToTexMatrix}).
+   * It is whoever calls this that knows the two frames and which way the
+   * registration goes; the renderer applies the matrix as it is.
    */
-  setOverlay(volume: Volume | null, opacity: number, display?: LayerDisplay): void {
+  setOverlay(
+    volume: Volume | null,
+    opacity: number,
+    display?: LayerDisplay,
+    baseToOverlay?: Mat4 | null,
+  ): void {
     if (!volume) {
       if (!this.overlayVolume) return;
       this.clearOverlay();
@@ -453,15 +478,23 @@ export class SliceRenderer {
     // Same overlay grid, only opacity/colormap changed (the blend bar and the
     // layers-panel slider): update the per-frame scalars and the LUT in place —
     // no texture re-upload, matrix recompute, or bind-group churn per drag frame.
+    const registration = baseToOverlay ?? null;
     if (volume === this.overlayVolume) {
       this.overlayOpacity = opacity;
       this.overlayColormap = display?.kind === 'colormap';
       if (display?.kind === 'colormap') this.uploadOverlayLut(colormap(display.name));
+      // The same image placed by another registration, or by none: where it
+      // is read changes, and nothing is uploaded again.
+      if (!sameMatrix(registration, this.overlayRegistration)) {
+        this.overlayRegistration = registration;
+        this.overlayMatrices = this.registeredOverlayMatrices(volume);
+      }
       return;
     }
     this.overlayTexture?.destroy();
     this.overlayTexture = createVolumeTexture(this.device, volume, 'Overlay');
     this.overlayVolume = volume;
+    this.overlayRegistration = registration;
     this.overlayOpacity = opacity;
     // Colormap display bakes the named ramp into the overlay LUT; grayscale leaves
     // the flag off and the shader uses the windowed value directly.
@@ -471,18 +504,23 @@ export class SliceRenderer {
     // grid, so they need the base volume; rebuilt here for the orthogonal panes
     // and refreshed per-frame for oblique ones in writeParams. Without a base
     // there's nothing to composite over (matrices stay null → shader skips it).
-    const base = this.volume;
-    this.overlayMatrices = base
-      ? [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal].map((orientation) =>
-          overlayPlaneToTexMatrix(base, volume, orientation),
-        )
-      : null;
+    this.overlayMatrices = this.registeredOverlayMatrices(volume);
     // Standalone matrices on the overlay's own bounds — the Compare layout draws
     // the overlay as a base in its column, not co-registered onto the base plane.
     this.overlayOwnMatrices = [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal].map(
       (orientation) => planeToTexMatrix(volume, orientation),
     );
     this.rebuildMprBindGroups();
+  }
+
+  /** The orthogonal panes' matrices for an overlay, through its registration if it has one. */
+  private registeredOverlayMatrices(overlay: Volume): readonly Float32Array[] | null {
+    const base = this.volume;
+    if (!base) return null;
+    const registration = this.overlayRegistration ?? undefined;
+    return [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal].map((orientation) =>
+      overlayPlaneToTexMatrix(base, overlay, orientation, undefined, registration),
+    );
   }
 
   /**
@@ -550,12 +588,15 @@ export class SliceRenderer {
       if (!slot) continue;
       // Compare's second column (group ≥ 1) draws the overlay layer standalone on
       // its own grid; everything else draws the base. Fall back to the base when
-      // there's no overlay to compare against.
+      // there's no overlay to compare against, or when a registration places
+      // it: its own grid is then not where the base's is, and the column would
+      // show planes that do not belong together.
       const useOverlay =
         (pane.group ?? 0) >= 1 &&
         !!this.overlayTexture &&
         !!this.overlayVolume &&
-        !!this.overlayOwnMatrices;
+        !!this.overlayOwnMatrices &&
+        !this.overlayRegistration;
       const paneVolume = useOverlay ? this.overlayVolume! : volume;
       const matrices = useOverlay ? this.overlayOwnMatrices! : this.matrices;
       const composite = pane.composite ?? true;
@@ -689,7 +730,13 @@ export class SliceRenderer {
       composite && this.overlayVolume && this.overlayMatrices
         ? {
             matrix: isOblique(view.rotation)
-              ? overlayPlaneToTexMatrix(volume, this.overlayVolume, view.orientation, view.rotation)
+              ? overlayPlaneToTexMatrix(
+                  volume,
+                  this.overlayVolume,
+                  view.orientation,
+                  view.rotation,
+                  this.overlayRegistration ?? undefined,
+                )
               : this.overlayMatrices[view.orientation],
             windowCenter: this.overlayVolume.windowCenter,
             windowWidth: this.overlayVolume.windowWidth,

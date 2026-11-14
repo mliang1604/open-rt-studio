@@ -3,12 +3,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
+  IDENTITY_MAT4,
   Orientation,
+  type Mat4,
   type Vec3,
   type Volume,
   type VolumeGeometry,
   dot,
+  invertMat4,
+  rigidMat4,
   sub,
+  transformPoint,
 } from '@open-rt-studio/dicom';
 import {
   clipLineToUnitSquare,
@@ -106,6 +111,108 @@ describe('overlayPlaneToTexMatrix', () => {
       0.5,
     );
     expect(correct[0]).not.toBeCloseTo(naive[0]);
+  });
+});
+
+describe('overlayPlaneToTexMatrix through a registration (#76)', () => {
+  // Two images of one anatomy in two frames of reference. The overlay's frame
+  // is the base's turned and moved: a point at `p` in the base's frame is at
+  // `M · p` in the overlay's.
+  const base = makeVolume([8, 6, 4], {
+    iStep: [2, 0, 0],
+    jStep: [0, 2, 0],
+    kStep: [0, 0, 3],
+    origin: [-7, -5, -4],
+  });
+  const overlay = makeVolume([5, 7, 6], {
+    iStep: [1.5, 0, 0],
+    jStep: [0, 1.5, 0],
+    kStep: [0, 0, 2],
+    origin: [20, 30, 40],
+  });
+  const baseToOverlay: Mat4 = rigidMat4([1, 2, -1], 25, [24, 33, 44]);
+
+  /** The patient position a texture coordinate of a volume is at. */
+  function patientAt(volume: Volume, tex: readonly number[]): Vec3 {
+    const { iStep, jStep, kStep, origin } = volume.geometry!;
+    const index = [0, 1, 2].map((axis) => tex[axis] * volume.dims[axis] - 0.5);
+    return [0, 1, 2].map(
+      (c) => origin[c] + index[0] * iStep[c] + index[1] * jStep[c] + index[2] * kStep[c],
+    ) as unknown as Vec3;
+  }
+
+  const panePoints: [number, number, number][] = [
+    [0, 0, 0],
+    [0.5, 0.5, 0.5],
+    [1, 0, 0.25],
+    [0.2, 0.9, 1],
+  ];
+  const tilted: ObliqueRotation = { tiltU: 0.3, tiltV: -0.2 };
+
+  it.each([
+    ['axial', Orientation.Axial, undefined],
+    ['coronal', Orientation.Coronal, undefined],
+    ['sagittal', Orientation.Sagittal, undefined],
+    ['an oblique plane', Orientation.Axial, tilted],
+  ] as const)(
+    'reads the overlay where the registration puts each point of the pane: %s',
+    (_name, orientation, rotation) => {
+      // Where the pane shows the base, in the base's own frame.
+      const baseMatrix = overlayPlaneToTexMatrix(base, base, orientation, rotation);
+      const registered = overlayPlaneToTexMatrix(
+        base,
+        overlay,
+        orientation,
+        rotation,
+        baseToOverlay,
+      );
+      for (const [u, v, slicePos] of panePoints) {
+        const inBase = patientAt(base, applyMat4(baseMatrix, u, v, slicePos));
+        const read = patientAt(overlay, applyMat4(registered, u, v, slicePos));
+        // The same anatomy: the base's point, carried into the overlay's frame.
+        // To a ten-thousandth of a millimetre: the matrices are 32-bit, as the
+        // shader takes them.
+        const expected = transformPoint(baseToOverlay, inBase);
+        read.forEach((value, i) => expect(value, `coordinate ${i}`).toBeCloseTo(expected[i], 4));
+      }
+    },
+  );
+
+  it('is as without one for the identity, and not for anything else', () => {
+    const plain = overlayPlaneToTexMatrix(base, overlay, Orientation.Axial);
+    expectVec(
+      [...overlayPlaneToTexMatrix(base, overlay, Orientation.Axial, undefined, IDENTITY_MAT4)],
+      [...plain],
+    );
+    const moved = overlayPlaneToTexMatrix(
+      base,
+      overlay,
+      Orientation.Axial,
+      undefined,
+      baseToOverlay,
+    );
+    expect(Math.abs(moved[12] - plain[12])).toBeGreaterThan(0.1);
+  });
+
+  it('goes the way it is given: the inverse reads somewhere else', () => {
+    // A move of 10 mm along x from the base's frame to the overlay's.
+    const shift: Mat4 = rigidMat4([0, 0, 1], 0, [10, 0, 0]);
+    const there = overlayPlaneToTexMatrix(base, base, Orientation.Axial, undefined, shift);
+    const back = overlayPlaneToTexMatrix(
+      base,
+      base,
+      Orientation.Axial,
+      undefined,
+      invertMat4(shift),
+    );
+    const plain = overlayPlaneToTexMatrix(base, base, Orientation.Axial);
+    // The base is 16 mm wide: 10 mm is five eighths of its texture, one way or the other.
+    expect(applyMat4(there, 0.5, 0.5, 0.5)[0] - applyMat4(plain, 0.5, 0.5, 0.5)[0]).toBeCloseTo(
+      0.625,
+    );
+    expect(applyMat4(back, 0.5, 0.5, 0.5)[0] - applyMat4(plain, 0.5, 0.5, 0.5)[0]).toBeCloseTo(
+      -0.625,
+    );
   });
 });
 

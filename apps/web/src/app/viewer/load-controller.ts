@@ -575,7 +575,19 @@ export class LoadController {
         return true;
       }
       if (imported.kind === 'structures') {
+        this.files.addRegistrations(imported.registrations);
         this.addStructureSets(imported.structureSets, previous);
+        if (entry) this.recentStore.record(entry);
+        return true;
+      }
+      if (imported.kind === 'registrations') {
+        // Nothing to show by itself: kept, for the series it connects.
+        this.files.addRegistrations(imported.registrations);
+        d.load.set(previous.status === 'ready' ? previous : { status: 'idle' });
+        const count = imported.registrations.length;
+        this.flashNotice(
+          `Imported ${count} registration${count === 1 ? '' : 's'}. Hold ⌥ and pick a series it connects to the one on screen to fuse the two.`,
+        );
         if (entry) this.recentStore.record(entry);
         return true;
       }

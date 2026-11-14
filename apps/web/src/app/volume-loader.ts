@@ -11,9 +11,10 @@ import {
   structureSetsForSeries,
   baseImageLayer,
   baseLayer,
-  framesMatch,
+  findPlacement,
   overlayImageLayer,
   type Layer,
+  type SpatialRegistration,
   type StructureSet,
   VolumeBuildError,
 } from '@open-rt-studio/dicom';
@@ -29,11 +30,18 @@ import { parseFilesInWorkers, type LoadProgress, type SkippedFile } from './pars
  * What a batch of files turned out to hold; see {@link VolumeLoader.importFiles}.
  * `skipped` lists the files that could not be read; the rest was imported.
  * `nothing` is a batch that held DICOM files but none that could be read, so
- * `skipped` is all there is to say about it.
+ * `skipped` is all there is to say about it. `registrations` are the Spatial
+ * Registration objects of a batch with no image and no structure set in it;
+ * with images they are in the result, and with structure sets beside them.
  */
 export type FileImport = (
   | { readonly kind: 'images'; readonly result: LoadResult }
-  | { readonly kind: 'structures'; readonly structureSets: readonly StructureSet[] }
+  | {
+      readonly kind: 'structures';
+      readonly structureSets: readonly StructureSet[];
+      readonly registrations: readonly SpatialRegistration[];
+    }
+  | { readonly kind: 'registrations'; readonly registrations: readonly SpatialRegistration[] }
   | { readonly kind: 'nothing' }
 ) & { readonly skipped: readonly SkippedFile[] };
 
@@ -66,6 +74,12 @@ export interface LoadResult {
    * the current selection.
    */
   readonly allStructureSets: readonly StructureSet[];
+  /**
+   * The Spatial Registration objects that came with the load: those read in
+   * the batch of files, or those the source gave with the series. What may
+   * place a series of another frame of reference over this one.
+   */
+  readonly registrations: readonly SpatialRegistration[];
   /** Number of files the user selected. */
   readonly fileCount: number;
   /** Number of image slices the selected series contributed. */
@@ -108,21 +122,24 @@ export class VolumeLoader {
     onProgress?: LoadProgress,
     signal?: AbortSignal,
   ): Promise<FileImport> {
-    const { slices, structureSets, skipped } = await parseFilesInWorkers(
+    const { slices, structureSets, registrations, skipped } = await parseFilesInWorkers(
       files,
       onProgress,
       undefined,
       signal,
     );
     if (slices.length === 0 && structureSets.length > 0) {
-      return { kind: 'structures', structureSets, skipped };
+      return { kind: 'structures', structureSets, registrations, skipped };
+    }
+    if (slices.length === 0 && registrations.length > 0) {
+      return { kind: 'registrations', registrations, skipped };
     }
     // Nothing came out and files were skipped: the list of them says why. The
     // "no slices found" error is for a batch with no DICOM image in it at all.
     if (slices.length === 0 && skipped.length > 0) return { kind: 'nothing', skipped };
     return {
       kind: 'images',
-      result: this.buildFromSlices(slices, structureSets, files.length),
+      result: this.buildFromSlices(slices, structureSets, registrations, files.length),
       skipped,
     };
   }
@@ -130,6 +147,7 @@ export class VolumeLoader {
   private buildFromSlices(
     slices: Parameters<typeof groupSeries>[0],
     structureSets: readonly StructureSet[],
+    registrations: readonly SpatialRegistration[],
     fileCount: number,
   ): LoadResult {
     const series = groupSeries(slices);
@@ -138,7 +156,7 @@ export class VolumeLoader {
     const selected = initialImportSeries(series);
     if (!selected) buildVolume([...slices]); // throws the canonical "no slices" error
 
-    return this.buildResult(series, selected!, structureSets, fileCount);
+    return this.buildResult(series, selected!, structureSets, registrations, fileCount);
   }
 
   /**
@@ -150,8 +168,18 @@ export class VolumeLoader {
    * the current view's `allStructureSets`, or none. The viewer routes the result
    * through {@link merge} for the same-FoR-fuses / different-study-replaces rule.
    */
-  loadSeries(series: Series, allStructureSets: readonly StructureSet[] = []): LoadResult {
-    return this.buildResult([series], series, allStructureSets, series.slices.length);
+  loadSeries(
+    series: Series,
+    allStructureSets: readonly StructureSet[] = [],
+    registrations: readonly SpatialRegistration[] = [],
+  ): LoadResult {
+    return this.buildResult(
+      [series],
+      series,
+      allStructureSets,
+      registrations,
+      series.slices.length,
+    );
   }
 
   /**
@@ -159,14 +187,19 @@ export class VolumeLoader {
    * the injectable method just delegates so the viewer can go through the loader
    * seam, while the pure decision stays unit-testable.
    */
-  merge(current: LoadResult, incoming: LoadResult): MergedLoad {
-    return mergeLoad(current, incoming);
+  merge(
+    current: LoadResult,
+    incoming: LoadResult,
+    registrations: readonly SpatialRegistration[] = [],
+  ): MergedLoad {
+    return mergeLoad(current, incoming, registrations);
   }
 
   private buildResult(
     series: readonly Series[],
     selected: Series,
     allStructureSets: readonly StructureSet[],
+    registrations: readonly SpatialRegistration[],
     fileCount: number,
   ): LoadResult {
     // One layer: the selected series. Anything else, a dose included, joins the
@@ -178,6 +211,7 @@ export class VolumeLoader {
       layers,
       structureSets: structureSetsForSeries(allStructureSets, selected),
       allStructureSets,
+      registrations,
       fileCount,
       sliceCount: selected.slices.length,
     };
@@ -195,6 +229,11 @@ export interface MergedLoad {
   readonly result: LoadResult;
   /** True when {@link result} added the incoming series as an overlay layer. */
   readonly added: boolean;
+  /**
+   * Set when the series is in another frame of reference and more than one
+   * registration leads to it: none was chosen, and nothing was added.
+   */
+  readonly why?: 'several-registrations';
 }
 
 /**
@@ -203,15 +242,30 @@ export interface MergedLoad {
  *
  * When the incoming selected series shares the current base layer's frame of
  * reference, it images the same patient in the same placement, so it's *added*
- * as a translucent overlay layer above the base (which stays). Otherwise it's a
+ * as a translucent overlay layer above the base (which stays). When it is in
+ * another frame and exactly one way of `registrations` leads from the base's
+ * frame to its own, it is added too, placed by them (#76). Otherwise it's a
  * different study and *replaces* the current load. A series with no frame of
  * reference never matches, so it always replaces — there's nothing to align it
- * against.
+ * against. Between several registrations none is chosen: the series is not
+ * added, and `why` says so.
  *
  * Pure for unit testing the add-vs-replace rule and the resulting registry.
  */
-export function mergeLoad(current: LoadResult, incoming: LoadResult): MergedLoad {
-  if (!sameFrameOfReference(current, incoming)) return { result: incoming, added: false };
+export function mergeLoad(
+  current: LoadResult,
+  incoming: LoadResult,
+  registrations: readonly SpatialRegistration[] = [],
+): MergedLoad {
+  const found = findPlacement(
+    selectedSeries(current)?.frameOfReferenceUid ?? null,
+    selectedSeries(incoming)?.frameOfReferenceUid ?? null,
+    registrations,
+  );
+  if (found.kind === 'none') return { result: incoming, added: false };
+  if (found.kind === 'several') {
+    return { result: incoming, added: false, why: 'several-registrations' };
+  }
 
   // Co-sampling an overlay in the base's patient frame maps each pane pixel
   // through both grids' index→patient affines, so both volumes need geometry;
@@ -235,20 +289,9 @@ export function mergeLoad(current: LoadResult, incoming: LoadResult): MergedLoad
   const overlay = overlayImageLayer(
     uniqueLayerId(current.layers, incoming.selectedUid),
     overlayVolume,
+    found.kind === 'placed' ? found.placement : undefined,
   );
   return { result: { ...current, layers: [...current.layers, overlay] }, added: true };
-}
-
-/**
- * Whether the two loads' selected series share a (non-null) frame of reference —
- * the rule for adding an overlay rather than replacing. A null frame of reference
- * never matches, even another null, since it gives nothing to align against.
- */
-function sameFrameOfReference(a: LoadResult, b: LoadResult): boolean {
-  return framesMatch(
-    selectedSeries(a)?.frameOfReferenceUid ?? null,
-    selectedSeries(b)?.frameOfReferenceUid ?? null,
-  );
 }
 
 /** The series a load currently shows (its base layer's source), or undefined. */

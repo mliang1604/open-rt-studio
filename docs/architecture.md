@@ -466,6 +466,36 @@ from the item's frame to the object's frame, with the matrix as written.
 - A matrix element is written with as many digits as fit in sixteen
   characters, twelve or more decimals for a rotation.
 
+**In the viewer** (part of #76) a registration places a series of one frame
+of reference over a series of another, as a fusion overlay.
+
+- Registration objects are read from files like structure sets: by the parse
+  worker, kept for the session in the patient catalog, and given with a
+  fetched series by the data source (`FetchedSeries.registrations`). The
+  server source gives none yet (#228).
+- A series joins the view as an overlay when it is in the base's frame, or
+  when exactly one way of the known registrations leads from the base's
+  frame to its own (`findPlacement`). With several equally short ways, none
+  is chosen and the series is refused with that reason. Choosing among them
+  is still to come.
+- The layer carries its `placement`: the registrations on the way, each with
+  the direction it was written in, and the matrix from the base's frame to
+  the layer's with its inverse. A registration that a file writes from the
+  secondary image's frame to the primary's is taken inverted, and the layers
+  panel says which way it was written.
+- **The image goes one way and its coordinates the other.** To draw the
+  overlay over the base, each position of the base's plane is carried from
+  the base's frame to the overlay's, and the overlay is read there. The
+  shader gets this as the one overlay matrix it already had
+  (`overlayPlaneToTexMatrix`), which is exact for a matrix since a plane
+  stays a plane; the probe carries its point the same way
+  (`pointBetweenLayers`). Both take the matrix from the layer's placement,
+  so they cannot disagree about it.
+- The Compare layout does not show a placed overlay yet: its second column
+  draws an image on its own grid, which a registration does not line up
+  with the base's. The column falls back to the base and the layers panel
+  says so. Linked navigation through a registration is the rest of #76.
+
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), and how a Deformable
 Spatial Registration object fills the model (#75). Status: **decided, and

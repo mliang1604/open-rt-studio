@@ -76,7 +76,8 @@ export class FakeDataSource implements DataSource {
       const fetch: FakeFetch = {
         seriesUid,
         options,
-        answer: () => resolve({ series: this.seriesFor(seriesUid), structureSets: [] }),
+        answer: () =>
+          resolve({ series: this.seriesFor(seriesUid), structureSets: [], registrations: [] }),
         fail: reject,
       };
       options.signal?.addEventListener('abort', () =>

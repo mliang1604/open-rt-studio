@@ -90,6 +90,9 @@ by git) if you want files on disk to open.
   cut-away, structure surfaces
 - Fusion of a second series or a dose grid over the image, with colour maps
   and a checkerboard; a side-by-side Compare layout
+- Fusion of a series from another frame of reference through a rigid DICOM
+  Spatial Registration opened from files beside it (fusion only so far, not
+  Compare, and not yet from the server)
 - Curved planar reformat: draw a path through the volume and see the image
   straightened along it
 - Distance, angle and region measurements; cine; PNG and spin-video capture

@@ -29,7 +29,7 @@ export async function parseHere(files: readonly File[]): Promise<ParsedFiles> {
     const set = parsed.length === 0 ? parseStructureSet(file.name, buffer) : null;
     if (set) structureSets.push(set);
   }
-  return { slices, structureSets, skipped: [] };
+  return { slices, structureSets, registrations: [], skipped: [] };
 }
 
 interface Held {

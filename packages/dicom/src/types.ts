@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import type { LayerPlacement } from './layer-placement.js';
 import type { DicomMetadata } from './metadata.js';
 
 /** A single parsed DICOM slice, with the bits we need to build a volume. */
@@ -283,6 +284,12 @@ export interface Layer {
   readonly opacity: number;
   /** Whether the layer is currently drawn. */
   readonly visible: boolean;
+  /**
+   * How the layer is placed over the base when it is in another frame of
+   * reference: by a registration. Absent for the base, and for a layer in
+   * the base's own frame.
+   */
+  readonly placement?: LayerPlacement;
 }
 
 /**
@@ -308,12 +315,13 @@ export const DOSE_COLORMAP = 'jet';
 /**
  * Build an overlay image layer for a {@link Volume}: a translucent, visible
  * `'overlay'`-role layer that sits above the base. Used when a second (or Nth)
- * series sharing the base's frame of reference is loaded as an added layer rather
- * than replacing the current load. A dose grid (modality RTDOSE) defaults to a
+ * series is loaded as an added layer rather than replacing the current load: one
+ * that shares the base's frame of reference, or one in another frame with the
+ * `placement` a registration gives it. A dose grid (modality RTDOSE) defaults to a
  * colour wash ({@link DOSE_COLORMAP}); other images default to grayscale, and a
  * caller can swap {@link Layer.display} later.
  */
-export function overlayImageLayer(id: string, volume: Volume): Layer {
+export function overlayImageLayer(id: string, volume: Volume, placement?: LayerPlacement): Layer {
   const display: LayerDisplay =
     volume.modality === 'RTDOSE' ? { kind: 'colormap', name: DOSE_COLORMAP } : GRAYSCALE_DISPLAY;
   return {
@@ -324,6 +332,7 @@ export function overlayImageLayer(id: string, volume: Volume): Layer {
     display,
     opacity: DEFAULT_OVERLAY_OPACITY,
     visible: true,
+    ...(placement ? { placement } : {}),
   };
 }
 

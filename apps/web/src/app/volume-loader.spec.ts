@@ -5,11 +5,13 @@
 import {
   baseImageLayer,
   overlayImageLayer,
+  pointBetweenLayers,
   type Slice,
   type Volume,
   type VolumeGeometry,
   type Series,
 } from '@open-rt-studio/dicom';
+import { registrationObject, shiftMatrix } from './registration-testing';
 import { mergeLoad, VolumeLoader, type LoadResult } from './volume-loader';
 
 /** A unit index→patient affine; real loads always carry one (see buildVolume). */
@@ -80,6 +82,7 @@ function fakeLoad(
     layers: [baseImageLayer(uid, fakeVolume(modality, geometry))],
     structureSets: [],
     allStructureSets: [],
+    registrations: [],
     fileCount: 1,
     sliceCount: 1,
   };
@@ -172,6 +175,61 @@ describe('mergeLoad', () => {
 
     expect(added).toBe(false);
     expect(result).toBe(incoming);
+  });
+
+  it('adds a series of another frame that one registration connects, placed by it (#76)', () => {
+    const current = fakeLoad('planning', 'frame-1');
+    const incoming = fakeLoad('follow-up', 'frame-2');
+    // As a file has it: the follow-up's frame mapped into the planning frame.
+    const registration = registrationObject('reg', 'frame-2', 'frame-1', shiftMatrix(5, -3, 2));
+
+    const { result, added, why } = mergeLoad(current, incoming, [registration]);
+
+    expect(added).toBe(true);
+    expect(why).toBeUndefined();
+    expect(result.layers.map((l) => [l.id, l.role])).toEqual([
+      ['planning', 'base'],
+      ['follow-up', 'overlay'],
+    ]);
+    const placement = result.layers[1].placement!;
+    expect(placement).toMatchObject({ baseFrame: 'frame-1', layerFrame: 'frame-2' });
+    expect(placement.steps.map((step) => [step.sopInstanceUid, step.inverted])).toEqual([
+      ['reg', true],
+    ]);
+    // The base's point (5, -3, 2) is the follow-up's origin.
+    expect(pointBetweenLayers([5, -3, 2], undefined, placement)).toEqual([0, 0, 0]);
+    // A layer in the base's own frame has no placement.
+    expect(
+      mergeLoad(current, fakeLoad('mr', 'frame-1', 'MR'), [registration]).result.layers[1],
+    ).not.toHaveProperty('placement');
+  });
+
+  it('replaces a series of another frame that no registration connects', () => {
+    const registration = registrationObject('reg', 'frame-2', 'frame-1');
+    const incoming = fakeLoad('other', 'frame-3');
+    expect(mergeLoad(fakeLoad('planning', 'frame-1'), incoming, [registration])).toEqual({
+      result: incoming,
+      added: false,
+    });
+  });
+
+  it('does not choose between two registrations, and says that is why', () => {
+    const incoming = fakeLoad('follow-up', 'frame-2');
+    const merged = mergeLoad(fakeLoad('planning', 'frame-1'), incoming, [
+      registrationObject('reg-a', 'frame-2', 'frame-1', shiftMatrix(5, -3, 2)),
+      registrationObject('reg-b', 'frame-2', 'frame-1', shiftMatrix(6, -3, 2)),
+    ]);
+    expect(merged).toEqual({ result: incoming, added: false, why: 'several-registrations' });
+  });
+
+  it('replaces a registered series when a volume lacks geometry', () => {
+    const registration = registrationObject('reg', 'frame-2', 'frame-1');
+    const merged = mergeLoad(
+      fakeLoad('planning', 'frame-1'),
+      fakeLoad('follow-up', 'frame-2', 'CT', null),
+      [registration],
+    );
+    expect(merged.added).toBe(false);
   });
 
   it('replaces when either series has no frame of reference', () => {

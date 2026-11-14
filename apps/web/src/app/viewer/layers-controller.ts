@@ -112,6 +112,21 @@ export class LayersController {
     () => this.layers().find((layer) => layer.role === 'overlay' && layer.visible) ?? null,
   );
 
+  /**
+   * The overlay the Compare layout shows in its second column: the active
+   * overlay, unless a registration places it. That column draws an image on
+   * its own grid, which a registration does not line up with the base's, so
+   * until Compare can show such an image rightly the column falls back to
+   * the base, as it does with no overlay at all.
+   */
+  readonly compareOverlay = computed<Layer | null>(() => {
+    const overlay = this.selectedOverlay();
+    return overlay?.placement ? null : overlay;
+  });
+
+  /** Whether the active overlay is one that Compare does not show yet. */
+  readonly compareLacksOverlay = computed(() => !!this.selectedOverlay()?.placement);
+
   /** True in the side-by-side Compare layout (vs. the composited fusion views). */
   readonly isCompare = computed(() => this.deps!.layoutMode() === LayoutMode.Compare);
 
@@ -122,7 +137,7 @@ export class LayersController {
   readonly activeWlLayer = computed<Layer | null>(() => {
     const base = baseLayer(this.layers()) ?? null;
     if (!this.isCompare()) return base;
-    const overlay = this.selectedOverlay();
+    const overlay = this.compareOverlay();
     if (!overlay) return base;
     return this.deps!.activeCompareGroup() >= 1 ? overlay : base;
   });
@@ -133,7 +148,7 @@ export class LayersController {
   /** The modalities of the two Compare columns: the base layer and the overlay. */
   readonly compareModalities = computed<readonly [string | null, string | null]>(() => [
     baseLayer(this.layers())?.volume.modality ?? null,
-    this.selectedOverlay()?.volume.modality ?? null,
+    this.compareOverlay()?.volume.modality ?? null,
   ]);
 
   /** Whether the two columns hold the same modality, so one window can serve both. */
@@ -223,7 +238,7 @@ export class LayersController {
   /** The volume a Compare group draws: base for group 0, the active overlay otherwise. */
   groupVolume(group: number): Volume | null {
     if (group === 0) return this.volume();
-    return this.selectedOverlay()?.volume ?? this.volume();
+    return this.compareOverlay()?.volume ?? this.volume();
   }
 
   /** Whether a Compare group navigates on its own (unlinked, and not the base group). */

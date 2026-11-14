@@ -748,7 +748,8 @@ export class ServerSource implements DataSource {
           unreadable ? `${unreadable.reason}.` : 'No DICOM image slices were found in that series.',
         );
       }
-      return { series, structureSets: parsed.structureSets };
+      // The server does not give registrations with a series yet (#228).
+      return { series, structureSets: parsed.structureSets, registrations: [] };
     } catch (error) {
       // Aborted by the caller: say so in the way a caller looks for.
       if (options.signal?.aborted && !isAbortError(error)) {

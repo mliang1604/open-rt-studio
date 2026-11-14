@@ -472,7 +472,7 @@ export class Viewer {
       clampZoom: (zoom) => clamp(zoom, MIN_ZOOM, MAX_ZOOM),
       layers: () => this.layersCtl.layers(),
       isCompare: () => this.layersCtl.isCompare(),
-      selectedOverlay: () => this.layersCtl.selectedOverlay(),
+      compareOverlay: () => this.layersCtl.compareOverlay(),
       layerWindow: (layer) => this.layersCtl.layerWindow(layer),
       setLayerWindow: (layer, next) => this.layersCtl.setLayerWindow(layer, next),
       camera3d: this.camera3d,
