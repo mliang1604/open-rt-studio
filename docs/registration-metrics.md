@@ -170,10 +170,22 @@ taken, whether the two directions are pooled or averaged, how a percentile
 is read), and their numbers will differ from these by about a voxel. That
 was not measured against another program here.
 
+The work is done in a worker of its own (#237), so the page goes on
+answering: about a second and a half for a lung and four for a body outline
+on a grid of 512 × 512 × 200, measured in Node before the worker was there.
+The worker is sent the image's grid and the two structures, not the image's
+values, and runs the same `compareRois`. It lives for one comparison:
+choosing other structures, showing another image or leaving the form ends
+it at once, which is what abandons the work. So nothing is kept between
+comparisons, and a structure compared twice is filled into voxels twice.
+In the browser, on the thorax phantom made 384 × 384 × 128, a body outline
+against a lung took about a second and a half; the page drew every frame
+meanwhile (none more than 30 ms after the one before) and a turn of the
+wheel changed the slice 0.14 s into it.
+
 Not done: a grid whose slices are tilted is refused. Painted structures are
-not offered, only those of the structure sets. The work is done in the
-page, which does not answer meanwhile: about a second and a half for a
-lung, four for a body outline, on a grid of 512 × 512 × 200 (#237).
+not offered, only those of the structure sets. The filled voxels of a
+structure are not kept for a second comparison.
 
 ## Target registration error as built
 
@@ -290,7 +302,8 @@ inverse consistency map. No pair of fields from a registration program was
 measured: the test data has one field and no second that undoes it. A structure of the
 compared image is not offered, only those of the base image. The numbers
 were not compared with another program's. A large field is measured in the
-page's own thread, as structures are compared (#237).
+page's own thread, which does not answer meanwhile; structures are compared
+in a worker (#237), and a field is not yet.
 
 ## Sources
 

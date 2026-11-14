@@ -20,6 +20,7 @@ import {
   type ComparisonReport,
   type StructureChoice,
 } from './structure-compare';
+import type { CompareRunner } from './compare-in-worker';
 
 const roi = (number: number, name: string): Roi =>
   ({ number, name, color: [255, 0, 0], interpretedType: 'ORGAN', contours: [] }) as Roi;
@@ -117,16 +118,24 @@ describe('StructureCompare', () => {
     set('Planning', [roi(1, 'Heart'), roi(2, 'Lung'), roi(3, 'Cord')]),
   ]);
 
+  /** A comparison that was asked for, to answer when a test chooses to. */
+  interface Asked {
+    readonly volume: Volume;
+    readonly first: Roi;
+    readonly second: Roi;
+    readonly signal: AbortSignal;
+    readonly answer: (found: RoiComparison) => void;
+    readonly fail: (error: Error) => void;
+  }
+
   function setup(inputs: Record<string, unknown> = {}) {
-    vi.useFakeTimers();
-    const asked: [Volume, Roi, Roi][] = [];
+    const asked: Asked[] = [];
+    const compare: CompareRunner = (volume, first, second, signal) =>
+      new Promise((answer, fail) => asked.push({ volume, first, second, signal, answer, fail }));
     const fixture = TestBed.createComponent(StructureCompare);
     fixture.componentRef.setInput('choices', CHOICES);
     fixture.componentRef.setInput('volume', VOLUME);
-    fixture.componentRef.setInput('compare', (volume: Volume, first: Roi, second: Roi) => {
-      asked.push([volume, first, second]);
-      return FOUND;
-    });
+    fixture.componentRef.setInput('compare', compare);
     for (const [name, value] of Object.entries(inputs)) fixture.componentRef.setInput(name, value);
     fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
@@ -137,20 +146,25 @@ describe('StructureCompare', () => {
       selects()[which].dispatchEvent(new Event('change'));
       fixture.detectChanges();
     };
-    const run = (): void => {
+    /** Let what was answered reach the form. */
+    const settle = async (): Promise<void> => {
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
+    /** Ask for the comparison, and answer it at once when it was asked for. */
+    const run = async (): Promise<void> => {
+      const before = asked.length;
       button().click();
       fixture.detectChanges();
-      vi.runAllTimers();
-      fixture.detectChanges();
+      if (asked.length > before) asked.at(-1)!.answer(FOUND);
+      await settle();
     };
     const cells = (): string[][] =>
       [...host.querySelectorAll('tbody tr')].map((row) =>
         [...row.children].map((cell) => cell.textContent.trim()),
       );
-    return { fixture, host, selects, button, choose, run, cells, asked };
+    return { fixture, host, selects, button, choose, run, settle, cells, asked };
   }
-
-  afterEach(() => vi.useRealTimers());
 
   it('offers the first two structures until others are chosen', () => {
     const { selects, button } = setup();
@@ -162,12 +176,14 @@ describe('StructureCompare', () => {
     expect(button().textContent.trim()).toBe('Compare');
   });
 
-  it('compares the two that are chosen on the image on screen, and shows the table', () => {
+  it('compares the two that are chosen on the image on screen, and shows the table', async () => {
     const { choose, run, cells, asked, host } = setup();
     choose(1, '0:3');
     expect(host.querySelector('table')).toBeNull();
-    run();
-    expect(asked).toEqual([[VOLUME, CHOICES[0].roi, CHOICES[2].roi]]);
+    await run();
+    expect(asked.map((one) => [one.volume, one.first, one.second])).toEqual([
+      [VOLUME, CHOICES[0].roi, CHOICES[2].roi],
+    ]);
     expect(host.querySelector('caption')!.textContent.replace(/\s+/g, ' ').trim()).toBe(
       'Heart and Cord',
     );
@@ -178,31 +194,36 @@ describe('StructureCompare', () => {
     );
   });
 
-  it('says that it is comparing before the numbers come', () => {
-    const { fixture, button, host } = setup();
+  it('says that it is comparing until the numbers come, and asks once', async () => {
+    const { fixture, button, host, asked, settle } = setup();
     button().click();
     fixture.detectChanges();
     expect(button().textContent.trim()).toBe('Comparing…');
     expect(button().disabled).toBe(true);
     expect(host.querySelector('table')).toBeNull();
-    vi.runAllTimers();
-    fixture.detectChanges();
+    // The form is still there to be used while the comparison is under way.
+    await settle();
+    expect(button().textContent.trim()).toBe('Comparing…');
+    button().click();
+    expect(asked).toHaveLength(1);
+    asked[0].answer(FOUND);
+    await settle();
     expect(button().textContent.trim()).toBe('Compare');
     expect(host.querySelector('table')).not.toBeNull();
   });
 
-  it('does not compare a structure with itself', () => {
+  it('does not compare a structure with itself', async () => {
     const { choose, button, run, asked } = setup();
     choose(1, '0:1');
     expect(button().disabled).toBe(true);
     expect(button().title).toBe('Choose two different structures');
-    run();
+    await run();
     expect(asked).toEqual([]);
   });
 
-  it('takes the numbers away when another structure is chosen, or another image is shown', () => {
+  it('takes the numbers away when another structure is chosen, or another image is shown', async () => {
     const chosen = setup();
-    chosen.run();
+    await chosen.run();
     expect(chosen.host.querySelector('table')).not.toBeNull();
     chosen.choose(0, '0:3');
     expect(chosen.host.querySelector('table')).toBeNull();
@@ -215,17 +236,64 @@ describe('StructureCompare', () => {
     expect(chosen.host.querySelector('table')).toBeNull();
   });
 
-  it('says why when two structures cannot be compared', () => {
-    const { run, host } = setup({
-      compare: () => {
-        throw new MaskComparisonError('The image’s grid is not rectangular.');
-      },
-    });
-    run();
+  it('abandons the comparison under way when another structure is chosen', async () => {
+    const { fixture, button, choose, host, asked, settle } = setup();
+    button().click();
+    fixture.detectChanges();
+    expect(asked[0].signal.aborted).toBe(false);
+    choose(1, '0:3');
+    expect(asked[0].signal.aborted).toBe(true);
+    // The form can be asked again at once, of the two that are chosen now.
+    expect(button().textContent.trim()).toBe('Compare');
+    expect(button().disabled).toBe(false);
+    // What comes of the abandoned one, an answer or a refusal, is not shown.
+    asked[0].answer(FOUND);
+    await settle();
+    expect(host.querySelector('table')).toBeNull();
+    expect(host.querySelector('.problem')).toBeNull();
+
+    button().click();
+    fixture.detectChanges();
+    expect(asked).toHaveLength(2);
+    expect(asked[1].second).toBe(CHOICES[2].roi);
+    asked[1].answer(FOUND);
+    await settle();
+    expect(host.querySelector('caption')!.textContent.replace(/\s+/g, ' ').trim()).toBe(
+      'Heart and Cord',
+    );
+  });
+
+  it('abandons the comparison under way when another image is shown, or the form goes', async () => {
+    const shown = setup();
+    shown.button().click();
+    shown.fixture.detectChanges();
+    shown.fixture.componentRef.setInput('volume', { dims: [3, 3, 3] } as unknown as Volume);
+    shown.fixture.detectChanges();
+    expect(shown.asked[0].signal.aborted).toBe(true);
+    shown.asked[0].fail(new DOMException('The comparison was abandoned.', 'AbortError'));
+    await shown.settle();
+    expect(shown.host.querySelector('.problem')).toBeNull();
+    expect(shown.button().textContent.trim()).toBe('Compare');
+
+    TestBed.resetTestingModule();
+    const gone = setup();
+    gone.button().click();
+    gone.fixture.detectChanges();
+    gone.fixture.destroy();
+    expect(gone.asked[0].signal.aborted).toBe(true);
+  });
+
+  it('says why when two structures cannot be compared', async () => {
+    const { fixture, button, host, asked, settle } = setup();
+    button().click();
+    fixture.detectChanges();
+    asked[0].fail(new MaskComparisonError('The image’s grid is not rectangular.'));
+    await settle();
     expect(host.querySelector('.problem')!.textContent).toBe(
       'Not compared. The image’s grid is not rectangular.',
     );
     expect(host.querySelector('table')).toBeNull();
+    expect(button().textContent.trim()).toBe('Compare');
   });
 
   it('has nothing to compare on without an image', () => {
@@ -233,11 +301,11 @@ describe('StructureCompare', () => {
     expect(button().disabled).toBe(true);
   });
 
-  it('hands what it shows to the registration report, and takes it back when it shows none', () => {
+  it('hands what it shows to the registration report, and takes it back when it shows none', async () => {
     const { fixture, choose, run } = setup();
     const reported: (ComparisonReport | null)[] = [];
     fixture.componentInstance.reported.subscribe((report) => reported.push(report));
-    run();
+    await run();
     const report = reported.at(-1)!;
     expect(report.volume).toBe(VOLUME);
     expect(report.rois).toEqual([CHOICES[0].roi, CHOICES[1].roi]);
