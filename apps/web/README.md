@@ -81,6 +81,13 @@ Loading:
   catalog nor the view.
 - `patient-catalog.ts`, `recent-store.ts`: the catalog of everything imported
   in this session, and the list of recent selections.
+- `file-access.ts`, `recent-handles.ts`: where the browser has the File System
+  Access API (Chromium), Open folder and Open files use its pickers, and the
+  handle of a folder or of a single file is kept in IndexedDB. Choosing that
+  entry in the Recent list reads it again, after the browser's permission
+  prompt in a new session. Elsewhere, and for a set of several files, the
+  entry is marked "pick again" and opens the picker. The hidden file inputs
+  stay: they are the fallback, and what the end-to-end tests feed.
 
 Viewer (`src/app/viewer`):
 
