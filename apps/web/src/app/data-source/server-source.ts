@@ -86,7 +86,10 @@ interface ServerSeries {
   readonly number: number | null;
   readonly description: string | null;
   readonly frameOfReferenceUid: string | null;
+  /** Files. */
   readonly instances: number;
+  /** Images in those files: a file of several frames holds several. */
+  readonly images: number;
   readonly structureSets: number;
 }
 interface ServerInstance {
@@ -166,6 +169,8 @@ export class ServerSource implements DataSource {
   private readonly more = signal(false);
   /** Previews asked for, by series UID, so that each is fetched once. */
   private readonly previews = new Map<string, Promise<SeriesThumbnail>>();
+  /** How many files each listed series holds, by series UID: what a preview picks from. */
+  private readonly files = new Map<string, number>();
   /** Which patient was asked for last; an answer for an earlier one is dropped. */
   private selection = 0;
 
@@ -224,15 +229,19 @@ export class ServerSource implements DataSource {
         await this.all<ServerSeries>(`/studies/${study.studyInstanceUid}/series`, signal)
       )
         .filter((one) => !NO_PIXELS.has(one.modality.toUpperCase()))
-        .map((one): SeriesSummary => ({
-          uid: one.seriesInstanceUid,
-          seriesNumber: one.number,
-          description: one.description,
-          modality: one.modality,
-          frameOfReferenceUid: one.frameOfReferenceUid,
-          imageCount: one.instances,
-          structureSets: one.structureSets,
-        }));
+        .map((one): SeriesSummary => {
+          this.files.set(one.seriesInstanceUid, one.instances);
+          return {
+            uid: one.seriesInstanceUid,
+            seriesNumber: one.number,
+            description: one.description,
+            modality: one.modality,
+            frameOfReferenceUid: one.frameOfReferenceUid,
+            // What opened files count: the slices, of which one file may hold many.
+            imageCount: one.images,
+            structureSets: one.structureSets,
+          };
+        });
       history[index] = {
         studyUid: study.studyInstanceUid,
         date: study.date,
@@ -317,13 +326,13 @@ export class ServerSource implements DataSource {
     if (!series || !isImageSeries(series.modality) || series.imageCount === 0) return icon;
     let preview = this.previews.get(seriesUid);
     if (!preview) {
-      preview = this.preview(seriesUid, series.imageCount).catch(() => icon);
+      preview = this.preview(seriesUid, this.files.get(seriesUid) ?? 0).catch(() => icon);
       this.previews.set(seriesUid, preview);
     }
     return preview;
   }
 
-  /** The picture of the instance in the middle of a series. */
+  /** The picture in the middle of a series: of its middle file, the middle image. */
   private async preview(seriesUid: string, count: number): Promise<SeriesThumbnail> {
     const page = await this.json<Page<ServerInstance>>(
       `/series/${seriesUid}/instances?limit=1&offset=${Math.floor(count / 2)}`,
@@ -332,7 +341,10 @@ export class ServerSource implements DataSource {
     if (!instance) throw new Error('The series has no instance there.');
     const { slices } = await this.parse([await this.file(instance)]);
     if (slices.length === 0) throw new Error('The instance has no picture.');
-    return { kind: 'image', pixels: renderSliceThumbnail(slices[0]) };
+    return {
+      kind: 'image',
+      pixels: renderSliceThumbnail(slices[Math.floor(slices.length / 2)]),
+    };
   }
 
   /**

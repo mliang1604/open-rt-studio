@@ -39,7 +39,11 @@ export function entry(
   modality: Modality,
   seriesIndex: number,
   instance: number,
-  options: { readonly references?: readonly Reference[]; readonly frame?: boolean } = {},
+  options: {
+    readonly references?: readonly Reference[];
+    readonly frame?: boolean;
+    readonly frames?: number;
+  } = {},
 ): InstanceEntry {
   return {
     patient: { id: study.patient.id, name: study.patient.name, birthDate: '19700101', sex: 'O' },
@@ -61,6 +65,7 @@ export function entry(
       uid: instanceUid(study, seriesIndex, instance),
       sopClassUid: SOP_CLASS[modality],
       number: instance,
+      frames: options.frames ?? null,
       size: 1000 + instance,
       sha256: instance.toString(16).padStart(64, '0'),
     },

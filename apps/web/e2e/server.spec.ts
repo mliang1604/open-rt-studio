@@ -7,6 +7,7 @@ import {
   syntheticThoraxPatient,
   THORAX_PATIENT,
   THORAX_PLANNING_STUDY,
+  thoraxDoseGrid,
   thoraxGrid,
 } from '@open-rt-studio/testdata';
 import { expect, test, type Page } from '@playwright/test';
@@ -88,11 +89,7 @@ async function captured(page: Page): Promise<string> {
   return Buffer.concat(chunks).toString('base64');
 }
 
-/**
- * What each series chip says. For a dose the image count is left out: a
- * multi-frame dose says its number of frames from files and "1 img" from the
- * server, which is #201.
- */
+/** What each series chip says. */
 async function chips(page: Page): Promise<string[]> {
   return page.locator('app-series-chip').evaluateAll((all) =>
     all.map((chip) => {
@@ -101,7 +98,7 @@ async function chips(page: Page): Promise<string[]> {
       return [
         text('.chip-label'),
         text('.chip-modality'),
-        text('.chip-modality') === 'RTDOSE' ? '' : text('.chip-count'),
+        text('.chip-count'),
         text('.chip-sets [aria-hidden]'),
       ].join(' | ');
     }),
@@ -171,7 +168,8 @@ test('a series stored on a server loads and displays as the same series loaded f
   expect(fromFiles['chips']).toEqual([
     'Planning CT | CT | 16 img | RS 1',
     'T2-like MR | MR | 16 img | RS 1',
-    'Synthetic dose | RTDOSE |  | ',
+    // One file of several planes: it says its planes, not "1 img" (#201).
+    `Synthetic dose | RTDOSE | ${thoraxDoseGrid(SHAPE).frames} img | `,
   ]);
   expect(fromServer['probes']).toEqual(fromFiles['probes']);
   // Pixel for pixel.

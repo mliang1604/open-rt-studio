@@ -129,6 +129,9 @@ const SERIES = `
   SELECT s.series_uid, s.study_uid, s.modality, s.series_number, s.description,
     s.frame_of_reference_uid,
     (SELECT count(*) FROM instance i WHERE i.series_uid = s.series_uid) AS instance_count,
+    -- An instance holds as many images as it has frames; one when it does not say.
+    (SELECT coalesce(sum(coalesce(i.frame_count, 1)), 0) FROM instance i
+      WHERE i.series_uid = s.series_uid) AS image_count,
     -- The rule of relatedToSeries: named by series, or by the frame of reference.
     (SELECT count(DISTINCT r.sop_instance_uid) FROM reference r
       WHERE (r.target_uid = s.series_uid AND r.relation = 'structure-set.series')
@@ -138,7 +141,7 @@ const SERIES = `
 
 const INSTANCE = `
   SELECT i.sop_instance_uid, i.sop_class_uid, i.series_uid, s.study_uid, s.modality,
-    i.instance_number, i.size, i.sha256
+    i.instance_number, i.frame_count, i.size, i.sha256
   FROM instance i JOIN series s ON s.series_uid = i.series_uid`;
 
 const PATIENT = `
@@ -181,6 +184,7 @@ const toSeries = (row: Row): SeriesRecord => ({
   description: text(row['description']),
   frameOfReferenceUid: text(row['frame_of_reference_uid']),
   instances: Number(row['instance_count']),
+  images: Number(row['image_count']),
   structureSets: Number(row['structure_set_count']),
 });
 
@@ -191,6 +195,7 @@ const toInstance = (row: Row): InstanceRecord => ({
   studyInstanceUid: String(row['study_uid']),
   modality: String(row['modality']),
   number: number(row['instance_number']),
+  frames: number(row['frame_count']),
   size: Number(row['size']),
   sha256: String(row['sha256']),
 });
@@ -214,6 +219,10 @@ function check(entry: InstanceEntry): void {
   if (!isUid(entry.series.uid)) wrong('series UID is not a UID');
   if (!isUid(entry.instance.uid)) wrong('SOP Instance UID is not a UID');
   if (!isUid(entry.instance.sopClassUid)) wrong('SOP Class UID is not a UID');
+  const frames = entry.instance.frames;
+  if (frames !== null && !(Number.isInteger(frames) && frames >= 1)) {
+    wrong('number of frames is not a count');
+  }
   if (entry.series.modality.trim() === '') wrong('modality is empty');
   if (!Number.isInteger(entry.instance.size) || entry.instance.size <= 0) {
     wrong('size is not a whole number above 0');
@@ -397,15 +406,16 @@ export async function openSqliteIndex(
           series.frameOfReferenceUid,
         );
         run(
-          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, size, sha256)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, frame_count, size, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (sop_instance_uid) DO UPDATE SET sop_class_uid = excluded.sop_class_uid,
-             instance_number = excluded.instance_number, size = excluded.size,
-             sha256 = excluded.sha256`,
+             instance_number = excluded.instance_number, frame_count = excluded.frame_count,
+             size = excluded.size, sha256 = excluded.sha256`,
           instance.uid,
           series.uid,
           instance.sopClassUid,
           instance.number,
+          instance.frames,
           instance.size,
           instance.sha256,
         );

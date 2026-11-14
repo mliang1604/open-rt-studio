@@ -282,13 +282,13 @@ only the kind of a job and how it ended.
 Patients, studies, series and instances, and how radiotherapy objects refer
 to each other.
 
-| Table       | One row per                                      | Key                               |
-| ----------- | ------------------------------------------------ | --------------------------------- |
-| `patient`   | patient: Patient ID and issuer, name, birth date | a number of the index's own       |
-| `study`     | study, with its patient                          | Study Instance UID                |
-| `series`    | series, with modality and frame of reference     | Series Instance UID               |
-| `instance`  | stored instance, with its size and checksum      | SOP Instance UID                  |
-| `reference` | reference from an instance to another object     | instance, relation and target UID |
+| Table       | One row per                                                   | Key                               |
+| ----------- | ------------------------------------------------------------- | --------------------------------- |
+| `patient`   | patient: Patient ID and issuer, name, birth date              | a number of the index's own       |
+| `study`     | study, with its patient                                       | Study Instance UID                |
+| `series`    | series, with modality and frame of reference                  | Series Instance UID               |
+| `instance`  | stored instance, with its size, checksum and number of frames | SOP Instance UID                  |
+| `reference` | reference from an instance to another object                  | instance, relation and target UID |
 
 A reference has one of these relations, and its target is a UID that need not
 be in the index: objects arrive in any order, and some never arrive.
@@ -328,6 +328,13 @@ without asking for each.
   never edited after it is released; a change is a new step in
   `migrations.ts`. An index from a newer version, or a SQLite file that is
   something else, is refused.
+- **Images are counted by frames.** A series says how many files it holds
+  (`instances`) and how many images those hold (`images`): for each file its
+  Number of Frames, or one when the file does not say. A dose grid in one
+  file is one instance and as many images as it has planes, which is what
+  the viewer shows for the same file opened from disk. An instance filed
+  before version 3 of the schema has no frame count and counts as one image;
+  ingesting the same file again fills it in, and leaves the store alone.
 - The index holds patient names and IDs. That is its purpose; protect the
   file as you would the data. Its errors and log lines carry none of them.
 

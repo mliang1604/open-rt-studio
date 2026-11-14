@@ -87,6 +87,16 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX reference_target ON reference (target_uid, relation);
     `,
   },
+  {
+    version: 3,
+    name: 'frames of an instance',
+    sql: `
+      -- Number of Frames: how many images the one file holds. NULL when the
+      -- file does not say, and for every instance filed before this step,
+      -- which then counts as one image until it is ingested again.
+      ALTER TABLE instance ADD COLUMN frame_count INTEGER;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

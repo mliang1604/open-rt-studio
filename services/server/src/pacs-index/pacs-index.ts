@@ -73,6 +73,8 @@ export interface InstanceEntry {
     readonly uid: string;
     readonly sopClassUid: string;
     readonly number: number | null;
+    /** Number of Frames, one or more; null when the file does not say. */
+    readonly frames: number | null;
     /** Size and checksum of the stored file, as the store reports them. */
     readonly size: number;
     readonly sha256: string;
@@ -115,7 +117,14 @@ export interface SeriesRecord {
   readonly number: number | null;
   readonly description: string | null;
   readonly frameOfReferenceUid: string | null;
+  /** How many files the series holds. */
   readonly instances: number;
+  /**
+   * How many images those files hold: for each, its number of frames, or one
+   * when it does not say. A dose grid in one file is one instance and as
+   * many images as it has planes.
+   */
+  readonly images: number;
   /**
    * How many structure sets belong to the series: those that name it, and
    * those that name its frame of reference. The same ones
@@ -132,6 +141,8 @@ export interface InstanceRecord {
   readonly studyInstanceUid: string;
   readonly modality: string;
   readonly number: number | null;
+  /** Number of Frames; null when the file does not say, or was filed before it was kept. */
+  readonly frames: number | null;
   readonly size: number;
   readonly sha256: string;
 }
