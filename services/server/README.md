@@ -64,11 +64,40 @@ Anything else is 404, or 405 with an `Allow` header for a known path.
   see [docs/architecture.md](../../docs/architecture.md), "Server and PACS",
   for why and for when that is to be looked at again. A route is a method, an
   exact path and a function (`host/routes.ts`).
+- `src/store/`: where DICOM instances are kept (#42). `DicomStore` is the
+  interface (`put`, `get` as a stream, `stat`, `exists`, `delete`, `verify`,
+  all by SOP Instance UID); `openFileStore(directory)` is the one on disk and
+  `createMemoryStore()` one for tests. Nothing uses a store yet: ingest (#45)
+  will.
 - `src/config.ts`: the settings above, typed and checked.
 - `src/logger.ts`: the log.
 - `src/server.ts`: `startServer(config, logger)`, which makes a core, puts the
   host in front of it and listens; `src/main.ts` is the process around it.
 - `src/index.ts`: the package's one entry point.
+
+## The file store
+
+```
+<root>/open-rt-studio-store.json              marks the directory as a store, with its layout version
+<root>/instances/ab/cd/<name>.json            an instance's record: UID, size, SHA-256
+<root>/instances/ab/cd/<name>.<sha256>.dcm    its bytes, exactly as given: an ordinary DICOM file
+<root>/incoming/<random>.part                 a file being written
+```
+
+- **No patient identifiers in paths.** `<name>` is the SHA-256 of the SOP
+  Instance UID and `<sha256>` the checksum of the bytes. A path holds no name,
+  ID or date, and not the UID itself. The files' contents are DICOM and do
+  identify the patient: protect the directory as you would the data.
+- **Whole or not at all.** Bytes are written under `incoming/`, flushed to
+  disk and renamed into place; renaming the record is the one step that
+  stores or replaces an instance. A write that is interrupted, by a lost
+  connection or a killed process, leaves the instance that was there before,
+  or none. Opening a store removes what such a write left in `incoming/`.
+- **Checksums.** `verify(uid)` reads an instance back and compares it with
+  the size and SHA-256 taken when it was stored.
+- A directory that is not empty and is not a store is refused, and nothing in
+  it is touched.
+- One process opens a store at a time.
 
 ## Logs
 
