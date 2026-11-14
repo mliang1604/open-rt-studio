@@ -31,6 +31,13 @@ export {
 } from './image-series.js';
 export { SYNTHETIC_PATIENT_STUDIES, syntheticPatient } from './patient.js';
 export {
+  JPEG_EXTENDED_SYNTAX,
+  JPEG_LOSSLESS_SYNTAX,
+  SYNTHETIC_UNREADABLE,
+  syntheticUnreadableFiles,
+  type UnreadableFile,
+} from './unreadable.js';
+export {
   SYNTHETIC_DOSE_GEOMETRY,
   SYNTHETIC_DOSE_GRID_SCALING,
   syntheticDoseGy,

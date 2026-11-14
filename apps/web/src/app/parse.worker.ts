@@ -7,6 +7,7 @@
 import {
   parseFileAsync,
   parseStructureSet,
+  UnsupportedDicomError,
   type Slice,
   type StructureSet,
 } from '@open-rt-studio/dicom';
@@ -24,8 +25,9 @@ export interface ParseRequest {
 
 /**
  * The result of one {@link ParseRequest}: the parsed image slices and structure
- * sets on success, or the error message on failure (the worker never throws
- * across the boundary). On success each slice's pixel buffer is transferred
+ * sets on success, or on failure why the file could not be read (the worker
+ * never throws across the boundary). `message` names the file; `reason` is the
+ * same without the name. On success each slice's pixel buffer is transferred
  * back, not copied. `structureSets` holds the file's RTSTRUCT when it is one
  * (its contour points carry no pixel buffers, so they are cloned, not
  * transferred); empty otherwise.
@@ -37,7 +39,12 @@ export type ParseResponse =
       readonly slices: Slice[];
       readonly structureSets: StructureSet[];
     }
-  | { readonly id: number; readonly ok: false; readonly message: string };
+  | {
+      readonly id: number;
+      readonly ok: false;
+      readonly message: string;
+      readonly reason: string;
+    };
 
 /**
  * Thin off-main-thread wrapper around the pure parsers: parse one file per
@@ -59,6 +66,7 @@ addEventListener('message', async (event: MessageEvent<ParseRequest>) => {
     postMessage({ id, ok: true, slices, structureSets } satisfies ParseResponse, transfer);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    postMessage({ id, ok: false, message } satisfies ParseResponse);
+    const reason = error instanceof UnsupportedDicomError ? error.reason : message;
+    postMessage({ id, ok: false, message, reason } satisfies ParseResponse);
   }
 });

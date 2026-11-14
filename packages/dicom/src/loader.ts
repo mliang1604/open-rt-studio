@@ -4,7 +4,9 @@
 
 import dicomParser from 'dicom-parser';
 import type { DataSet, Element as DicomElement } from 'dicom-parser';
-import { decodeWasmFrame, isWasmTransferSyntax } from './wasm-codecs.js';
+import { jpegFrameHeader } from './jpeg-header.js';
+import { describeTransferSyntax, isDctJpegSyntax } from './transfer-syntax.js';
+import { decodeWasmFrame, isWasmTransferSyntax, type DecodedFrame } from './wasm-codecs.js';
 import {
   asRgb,
   colorFrameToLuma,
@@ -45,7 +47,21 @@ import {
 /** SOP Class UID identifying an RT Dose Storage object. */
 const RTDOSE_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.2';
 
-export class UnsupportedDicomError extends Error {}
+/**
+ * A DICOM file this package recognises but cannot read: a transfer syntax with
+ * no codec, pixel data that is cut short or will not decode. The message names
+ * the file; {@link reason} is the same without the name, for a list that shows
+ * the name beside it.
+ */
+export class UnsupportedDicomError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string, fileName: string) {
+    super(`${reason} (${fileName}).`);
+    this.name = 'UnsupportedDicomError';
+    this.reason = reason;
+  }
+}
 
 /**
  * The fields shared by every frame in a file: image geometry that is fixed by
@@ -121,7 +137,8 @@ export function parseFile(name: string, buffer: ArrayBuffer): Slice[] {
   if (ctx.isDose) return parseDose(ctx, frames);
   if (ctx.wasmTransferSyntax) {
     throw new UnsupportedDicomError(
-      `Transfer syntax ${ctx.wasmTransferSyntax} requires async decoding; use parseFileAsync (${name}).`,
+      `Transfer syntax ${ctx.wasmTransferSyntax} requires async decoding; use parseFileAsync`,
+      name,
     );
   }
   const count = ctx.rows * ctx.columns;
@@ -167,7 +184,10 @@ function setupFile(name: string, buffer: ArrayBuffer): FileSetup | null {
   const codec = FRAME_CODECS[transferSyntax] ?? null;
   const wasm = isWasmTransferSyntax(transferSyntax);
   if (!codec && !wasm && !UNCOMPRESSED_LE.has(transferSyntax)) {
-    throw new UnsupportedDicomError(`Unsupported transfer syntax ${transferSyntax} (${name}).`);
+    throw new UnsupportedDicomError(
+      `Unsupported transfer syntax ${describeTransferSyntax(transferSyntax)}`,
+      name,
+    );
   }
 
   const rows = dataSet.uint16('x00280010');
@@ -252,7 +272,7 @@ function assemble(ctx: FileContext, frames: number, raw: FramePixels[]): Slice[]
  */
 function parseDose(ctx: FileContext, frames: number): Slice[] {
   if (ctx.codec || ctx.wasmTransferSyntax) {
-    throw new UnsupportedDicomError(`Compressed RT Dose is not supported (${ctx.name}).`);
+    throw new UnsupportedDicomError('Compressed RT Dose is not supported', ctx.name);
   }
   const { dataSet } = ctx;
   const scaling = num(dataSet, 'x3004000e', 1); // DoseGridScaling
@@ -349,7 +369,7 @@ function readDoseFrame(
 function ensurePixelBytes(ctx: FileContext, offset: number, byteCount: number): void {
   const pixelEnd = ctx.pixelOffset + ctx.pixelElement.length;
   if (offset + byteCount > ctx.buffer.byteLength || offset + byteCount > pixelEnd) {
-    throw new UnsupportedDicomError(`PixelData truncated (${ctx.name}).`);
+    throw new UnsupportedDicomError('PixelData truncated', ctx.name);
   }
 }
 
@@ -530,7 +550,24 @@ async function readFrameSamplesAsync(
 ): Promise<FramePixels> {
   if (!ctx.wasmTransferSyntax) return readFrameSamples(ctx, frameIndex, count);
   const frame = encapsulatedFrame(ctx.dataSet, ctx.pixelElement, frameIndex);
-  const decoded = await decodeWasmFrame(ctx.wasmTransferSyntax, frame);
+  // The bundled libjpeg-turbo is the 8-bit build. Say so for a 12-bit stream
+  // instead of handing it over to fail, or to decode as something it is not.
+  if (isDctJpegSyntax(ctx.wasmTransferSyntax)) {
+    const precision = jpegFrameHeader(frame)?.precision ?? 8;
+    if (precision > 8) {
+      throw new UnsupportedDicomError(`${precision}-bit JPEG is not supported`, ctx.name);
+    }
+  }
+  let decoded: DecodedFrame;
+  try {
+    decoded = await decodeWasmFrame(ctx.wasmTransferSyntax, frame);
+  } catch {
+    // A codec throws whatever its wasm build throws, often a bare number.
+    throw new UnsupportedDicomError(
+      `The pixel data could not be decoded (transfer syntax ${ctx.wasmTransferSyntax})`,
+      ctx.name,
+    );
+  }
   // A colour codec output (componentCount ≥ 3) is interleaved 8-bit RGB after the
   // decoder's own colour transform; reduce it to luminance like the colour path.
   if (decoded.componentCount >= 3) {

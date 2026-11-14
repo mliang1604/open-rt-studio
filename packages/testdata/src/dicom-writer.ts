@@ -107,20 +107,53 @@ export function pixelData16(samples: ArrayLike<number>): DataElement {
 }
 
 /**
+ * An encapsulated PixelData element: an empty Basic Offset Table, then one
+ * item per frame, then the sequence delimiter. This is how compressed pixel
+ * data is stored. The frames are written as given; nothing here compresses.
+ */
+export function encapsulatedPixelData(frames: readonly Uint8Array[]): DataElement {
+  const item = (body: Uint8Array): Uint8Array => {
+    const padded = padEven(body, 0x00);
+    const header = new Uint8Array(8);
+    const view = new DataView(header.buffer);
+    view.setUint16(0, 0xfffe, true); // Item tag (FFFE,E000)
+    view.setUint16(2, 0xe000, true);
+    view.setUint32(4, padded.length, true);
+    return concat([header, padded]);
+  };
+  const header = new Uint8Array(12);
+  const view = new DataView(header.buffer);
+  view.setUint16(0, 0x7fe0, true);
+  view.setUint16(2, 0x0010, true);
+  header[4] = 'O'.charCodeAt(0);
+  header[5] = 'B'.charCodeAt(0);
+  view.setUint32(8, 0xffffffff, true); // undefined length marks encapsulation
+  const delimiter = new Uint8Array(8);
+  const end = new DataView(delimiter.buffer);
+  end.setUint16(0, 0xfffe, true); // Sequence Delimitation Item (FFFE,E0DD)
+  end.setUint16(2, 0xe0dd, true);
+  const bytes = concat([header, item(new Uint8Array(0)), ...frames.map(item), delimiter]);
+  return { group: 0x7fe0, element: 0x0010, bytes };
+}
+
+/**
  * A complete Part 10 file: 128-byte preamble, `DICM`, the file meta group and
  * the data set. SOP Class and Instance UID are written to both, as real files
- * have them.
+ * have them. The data set is always written as Explicit VR Little Endian;
+ * `transferSyntaxUid` only changes what the file declares, for files whose
+ * pixel data is encapsulated.
  */
 export function part10(
   sopClassUid: string,
   sopInstanceUid: string,
   elements: readonly DataElement[],
+  transferSyntaxUid: string = EXPLICIT_VR_LE,
 ): Uint8Array {
   const meta = dataSet([
     el(0x0002, 0x0001, 'OB', Uint8Array.of(0, 1)), // FileMetaInformationVersion
     el(0x0002, 0x0002, 'UI', uid(sopClassUid)), // MediaStorageSOPClassUID
     el(0x0002, 0x0003, 'UI', uid(sopInstanceUid)), // MediaStorageSOPInstanceUID
-    el(0x0002, 0x0010, 'UI', uid(EXPLICIT_VR_LE)), // TransferSyntaxUID
+    el(0x0002, 0x0010, 'UI', uid(transferSyntaxUid)), // TransferSyntaxUID
   ]);
   const groupLength = el(0x0002, 0x0000, 'UL', u32le(meta.length));
   const body = dataSet([

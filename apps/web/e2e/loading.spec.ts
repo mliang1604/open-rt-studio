@@ -6,7 +6,14 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { syntheticPatient, type SyntheticFile } from '@open-rt-studio/testdata';
+import {
+  SYNTHETIC_UNREADABLE,
+  syntheticCtSeries,
+  syntheticMrSeries,
+  syntheticPatient,
+  syntheticUnreadableFiles,
+  type SyntheticFile,
+} from '@open-rt-studio/testdata';
 import { expect, test, type Page } from '@playwright/test';
 
 import { preAcknowledge, requireWebGpu, watchProblems, expectNoProblems } from './fixtures/app';
@@ -138,4 +145,99 @@ test('importing more files leaves the displayed series on screen', async ({ page
   await expect(page.locator('div.status')).toContainText('volume 32 × 32 × 12');
   await expect(page.getByRole('button', { name: /layout/i })).toBeEnabled();
   await expect(page.locator('.pane-overlay .pane')).toHaveCount(3);
+});
+
+// One file the application cannot read used to fail the whole import (#144).
+test.describe('files that cannot be read', () => {
+  const report = (page: Page) => page.locator('app-import-report');
+
+  test('are skipped and named, and the rest is imported', async ({ page }) => {
+    const problems = watchProblems(page);
+    const unreadable = syntheticUnreadableFiles();
+    // The unreadable files first and in the middle, not only at the end.
+    const series = syntheticCtSeries(12, 32);
+    await importFiles(page, [
+      unreadable[0],
+      ...series.slice(0, 5),
+      unreadable[1],
+      ...series.slice(5),
+    ]);
+
+    await expect(page.locator('.study-tile')).toHaveCount(1);
+    await expect(page.locator('.study-tile').first()).toContainText('1 series');
+    await expect(page.locator('div.status')).toHaveText(
+      'Pick a series from the history below to view it.',
+    );
+
+    await expect(report(page).locator('h2')).toHaveText('2 of 14 files were skipped');
+    const rows = report(page).locator('li');
+    await expect(rows).toHaveCount(SYNTHETIC_UNREADABLE.length);
+    for (const [i, file] of SYNTHETIC_UNREADABLE.entries()) {
+      await expect(rows.nth(i).locator('.import-report-name')).toHaveText(file.name);
+      await expect(rows.nth(i).locator('.import-report-reason')).toHaveText(file.reason);
+    }
+
+    await report(page).getByRole('button', { name: 'Dismiss' }).click();
+    await expect(report(page)).toHaveCount(0);
+    // The series that came through is whole: all 12 slices.
+    const chip = await seriesChip(page, 'CT');
+    await expect(chip).toContainText('12 img');
+    expectNoProblems(problems);
+  });
+
+  test('the list goes when the next import begins', async ({ page }) => {
+    await importFiles(page, [...syntheticCtSeries(12, 32), ...syntheticUnreadableFiles()]);
+    await expect(report(page)).toBeVisible();
+
+    await importFiles(page, syntheticMrSeries(12, 32));
+
+    await expect(page.locator('.study-tile').first()).toContainText('2 series');
+    await expect(report(page)).toHaveCount(0);
+  });
+
+  test('a batch with nothing readable imports nothing and lists every file', async ({ page }) => {
+    await importFiles(page, syntheticUnreadableFiles());
+
+    await expect(report(page).locator('h2')).toHaveText('2 of 2 files were skipped');
+    await expect(report(page)).toContainText('Nothing was imported.');
+    await expect(report(page).locator('.import-report-name')).toHaveText(
+      SYNTHETIC_UNREADABLE.map((f) => f.name),
+    );
+    await expect(report(page).locator('.import-report-reason')).toHaveText(
+      SYNTHETIC_UNREADABLE.map((f) => f.reason),
+    );
+    await expect(page.locator('.study-tile')).toHaveCount(0);
+    await expect(page.locator('div.status')).toHaveText('Open a DICOM folder or files to begin.');
+  });
+
+  test('an import with no DICOM image in it leaves the displayed series on screen', async ({
+    page,
+  }) => {
+    await requireWebGpu(page);
+    await importFiles(page, syntheticCtSeries(12, 32));
+    await pickSeries(page, 'CT');
+    const shown = (await page.locator('div.status').textContent())!.trim();
+
+    const notes = new TextEncoder().encode('not a DICOM file');
+    await importFiles(page, [{ name: 'notes.txt', mimeType: 'text/plain', bytes: notes }]);
+
+    await expect(page.locator('.notice')).toHaveText('No DICOM image slices were found.');
+    await expect(page.locator('div.status')).toHaveText(shown);
+    await expect(page.getByRole('button', { name: /layout/i })).toBeEnabled();
+    await expect(report(page)).toHaveCount(0);
+  });
+
+  test('an import that reads nothing leaves the displayed series on screen', async ({ page }) => {
+    await requireWebGpu(page);
+    await importFiles(page, syntheticCtSeries(12, 32));
+    await pickSeries(page, 'CT');
+    const shown = (await page.locator('div.status').textContent())!.trim();
+
+    await importFiles(page, syntheticUnreadableFiles());
+
+    await expect(report(page).locator('h2')).toHaveText('2 of 2 files were skipped');
+    await expect(page.locator('div.status')).toHaveText(shown);
+    await expect(page.getByRole('button', { name: /layout/i })).toBeEnabled();
+    await expect(page.locator('.pane-overlay .pane')).toHaveCount(3);
+  });
 });

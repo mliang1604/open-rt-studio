@@ -1261,6 +1261,10 @@
     @if (notice(); as notice) {
       <div class="notice" role="status">{{ notice }}</div>
     }
+
+    @if (loadCtl.importReport(); as report) {
+      <app-import-report [report]="report" (dismissed)="loadCtl.dismissImportReport()" />
+    }
   </main>
 </div>
 

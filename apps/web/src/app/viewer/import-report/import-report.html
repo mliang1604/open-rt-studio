@@ -1,0 +1,22 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<div class="import-report-head">
+  <h2 id="import-report-title" role="status">{{ headline() }}</h2>
+  <button type="button" (click)="dismissed.emit()" title="Close this list">Dismiss</button>
+</div>
+<p class="import-report-note">
+  {{ anythingImported() ? 'The other files were imported.' : 'Nothing was imported.' }}
+</p>
+<ul>
+  @for (file of listed(); track $index) {
+    <li>
+      <span class="import-report-name">{{ file.name }}</span>
+      <span class="import-report-reason">{{ file.reason }}</span>
+    </li>
+  }
+</ul>
+@if (more() > 0) {
+  <p class="import-report-note">and {{ more() }} more</p>
+}

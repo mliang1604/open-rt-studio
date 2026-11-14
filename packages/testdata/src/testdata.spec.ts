@@ -8,8 +8,10 @@ import {
   framesMatch,
   groupSeries,
   parseFile,
+  parseFileAsync,
   parseStructureSet,
   structureSetsForSeries,
+  UnsupportedDicomError,
   type PatientCatalogMap,
   type Slice,
 } from '@open-rt-studio/dicom';
@@ -24,6 +26,7 @@ import {
   SYNTHETIC_PATIENT,
   SYNTHETIC_STUDY,
   SYNTHETIC_UID_ROOT,
+  SYNTHETIC_UNREADABLE,
   syntheticCtSeries,
   syntheticCtValue,
   syntheticDoseGy,
@@ -34,6 +37,7 @@ import {
   syntheticRtDose,
   syntheticRtStruct,
   type SyntheticFile,
+  syntheticUnreadableFiles,
 } from './index.js';
 
 /** The exact bytes of a file as a standalone ArrayBuffer, as the loader takes them. */
@@ -261,5 +265,34 @@ describe('syntheticPatient', () => {
     expect([...planning.modalities].sort()).toEqual(['CT', 'MR', 'RTDOSE']);
     const followUp = patient.studies.find((s) => s.date === SYNTHETIC_FOLLOW_UP_STUDY.date)!;
     expect(followUp.modalities).toEqual(['CT']);
+  });
+});
+
+describe('syntheticUnreadableFiles', () => {
+  const files = syntheticUnreadableFiles();
+
+  it('are Part 10 files named as SYNTHETIC_UNREADABLE lists them', () => {
+    expect(files.map((f) => f.name)).toEqual(SYNTHETIC_UNREADABLE.map((u) => u.name));
+    for (const f of files) {
+      expect(String.fromCharCode(...f.bytes.subarray(128, 132)), f.name).toBe('DICM');
+      expect(f.bytes.length % 2, f.name).toBe(0);
+    }
+  });
+
+  it('are refused by the DICOM package for the reason stated', async () => {
+    for (const [i, f] of files.entries()) {
+      const error: unknown = await parseFileAsync(f.name, buffer(f)).catch((e: unknown) => e);
+      expect(error, f.name).toBeInstanceOf(UnsupportedDicomError);
+      expect((error as UnsupportedDicomError).reason).toBe(SYNTHETIC_UNREADABLE[i].reason);
+      expect((error as UnsupportedDicomError).message).toContain(`(${f.name})`);
+    }
+  });
+
+  it('carry the synthetic identity and no image', () => {
+    const text = (f: SyntheticFile) => String.fromCharCode(...f.bytes);
+    for (const f of files) {
+      expect(text(f)).toContain(SYNTHETIC_PATIENT.id);
+      expect(f.bytes.length).toBeLessThan(2000);
+    }
   });
 });

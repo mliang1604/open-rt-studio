@@ -69,6 +69,10 @@ Loading:
 - `volume-loader.ts`, `parse-pool.ts`, `parse.worker.ts`: files are parsed in
   a pool of web workers with progress reporting, then assembled into volumes.
   The parse takes an `AbortSignal`; aborting terminates the workers.
+- A file that cannot be read (JPEG Lossless, 12-bit JPEG, a transfer syntax
+  with no codec, pixel data that will not decode) is skipped and the rest of
+  the batch is imported. `viewer/import-report/` lists the skipped files with
+  the reason for each, until it is dismissed or the next import begins.
 - `viewer/load-sequence.ts`: which import is the one in progress. Cancel, or a
   second import, aborts the first, and an aborted import changes neither the
   catalog nor the view.

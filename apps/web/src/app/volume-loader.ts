@@ -17,7 +17,7 @@ import {
   type StructureSet,
   VolumeBuildError,
 } from '@open-rt-studio/dicom';
-import { parseFilesInWorkers, type LoadProgress } from './parse-pool';
+import { parseFilesInWorkers, type LoadProgress, type SkippedFile } from './parse-pool';
 
 /**
  * Outcome of loading a batch of files: the series found across them and the one
@@ -25,10 +25,17 @@ import { parseFilesInWorkers, type LoadProgress } from './parse-pool';
  * series; the grouped slices are kept so switching selection rebuilds without
  * re-reading.
  */
-/** What a batch of files turned out to hold; see {@link VolumeLoader.importFiles}. */
-export type FileImport =
+/**
+ * What a batch of files turned out to hold; see {@link VolumeLoader.importFiles}.
+ * `skipped` lists the files that could not be read; the rest was imported.
+ * `nothing` is a batch that held DICOM files but none that could be read, so
+ * `skipped` is all there is to say about it.
+ */
+export type FileImport = (
   | { readonly kind: 'images'; readonly result: LoadResult }
-  | { readonly kind: 'structures'; readonly structureSets: readonly StructureSet[] };
+  | { readonly kind: 'structures'; readonly structureSets: readonly StructureSet[] }
+  | { readonly kind: 'nothing' }
+) & { readonly skipped: readonly SkippedFile[] };
 
 export interface LoadResult {
   /** Every series found, in picker order. */
@@ -81,7 +88,12 @@ export class VolumeLoader {
   async loadFromFiles(files: readonly File[], onProgress?: LoadProgress): Promise<LoadResult> {
     const imported = await this.importFiles(files, onProgress);
     if (imported.kind === 'images') return imported.result;
-    throw new VolumeBuildError('No DICOM image slices were found.');
+    const [unreadable] = imported.skipped;
+    throw new VolumeBuildError(
+      unreadable && imported.kind === 'nothing'
+        ? `${unreadable.reason} (${unreadable.name}).`
+        : 'No DICOM image slices were found.',
+    );
   }
 
   /**
@@ -96,16 +108,23 @@ export class VolumeLoader {
     onProgress?: LoadProgress,
     signal?: AbortSignal,
   ): Promise<FileImport> {
-    const { slices, structureSets } = await parseFilesInWorkers(
+    const { slices, structureSets, skipped } = await parseFilesInWorkers(
       files,
       onProgress,
       undefined,
       signal,
     );
     if (slices.length === 0 && structureSets.length > 0) {
-      return { kind: 'structures', structureSets };
+      return { kind: 'structures', structureSets, skipped };
     }
-    return { kind: 'images', result: this.buildFromSlices(slices, structureSets, files.length) };
+    // Nothing came out and files were skipped: the list of them says why. The
+    // "no slices found" error is for a batch with no DICOM image in it at all.
+    if (slices.length === 0 && skipped.length > 0) return { kind: 'nothing', skipped };
+    return {
+      kind: 'images',
+      result: this.buildFromSlices(slices, structureSets, files.length),
+      skipped,
+    };
   }
 
   private buildFromSlices(
