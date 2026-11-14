@@ -165,7 +165,7 @@ are not regressions. Each has an issue.
 | #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot (both done since)                                                  | #22          |
 | #151  | Filled display of imported structures                                                                                                         | #104         |
 | #152  | Rename, recolour and delete for painted structures; listing them under Structures                                                             | #105         |
-| #155  | Tree view expansion remembered                                                                                                                | #33          |
+| #155  | Tree view expansion remembered (added since)                                                                                                  | #33          |
 | #156  | Reopening a recent selection without picking the files again                                                                                  | #34          |
 | #157  | Probe position in patient millimetres (added since)                                                                                           | #21          |
 

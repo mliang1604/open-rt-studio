@@ -29,7 +29,7 @@ import { SeriesChip } from './series-chip';
  * collapsible rows under a patient root for patients with many studies/series.
  * Both reuse {@link SeriesChip} and share the open-study and active-series state,
  * so the header toggle switches layout without reloading or losing selection.
- * The collapsed flag, the chosen view and the last-opened study all persist via
+ * The collapsed flag, the chosen view, the tree's expansion and the last-opened study all persist via
  * {@link PreferencesStore} so the panel restores across sessions.
  *
  * It reflects the {@link PatientCatalog} and highlights the chip of every
@@ -101,8 +101,10 @@ export class HistoryPanel {
   /** The active layout (`timeline` / `tree`). Restored from preferences. */
   protected readonly view = signal<HistoryView>(this.preferences.preferences().historyView);
 
-  /** Whether the tree's patient root is expanded. Tree-only, session-local. */
-  protected readonly patientExpanded = signal(true);
+  /** Whether the tree's patient root is expanded. Tree-only. Restored from preferences. */
+  protected readonly patientExpanded = signal(
+    this.preferences.preferences().historyPatientExpanded,
+  );
 
   /**
    * StudyInstanceUID of the single open (accordion) study, or null when all are
@@ -136,9 +138,11 @@ export class HistoryPanel {
     this.preferences.update({ historyView: view });
   }
 
-  /** Expand/collapse the tree's patient root. */
+  /** Expand/collapse the tree's patient root, persisting the choice. */
   protected togglePatient(): void {
-    this.patientExpanded.update((open) => !open);
+    const next = !this.patientExpanded();
+    this.patientExpanded.set(next);
+    this.preferences.update({ historyPatientExpanded: next });
   }
 
   /** Open the clicked study (closing any other), or close it if already open. */

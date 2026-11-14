@@ -21,6 +21,7 @@ const SAMPLE: ViewPreferences = {
   historyCollapsed: true,
   historyView: 'tree',
   lastOpenedStudyUid: '1.2.840.113619.2.55.3.123',
+  historyPatientExpanded: false,
 };
 
 describe('serializePreferences / parsePreferences', () => {
@@ -45,6 +46,22 @@ describe('serializePreferences / parsePreferences', () => {
 
   it('preserves the history view choice', () => {
     expect(parsePreferences(serializePreferences(SAMPLE)).historyView).toBe('tree');
+  });
+
+  it('preserves a collapsed patient row of the tree', () => {
+    expect(parsePreferences(serializePreferences(SAMPLE)).historyPatientExpanded).toBe(false);
+    const open = { ...SAMPLE, historyPatientExpanded: true };
+    expect(parsePreferences(serializePreferences(open)).historyPatientExpanded).toBe(true);
+  });
+
+  it('expands the patient row for preferences stored before the field existed', () => {
+    const older: Record<string, unknown> = { version: 3, ...SAMPLE };
+    delete older['historyPatientExpanded'];
+    const restored = parsePreferences(JSON.stringify(older));
+    expect(restored.historyPatientExpanded).toBe(true);
+    // The rest of what was stored is kept: the schema version did not change.
+    expect(restored.historyView).toBe('tree');
+    expect(restored.windowWidth).toBe(400);
   });
 });
 
