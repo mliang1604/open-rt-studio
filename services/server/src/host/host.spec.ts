@@ -470,7 +470,7 @@ describe('requests from web pages', () => {
     expect(asked.headers['access-control-allow-origin']).toBe(PAGE);
     expect(asked.headers['access-control-allow-methods']).toBe('POST, GET');
     expect(asked.headers['access-control-allow-headers']).toBe(
-      'Content-Type, Range, If-None-Match',
+      'Authorization, Content-Type, Range, If-None-Match',
     );
     expect(asked.headers['access-control-max-age']).toBe('600');
     expect(asked.headers['access-control-allow-private-network']).toBeUndefined();

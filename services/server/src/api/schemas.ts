@@ -54,6 +54,16 @@ const instance = {
   sha256: { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'Of the stored file.' },
 };
 
+const account = object(
+  {
+    name: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' },
+    role: { type: 'string', enum: ['admin', 'user'] },
+    disabled: { type: 'boolean', description: 'A disabled account is kept, and cannot log in.' },
+    createdAt: { ...text, description: 'ISO 8601.' },
+  },
+  'An account. Its password is never part of an answer.',
+);
+
 const reference = object({
   relation: {
     type: 'string',
@@ -76,6 +86,34 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     error: { type: 'string', description: 'A fixed word for what is wrong.' },
     message: text,
   }),
+  Account: account,
+  AccountList: object({ accounts: { type: 'array', items: ref('Account') } }),
+  Session: object(
+    {
+      account: {
+        ...account,
+        type: ['object', 'null'],
+        description: 'Whose session it is. Null on a server without accounts.',
+      },
+      expiresAt: {
+        ...nullableText,
+        description:
+          'When the session ends if it is not used again (ISO 8601). Null on a server without accounts.',
+      },
+    },
+    'Who is logged in.',
+  ),
+  Login: object(
+    {
+      token: {
+        type: 'string',
+        description: 'Send it with every request, as `Authorization: Bearer <token>`.',
+      },
+      account,
+      expiresAt: { ...text, description: 'When the session ends if it is not used again.' },
+    },
+    'A login: the token, told once, and the session it stands for.',
+  ),
   Health: object({
     status: { type: 'string', enum: ['ok', 'stopping'] },
     version: text,

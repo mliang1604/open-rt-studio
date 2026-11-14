@@ -35,6 +35,8 @@ export interface ApiOptions {
   readonly maxUploadBytes: number;
   /** Routes that are served beside these and belong in the description. */
   readonly described?: readonly Route[];
+  /** Whether the server has accounts, for the description to say how to log in. */
+  readonly login?: boolean;
 }
 
 export const LIMIT: ParameterDoc = {
@@ -563,9 +565,13 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
   const description: Route = {
     method: 'GET',
     path: `${API_PREFIX}/openapi.json`,
+    // What the API is, not what the server holds: a client reads it to find the login.
+    access: 'public',
     handle: () => ({
       status: 200,
-      body: openApiDocument([...(options.described ?? []), ...routes, description]),
+      body: openApiDocument([...(options.described ?? []), ...routes, description], {
+        login: options.login ?? false,
+      }),
     }),
     doc: {
       tag: 'Server',

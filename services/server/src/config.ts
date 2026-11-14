@@ -9,11 +9,17 @@ import { LOG_LEVELS, type LogLevel } from './logger.js';
 /** What the server is told at start. Every value has a default. */
 export interface ServerConfig {
   /**
-   * The address to listen on. The default is this machine only: there are no
-   * accounts yet (#55), so the server should not be reachable from elsewhere
-   * unless someone decides it should.
+   * The address to listen on. The default is this machine only: the server
+   * should not be reachable from elsewhere unless someone decides it should.
    */
   readonly host: string;
+  /**
+   * Who may use the server. `accounts`, the default: whoever logs in with an
+   * account (they are kept in the data directory, and made with the `account`
+   * command). `none`: whoever can reach it, with no login; that is for trying
+   * the server out, and is refused unless it listens on this machine only.
+   */
+  readonly auth: AuthMode;
   /** The port to listen on; 0 lets the operating system choose a free one. */
   readonly port: number;
   /** The least severe level that is logged. */
@@ -32,14 +38,18 @@ export interface ServerConfig {
   /**
    * The web origins, other than the server's own, whose pages may use the
    * server from a browser: `https://example.org`, `http://localhost:4200`.
-   * None by default. There is no "any origin": until there is a login (#55),
-   * a page that may call the server may read everything in it.
+   * None by default, and there is no "any origin". On a server with accounts
+   * such a page still has to log in; on one without, it may read everything.
    */
   readonly allowedOrigins: readonly string[];
 }
 
+export const AUTH_MODES = ['accounts', 'none'] as const;
+export type AuthMode = (typeof AUTH_MODES)[number];
+
 export const DEFAULT_CONFIG: ServerConfig = {
   host: '127.0.0.1',
+  auth: 'accounts',
   port: 4300,
   logLevel: 'info',
   shutdownTimeoutMs: 10_000,
@@ -55,6 +65,7 @@ export const CONFIG_FILE_VARIABLE = 'OPEN_RT_STUDIO_CONFIG';
 /** The environment variable that sets each key. The environment wins over the file. */
 export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>> = {
   host: 'OPEN_RT_STUDIO_HOST',
+  auth: 'OPEN_RT_STUDIO_AUTH',
   port: 'OPEN_RT_STUDIO_PORT',
   logLevel: 'OPEN_RT_STUDIO_LOG_LEVEL',
   shutdownTimeoutMs: 'OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS',
@@ -81,6 +92,10 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       typeof value === 'string' && value.trim() !== ''
         ? { value: value.trim() }
         : { wrong: 'must be an address' },
+    auth: (value) =>
+      typeof value === 'string' && (AUTH_MODES as readonly string[]).includes(value)
+        ? { value: value as AuthMode }
+        : { wrong: `must be one of ${AUTH_MODES.join(', ')}` },
     port: (value) =>
       typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 65535
         ? { value }

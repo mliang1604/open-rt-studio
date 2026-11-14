@@ -36,7 +36,11 @@ application. Never commit patient data or real DICOM files
   `src/host` is HTTP on `node:http` and `src/api` the routes it serves. A
   route carries its own description, from which the OpenAPI document is made. Logs carry no
   patient identifiers: log a route, a count or a duration, never a name, an
-  ID or the address that was asked for.
+  ID or the address that was asked for. `src/accounts` is who may use the
+  server: accounts, roles and sessions. A route answers only a logged-in
+  user unless it sets `access` (`public` or `admin`); leave it out for
+  anything that reads or changes what the server holds. Account names,
+  passwords and tokens are never logged.
 - `apps/desktop`, `native/`: placeholders until M2 and M3.
 - `docs/`: architecture, license headers, test data policy, and the parity
   audit against dicom-workspace.
@@ -53,7 +57,9 @@ All commands run from the repository root. Node 24.15 or newer is required
 - Install: `npm ci` (not `npm install`, which rewrites the lockfile).
 - Run the app: `npm start` (dev server on http://localhost:4200)
 - Run the server: `npm run build -w @open-rt-studio/server`, then
-  `npm start -w @open-rt-studio/server` (http://127.0.0.1:4300/health)
+  `OPEN_RT_STUDIO_AUTH=none npm start -w @open-rt-studio/server`
+  (http://127.0.0.1:4300/health). Without `AUTH=none` it wants a data
+  directory and an account; see `services/server/README.md`.
 - Lint: `npm run lint` (ESLint, the license-header check and the guard
   against committed DICOM files)
 - Format check: `npm run format:check` (fix with `npm run format`)
