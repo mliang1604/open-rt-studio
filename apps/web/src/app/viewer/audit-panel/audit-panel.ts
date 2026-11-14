@@ -53,7 +53,9 @@ export function auditWhen(record: AuditEntry): string {
 /** Who did it, in words when no account did. */
 export function auditWho(record: AuditEntry): string {
   if (record.actor) return record.actor;
-  return record.origin === 'command' ? 'A command on the server' : 'No one logged in';
+  if (record.origin === 'command') return 'A command on the server';
+  // What the server does by a rule it was set to keep: clearing old records.
+  return record.origin === 'server' ? 'The server itself' : 'No one logged in';
 }
 
 /**

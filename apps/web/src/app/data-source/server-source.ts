@@ -197,7 +197,15 @@ export const AUDIT_ACTIONS = [
   ...['login', 'logout', 'password-change', 'patients-list', 'studies-search'],
   ...['study-read', 'series-read', 'instance-read', 'instance-download', 'instance-upload'],
   ...['accounts-list', 'account-create', 'account-change', 'account-remove'],
-  ...['job-start', 'job-cancel', 'job-read', 'audit-read', 'audit-export', 'request'],
+  ...[
+    'job-start',
+    'job-cancel',
+    'job-read',
+    'audit-read',
+    'audit-export',
+    'audit-clear',
+    'request',
+  ],
 ] as const;
 /** How a thing that was done can have ended. */
 export const AUDIT_OUTCOMES = ['ok', 'refused', 'not-found', 'rejected', 'failed'] as const;

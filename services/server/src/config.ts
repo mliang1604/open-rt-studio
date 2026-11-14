@@ -50,6 +50,12 @@ export interface ServerConfig {
   readonly tlsCert: string | null;
   /** The file that holds the certificate's private key, in PEM, with no passphrase. */
   readonly tlsKey: string | null;
+  /**
+   * How many days an audit record is kept after the last thing it records.
+   * Null keeps every record for good, which is the default: nothing is
+   * cleared unless this is set.
+   */
+  readonly auditRetentionDays: number | null;
 }
 
 export const AUTH_MODES = ['accounts', 'none'] as const;
@@ -67,6 +73,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   allowedOrigins: [],
   tlsCert: null,
   tlsKey: null,
+  auditRetentionDays: null,
 };
 
 /** The environment variable naming a JSON config file. */
@@ -85,6 +92,7 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   allowedOrigins: 'OPEN_RT_STUDIO_ALLOWED_ORIGINS',
   tlsCert: 'OPEN_RT_STUDIO_TLS_CERT',
   tlsKey: 'OPEN_RT_STUDIO_TLS_KEY',
+  auditRetentionDays: 'OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -157,6 +165,11 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
     },
     tlsCert: fileOrNone,
     tlsKey: fileOrNone,
+    auditRetentionDays: (value) =>
+      value === null ||
+      (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 36_500)
+        ? { value }
+        : { wrong: 'must be a whole number of days from 1 to 36500, or null to keep every record' },
   };
 
 /** Whether a text is a web origin as a browser writes one in an `Origin` header. */
@@ -180,6 +193,7 @@ const NUMERIC: ReadonlySet<keyof ServerConfig> = new Set([
   'shutdownTimeoutMs',
   'maxUploadBytes',
   'jobConcurrency',
+  'auditRetentionDays',
 ]);
 
 const KEYS = Object.keys(DEFAULT_CONFIG) as (keyof ServerConfig)[];

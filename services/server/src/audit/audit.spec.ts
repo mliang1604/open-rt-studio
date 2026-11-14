@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import { migrate } from '../pacs-index/migrations.js';
 import {
+  AUDIT_MIGRATIONS,
   AUDIT_STORE_APPLICATION_ID,
   openSqliteAuditStore,
   type AuditEntry,
@@ -334,6 +336,62 @@ describe('the file', () => {
     expect(command.find().items).toEqual(server.find().items);
   });
 
+  it('lets only what is below its floor be deleted, and the floor only rises', () => {
+    const file = join(directory, 'audit.sqlite');
+    let at = START;
+    const log = createAuditLog({ store: openSqliteAuditStore(file), now: () => at });
+    logs.push(log);
+    for (let i = 0; i < 6; i++) {
+      log.record(entry({ object: `n${i}` }));
+      at += 60 * MINUTE;
+    }
+    // Cleared up to 10:00: n0 and n1 went, and the clearing was written down.
+    expect(log.clear(START + 2 * 60 * MINUTE, { actor: null, origin: 'server' })).toBe(2);
+    const db = new DatabaseSync(file);
+    try {
+      // A slip: everything. Nothing from the floor up can go, so nothing goes.
+      expect(() => db.exec('DELETE FROM audit')).toThrow(/not deleted/);
+      expect(() => db.exec("DELETE FROM audit WHERE object = 'n5'")).toThrow(/not deleted/);
+      expect(log.find().items).toHaveLength(5);
+      // The floor is not moved back, to reach further, nor taken away.
+      expect(() => db.exec('UPDATE audit_floor SET before = 0')).toThrow(/does not go back/);
+      expect(() => db.exec('DELETE FROM audit_floor')).toThrow(/is not removed/);
+      expect(() => db.exec('INSERT INTO audit_floor (id, before) VALUES (2, 0)')).toThrow();
+      expect(db.prepare('SELECT before FROM audit_floor').all()).toEqual([
+        { before: START + 2 * 60 * MINUTE },
+      ]);
+    } finally {
+      db.close();
+    }
+    // Clearing to an earlier moment than before removes nothing and moves nothing.
+    expect(log.clear(START, { actor: null, origin: 'server' })).toBe(0);
+    expect(log.find().items).toHaveLength(5);
+  });
+
+  it('takes a log from before there was a floor, and keeps its records', () => {
+    const file = join(directory, 'audit.sqlite');
+    const old = new DatabaseSync(file);
+    migrate(old, 1, AUDIT_MIGRATIONS, {
+      applicationId: AUDIT_STORE_APPLICATION_ID,
+      noun: 'audit log',
+    });
+    old
+      .prepare(
+        `INSERT INTO audit (time, until, actor, origin, action, outcome)
+         VALUES (?, ?, 'ada', 'api', 'login', 'ok')`,
+      )
+      .run(START, START);
+    old.close();
+    const log = createAuditLog({ store: openSqliteAuditStore(file), now: () => START + MINUTE });
+    logs.push(log);
+    expect(log.find().items).toMatchObject([{ actor: 'ada', action: 'login' }]);
+    // And is as any log from then on: guarded, and clearable.
+    const db = new DatabaseSync(file);
+    expect(() => db.exec('DELETE FROM audit')).toThrow(/not deleted/);
+    db.close();
+    expect(log.clear(START + 1, { actor: null, origin: 'server' })).toBe(1);
+  });
+
   it('lets no record be deleted or changed, by whoever writes to the file', () => {
     const file = join(directory, 'audit.sqlite');
     const log = createAuditLog({ store: openSqliteAuditStore(file), now: () => START });
@@ -366,6 +424,74 @@ describe('the file', () => {
       db.close();
     }
     expect(log.find().items).toEqual(before);
+  });
+});
+
+describe('clearing what is old (#216)', () => {
+  /** Ten records, one a day, the first at the start. */
+  function tenDays() {
+    const made = make();
+    for (let i = 0; i < 10; i++) {
+      made.log.record(entry({ object: `day ${i}` }));
+      made.pass(DAY);
+    }
+    return made;
+  }
+  const DAY = 24 * 60 * MINUTE;
+  const objects = (log: AuditLog) => [...log.all()].map((record) => record.object);
+
+  it('removes the records that ended before a moment, and says how many', () => {
+    const { log } = tenDays();
+    expect(log.clear(START + 4 * DAY, { actor: null, origin: 'server' })).toBe(4);
+    expect(objects(log).slice(0, 6)).toEqual([
+      ...['day 4', 'day 5', 'day 6', 'day 7', 'day 8', 'day 9'],
+    ]);
+  });
+
+  it('writes down that it was done: by whom, up to when, how many went', () => {
+    const { log } = tenDays();
+    log.clear(START + 4 * DAY, { actor: 'root', origin: 'api' });
+    const last = [...log.all()].at(-1);
+    expect(last).toMatchObject({
+      actor: 'root',
+      origin: 'api',
+      action: 'audit-clear',
+      outcome: 'ok',
+      patientId: null,
+      detail: 'removed=4 before=2026-03-05T08:00:00.000Z',
+    });
+  });
+
+  it('writes nothing when there was nothing to remove', () => {
+    const { log } = tenDays();
+    expect(log.clear(START - DAY, { actor: null, origin: 'server' })).toBe(0);
+    expect(log.clear(START, { actor: null, origin: 'server' })).toBe(0);
+    expect(objects(log)).toHaveLength(10);
+  });
+
+  it('keeps a record that counts over the moment: it ended after it', () => {
+    const { log, pass } = make();
+    log.record(entry());
+    pass(4 * MINUTE);
+    log.record(entry());
+    // From 08:00 to 08:04; cleared up to 08:02.
+    expect(log.clear(START + 2 * MINUTE, { actor: null, origin: 'server' })).toBe(0);
+    expect(log.find().items).toMatchObject([{ count: 2 }]);
+    expect(log.clear(START + 5 * MINUTE, { actor: null, origin: 'server' })).toBe(1);
+  });
+
+  it('begins a new record for a thing whose record was cleared away', () => {
+    const { log, pass } = make();
+    log.record(entry());
+    pass(MINUTE);
+    log.clear(START + 30_000, { actor: null, origin: 'server' });
+    // Within the while it would have been counted on the record that is gone.
+    log.record(entry());
+    const left = log.find().items;
+    expect(left.map((record) => [record.action, record.count])).toEqual([
+      ['study-read', 1],
+      ['audit-clear', 1],
+    ]);
   });
 });
 

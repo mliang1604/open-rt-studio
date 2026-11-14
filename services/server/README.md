@@ -106,16 +106,17 @@ ended** (`outcome`: `ok`, `refused`, `not-found`, `rejected`, `failed`) and
 what more there is to say (`detail`: what was searched for, what was
 changed).
 
-| Action                                                  | Written when                                               |
-| ------------------------------------------------------- | ---------------------------------------------------------- |
-| `login`, `logout`, `password-change`                    | Someone logs in (or fails to), logs out, changes their own |
-| `patients-list`, `studies-search`                       | A list is asked for; `detail` holds what was searched for  |
-| `study-read`, `series-read`, `instance-read`            | A study, a series or an instance is looked at              |
-| `instance-download`                                     | A file is fetched                                          |
-| `instance-upload`                                       | A file is sent; `detail` says what became of it            |
-| `accounts-list`, `account-create`, `-change`, `-remove` | An administrator, or the `account` command, does so        |
-| `job-start`, `job-cancel`, `job-read`                   | A job is submitted, cancelled, followed                    |
-| `audit-read`, `audit-export`                            | The audit log itself is read                               |
+| Action                                                  | Written when                                                      |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| `login`, `logout`, `password-change`                    | Someone logs in (or fails to), logs out, changes their own        |
+| `patients-list`, `studies-search`                       | A list is asked for; `detail` holds what was searched for         |
+| `study-read`, `series-read`, `instance-read`            | A study, a series or an instance is looked at                     |
+| `instance-download`                                     | A file is fetched                                                 |
+| `instance-upload`                                       | A file is sent; `detail` says what became of it                   |
+| `accounts-list`, `account-create`, `-change`, `-remove` | An administrator, or the `account` command, does so               |
+| `job-start`, `job-cancel`, `job-read`                   | A job is submitted, cancelled, followed                           |
+| `audit-read`, `audit-export`                            | The audit log itself is read                                      |
+| `audit-clear`                                           | The server clears records that have outlived the retention period |
 
 What to know about it:
 
@@ -139,10 +140,19 @@ What to know about it:
   What was typed in place of a name is not kept: it may be a password.
 - **No password and no token is ever in it.** A search is: the log holds the
   names and IDs that were searched for.
-- **Records are not changed or deleted.** The file refuses it (SQLite
-  triggers), whoever writes to it through SQL. That stops a mistake, not
-  someone who can replace the file. There is no retention period and nothing
-  that clears old records; the file grows.
+- **Records are not changed, and not deleted but by the retention period.**
+  The file refuses it (SQLite triggers), whoever writes to it through SQL.
+  That stops a mistake, not someone who can replace the file.
+- **Every record is kept for good unless you say otherwise.** With
+  `auditRetentionDays`, the server clears the records that ended more than
+  that many days ago, when it starts and once a day after. A clearing is
+  itself recorded (`audit-clear`, by origin `server`: up to when, and how
+  many went), and the application log says `audit-cleared` with the count.
+  The file keeps a floor, the moment it was last cleared up to: nothing from
+  the floor on can be deleted, by the server or by a stray `DELETE`, and the
+  floor only rises. **What is cleared is gone.** To keep it, export it first
+  (`GET /api/v1/audit/export`), or copy `audit.sqlite` while the server is
+  stopped; shortening the period clears at the next start.
 - **The `account` command writes to it too**, as origin `command`, with the
   name the operating system gives for whoever ran it.
 - A server without a data directory keeps nothing, an audit log no more than
@@ -169,7 +179,7 @@ curl -H "Authorization: Bearer $TOKEN" -o audit.csv \
 
 In the CSV a value that a spreadsheet would take for a formula is given a
 leading apostrophe. The viewer shows the log to an administrator (the server
-card's "Audit log"). Nothing clears old records (#216). DIMSE sends and retrievals will be recorded when
+card's "Audit log"). DIMSE sends and retrievals will be recorded when
 there is DIMSE (#212).
 
 `SIGTERM` or `SIGINT` (Ctrl+C) stops it: it takes no new connections, answers
@@ -262,19 +272,20 @@ set them, and an environment variable wins over the file. A wrong or misspelt
 setting stops the server from starting, with a message that names it (exit
 code 2).
 
-| Setting             | Environment variable                 | Default     | Meaning                                                                                                                                                                              |
-| ------------------- | ------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `host`              | `OPEN_RT_STUDIO_HOST`                | `127.0.0.1` | Address to listen on                                                                                                                                                                 |
-| `auth`              | `OPEN_RT_STUDIO_AUTH`                | `accounts`  | `accounts`: only whoever logs in is answered; needs `dataDir`. `none`: no login, and only for an address of this machine                                                             |
-| `port`              | `OPEN_RT_STUDIO_PORT`                | `4300`      | Port to listen on; `0` takes a free one, which the log then names                                                                                                                    |
-| `logLevel`          | `OPEN_RT_STUDIO_LOG_LEVEL`           | `info`      | `debug`, `info`, `warn`, `error` or `silent`                                                                                                                                         |
-| `shutdownTimeoutMs` | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS` | `10000`     | How long a stop waits for requests, and then for the core's work                                                                                                                     |
-| `dataDir`           | `OPEN_RT_STUDIO_DATA_DIR`            | none        | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops                                                             |
-| `maxUploadBytes`    | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`    | `536870912` | The largest instance an upload may hold                                                                                                                                              |
-| `jobConcurrency`    | `OPEN_RT_STUDIO_JOB_CONCURRENCY`     | `1`         | How many jobs run at once; the rest wait their turn                                                                                                                                  |
-| `allowedOrigins`    | `OPEN_RT_STUDIO_ALLOWED_ORIGINS`     | none        | The web origins whose pages may use the server from a browser, such as `http://localhost:4200`. A list in the file; separated by commas in the environment. No patterns and no "any" |
-| `tlsCert`           | `OPEN_RT_STUDIO_TLS_CERT`            | none        | File with the server's certificate (PEM, any intermediates after it). With `tlsKey`, the server speaks HTTPS; see [HTTPS](#https)                                                    |
-| `tlsKey`            | `OPEN_RT_STUDIO_TLS_KEY`             | none        | File with the certificate's private key (PEM, no passphrase)                                                                                                                         |
+| Setting              | Environment variable                  | Default     | Meaning                                                                                                                                                                              |
+| -------------------- | ------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `host`               | `OPEN_RT_STUDIO_HOST`                 | `127.0.0.1` | Address to listen on                                                                                                                                                                 |
+| `auth`               | `OPEN_RT_STUDIO_AUTH`                 | `accounts`  | `accounts`: only whoever logs in is answered; needs `dataDir`. `none`: no login, and only for an address of this machine                                                             |
+| `port`               | `OPEN_RT_STUDIO_PORT`                 | `4300`      | Port to listen on; `0` takes a free one, which the log then names                                                                                                                    |
+| `logLevel`           | `OPEN_RT_STUDIO_LOG_LEVEL`            | `info`      | `debug`, `info`, `warn`, `error` or `silent`                                                                                                                                         |
+| `shutdownTimeoutMs`  | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS`  | `10000`     | How long a stop waits for requests, and then for the core's work                                                                                                                     |
+| `dataDir`            | `OPEN_RT_STUDIO_DATA_DIR`             | none        | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops                                                             |
+| `maxUploadBytes`     | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`     | `536870912` | The largest instance an upload may hold                                                                                                                                              |
+| `jobConcurrency`     | `OPEN_RT_STUDIO_JOB_CONCURRENCY`      | `1`         | How many jobs run at once; the rest wait their turn                                                                                                                                  |
+| `allowedOrigins`     | `OPEN_RT_STUDIO_ALLOWED_ORIGINS`      | none        | The web origins whose pages may use the server from a browser, such as `http://localhost:4200`. A list in the file; separated by commas in the environment. No patterns and no "any" |
+| `tlsCert`            | `OPEN_RT_STUDIO_TLS_CERT`             | none        | File with the server's certificate (PEM, any intermediates after it). With `tlsKey`, the server speaks HTTPS; see [HTTPS](#https)                                                    |
+| `tlsKey`             | `OPEN_RT_STUDIO_TLS_KEY`              | none        | File with the certificate's private key (PEM, no passphrase)                                                                                                                         |
+| `auditRetentionDays` | `OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS` | none        | How many days an audit record is kept. Without it every record is kept for good; see [The audit log](#the-audit-log)                                                                 |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
