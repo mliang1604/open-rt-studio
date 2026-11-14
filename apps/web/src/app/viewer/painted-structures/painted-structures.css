@@ -1,0 +1,120 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* Rows like those of the imported structures above them (viewer.css,
+   .roi-item and its parts), which a child component does not inherit. */
+:host {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
+.set,
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.set {
+  margin-top: 4px;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.set-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.set-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 400;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.color {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  background: none;
+  cursor: pointer;
+}
+
+/* The name reads as text until it is pointed at or edited. */
+.name {
+  /* Most of the row's spare width goes to the name, the rest to the slider. */
+  flex: 3 1 72px;
+  min-width: 48px;
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  text-overflow: ellipsis;
+}
+
+.name:hover {
+  border-color: var(--glass-border);
+}
+
+.name:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--accent-ring);
+  outline: none;
+}
+
+.row.active .name {
+  font-weight: 600;
+}
+
+.opacity {
+  flex: 1 1 48px;
+  min-width: 40px;
+  cursor: pointer;
+}
+
+.remove {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.remove:hover,
+.remove:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--accent-ring);
+  outline: none;
+  opacity: 1;
+}
+
+.none {
+  font-size: 0.85em;
+  opacity: 0.6;
+}

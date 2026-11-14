@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, signal } from '@angular/core';
+import type { MaskColor } from '@open-rt-studio/render';
 import {
   clearLabelId,
   createLabelVolume,
@@ -140,6 +141,12 @@ export class EditableStructuresStore {
    */
   private readonly _version = signal(0);
 
+  /** Ids of structures that are not drawn. Display only: the voxels are untouched. */
+  private readonly _hidden = signal<ReadonlySet<number>>(new Set());
+
+  /** Each structure's own opacity, 0 to 1, where it is not 1. Display only. */
+  private readonly _opacities = signal<ReadonlyMap<number, number>>(new Map());
+
   /** The label grid the brush paints into; null before a load. Read-only handle. */
   readonly labelVolume = this._labelVolume.asReadonly();
 
@@ -171,6 +178,26 @@ export class EditableStructuresStore {
   /** Whether any structure has been authored, gating the panel section. */
   readonly hasStructures = computed(() => this.rois().length > 0);
 
+  /** Ids of the structures that are hidden. */
+  readonly hiddenRois = this._hidden.asReadonly();
+
+  /** Each structure's own opacity where it differs from 1. */
+  readonly roiOpacities = this._opacities.asReadonly();
+
+  /**
+   * What the mask is drawn from: every structure's id and colour, with its own
+   * share of the mask's opacity (0 when hidden).
+   */
+  readonly maskColors = computed<readonly MaskColor[]>(() => {
+    const hidden = this._hidden();
+    const opacities = this._opacities();
+    return this.rois().map((roi) => ({
+      id: roi.id,
+      color: roi.color,
+      alpha: hidden.has(roi.id) ? 0 : (opacities.get(roi.id) ?? 1),
+    }));
+  });
+
   /**
    * Create a new, empty authored set and make it active, returning it. The target
    * for {@link createSet}'s "New set" panel action; new ROIs then land here.
@@ -191,6 +218,49 @@ export class EditableStructuresStore {
   /** Rename an authored set; no-op when the id is unknown. */
   renameSet(id: number, label: string): void {
     this._sets.update((sets) => sets.map((s) => (s.id === id ? { ...s, label } : s)));
+  }
+
+  /**
+   * Delete an authored set with every structure in it: their voxels go back to
+   * background. If it was the active set, the last remaining set becomes active
+   * (none when it was the only one). No-op when the id is unknown.
+   */
+  deleteSet(id: number): void {
+    const set = this._sets().find((s) => s.id === id);
+    if (!set) return;
+    const label = this._labelVolume();
+    let cleared = 0;
+    for (const roi of set.rois) {
+      if (label) cleared += clearLabelId(label, roi.id);
+      this.forgetDisplay(roi.id);
+    }
+    const remaining = this._sets().filter((s) => s.id !== id);
+    this._sets.set(remaining);
+    if (this._activeSetId() === id) {
+      this._activeSetId.set(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+    }
+    if (cleared > 0) this.bump();
+  }
+
+  /** Show or hide a structure. Its voxels stay as they are. */
+  setRoiVisible(id: number, visible: boolean): void {
+    this._hidden.update((hidden) => {
+      const next = new Set(hidden);
+      if (visible) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** Set a structure's own opacity, 0 to 1 (clamped). */
+  setRoiOpacity(id: number, opacity: number): void {
+    const value = Math.min(1, Math.max(0, opacity));
+    this._opacities.update((map) => {
+      const next = new Map(map);
+      if (value === 1) next.delete(id);
+      else next.set(id, value);
+      return next;
+    });
   }
 
   /**
@@ -267,6 +337,7 @@ export class EditableStructuresStore {
     this._sets.update((sets) =>
       sets.map((s) => ({ ...s, rois: s.rois.filter((r) => r.id !== id) })),
     );
+    this.forgetDisplay(id);
     const label = this._labelVolume();
     if (label && clearLabelId(label, id) > 0) this.bump();
   }
@@ -303,6 +374,8 @@ export class EditableStructuresStore {
     this._sets.set([]);
     this._activeSetId.set(null);
     this._version.set(0);
+    this._hidden.set(new Set());
+    this._opacities.set(new Map());
     this.nextId = 1;
     this.nextSetId = 1;
     this.hasImportedSets = hasImportedSets;
@@ -322,6 +395,12 @@ export class EditableStructuresStore {
     const base = this.hasImportedSets ? 'New ROIs' : 'Structures';
     const ordinal = this._sets().length + 1;
     return ordinal === 1 ? base : `${base} ${ordinal}`;
+  }
+
+  /** Drop the display state of a structure that no longer exists. */
+  private forgetDisplay(id: number): void {
+    if (this._hidden().has(id)) this.setRoiVisible(id, true);
+    if (this._opacities().has(id)) this.setRoiOpacity(id, 1);
   }
 
   /** Bump the label-voxel mutation counter so the display re-uploads. */

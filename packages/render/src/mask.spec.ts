@@ -49,6 +49,21 @@ describe('maskColorLut', () => {
     expect(lut[11]).toBe(1); // a
   });
 
+  it("writes a structure's own alpha: hidden at 0, faded in between, clamped to 0..1", () => {
+    const lut = maskColorLut([
+      { id: 1, color: [255, 0, 0], alpha: 0 },
+      { id: 2, color: [255, 0, 0], alpha: 0.4 },
+      { id: 3, color: [255, 0, 0], alpha: 7 },
+      { id: 4, color: [255, 0, 0], alpha: -1 },
+      { id: 5, color: [255, 0, 0] },
+    ]);
+    expect([lut[7], lut[11], lut[15], lut[19], lut[23]].map((a) => +a.toFixed(3))).toEqual([
+      0, 0.4, 1, 0, 1,
+    ]);
+    // A hidden structure keeps its colour; only its alpha says it is hidden.
+    expect(lut[4]).toBe(1);
+  });
+
   it('is MASK_LUT_SIZE texels of RGBA and skips ids outside [1, size)', () => {
     const lut = maskColorLut([
       { id: 0, color: [255, 255, 255] }, // background can't be recoloured

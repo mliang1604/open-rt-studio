@@ -1,0 +1,70 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@for (set of sets(); track set.id) {
+  <div class="set">
+    <span class="set-label" [title]="set.label">{{ set.label }}</span>
+    <span class="set-tag" title="Painted here with the brush, not imported">painted</span>
+    <button
+      type="button"
+      class="remove"
+      (click)="setRemoved.emit(set)"
+      [attr.aria-label]="'Delete the set ' + set.label"
+      title="Delete this set and every structure in it"
+    >
+      ✕
+    </button>
+  </div>
+  @for (roi of set.rois; track roi.id) {
+    <div class="row" [class.active]="roi.id === activeRoiId()">
+      <input
+        type="checkbox"
+        [checked]="!hidden().has(roi.id)"
+        (change)="onVisible(roi, $event)"
+        [attr.aria-label]="'Show ' + roi.name + ' (painted)'"
+      />
+      <input
+        type="color"
+        class="color"
+        [value]="hex(roi)"
+        (input)="onColor(roi, $event)"
+        [attr.aria-label]="roi.name + ' colour (painted)'"
+        [title]="roi.name + ' colour'"
+      />
+      <input
+        type="text"
+        class="name"
+        [value]="roi.name"
+        (change)="onName(roi, $event)"
+        (keydown.enter)="commit($event)"
+        [attr.aria-label]="'Name of ' + roi.name + ' (painted)'"
+        title="Rename this structure"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <input
+        type="range"
+        class="opacity"
+        min="0"
+        max="100"
+        step="5"
+        [value]="percent(roi)"
+        (input)="onOpacity(roi, $event)"
+        [attr.aria-label]="roi.name + ' opacity (painted)'"
+        [title]="roi.name + ' opacity: ' + percent(roi) + '%'"
+      />
+      <button
+        type="button"
+        class="remove"
+        (click)="removed.emit(roi)"
+        [attr.aria-label]="'Delete ' + roi.name"
+        title="Delete this structure"
+      >
+        ✕
+      </button>
+    </div>
+  } @empty {
+    <div class="none">No structures in this set yet.</div>
+  }
+}

@@ -529,6 +529,15 @@ canvas.movable {
   font-weight: 600;
 }
 
+/* The rail makes its buttons as wide as the rail; this one sits in a row,
+   and is kept small so that it takes little from the name. */
+.tool-rail .roi-edit {
+  flex: 0 0 auto;
+  width: 20px;
+  padding: 0;
+  text-align: center;
+}
+
 /* Per-structure-set heading above its ROI rows when several sets are listed (#259). */
 .roi-group-label {
   margin-top: 4px;
@@ -593,7 +602,7 @@ canvas.movable {
      whose thumb stopped well short of it). flex-basis 0 lets the name show fully
      first, then the slider takes the slack. */
   flex: 1;
-  min-width: 56px;
+  min-width: 40px;
   cursor: pointer;
 }
 

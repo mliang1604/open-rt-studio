@@ -277,14 +277,15 @@ export class RoiController {
    * conversion is deliberate and reversible by re-showing them. No-op when the ROI
    * is unknown, has nothing fillable, or no volume is loaded.
    */
-  promoteRoi(setIndex: number, roiNumber: number): void {
+  promoteRoi(setIndex: number, roiNumber: number): number | null {
     const roi = this.structureSets()[setIndex]?.rois.find((r) => r.number === roiNumber);
-    if (!roi) return;
+    if (!roi) return null;
     const promotion = this.editable.promoteRoi(roi);
-    if (!promotion) return;
+    if (!promotion) return null;
     const key = roiKeyOf(setIndex, roiNumber);
     this.hiddenRois.update((hidden) => new Set(hidden).add(key));
     this.promotedRois.update((promoted) => new Set(promoted).add(key));
+    return promotion.roi.id;
   }
 
   /**

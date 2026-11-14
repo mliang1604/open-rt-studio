@@ -147,6 +147,140 @@ describe('EditableStructuresStore authored sets', () => {
   });
 });
 
+describe('EditableStructuresStore deleteSet', () => {
+  it('removes the set, its structures and their voxels', () => {
+    const s = store();
+    const a = s.createRoi('A');
+    const b = s.createRoi('B');
+    s.createSet('Second');
+    const c = s.createRoi('C');
+    const [first, second] = s.sets();
+    const label = s.labelVolume()!;
+    s.paint(a.id, [0, 1]);
+    s.paint(b.id, [2]);
+    s.paint(c.id, [5]);
+    const before = s.version();
+
+    s.deleteSet(first.id);
+
+    expect(s.sets()).toEqual([second]);
+    expect(s.rois()).toEqual([c]);
+    expect(Array.from(label.data.slice(0, 6))).toEqual([0, 0, 0, 0, 0, c.id]);
+    expect(s.version()).toBeGreaterThan(before); // the display has voxels to re-upload
+  });
+
+  it('makes the last remaining set active when the active one goes, and none when it was the only one', () => {
+    const s = store();
+    s.createRoi('A');
+    s.createSet('Second');
+    s.createSet('Third');
+    const [first, second, third] = s.sets();
+    expect(s.activeSetId()).toBe(third.id);
+
+    s.deleteSet(third.id);
+    expect(s.activeSetId()).toBe(second.id);
+    // Deleting a set that is not the active one leaves the active one alone.
+    s.deleteSet(first.id);
+    expect(s.activeSetId()).toBe(second.id);
+    s.deleteSet(second.id);
+    expect(s.activeSetId()).toBeNull();
+    expect(s.sets()).toEqual([]);
+  });
+
+  it('does not bump the version for an empty set, and ignores an unknown id', () => {
+    const s = store();
+    const set = s.createSet('Empty');
+    const before = s.version();
+    s.deleteSet(999);
+    expect(s.sets()).toHaveLength(1);
+    s.deleteSet(set.id);
+    expect(s.sets()).toEqual([]);
+    expect(s.version()).toBe(before);
+  });
+
+  it('a structure created after a set was deleted takes a new id, never a deleted one', () => {
+    const s = store();
+    const a = s.createRoi('A');
+    s.deleteSet(s.sets()[0].id);
+    expect(s.createRoi('B').id).toBeGreaterThan(a.id);
+  });
+});
+
+describe('EditableStructuresStore display of a structure', () => {
+  it('draws every structure at full strength to begin with', () => {
+    const s = store();
+    const a = s.createRoi('A', [10, 20, 30]);
+    expect(s.maskColors()).toEqual([{ id: a.id, color: [10, 20, 30], alpha: 1 }]);
+    expect(s.hiddenRois().size).toBe(0);
+  });
+
+  it('hides and shows a structure without touching its voxels', () => {
+    const s = store();
+    const a = s.createRoi('A');
+    const b = s.createRoi('B');
+    s.paint(a.id, [0]);
+    const before = s.version();
+
+    s.setRoiVisible(a.id, false);
+    expect(s.hiddenRois().has(a.id)).toBe(true);
+    expect(s.maskColors().map((c) => c.alpha)).toEqual([0, 1]);
+    expect(s.labelVolume()!.data[0]).toBe(a.id);
+    expect(s.version()).toBe(before);
+
+    s.setRoiVisible(a.id, true);
+    expect(s.maskColors().map((c) => c.alpha)).toEqual([1, 1]);
+    expect(s.rois()).toEqual([a, b]);
+  });
+
+  it('gives a structure its own opacity, clamped to 0..1', () => {
+    const s = store();
+    const a = s.createRoi('A');
+    const b = s.createRoi('B');
+    s.setRoiOpacity(a.id, 0.4);
+    s.setRoiOpacity(b.id, 3);
+    expect(s.maskColors().map((c) => c.alpha)).toEqual([0.4, 1]);
+    expect(s.roiOpacities().get(a.id)).toBe(0.4);
+    expect(s.roiOpacities().has(b.id)).toBe(false);
+    s.setRoiOpacity(a.id, -1);
+    expect(s.maskColors()[0].alpha).toBe(0);
+    // Hidden wins over an opacity; shown again, the opacity is still there.
+    s.setRoiOpacity(a.id, 0.4);
+    s.setRoiVisible(a.id, false);
+    expect(s.maskColors()[0].alpha).toBe(0);
+    s.setRoiVisible(a.id, true);
+    expect(s.maskColors()[0].alpha).toBe(0.4);
+  });
+
+  it('follows a recolour', () => {
+    const s = store();
+    const a = s.createRoi('A', [1, 2, 3]);
+    s.recolorRoi(a.id, [200, 100, 0]);
+    expect(s.maskColors()[0].color).toEqual([200, 100, 0]);
+  });
+
+  it('forgets the display state of a deleted structure, a deleted set, and on a new load', () => {
+    const s = store();
+    const a = s.createRoi('A');
+    const b = s.createRoi('B');
+    s.setRoiVisible(a.id, false);
+    s.setRoiOpacity(a.id, 0.5);
+    s.setRoiVisible(b.id, false);
+    s.setRoiOpacity(b.id, 0.5);
+
+    s.deleteRoi(a.id);
+    expect(s.hiddenRois().has(a.id)).toBe(false);
+    expect(s.roiOpacities().has(a.id)).toBe(false);
+    s.deleteSet(s.sets()[0].id);
+    expect(s.hiddenRois().size).toBe(0);
+    expect(s.roiOpacities().size).toBe(0);
+
+    const c = s.createRoi('C');
+    s.setRoiVisible(c.id, false);
+    s.resetForLoad(makeVolume());
+    expect(s.hiddenRois().size).toBe(0);
+  });
+});
+
 describe('EditableStructuresStore voxel mutation', () => {
   it('paints occupancy and bumps the version', () => {
     const s = store();

@@ -37,6 +37,7 @@ import { CprStore } from './cpr/cpr-store';
 import { EmptyState } from './empty-state/empty-state';
 import { GpuNotice } from './gpu-notice/gpu-notice';
 import { ImportReportCard } from './import-report/import-report';
+import { PaintedStructures } from './painted-structures/painted-structures';
 import { MeasurementStore } from './measurement-store';
 import { LayersStore } from './layers-store';
 import { Camera3dStore } from './camera3d-store';
@@ -52,7 +53,11 @@ import { LoadController, type LoadState } from './load-controller';
 import { MeasureController, type ToolMode } from './measure-controller';
 import { RenderController } from './render-controller';
 import { RoiController } from './roi-controller';
-import { EditableStructuresStore } from './editable-structures-store';
+import {
+  EditableStructuresStore,
+  type AuthoredStructureSet,
+  type EditableRoi,
+} from './editable-structures-store';
 import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
 import { LayersController } from './layers-controller';
@@ -61,7 +66,7 @@ import { StatusController } from './status-controller';
 import { RangeFill } from './range-fill';
 import { HistoryPanel } from './history-panel/history-panel';
 import { placePanes, placementAt, type PanePlacement } from './pane-placement';
-import { downloadBlob, dropHeadlineText } from './viewer-dom';
+import { confirmDelete, downloadBlob, dropHeadlineText } from './viewer-dom';
 import { paneKeyOf } from './pane-placement';
 import { SHORTCUTS, MEASURE_TOOLS, CINE_FPS_OPTIONS } from './viewer-consts';
 import {
@@ -113,6 +118,7 @@ const MAX_ZOOM = 20;
     DvrPanel,
     ShortcutHelp,
     ImportReportCard,
+    PaintedStructures,
   ],
   providers: [
     MeasurementStore,
@@ -171,6 +177,8 @@ export class Viewer {
   protected readonly roiCtl = inject(RoiController);
   /** Owns the brush/eraser structures-editing gesture and its settings; wired in the constructor. */
   protected readonly brushCtl = inject(BrushController);
+  /** The painted structures, for the list of them under Structures. */
+  protected readonly structures = inject(EditableStructuresStore);
   protected readonly cpr = inject(CprStore);
   /** Switches the tools that own the left button, one at a time. */
   protected readonly tools = inject(ToolSwitch);
@@ -679,6 +687,33 @@ export class Viewer {
     // plus the auxiliary effects passed above, frees the renderer on destroy, and
     // the capture controller stops its own recording.
     this.render.startEffects();
+  }
+
+  /** Delete a painted structure, after asking: there is no undo for it yet. */
+  protected onPaintedRemove(roi: EditableRoi): void {
+    if (confirmDelete(`Delete ${roi.name}?`)) this.brushCtl.removeRoi(roi.id);
+  }
+
+  /** Delete a painted set and what is in it, after asking. */
+  protected onPaintedSetRemove(set: AuthoredStructureSet): void {
+    const count = set.rois.length;
+    const holding =
+      count === 0
+        ? ''
+        : count === 1
+          ? ' and the structure in it'
+          : ` and the ${count} structures in it`;
+    if (confirmDelete(`Delete the set ${set.label}${holding}?`)) this.brushCtl.removeSet(set.id);
+  }
+
+  /**
+   * Make a painted copy of an imported structure and point the brush at it.
+   * The imported structure is hidden, not changed; the copy is listed with the
+   * painted structures.
+   */
+  protected onPromote(setIndex: number, roiNumber: number): void {
+    const id = this.roiCtl.promoteRoi(setIndex, roiNumber);
+    if (id !== null) this.brushCtl.selectRoi(id);
   }
 
   /** Stable identity for a placement, used for `@for` tracking and hover state. */

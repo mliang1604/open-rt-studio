@@ -165,6 +165,80 @@ describe('BrushController', () => {
     expect(brush.activeRoiId()).toBe(a.id); // first ROI of the now-active set
   });
 
+  it('moves to another structure of the set when the one it paints into is deleted', () => {
+    const { brush, store } = setup();
+    brush.newStructure();
+    const first = brush.activeRoiId()!;
+    brush.newStructure();
+    const second = brush.activeRoiId()!;
+    expect(brush.mode()).toBe('paint');
+
+    brush.removeRoi(second);
+    expect(store.rois().map((r) => r.id)).toEqual([first]);
+    expect(brush.activeRoiId()).toBe(first);
+    expect(brush.mode()).toBe('paint'); // there is still something to paint into
+  });
+
+  it('keeps its structure when another one is deleted', () => {
+    const { brush } = setup();
+    brush.newStructure();
+    const first = brush.activeRoiId()!;
+    brush.newStructure();
+    const second = brush.activeRoiId()!;
+    brush.removeRoi(first);
+    expect(brush.activeRoiId()).toBe(second);
+  });
+
+  it('stops painting when the last structure is deleted', () => {
+    const { brush, store } = setup();
+    brush.newStructure();
+    brush.removeRoi(brush.activeRoiId()!);
+    expect(store.rois()).toEqual([]);
+    expect(brush.activeRoiId()).toBeNull();
+    expect(brush.mode()).toBe('off');
+    expect(brush.isActive()).toBe(false);
+  });
+
+  it('leaves erasing on when the last structure is deleted', () => {
+    const { brush } = setup();
+    brush.newStructure();
+    const id = brush.activeRoiId()!;
+    brush.toggleMode('erase');
+    brush.removeRoi(id);
+    expect(brush.mode()).toBe('erase');
+  });
+
+  it('follows to the set that becomes active when its set is deleted', () => {
+    const { brush, store } = setup();
+    const a = store.createRoi('A'); // set 1
+    brush.newSet();
+    brush.newStructure(); // set 2, painting into it
+    const [set1, set2] = store.sets();
+
+    brush.removeSet(set2.id);
+    expect(store.sets()).toEqual([set1]);
+    expect(brush.activeSetId()).toBe(set1.id);
+    expect(brush.activeRoiId()).toBe(a.id);
+
+    brush.removeSet(set1.id);
+    expect(brush.activeSetId()).toBeNull();
+    expect(brush.activeRoiId()).toBeNull();
+    expect(brush.mode()).toBe('off');
+  });
+
+  it('selects a structure to paint into, making its set the active one', () => {
+    const { brush, store } = setup();
+    const a = store.createRoi('A'); // set 1
+    brush.newSet(); // set 2 is active now
+    const [set1] = store.sets();
+
+    brush.selectRoi(a.id);
+    expect(brush.activeSetId()).toBe(set1.id);
+    expect(brush.activeRoiId()).toBe(a.id);
+    brush.selectRoi(999); // unknown: nothing changes
+    expect(brush.activeRoiId()).toBe(a.id);
+  });
+
   it('renames the active set from the field', () => {
     const { brush, store } = setup();
     brush.newSet();
