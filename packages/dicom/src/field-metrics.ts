@@ -6,7 +6,7 @@ import { rasterizeRoiContours } from './contour-raster.js';
 import { createLabelVolume } from './label-volume.js';
 import { IDENTITY_MAT4, invertMat4, linearDeterminant, transformPoint, type Mat4 } from './mat4.js';
 import type { DeformationGrid } from './registration.js';
-import type { Roi, Volume } from './types.js';
+import type { Roi, Vec3, Volume } from './types.js';
 import { patientToVoxel } from './volume.js';
 
 // What a deformation field says of itself (#84): the Jacobian determinant
@@ -40,6 +40,14 @@ import { patientToVoxel } from './volume.js';
 // volume. Percentiles are by nearest rank: the smallest value that at least
 // that many in a hundred of the values do not exceed.
 //
+// **Inverse consistency** needs a registration each way. From the place of
+// each vector of the field's grid: there by the field's registration, back
+// by the other, and how far from where it began, in mm of the frame the
+// field maps out of. A place the field cannot take there, or the other
+// registration cannot take back, has no error and is counted apart. A small
+// error says the two registrations undo one another, not that either is
+// right: two registrations can agree and both be wrong.
+//
 // **Inside a structure** the same numbers are of the vectors that lie in it
 // ({@link fieldVectorsInRoi}): those whose place, in the image the field's
 // object belongs to, falls in a voxel of that image that the structure
@@ -69,6 +77,21 @@ export interface JacobianSummary {
 export interface DisplacementSummary {
   /** How many of the grid's vectors are defined. */
   readonly count: number;
+  readonly meanMm: number;
+  /** The 95th percentile, by nearest rank. */
+  readonly p95Mm: number;
+  readonly maxMm: number;
+}
+
+/**
+ * How far places end from where they began, after going there by one
+ * registration and back by another: the inverse consistency error, in mm.
+ */
+export interface ConsistencySummary {
+  /** How many of the grid's places could be taken there and back. */
+  readonly count: number;
+  /** How many could not: no vector there, or no way back from where it led. */
+  readonly unmappedCount: number;
   readonly meanMm: number;
   /** The 95th percentile, by nearest rank. */
   readonly p95Mm: number;
@@ -280,6 +303,68 @@ export function summarizeDisplacement(
   for (let i = 0; i < count; i++) sum += sorted[i];
   return {
     count,
+    meanMm: sum / count,
+    p95Mm: nearestRank(sorted, 95),
+    maxMm: sorted[count - 1],
+  };
+}
+
+/**
+ * The inverse consistency error at each vector of a field's grid, in the
+ * grid's own order, in mm. The place of a vector in the frame the field maps
+ * out of is `pre⁻¹` of the grid's point; it is taken there by the field
+ * (`post · (q + field(q))`), and back by `back`, which maps a point of the
+ * frame the field maps into to the frame it maps out of, or gives null where
+ * it cannot. NaN where the vector is undefined or there is no way back.
+ */
+export function inverseConsistencyErrors(
+  field: { readonly grid: DeformationGrid; readonly pre?: Mat4; readonly post?: Mat4 },
+  back: (point: Vec3) => Vec3 | null,
+): Float32Array {
+  const { dims, origin, axes, spacing, vectors } = field.grid;
+  const toStart = invertMat4(field.pre ?? IDENTITY_MAT4);
+  const post = field.post ?? IDENTITY_MAT4;
+  const out = new Float32Array(dims[0] * dims[1] * dims[2]).fill(Number.NaN);
+  let n = 0;
+  for (let k = 0; k < dims[2]; k++) {
+    for (let j = 0; j < dims[1]; j++) {
+      for (let i = 0; i < dims[0]; i++, n++) {
+        const at = n * 3;
+        const [dx, dy, dz] = [vectors[at], vectors[at + 1], vectors[at + 2]];
+        if (Number.isNaN(dx + dy + dz)) continue;
+        const steps = [i * spacing[0], j * spacing[1], k * spacing[2]];
+        const q: Vec3 = [
+          origin[0] + steps[0] * axes[0][0] + steps[1] * axes[1][0] + steps[2] * axes[2][0],
+          origin[1] + steps[0] * axes[0][1] + steps[1] * axes[1][1] + steps[2] * axes[2][1],
+          origin[2] + steps[0] * axes[0][2] + steps[1] * axes[1][2] + steps[2] * axes[2][2],
+        ];
+        const returned = back(transformPoint(post, [q[0] + dx, q[1] + dy, q[2] + dz]));
+        if (!returned) continue;
+        const start = transformPoint(toStart, q);
+        out[n] = Math.hypot(returned[0] - start[0], returned[1] - start[1], returned[2] - start[2]);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The numbers of inverse consistency errors worked out by
+ * {@link inverseConsistencyErrors}: of all of them, or of those marked in
+ * `inside` (one mark to a vector). Null when none could be worked out.
+ */
+export function summarizeConsistency(
+  errors: Float32Array,
+  inside?: Uint8Array,
+): ConsistencySummary | null {
+  const sorted = sortedNumbers(errors, inside);
+  const count = sorted.length;
+  if (count === 0) return null;
+  let sum = 0;
+  for (let i = 0; i < count; i++) sum += sorted[i];
+  return {
+    count,
+    unmappedCount: sizeOf(errors, inside) - count,
     meanMm: sum / count,
     p95Mm: nearestRank(sorted, 95),
     maxMm: sorted[count - 1],

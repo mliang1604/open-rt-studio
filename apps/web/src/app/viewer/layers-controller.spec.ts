@@ -13,9 +13,12 @@ import {
   overlayImageLayer,
   rigidMat4,
   transformVector,
+  deformableTransform,
+  type DeformableSpatialRegistration,
   type DeformationGrid,
   type Layer,
   type LayerPlacement,
+  type RegistrationObject,
   type Volume,
 } from '@open-rt-studio/dicom';
 import { LayoutMode, NO_OBLIQUE } from '@open-rt-studio/render';
@@ -46,7 +49,11 @@ function volumeOf(modality: string, windowCenter: number, windowWidth: number): 
   };
 }
 
-function setup(overlayModality: string | null, placement?: LayerPlacement) {
+function setup(
+  overlayModality: string | null,
+  placement?: LayerPlacement,
+  registrations: readonly RegistrationObject[] = [],
+) {
   const base = baseImageLayer('base', volumeOf('CT', 40, 400));
   const overlay = overlayModality
     ? overlayImageLayer('over', volumeOf(overlayModality, 600, 1200), placement)
@@ -54,7 +61,7 @@ function setup(overlayModality: string | null, placement?: LayerPlacement) {
   const layers: Layer[] = overlay ? [base, overlay] : [base];
   const load = signal<LoadState>({
     status: 'ready',
-    result: { layers } as unknown as LoadResult,
+    result: { layers, registrations } as unknown as LoadResult,
   });
   const activeGroup = signal(0);
   const markMipSettling = vi.fn();
@@ -377,5 +384,105 @@ describe('LayersController and what a deformation field is doing (#83)', () => {
     expect(controller.selectedField()).toBeNull();
     expect(controller.fieldViewDeterminants()).toBeNull();
     expect(controller.fieldReading([1, 1, 1])).toBeNull();
+  });
+});
+
+describe('LayersController and the way back from a field (#84)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  /** A deformable object in frame `from` whose field maps into `to`: every place moved 1 mm along x. */
+  function fieldObject(uid: string, from: string, to: string): DeformableSpatialRegistration {
+    return {
+      sopInstanceUid: uid,
+      registeredFrame: from,
+      patientId: null,
+      label: 'DEFORMABLE',
+      description: `Field ${uid}`,
+      registrations: [
+        {
+          item: 0,
+          transform: deformableTransform({
+            id: `${uid}#0`,
+            from,
+            to,
+            grid: {
+              dims: [3, 3, 3],
+              origin: [0, 0, 0],
+              axes: [
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+              ],
+              spacing: [5, 5, 5],
+              vectors: Float32Array.from({ length: 81 }, (_, i) => (i % 3 === 0 ? 1 : 0)),
+            },
+          }),
+          vectorsTurned: false,
+          comment: null,
+        },
+      ],
+      identityItems: [],
+      unread: [],
+    };
+  }
+  const there = fieldObject('there', 'planning', 'follow-up');
+  /** The overlay placed through `there`, with `others` known beside it. */
+  function through(others: readonly RegistrationObject[]) {
+    const found = findPlacement('planning', 'follow-up', [there]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    return setup('MR', found.placement, [there, ...others]).controller;
+  }
+
+  it('has none when the field’s own registration is all there is', () => {
+    expect(through([]).fieldWayBack()).toBeNull();
+  });
+
+  it('is another registration that leads back, by name, mapping the compared image’s points to the base’s', () => {
+    // As a file has it: the follow-up's frame mapped into the planning frame, 2 mm along y.
+    const back = through([
+      registrationObject('rigid', 'follow-up', 'planning', shiftMatrix(0, 2, 0)),
+    ]).fieldWayBack();
+    if (back?.kind !== 'one') throw new Error('no one way back');
+    expect(back.name).toBe('“REGISTRATION”');
+    expect(back.deformable).toBe(false);
+    expect(back.map([1, 1, 1])).toEqual([1, 3, 1]);
+  });
+
+  it('takes a matrix written the other way turned round, as a placement does', () => {
+    const back = through([
+      registrationObject('rigid', 'planning', 'follow-up', shiftMatrix(0, 2, 0)),
+    ]).fieldWayBack();
+    if (back?.kind !== 'one') throw new Error('no one way back');
+    expect(back.map([1, 1, 1])).toEqual([1, -1, 1]);
+  });
+
+  it('goes back through another field, as that field is written', () => {
+    const back = through([fieldObject('back', 'follow-up', 'planning')]).fieldWayBack();
+    if (back?.kind !== 'one') throw new Error('no one way back');
+    expect(back.name).toBe('“Field back” (deformable)');
+    expect(back.deformable).toBe(true);
+    expect(back.map([2, 2, 2])).toEqual([3, 2, 2]);
+    // Where that field has no vector there is no way back.
+    expect(back.map([50, 2, 2])).toBeNull();
+  });
+
+  it('is not a second field written the same way as the first: a field is not turned round', () => {
+    expect(through([fieldObject('again', 'planning', 'follow-up')]).fieldWayBack()).toBeNull();
+  });
+
+  it('picks none of several that lead back', () => {
+    const back = through([
+      registrationObject('one', 'follow-up', 'planning', shiftMatrix(0, 2, 0)),
+      registrationObject('two', 'follow-up', 'planning', shiftMatrix(0, 3, 0)),
+    ]).fieldWayBack();
+    expect(back).toEqual({ kind: 'several', count: 2 });
+  });
+
+  it('has none for an overlay a matrix places', () => {
+    const rigid = registrationObject('rigid', 'follow-up', 'planning');
+    const found = findPlacement('planning', 'follow-up', [rigid]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    const { controller } = setup('MR', found.placement, [rigid, there]);
+    expect(controller.fieldWayBack()).toBeNull();
   });
 });

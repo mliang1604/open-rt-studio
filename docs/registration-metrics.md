@@ -138,7 +138,7 @@ it.
   expansion, and that stripes are a fold.
 - #84 (field-based metrics): the Jacobian determinant's numbers first;
   inverse consistency second, only when both directions exist; harmonic
-  energy last. The first is built: see "Field measures as built".
+  energy last. The first two are built: see "Field measures as built".
 - #85 (landmarks): as planned; add the count of landmarks and the
   per-landmark table.
 - #86 (contour metrics): lead with surface distances (mean, 95th
@@ -250,6 +250,20 @@ with the numbers where they are shown. In short:
 - "Shows whether the deformation is physically plausible, not whether it is
   right." is under the numbers. No value is shown as passed or failed, and no
   range from the literature is shown beside one.
+- **Inverse consistency** ("There and back") is measured when exactly one
+  other registration leads back from the compared image's frame to the base
+  image's: any of the patient's registration objects but the one the field
+  is from, found as a placement is found, so a matrix is taken either way
+  round and a field only as it is written. From the place of each vector of
+  the field's grid: there by the field's registration, back by the other,
+  and how far from where it began, in mm: the mean, the 95th percentile and
+  the largest. Places that could not be taken there and back are counted and
+  said. The registration that leads back is named. With several that lead
+  back none is picked, and the panel says that there are several.
+- When the way back is by a matrix, the panel says that the error is how far
+  the two registrations differ at each place: a matrix has no deformation of
+  its own to undo the field's. "Consistent is not the same as accurate." is
+  under the numbers either way.
 
 The numbers are worked out when asked for, of the field that places the
 image on screen, and are shown only for that field and that structure. With
@@ -263,8 +277,17 @@ itself, and the synthetic field of `packages/testdata`, whose determinant is
 a formula (`syntheticDeformationJacobian`): the grid's numbers are within
 0.02 of it inside the grid.
 
-Not done: inverse consistency, which needs a registration each way; harmonic
-or bending energy. A structure of the
+Inverse consistency is tested against pairs with a known answer: a way back
+that undoes the way there (nothing), one that misses by a set distance (that
+distance), the field's own matrices turned round (the field's displacement
+at each vector), and a second field that undoes the first, read between its
+vectors. In the application, the synthetic pair's rigid registration is the
+synthetic field's matrices turned round, so there and back by those two is
+off by the field's displacement, 5.10 mm at most by its formula.
+
+Not done: harmonic or bending energy; a choice among several ways back; an
+inverse consistency map. No pair of fields from a registration program was
+measured: the test data has one field and no second that undoes it. A structure of the
 compared image is not offered, only those of the base image. The numbers
 were not compared with another program's. A large field is measured in the
 page's own thread, as structures are compared (#237).

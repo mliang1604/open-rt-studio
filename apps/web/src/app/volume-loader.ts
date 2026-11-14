@@ -79,7 +79,9 @@ export interface LoadResult {
   /**
    * The Spatial Registration objects that came with the load: those read in
    * the batch of files, or those the source gave with the series. What may
-   * place a series of another frame of reference over this one.
+   * place a series of another frame of reference over this one. When a series
+   * is added as an overlay, those that were looked through to place it are
+   * kept here too.
    */
   readonly registrations: readonly RegistrationObject[];
   /** Number of files the user selected. */
@@ -323,8 +325,15 @@ export function mergeLoad(
       return exhaustive;
     }
   }
+  // The registrations that were looked through stay with the view: what is
+  // asked of them later (a way back, for inverse consistency) is asked of the
+  // same ones that placed the layer.
+  const known = [...current.registrations];
+  for (const one of registrations) {
+    if (!known.some((kept) => kept.sopInstanceUid === one.sopInstanceUid)) known.push(one);
+  }
   return {
-    result: { ...current, layers: [...layers, overlay] },
+    result: { ...current, layers: [...layers, overlay], registrations: known },
     added: true,
     ...(found.kind === 'several' ? { choices: found.placements.length } : {}),
     ...(found.kind === 'none' ? { unplaced: true as const } : {}),

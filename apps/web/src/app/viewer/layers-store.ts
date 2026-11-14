@@ -148,6 +148,11 @@ function stepName(step: PlacementStep): string {
   return `“${registrationName(step)}”${step.deformable ? ' (deformable)' : ''}`;
 }
 
+/** The registrations of a placement by name, in the order they are gone through. */
+export function placementNames(placement: LayerPlacement): string {
+  return placement.steps.map(stepName).join(', then ');
+}
+
 /** Whether a placement has a registration by a deformation field among its steps. */
 export function isDeformable(placement: LayerPlacement): boolean {
   return placement.steps.some((step) => step.deformable);

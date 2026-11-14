@@ -215,6 +215,14 @@ describe('mergeLoad', () => {
     ).not.toHaveProperty('placement');
   });
 
+  it('keeps the registrations it looked through with the view, each once', () => {
+    const registration = registrationObject('reg', 'frame-2', 'frame-1');
+    const other = registrationObject('other', 'frame-3', 'frame-1');
+    const current = { ...fakeLoad('planning', 'frame-1'), registrations: [other] };
+    const { result } = mergeLoad(current, fakeLoad('follow-up', 'frame-2'), [registration, other]);
+    expect(result.registrations.map((one) => one.sopInstanceUid)).toEqual(['other', 'reg']);
+  });
+
   it('does not place a series by a registration of other frames', () => {
     const registration = registrationObject('reg', 'frame-2', 'frame-1');
     const merged = mergeLoad(fakeLoad('planning', 'frame-1'), fakeLoad('other', 'frame-3'), [

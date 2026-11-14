@@ -6,13 +6,34 @@ import { ChangeDetectionStrategy, Component, computed, input, signal } from '@an
 import {
   fieldMetrics,
   fieldVectorsInRoi,
+  inverseConsistencyErrors,
+  summarizeConsistency,
+  type ConsistencySummary,
   type DeformationGrid,
   type FieldMetrics,
   type PlacementField,
+  type Vec3,
   type Volume,
 } from '@open-rt-studio/dicom';
 
 import type { StructureChoice } from '../structure-compare/structure-compare';
+
+/**
+ * The way back from the frame a field maps into to the frame it maps out of,
+ * for inverse consistency: another registration than the field's own. With
+ * several that lead back none is picked, and nothing is measured.
+ */
+export type FieldWayBack =
+  | {
+      readonly kind: 'one';
+      /** The registration, or registrations in a row, by name. */
+      readonly name: string;
+      /** Whether it goes through a deformation field of its own. */
+      readonly deformable: boolean;
+      /** A point of the frame the field maps into, in the frame it maps out of; null where it cannot be taken. */
+      readonly map: (point: Vec3) => Vec3 | null;
+    }
+  | { readonly kind: 'several'; readonly count: number };
 
 /** One line of a table: a name and a value with its unit. */
 export interface MetricRow {
@@ -70,6 +91,42 @@ export function displacementRows(found: FieldMetrics): MetricRow[] {
     { name: '95th percentile', value: mm(d.p95Mm) },
     { name: 'Largest', value: mm(d.maxMm) },
   ];
+}
+
+/** How far places end from where they began, there and back, as the lines of a table. */
+export function consistencyRows(found: ConsistencySummary): MetricRow[] {
+  return [
+    { name: 'Mean', value: mm(found.meanMm) },
+    { name: '95th percentile', value: mm(found.p95Mm) },
+    { name: 'Largest', value: mm(found.maxMm) },
+  ];
+}
+
+/**
+ * How the inverse consistency error was measured and what it cannot tell, in
+ * words that go with it wherever it is shown.
+ */
+export function consistencyNotes(
+  found: ConsistencySummary | null,
+  back: Extract<FieldWayBack, { kind: 'one' }>,
+): string[] {
+  const way = `From the place of each vector of the field’s grid: there by this registration, back by ${back.name}, and how far from where it began.`;
+  if (!found) {
+    return [`${way} No place could be taken there and back.`];
+  }
+  const notes = [way];
+  if (found.unmappedCount > 0) {
+    notes.push(
+      `${found.unmappedCount} of ${found.count + found.unmappedCount} places could not be taken there and back, and are not in these numbers.`,
+    );
+  }
+  if (!back.deformable) {
+    notes.push(
+      'The way back is by a matrix, with no deformation of its own: the error is how far the two registrations differ at each place.',
+    );
+  }
+  notes.push('Consistent is not the same as accurate.');
+  return notes;
 }
 
 /**
@@ -140,6 +197,9 @@ interface Measured {
   readonly volume: Volume | null;
   readonly found: FieldMetrics;
   readonly region: MeasuredRegion | null;
+  /** The way back that was measured against, and what was found; null with no one way back. */
+  readonly back: Extract<FieldWayBack, { kind: 'one' }> | null;
+  readonly consistency: ConsistencySummary | null;
 }
 
 /**
@@ -160,6 +220,8 @@ export class FieldMetricsPanel {
   readonly choices = input<readonly StructureChoice[]>([]);
   /** The base image: the grid its structures are filled into. */
   readonly volume = input<Volume | null>(null);
+  /** The way back for inverse consistency, when another registration leads back. */
+  readonly back = input<FieldWayBack | null>(null);
 
   /** The structure to measure inside, by its key; '' for the whole field. */
   private readonly chosen = signal('');
@@ -176,9 +238,32 @@ export class FieldMetricsPanel {
     return measured &&
       measured.field === this.field() &&
       measured.key === this.key() &&
-      (measured.key === '' || measured.volume === this.volume())
+      (measured.key === '' || measured.volume === this.volume()) &&
+      measured.back === this.oneWayBack()
       ? measured
       : null;
+  });
+  /** The one way back there is, or null with none or several. */
+  private readonly oneWayBack = computed(() => {
+    const back = this.back();
+    return back?.kind === 'one' ? back : null;
+  });
+  /** How many ways lead back when there are several, and so none is measured against. */
+  protected readonly severalBack = computed(() => {
+    const back = this.back();
+    return back?.kind === 'several' ? back.count : 0;
+  });
+  /** The way back that was measured against, by name. */
+  protected readonly backName = computed(() => this.current()?.back?.name ?? null);
+  protected readonly consistency = computed(() => {
+    const found = this.current()?.consistency;
+    return found ? consistencyRows(found) : [];
+  });
+  protected readonly consistencyNotes = computed(() => {
+    const current = this.current();
+    return current?.back && !this.empty()
+      ? consistencyNotes(current.consistency, current.back)
+      : [];
   });
   protected readonly found = computed(() => this.current()?.found ?? null);
   protected readonly region = computed(() => this.current()?.region ?? null);
@@ -211,8 +296,18 @@ export class FieldMetricsPanel {
     const key = this.key();
     const volume = this.volume();
     const choice = this.choices().find((one) => one.key === key);
+    const back = this.oneWayBack();
+    const errors = back ? inverseConsistencyErrors(field, back.map) : null;
     if (!choice || !volume) {
-      this.measured.set({ field, key: '', volume, found: fieldMetrics(field), region: null });
+      this.measured.set({
+        field,
+        key: '',
+        volume,
+        found: fieldMetrics(field),
+        region: null,
+        back,
+        consistency: errors ? summarizeConsistency(errors) : null,
+      });
       return;
     }
     const { inside, count, skipped } = fieldVectorsInRoi(field, volume, choice.roi);
@@ -222,6 +317,8 @@ export class FieldMetricsPanel {
       volume,
       found: fieldMetrics(field, inside),
       region: { name: choice.roi.name, count, skipped },
+      back,
+      consistency: errors ? summarizeConsistency(errors, inside) : null,
     });
   }
 }

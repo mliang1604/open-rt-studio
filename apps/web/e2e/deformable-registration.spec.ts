@@ -269,6 +269,9 @@ test('a deformation field is measured: its Jacobian determinant and how far it m
   );
   // A value, and what it was measured on; nothing says whether it is good.
   expect(await panel.innerText()).not.toMatch(/pass|fail|accept|tolerance|within limits/i);
+  // No other registration leads back: nothing is said of going there and back.
+  await expect(panel.locator('[data-field-consistency]')).toHaveCount(0);
+  await expect(panel.locator('[data-field-consistency-note]')).toHaveCount(0);
 
   // Inside a structure: a circle of 4 mm about (13, 18) on the slices from 2
   // to 9 mm. Which of the grid's vectors are in it depends on the voxels at
@@ -312,5 +315,67 @@ test('a deformation field is measured: its Jacobian determinant and how far it m
   // With the field left out there is no field in use, and nothing of it shown.
   await page.locator('.layer-panel [data-deformation]').click();
   await expect(fieldPanel(page)).toHaveCount(0);
+  expectNoProblems(problems);
+});
+
+test('going there by the field and back by the pair’s rigid registration misses by the field’s own size', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  const pair = syntheticRegisteredPair();
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  // Both registrations of the pair: the rigid one, written from the MR's
+  // frame to the CT's, and the deformable one, from the CT's to the MR's.
+  await importFiles(page, [
+    ...pair.planningCt,
+    ...pair.followUpMr,
+    pair.registration,
+    syntheticDeformableRegistration(),
+  ]);
+  await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
+  await showCt(page);
+  await fuseChipByDrag(page, await chipOf(page, 'MR'));
+
+  // Two registrations place the MR: none is picked for the user.
+  const choice = page.locator('.layer-panel select[data-placement-choice]');
+  await expect(choice.locator('option')).toHaveCount(3);
+  const deformable = choice.locator('option', { hasText: '(deformable)' });
+  await expect(deformable).toHaveCount(1);
+  await choice.selectOption({
+    index: await deformable.evaluate((option) => (option as HTMLOptionElement).index),
+  });
+  await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
+
+  const panel = fieldPanel(page);
+  await panel.locator('[data-field-measure]').click();
+  // The rigid registration is the field's own matrices turned round, so a
+  // place comes back off by what the field moved it: the displacement's own
+  // numbers, and at most the formula's (4, −3, 1) mm.
+  await expect(panel.locator('[data-field-consistency] caption')).toHaveText(
+    'There and back (inverse consistency)',
+  );
+  for (const name of ['Mean', '95th percentile', 'Largest']) {
+    expect(await fieldValue(page, 'data-field-consistency', name), name).toBeCloseTo(
+      await fieldValue(page, 'data-field-displacement', name),
+      2,
+    );
+  }
+  expect(await fieldValue(page, 'data-field-consistency', 'Largest')).toBeCloseTo(
+    Math.hypot(4, 3, 1),
+    2,
+  );
+  const notes = panel.locator('[data-field-consistency-note]');
+  await expect(notes.first()).toHaveText(
+    /^From the place of each vector of the field’s grid: there by this registration, back by “.+”, and how far from where it began\.$/,
+  );
+  await expect(notes).toContainText([
+    'The way back is by a matrix, with no deformation of its own',
+    'Consistent is not the same as accurate.',
+  ]);
+  // Every place of the grid could be taken there and back.
+  await expect(panel).not.toContainText('could not be taken there and back');
   expectNoProblems(problems);
 });

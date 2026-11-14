@@ -5,11 +5,14 @@
 import {
   fieldMetrics,
   fieldVectorsInRoi,
+  inverseConsistencyErrors,
   jacobianDeterminants,
+  summarizeConsistency,
   summarizeDisplacement,
   summarizeJacobian,
 } from './field-metrics.js';
-import { rigidMat4, type Mat4 } from './mat4.js';
+import { invertMat4, multiplyMat4, rigidMat4, transformPoint, type Mat4 } from './mat4.js';
+import { deformableTransform, mapPoint, sampleDeformation } from './registration.js';
 import type { DeformationGrid } from './registration.js';
 import type { Roi, Vec3, Volume, VolumeGeometry } from './types.js';
 import { voxelToPatient } from './volume.js';
@@ -389,5 +392,111 @@ describe('a field inside a structure', () => {
     };
     const region = fieldVectorsInRoi({ grid: gridHere(() => [0, 0, 0]) }, volume, open);
     expect(region).toMatchObject({ count: 18, skipped: 1 });
+  });
+});
+
+describe('inverse consistency: there by one registration and back by another', () => {
+  const dims = [5, 4, 3] as const;
+  const spacing: Vec3 = [2, 2, 2];
+
+  it('is nothing where the way back undoes the way there', () => {
+    // There: every place moved by (3, −1, 2). Back: moved by the same, the other way.
+    const grid = gridOf(() => [3, -1, 2], dims, spacing);
+    const errors = inverseConsistencyErrors({ grid }, ([x, y, z]) => [x - 3, y + 1, z - 2]);
+    every(errors, 0);
+    expect(summarizeConsistency(errors)).toEqual({
+      count: 60,
+      unmappedCount: 0,
+      meanMm: 0,
+      p95Mm: 0,
+      maxMm: 0,
+    });
+  });
+
+  it('is how far the way back misses, where it misses', () => {
+    const grid = gridOf(() => [3, -1, 2], dims, spacing);
+    // The way back is short by (0, 0.3, 0.4): half a millimetre.
+    const errors = inverseConsistencyErrors({ grid }, ([x, y, z]) => [x - 3, y + 1.3, z - 1.6]);
+    every(errors, 0.5);
+    expect(summarizeConsistency(errors)).toMatchObject({ count: 60, unmappedCount: 0 });
+  });
+
+  it('is the field’s own size when the way back is the field’s matrices turned round', () => {
+    // A field between a matrix before it and one after it; the way back is
+    // the two matrices alone, turned round, with no deformation of its own.
+    const pre = rigidMat4([0, 0, 1], 30, [5, -2, 1]);
+    const post = rigidMat4([1, 0, 0], -20, [40, 10, -7]);
+    const grid = gridOf(([x, y]) => [0.1 * x, -0.2 * y, 0.5], dims, spacing);
+    const undo = invertMat4(multiplyMat4(post, pre));
+    const errors = inverseConsistencyErrors({ grid, pre, post }, (point) =>
+      transformPoint(undo, point),
+    );
+    // The matrices are rigid: the error at a vector is the vector's length.
+    const lengths = summarizeDisplacement(grid)!;
+    const found = summarizeConsistency(errors)!;
+    expect(found.count).toBe(60);
+    expect(found.meanMm).toBeCloseTo(lengths.meanMm, 4);
+    expect(found.p95Mm).toBeCloseTo(lengths.p95Mm, 4);
+    expect(found.maxMm).toBeCloseTo(lengths.maxMm, 4);
+    for (let n = 0; n < 60; n++) {
+      const at = n * 3;
+      expect(errors[n]).toBeCloseTo(
+        Math.hypot(grid.vectors[at], grid.vectors[at + 1], grid.vectors[at + 2]),
+        4,
+      );
+    }
+  });
+
+  it('goes back through another field, read between its vectors', () => {
+    // There: a squeeze along x, p → p − 0.2 x (so 0.8 x), from frame A to B.
+    // Back: a field of frame B that undoes it, q → q + 0.25 x (1.25 × 0.8 = 1).
+    const there = gridOf(([x]) => [-0.2 * x, 0, 0], [6, 3, 3], [2, 2, 2]);
+    const backGrid = gridOf(([x]) => [0.25 * x, 0, 0], [9, 3, 3], [1, 2, 2]);
+    const backward = deformableTransform({ id: 'back', from: 'B', to: 'A', grid: backGrid });
+    const back = (point: Vec3): Vec3 | null => mapPoint(backward, point, { from: 'B', to: 'A' });
+    const errors = inverseConsistencyErrors({ grid: there }, back);
+    // The forward grid's x runs from −4 to 6 and lands at −3.2 to 4.8. The way
+    // back's grid ends at 4: the last column has no way back.
+    const mapped = [...errors].filter((value) => !Number.isNaN(value));
+    expect(mapped.length).toBe(5 * 9);
+    // A field that goes with the place is read exactly between its vectors.
+    mapped.forEach((value) => expect(value).toBeCloseTo(0, 5));
+    expect(summarizeConsistency(errors)).toMatchObject({ count: 45, unmappedCount: 9 });
+    // The way back alone, at a place between its vectors.
+    expect(sampleDeformation(backGrid, [1.5, 8, 2])![0]).toBeCloseTo(0.375, 6);
+  });
+
+  it('has no error at an undefined vector, nor where there is no way back, and counts them apart', () => {
+    const grid = gridOf(() => [1, 0, 0], dims, spacing);
+    grid.vectors.fill(NaN, 0, 3);
+    // No way back from the far half.
+    const errors = inverseConsistencyErrors({ grid }, ([x, y, z]) =>
+      x > 2 ? null : [x - 1, y, z],
+    );
+    expect(Number.isNaN(errors[0])).toBe(true);
+    const found = summarizeConsistency(errors)!;
+    // The grid's x is −4 … 4, there +1: −3, −1, 1 have a way back, 3 and 5 have none.
+    expect(found.count).toBe(3 * 4 * 3 - 1);
+    expect(found.unmappedCount).toBe(2 * 4 * 3 + 1);
+    expect(found.maxMm).toBe(0);
+    expect(summarizeConsistency(inverseConsistencyErrors({ grid }, () => null))).toBeNull();
+  });
+
+  it('is of the vectors marked, when some are', () => {
+    const grid = gridOf(() => [1, 0, 0], dims, spacing);
+    // Back short by as many millimetres as the place's x is from −4, in twos: 0 to 4.
+    const errors = inverseConsistencyErrors({ grid }, ([x, y, z]) => [x - 1 + (x + 3) / 2, y, z]);
+    expect([...errors.slice(0, 5)].map((value) => Math.round(value * 100) / 100)).toEqual([
+      0, 1, 2, 3, 4,
+    ]);
+    const inside = new Uint8Array(60);
+    for (let n = 0; n < 60; n++) inside[n] = n % 5 >= 3 ? 1 : 0;
+    expect(summarizeConsistency(errors, inside)).toEqual({
+      count: 24,
+      unmappedCount: 0,
+      meanMm: 3.5,
+      p95Mm: 4,
+      maxMm: 4,
+    });
   });
 });
