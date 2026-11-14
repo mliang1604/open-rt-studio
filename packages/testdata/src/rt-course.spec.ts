@@ -3,7 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
+  mapPoint,
   parseFile,
+  parseSpatialRegistration,
   parseStructureSet,
   readInstanceHeader,
   type InstanceHeader,
@@ -119,6 +121,33 @@ describe('syntheticRtCourse', () => {
       { relation: 'registration.series', targetUid: COURSE.followUpCt },
       { relation: 'registration.series', targetUid: COURSE.ct },
     ]);
+  });
+
+  it('the registration reads as a transform from the follow-up frame to the planning frame', () => {
+    const read = parseSpatialRegistration(buffer(syntheticRegistration()))!;
+    expect(read).toMatchObject({
+      sopInstanceUid: COURSE.registration,
+      registeredFrame: COURSE.planningFrame,
+      // The planning frame itself, with the identity.
+      identityItems: [0],
+      unread: [],
+    });
+    expect(read.registrations).toHaveLength(1);
+    const { transform } = read.registrations[0];
+    expect(transform).toMatchObject({
+      from: COURSE.followUpFrame,
+      to: COURSE.planningFrame,
+      matrixKind: 'rigid',
+    });
+    // The generator's default: 5, -3 and 2 mm from the follow-up to the planning frame.
+    const direction = { from: COURSE.followUpFrame, to: COURSE.planningFrame };
+    expect(mapPoint(transform, [0, 0, 0], direction)).toEqual([5, -3, 2]);
+    expect(mapPoint(transform, [100, 50, -20], direction)).toEqual([105, 47, -18]);
+    // And another translation, between other studies, the same way round.
+    const other = parseSpatialRegistration(
+      buffer(syntheticRegistration({ translation: [-1.5, 0, 12] })),
+    )!;
+    expect(mapPoint(other.registrations[0].transform, [0, 0, 0], direction)).toEqual([-1.5, 0, 12]);
   });
 
   it("still loads in the viewer's own readers: images, structure set and dose", () => {
