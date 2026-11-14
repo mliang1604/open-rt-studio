@@ -69,6 +69,11 @@ Anything else is 404, or 405 with an `Allow` header for a known path.
   all by SOP Instance UID); `openFileStore(directory)` is the one on disk and
   `createMemoryStore()` one for tests. Nothing uses a store yet: ingest (#45)
   will.
+- `src/pacs-index/`: what the server knows about the instances in its store
+  (#43). `PacsIndex` is the interface, with nothing of a database in it;
+  `openSqliteIndex(file)` is the SQLite one, on Node's own `node:sqlite`;
+  `migrations.ts` is the schema's history. Nothing uses an index yet: ingest
+  (#45) will.
 - `src/config.ts`: the settings above, typed and checked.
 - `src/logger.ts`: the log.
 - `src/server.ts`: `startServer(config, logger)`, which makes a core, puts the
@@ -98,6 +103,56 @@ Anything else is 404, or 405 with an `Allow` header for a known path.
 - A directory that is not empty and is not a store is refused, and nothing in
   it is touched.
 - One process opens a store at a time.
+
+## The index
+
+Patients, studies, series and instances, and how radiotherapy objects refer
+to each other.
+
+| Table       | One row per                                      | Key                               |
+| ----------- | ------------------------------------------------ | --------------------------------- |
+| `patient`   | patient: Patient ID and issuer, name, birth date | a number of the index's own       |
+| `study`     | study, with its patient                          | Study Instance UID                |
+| `series`    | series, with modality and frame of reference     | Series Instance UID               |
+| `instance`  | stored instance, with its size and checksum      | SOP Instance UID                  |
+| `reference` | reference from an instance to another object     | instance, relation and target UID |
+
+A reference has one of these relations, and its target is a UID that need not
+be in the index: objects arrive in any order, and some never arrive.
+
+| Relation               | From         | To                                      |
+| ---------------------- | ------------ | --------------------------------------- |
+| `structure-set.series` | RTSTRUCT     | the image series it was drawn on        |
+| `structure-set.frame`  | RTSTRUCT     | the frame of reference of its contours  |
+| `plan.structure-set`   | RTPLAN       | the RTSTRUCT instance it was planned on |
+| `dose.plan`            | RTDOSE       | the RTPLAN instance it was computed for |
+| `dose.structure-set`   | RTDOSE       | an RTSTRUCT instance                    |
+| `registration.frame`   | registration | a frame of reference it connects        |
+| `registration.series`  | registration | a series it connects                    |
+
+`relatedToSeries(uid)` answers the question the viewer asks of an image
+series: its structure sets, the plans on those, the doses for those plans or
+structure sets, the registrations that connect it or its frame, and the other
+series in its frame. `referencesFrom` and `referencesTo` follow one relation
+in either direction.
+
+- **Queries match as DICOM C-FIND does**, so that browse and DIMSE share
+  them: `*` and `?` in text, date ranges such as `20260101-20260131`, lists
+  of UIDs. Names and descriptions ignore the case of A to Z; IDs and UIDs do
+  not.
+- **Structure is strict, description is not.** An entry that puts a known
+  instance in another series, a series in another study or a study under
+  another patient is refused and nothing changes. Names, descriptions and
+  dates follow the latest entry.
+- **A patient is a Patient ID and its issuer.** A study whose files give no
+  Patient ID gets a patient of its own.
+- **Migrations.** The schema has a version (`PRAGMA user_version`). Opening an
+  index applies the steps it is missing, each in a transaction. A step is
+  never edited after it is released; a change is a new step in
+  `migrations.ts`. An index from a newer version, or a SQLite file that is
+  something else, is refused.
+- The index holds patient names and IDs. That is its purpose; protect the
+  file as you would the data. Its errors and log lines carry none of them.
 
 ## Logs
 
