@@ -11,6 +11,7 @@ import {
   syntheticCtSeries,
   syntheticMrSeries,
   syntheticPatient,
+  syntheticThoraxPatient,
   syntheticUnreadableFiles,
   type SyntheticFile,
 } from '@open-rt-studio/testdata';
@@ -240,4 +241,42 @@ test.describe('files that cannot be read', () => {
     await expect(page.getByRole('button', { name: /layout/i })).toBeEnabled();
     await expect(page.locator('.pane-overlay .pane')).toHaveCount(3);
   });
+});
+
+test("the tree view's expansion is remembered across a reload", async ({ page }) => {
+  await preAcknowledge(page);
+  await page.goto('/');
+  await importFiles(page, syntheticThoraxPatient());
+  const panel = page.locator('app-history-panel');
+  await panel.getByRole('button', { name: 'Tree' }).click();
+  const patient = panel.locator('.tree-row-patient');
+  const studies = panel.locator('.tree-row-study');
+  await expect(patient).toHaveAttribute('aria-expanded', 'true');
+  await expect(studies).toHaveCount(2);
+
+  // Open the second study, then fold the patient away.
+  await studies.nth(1).click();
+  await expect(studies.nth(1)).toHaveAttribute('aria-expanded', 'true');
+  await patient.click();
+  await expect(patient).toHaveAttribute('aria-expanded', 'false');
+  await expect(studies).toHaveCount(0);
+
+  // The catalogue is not kept, so the same files are imported again. The tree
+  // comes back as it was left: chosen, with the patient folded.
+  await page.reload();
+  await importFiles(page, syntheticThoraxPatient());
+  await expect(patient).toHaveAttribute('aria-expanded', 'false');
+  await expect(studies).toHaveCount(0);
+
+  // Unfolded, the study that was open is the open one.
+  await patient.click();
+  await expect(studies).toHaveCount(2);
+  await expect(studies.nth(1)).toHaveAttribute('aria-expanded', 'true');
+  await expect(studies.nth(0)).toHaveAttribute('aria-expanded', 'false');
+
+  // And unfolded is remembered too.
+  await page.reload();
+  await importFiles(page, syntheticThoraxPatient());
+  await expect(patient).toHaveAttribute('aria-expanded', 'true');
+  await expect(studies).toHaveCount(2);
 });

@@ -54,6 +54,11 @@ export interface ViewPreferences {
    * or null when every study is collapsed. Restores the timeline's open tile.
    */
   readonly lastOpenedStudyUid: string | null;
+  /**
+   * Whether the tree view's patient row is expanded, showing its studies. Which
+   * study is open under it is {@link lastOpenedStudyUid}, shared with the timeline.
+   */
+  readonly historyPatientExpanded: boolean;
 }
 
 /** The preferences applied when nothing valid is stored. */
@@ -67,6 +72,7 @@ export const DEFAULT_PREFERENCES: ViewPreferences = {
   historyCollapsed: false,
   historyView: 'timeline',
   lastOpenedStudyUid: null,
+  historyPatientExpanded: true,
 };
 
 /**
@@ -138,6 +144,12 @@ export function parsePreferences(raw: string | null): ViewPreferences {
       typeof obj['lastOpenedStudyUid'] === 'string'
         ? obj['lastOpenedStudyUid']
         : DEFAULT_PREFERENCES.lastOpenedStudyUid,
+    // Added after the others: a blob written before it has no such field and
+    // gets the default, so the schema version stays.
+    historyPatientExpanded:
+      typeof obj['historyPatientExpanded'] === 'boolean'
+        ? obj['historyPatientExpanded']
+        : DEFAULT_PREFERENCES.historyPatientExpanded,
   };
 }
 
@@ -152,7 +164,8 @@ function samePreferences(a: ViewPreferences, b: ViewPreferences): boolean {
     a.slabThicknessMm === b.slabThicknessMm &&
     a.historyCollapsed === b.historyCollapsed &&
     a.historyView === b.historyView &&
-    a.lastOpenedStudyUid === b.lastOpenedStudyUid
+    a.lastOpenedStudyUid === b.lastOpenedStudyUid &&
+    a.historyPatientExpanded === b.historyPatientExpanded
   );
 }
 
