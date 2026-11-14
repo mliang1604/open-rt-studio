@@ -432,6 +432,25 @@
       </details>
     }
 
+    @if (layersCtl.selectedOverlay()?.placement?.field; as field) {
+      <details
+        class="tool-group"
+        role="group"
+        aria-label="Deformation field"
+        title="What the deformation field says of itself: its Jacobian determinant, and how far it moves things"
+        open
+      >
+        <summary class="tool-group-label">Deformation field</summary>
+        <div class="tool-group-body">
+          <app-field-metrics-panel
+            [field]="field"
+            [choices]="roiCtl.compareChoices()"
+            [volume]="layersCtl.volume()"
+          />
+        </div>
+      </details>
+    }
+
     @if (landmarks.available()) {
       <details
         class="tool-group"

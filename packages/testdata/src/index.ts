@@ -33,6 +33,7 @@ export {
   SYNTHETIC_DEFORMATION,
   syntheticDeformableRegistration,
   syntheticDeformationGridPoint,
+  syntheticDeformationJacobian,
   syntheticDeformationMm,
   syntheticDeformedPoint,
 } from './deformable-registration.js';

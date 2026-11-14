@@ -96,6 +96,9 @@ by git) if you want files on disk to open.
 - The same through a DICOM Deformable Spatial Registration: the second
   series read through the deformation field, with a switch that leaves the
   field out to see what it adds
+- What a deformation field says of itself: its Jacobian determinant (and
+  whether it folds) and how far it moves things, over the whole field or
+  inside a structure
 - Rigid registration by hand: shift and turn one series over another by
   dragging it in any plane or with numbers, see the fused picture follow,
   and save the result as a DICOM Spatial Registration object
