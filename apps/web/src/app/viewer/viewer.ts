@@ -36,6 +36,7 @@ import { ShortcutHelp } from './shortcut-help/shortcut-help';
 import { CprStore } from './cpr/cpr-store';
 import { EmptyState } from './empty-state/empty-state';
 import { GpuNotice } from './gpu-notice/gpu-notice';
+import { ImportReportCard } from './import-report/import-report';
 import { MeasurementStore } from './measurement-store';
 import { LayersStore } from './layers-store';
 import { Camera3dStore } from './camera3d-store';
@@ -110,6 +111,7 @@ const MAX_ZOOM = 20;
     MetadataPanel,
     DvrPanel,
     ShortcutHelp,
+    ImportReportCard,
   ],
   providers: [
     MeasurementStore,

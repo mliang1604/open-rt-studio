@@ -172,24 +172,73 @@ describe('parseFilesInWorkers', () => {
     expect(pool.workers.every((w) => w.terminated)).toBe(true);
   });
 
-  it('rejects with the worker-reported message on a parse failure', async () => {
+  it('skips a file the worker could not read and parses the rest', async () => {
     const pool = new FakeWorkerPool();
-    const run = parseFilesInWorkers([fakeFile('weird.dcm')], undefined, pool.create);
+    const files = Array.from({ length: 5 }, (_, i) => fakeFile(`f${i}.dcm`));
+    const loaded: number[] = [];
+    const run = parseFilesInWorkers(files, (n) => loaded.push(n), pool.create);
+
+    // Files 1 and 3 cannot be read; the others can.
+    let answered = 0;
+    while (answered < files.length) {
+      await tick();
+      for (const { worker, req } of pool.pending.splice(0)) {
+        answered++;
+        const bad = req.id === 1 || req.id === 3;
+        worker.emit('message', {
+          data: bad
+            ? {
+                id: req.id,
+                ok: false,
+                message: `Unsupported transfer syntax 9.9 (${req.name}).`,
+                reason: 'Unsupported transfer syntax 9.9',
+              }
+            : { ...successResponse(req), structureSets: [] },
+        });
+      }
+    }
+    const result = await run;
+
+    expect(result.slices.map((s) => s.name)).toEqual(['f0.dcm', 'f2.dcm', 'f4.dcm']);
+    expect(result.skipped).toEqual([
+      { name: 'f1.dcm', reason: 'Unsupported transfer syntax 9.9' },
+      { name: 'f3.dcm', reason: 'Unsupported transfer syntax 9.9' },
+    ]);
+    // A skipped file still counts as done.
+    expect(loaded).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(pool.workers.every((w) => w.terminated)).toBe(true);
+  });
+
+  it('lists skipped files in file order, whatever order they finished in', async () => {
+    const pool = new FakeWorkerPool();
+    const files = Array.from({ length: 4 }, (_, i) => fakeFile(`f${i}.dcm`));
+    const run = parseFilesInWorkers(files, undefined, pool.create);
     await tick();
+    for (const { worker, req } of pool.pending.splice(0).reverse()) {
+      worker.emit('message', {
+        data: { id: req.id, ok: false, message: `no (${req.name}).`, reason: `no ${req.id}` },
+      });
+    }
+    const result = await run;
 
-    const { worker, req } = pool.pending[0];
-    worker.emit('message', {
-      data: { id: req.id, ok: false, message: 'Unsupported transfer syntax' },
-    });
+    expect(result.slices).toEqual([]);
+    expect(result.skipped.map((s) => s.name)).toEqual(['f0.dcm', 'f1.dcm', 'f2.dcm', 'f3.dcm']);
+    expect(result.skipped[2].reason).toBe('no 2');
+  });
 
-    await expect(run).rejects.toThrow('Unsupported transfer syntax');
+  it('reports nothing skipped when every file parses', async () => {
+    const pool = new FakeWorkerPool();
+    const files = Array.from({ length: 3 }, (_, i) => fakeFile(`f${i}.dcm`));
+    const run = parseFilesInWorkers(files, undefined, pool.create);
+    await drainReversed(pool, files.length);
+    expect((await run).skipped).toEqual([]);
   });
 
   it('does no work and spawns no workers for an empty selection', async () => {
     const pool = new FakeWorkerPool();
     const result = await parseFilesInWorkers([], undefined, pool.create);
 
-    expect(result).toEqual({ slices: [], structureSets: [] });
+    expect(result).toEqual({ slices: [], structureSets: [], skipped: [] });
     expect(pool.workers).toHaveLength(0);
   });
 

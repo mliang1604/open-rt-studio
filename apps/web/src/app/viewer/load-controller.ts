@@ -9,6 +9,7 @@ import { PatientCatalog } from '../patient-catalog';
 import { PreferencesStore } from '../preferences-store';
 import { isAbortError } from '../parse-pool';
 import { VolumeLoader, type LoadResult } from '../volume-loader';
+import { type ImportReport } from './import-report/import-report';
 import { LoadSequence } from './load-sequence';
 import {
   type Series,
@@ -248,6 +249,17 @@ export class LoadController {
     this.applyOutcome(outcome, previous, null);
   }
 
+  /**
+   * The files the last import could not read, or null when it read them all.
+   * Shown until dismissed or until the next import begins.
+   */
+  readonly importReport = signal<ImportReport | null>(null);
+
+  /** Close the list of skipped files. */
+  dismissImportReport(): void {
+    this.importReport.set(null);
+  }
+
   /** True while the synthetic demo patient is being generated and imported. */
   readonly demoLoading = signal(false);
 
@@ -321,6 +333,7 @@ export class LoadController {
     // What was showing before this run of loads began; a same-frame-of-reference
     // series adds atop it, and a cancel goes back to it.
     const { signal, before: previous } = this.loads.begin(d.load());
+    this.importReport.set(null); // what the last import skipped is no longer news
     d.load.set({ status: 'loading', loaded: 0, total: files.length });
     try {
       const imported = await this.loader.importFiles(
@@ -334,6 +347,15 @@ export class LoadController {
       // Parsed, but cancelled or overtaken in the meantime: drop the result.
       if (!this.loads.isCurrent(signal)) return false;
       this.loads.finish(signal);
+      if (imported.skipped.length > 0) {
+        this.importReport.set({ total: files.length, skipped: imported.skipped });
+      }
+      if (imported.kind === 'nothing') {
+        // No file could be read; the report says which and why. What was on
+        // screen stays.
+        d.load.set(previous.status === 'ready' ? previous : { status: 'idle' });
+        return true;
+      }
       if (imported.kind === 'structures') {
         this.addStructureSets(imported.structureSets, previous);
         if (entry) this.recentStore.record(entry);
@@ -358,7 +380,13 @@ export class LoadController {
       // overtaken one must not touch the state of the load that overtook it.
       if (isAbortError(error) || !this.loads.isCurrent(signal)) return false;
       this.loads.finish(signal);
-      d.load.set({ status: 'error', message: messageOf(error) });
+      if (previous.status === 'ready') {
+        // An import that fails does not take the displayed series with it.
+        d.load.set(previous);
+        this.flashNotice(messageOf(error));
+      } else {
+        d.load.set({ status: 'error', message: messageOf(error) });
+      }
       return true;
     }
   }

@@ -8,10 +8,21 @@ import type { ParseRequest, ParseResponse } from './parse.worker';
 /** Reports parse progress: files finished out of the total selected. */
 export type LoadProgress = (loaded: number, total: number) => void;
 
-/** What a batch parse yields: image slices and any RTSTRUCTs, in file order. */
+/** A file of a batch that could not be read, and why. */
+export interface SkippedFile {
+  readonly name: string;
+  /** Why, without the file's name: "Unsupported transfer syntax …, JPEG Lossless". */
+  readonly reason: string;
+}
+
+/**
+ * What a batch parse yields: image slices and any RTSTRUCTs, in file order, and
+ * the files that could not be read, also in file order.
+ */
 export interface ParsedFiles {
   readonly slices: Slice[];
   readonly structureSets: StructureSet[];
+  readonly skipped: SkippedFile[];
 }
 
 /**
@@ -49,8 +60,10 @@ export type WorkerFactory = () => Worker;
  * worker finishes first, so the assembled volume is unchanged. {@link onProgress}
  * fires once per finished file.
  *
- * Rejects with the first file's parse error (e.g. an unsupported transfer
- * syntax), matching the previous synchronous behaviour.
+ * A file that cannot be read (an unsupported transfer syntax, pixel data that
+ * will not decode) does not fail the batch: the rest is parsed and the file is
+ * listed in `skipped` with the reason. Only a worker that breaks down (its
+ * script fails to load, an uncaught error) rejects the whole parse.
  *
  * When `signal` aborts, the workers are terminated at once, which stops the
  * files they were parsing; no further progress is reported and the promise
@@ -65,11 +78,11 @@ export async function parseFilesInWorkers(
   if (signal?.aborted) throw abortError();
   const total = files.length;
   onProgress?.(0, total);
-  if (total === 0) return { slices: [], structureSets: [] };
+  if (total === 0) return { slices: [], structureSets: [], skipped: [] };
 
   // One result bucket per file, filled at the file's original index so the
   // flattened output preserves selection order despite out-of-order completion.
-  const perFile: ParseResult[] = new Array(total);
+  const perFile: FileOutcome[] = new Array(total);
   let nextIndex = 0;
   let completed = 0;
 
@@ -111,24 +124,26 @@ export async function parseFilesInWorkers(
   return {
     slices: perFile.flatMap((r) => r.slices),
     structureSets: perFile.flatMap((r) => r.structureSets),
+    skipped: perFile.flatMap((r) => r.skipped),
   };
 }
 
-/** One file's parse output, before flattening across the batch. */
-type ParseResult = Pick<ParsedFiles, 'slices' | 'structureSets'>;
+/** One file's outcome, before flattening across the batch. */
+type FileOutcome = ParsedFiles;
 
 /**
- * Post one file to a worker and await its parsed slices and structure sets. Each
- * worker handles a single file at a time, so at most one request is in flight
- * per worker.
+ * Post one file to a worker and await its outcome: its parsed slices and
+ * structure sets, or the file as skipped when the worker reports that it could
+ * not be read. Each worker handles a single file at a time, so at most one
+ * request is in flight per worker.
  */
 function parseInWorker(
   worker: Worker,
   id: number,
   name: string,
   buffer: ArrayBuffer,
-): Promise<ParseResult> {
-  return new Promise<ParseResult>((resolve, reject) => {
+): Promise<FileOutcome> {
+  return new Promise<FileOutcome>((resolve, reject) => {
     const cleanup = () => {
       worker.removeEventListener('message', onMessage);
       worker.removeEventListener('error', onError);
@@ -137,8 +152,11 @@ function parseInWorker(
       const data = event.data;
       if (data.id !== id) return; // not this request's response
       cleanup();
-      if (data.ok) resolve({ slices: data.slices, structureSets: data.structureSets });
-      else reject(new Error(data.message));
+      if (data.ok) {
+        resolve({ slices: data.slices, structureSets: data.structureSets, skipped: [] });
+      } else {
+        resolve({ slices: [], structureSets: [], skipped: [{ name, reason: data.reason }] });
+      }
     };
     const onError = (event: ErrorEvent) => {
       cleanup();

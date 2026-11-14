@@ -536,6 +536,74 @@ describe('parseFileAsync — wasm-decoded compression', () => {
   });
 });
 
+/**
+ * A 2×2 16-bit CT whose PixelData is one encapsulated frame holding `frame`,
+ * declared with the given transfer syntax.
+ */
+function encapsulatedCt(transferSyntax: string, frame: readonly number[]): ArrayBuffer {
+  const body = concat([
+    element(0x0008, 0x0060, 'CS', text('CT')), // Modality
+    element(0x0028, 0x0002, 'US', u16le(1)), // SamplesPerPixel
+    element(0x0028, 0x0010, 'US', u16le(2)), // Rows
+    element(0x0028, 0x0011, 'US', u16le(2)), // Columns
+    element(0x0028, 0x0100, 'US', u16le(16)), // BitsAllocated
+    element(0x0028, 0x0103, 'US', u16le(0)), // PixelRepresentation
+    encapsulatedPixelData([padEven(Uint8Array.from(frame), 0)]),
+  ]);
+  return dicomFile(body, transferSyntax);
+}
+
+/** The start of a JPEG stream: SOI, then a one-component 2×2 frame header. */
+function jpegStart(sofMarker: number, precision: number): number[] {
+  return [0xff, 0xd8, 0xff, sofMarker, 0, 11, precision, 0, 2, 0, 2, 1, 1, 0x11, 0, 0xff, 0xd9];
+}
+
+describe('parseFileAsync — files it cannot read', () => {
+  const failure = async (name: string, buffer: ArrayBuffer): Promise<UnsupportedDicomError> => {
+    const error: unknown = await parseFileAsync(name, buffer).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(UnsupportedDicomError);
+    return error as UnsupportedDicomError;
+  };
+
+  it('names JPEG Lossless, which no bundled codec decodes', async () => {
+    for (const syntax of ['1.2.840.10008.1.2.4.57', '1.2.840.10008.1.2.4.70']) {
+      const error = await failure('ljpeg.dcm', encapsulatedCt(syntax, jpegStart(0xc3, 16)));
+      expect(error.message).toBe(
+        `Unsupported transfer syntax ${syntax}, JPEG Lossless (ljpeg.dcm).`,
+      );
+      // The same without the file name, for a list that shows the name beside it.
+      expect(error.reason).toBe(`Unsupported transfer syntax ${syntax}, JPEG Lossless`);
+      expect(error.name).toBe('UnsupportedDicomError');
+    }
+  });
+
+  it('quotes the UID alone for a transfer syntax it has no name for', async () => {
+    const error = await failure('odd.dcm', encapsulatedCt('1.2.3.4.5', [0, 0]));
+    expect(error.reason).toBe('Unsupported transfer syntax 1.2.3.4.5');
+  });
+
+  it('reports 12-bit JPEG Extended: the bundled JPEG codec is the 8-bit build', async () => {
+    const buffer = encapsulatedCt('1.2.840.10008.1.2.4.51', jpegStart(0xc1, 12));
+    const error = await failure('j12.dcm', buffer);
+    expect(error.message).toBe('12-bit JPEG is not supported (j12.dcm).');
+    expect(error.reason).toBe('12-bit JPEG is not supported');
+  });
+
+  it('reports a stream the codec cannot decode, whatever the codec throws', async () => {
+    // An 8-bit frame header and nothing else: no tables, no scan.
+    const buffer = encapsulatedCt('1.2.840.10008.1.2.4.50', jpegStart(0xc0, 8));
+    const error = await failure('broken.dcm', buffer);
+    expect(error.reason).toBe(
+      'The pixel data could not be decoded (transfer syntax 1.2.840.10008.1.2.4.50)',
+    );
+  });
+
+  it('sync parseFile reports the same unsupported transfer syntax', () => {
+    const buffer = encapsulatedCt('1.2.840.10008.1.2.4.70', jpegStart(0xc3, 16));
+    expect(() => parseFile('ljpeg.dcm', buffer)).toThrow(/JPEG Lossless \(ljpeg\.dcm\)/);
+  });
+});
+
 describe('parseFile — photometric handling', () => {
   it('inverts MONOCHROME1 by negating the modality LUT and window', () => {
     const s = parseFile('mono1.dcm', monochrome1())[0];

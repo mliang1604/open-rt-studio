@@ -21,7 +21,9 @@ with Node's own test runner, to prove that Node can import it.
 
 - Parsing (`parseFile`, `parseFileAsync`) on top of `dicom-parser`, with pixel
   decoding for uncompressed data, RLE, and JPEG, JPEG-LS and JPEG 2000 through
-  WebAssembly codecs that load on first use
+  WebAssembly codecs that load on first use. JPEG Lossless and 12-bit JPEG are
+  not decoded: such a file raises an `UnsupportedDicomError` that names the
+  file and says why (`reason` is the same without the file name)
 - Metadata and a tag dictionary, series grouping, slice ordering, volume
   building, photometric handling, the patient catalog
 - RT structure sets: reading, contour rasterization, label volumes, marching
