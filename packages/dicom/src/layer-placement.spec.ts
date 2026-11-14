@@ -9,13 +9,17 @@ import {
   registrationsOfPatient,
 } from './layer-placement.js';
 import { rigidMat4, transformPoint, type Mat4 } from './mat4.js';
+import { manualPlacement } from './rigid-params.js';
 import { matrixTransform } from './registration.js';
 import type { SpatialRegistration } from './spatial-registration.js';
 import {
   applyLayerOverrides,
   baseImageLayer,
   overlayImageLayer,
+  layerFrames,
   overlayLayerAwaitingChoice,
+  overlayLayerUnplaced,
+  type Layer,
   type Vec3,
   type Volume,
 } from './types.js';
@@ -213,6 +217,56 @@ describe('a layer that awaits a choice among registrations', () => {
     const placed = overlayImageLayer('over', volume, choices[0]);
     const [same] = applyLayerOverrides([placed], none.hidden, none.opacities, none.displays);
     expect(same).toBe(placed);
+  });
+});
+
+describe('a layer placed by hand', () => {
+  const volume = { modality: 'MR' } as unknown as Volume;
+  const frames = { baseFrame: PLANNING, layerFrame: MR };
+  const unplaced = overlayLayerUnplaced('over', volume, frames);
+  const byHand = manualPlacement(PLANNING, MR, rigidMat4([0, 0, 1], 10, [1, 2, 3]));
+  const none = { hidden: new Set<string>(), opacities: new Map(), displays: new Map() };
+  const apply = (layer: Layer, hand = new Map([['over', byHand]]), hidden = none.hidden) =>
+    applyLayerOverrides([layer], hidden, none.opacities, none.displays, new Map(), hand)[0];
+
+  it('is not drawn while no registration places it and none was made', () => {
+    expect(unplaced).toMatchObject({ visible: false, frames });
+    expect(unplaced.placement).toBeUndefined();
+    expect(apply(unplaced, new Map())).toBe(unplaced);
+    expect(layerFrames(unplaced)).toEqual(frames);
+  });
+
+  it('is drawn once it is placed by hand, and can still be hidden', () => {
+    expect(apply(unplaced)).toMatchObject({ visible: true, placement: byHand });
+    expect(apply(unplaced, undefined, new Set(['over']))).toMatchObject({
+      visible: false,
+      placement: byHand,
+    });
+  });
+
+  it('goes by the hand before a registration from a file, or one that was chosen', () => {
+    const fromFile = findPlacement(PLANNING, MR, [object('9.1', MR, PLANNING, followUpToPlanning)]);
+    if (fromFile.kind !== 'placed') throw new Error('expected a placement');
+    const placed = overlayImageLayer('over', volume, fromFile.placement);
+    expect(apply(placed).placement).toBe(byHand);
+    expect(layerFrames(placed)).toEqual(frames);
+
+    const awaiting = overlayLayerAwaitingChoice('over', volume, [fromFile.placement]);
+    const chosen = applyLayerOverrides(
+      [awaiting],
+      none.hidden,
+      none.opacities,
+      none.displays,
+      new Map([['over', 0]]),
+      new Map([['over', byHand]]),
+    )[0];
+    expect(chosen.placement).toBe(byHand);
+    expect(layerFrames(awaiting)).toEqual(frames);
+  });
+
+  it('has no frames to place between when it is the base, or in the base’s frame', () => {
+    expect(layerFrames(baseImageLayer('base', volume))).toBeNull();
+    expect(layerFrames(overlayImageLayer('over', volume))).toBeNull();
   });
 });
 

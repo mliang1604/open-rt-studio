@@ -14,6 +14,7 @@ import {
   findPlacement,
   overlayImageLayer,
   overlayLayerAwaitingChoice,
+  overlayLayerUnplaced,
   type Layer,
   type SpatialRegistration,
   type StructureSet,
@@ -236,6 +237,12 @@ export interface MergedLoad {
    * drawn until the user chooses one of them.
    */
   readonly choices?: number;
+  /**
+   * Set when the series is in another frame of reference and no registration
+   * leads to it. The layer was added, but is not drawn until the user places
+   * it by hand (#78).
+   */
+  readonly unplaced?: true;
 }
 
 /**
@@ -246,12 +253,18 @@ export interface MergedLoad {
  * reference, it images the same patient in the same placement, so it's *added*
  * as a translucent overlay layer above the base (which stays). When it is in
  * another frame and exactly one way of `registrations` leads from the base's
- * frame to its own, it is added too, placed by them (#76). Otherwise it's a
- * different study and *replaces* the current load. A series with no frame of
- * reference never matches, so it always replaces — there's nothing to align it
- * against. Between several registrations none is chosen: the series is added
- * as a layer that is not drawn until the user chooses one, and `choices` says
- * how many there are.
+ * frame to its own, it is added too, placed by them (#76). A series with no
+ * frame of reference never matches, so it always *replaces* the current load:
+ * there's nothing to align it against. Between several registrations none is
+ * chosen: the series is added as a layer that is not drawn until the user
+ * chooses one, and `choices` says how many there are. With no registration at
+ * all it is added the same way, not drawn, for the user to place by hand
+ * (`unplaced`, #78): nothing says where one frame is in the other, and none
+ * is guessed.
+ *
+ * A layer of the same series that was waiting for a placement is replaced by
+ * what the registrations say now, so that a series dropped again after its
+ * registration was opened is placed by it.
  *
  * Pure for unit testing the add-vs-replace rule and the resulting registry.
  */
@@ -260,12 +273,11 @@ export function mergeLoad(
   incoming: LoadResult,
   registrations: readonly SpatialRegistration[] = [],
 ): MergedLoad {
-  const found = findPlacement(
-    selectedSeries(current)?.frameOfReferenceUid ?? null,
-    selectedSeries(incoming)?.frameOfReferenceUid ?? null,
-    registrations,
-  );
-  if (found.kind === 'none') return { result: incoming, added: false };
+  const baseFrame = selectedSeries(current)?.frameOfReferenceUid ?? null;
+  const layerFrame = selectedSeries(incoming)?.frameOfReferenceUid ?? null;
+  // Without a frame of reference there is nothing to place by, nor by hand.
+  if (!baseFrame || !layerFrame) return { result: incoming, added: false };
+  const found = findPlacement(baseFrame, layerFrame, registrations);
 
   // Co-sampling an overlay in the base's patient frame maps each pane pixel
   // through both grids' index→patient affines, so both volumes need geometry;
@@ -286,15 +298,36 @@ export function mergeLoad(
     return { result: incoming, added: false };
   }
 
-  const id = uniqueLayerId(current.layers, incoming.selectedUid);
-  const overlay =
-    found.kind === 'several'
-      ? overlayLayerAwaitingChoice(id, overlayVolume, found.placements)
-      : overlayImageLayer(id, overlayVolume, found.kind === 'placed' ? found.placement : undefined);
+  // The same series, added before and still waiting for a placement, gives
+  // way to this one.
+  const layers = current.layers.filter(
+    (layer) => !(layer.id === incoming.selectedUid && layer.frames),
+  );
+  const id = uniqueLayerId(layers, incoming.selectedUid);
+  let overlay: Layer;
+  switch (found.kind) {
+    case 'several':
+      overlay = overlayLayerAwaitingChoice(id, overlayVolume, found.placements);
+      break;
+    case 'none':
+      overlay = overlayLayerUnplaced(id, overlayVolume, { baseFrame, layerFrame });
+      break;
+    case 'placed':
+      overlay = overlayImageLayer(id, overlayVolume, found.placement);
+      break;
+    case 'same-frame':
+      overlay = overlayImageLayer(id, overlayVolume);
+      break;
+    default: {
+      const exhaustive: never = found;
+      return exhaustive;
+    }
+  }
   return {
-    result: { ...current, layers: [...current.layers, overlay] },
+    result: { ...current, layers: [...layers, overlay] },
     added: true,
     ...(found.kind === 'several' ? { choices: found.placements.length } : {}),
+    ...(found.kind === 'none' ? { unplaced: true as const } : {}),
   };
 }
 

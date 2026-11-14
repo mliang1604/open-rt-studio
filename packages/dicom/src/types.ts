@@ -297,6 +297,28 @@ export interface Layer {
    * picked for the user.
    */
   readonly placementChoices?: readonly LayerPlacement[];
+  /**
+   * For a layer in another frame of reference that no registration places:
+   * the base's frame and its own. It has no {@link placement} and is not
+   * drawn (`visible` is false) until it is given one by hand (#78).
+   */
+  readonly frames?: LayerFrames;
+}
+
+/** The two frames of reference a layer is placed between. */
+export interface LayerFrames {
+  readonly baseFrame: string;
+  readonly layerFrame: string;
+}
+
+/**
+ * The frames a layer of another frame of reference is placed between: from
+ * its placement, from the placements it may choose among, or as it was added
+ * with none. Null for the base and for a layer in the base's own frame.
+ */
+export function layerFrames(layer: Layer): LayerFrames | null {
+  const from = layer.placement ?? layer.placementChoices?.[0] ?? layer.frames;
+  return from ? { baseFrame: from.baseFrame, layerFrame: from.layerFrame } : null;
 }
 
 /**
@@ -357,10 +379,20 @@ export function overlayLayerAwaitingChoice(
 }
 
 /**
+ * An overlay layer for a volume in another frame of reference that no
+ * registration places: it is not drawn until it is placed by hand
+ * ({@link applyLayerOverrides}).
+ */
+export function overlayLayerUnplaced(id: string, volume: Volume, frames: LayerFrames): Layer {
+  return { ...overlayImageLayer(id, volume), visible: false, frames };
+}
+
+/**
  * Apply the layers panel's user overrides onto the loaded registry: per-layer
  * visibility, composite opacity, display transform (grayscale ⇄ colormap) and,
  * for a layer with several placements to choose among, the one that was chosen
- * (by its index), keyed by {@link Layer.id}. Mirrors the structures panel's override maps — the
+ * (by its index), keyed by {@link Layer.id}. A placement made by hand
+ * (`byHand`) goes before any other, chosen or from a file. Mirrors the structures panel's override maps — the
  * loaded layers stay immutable and the panel layers its edits on top, so a reload
  * starts clean. A layer with no override is returned unchanged (same reference).
  */
@@ -370,12 +402,14 @@ export function applyLayerOverrides(
   opacities: ReadonlyMap<string, number>,
   displays: ReadonlyMap<string, LayerDisplay>,
   chosen: ReadonlyMap<string, number> = new Map(),
+  byHand: ReadonlyMap<string, LayerPlacement> = new Map(),
 ): Layer[] {
   return layers.map((layer) => {
     const opacity = opacities.get(layer.id);
     const display = displays.get(layer.id);
-    // A layer that awaits a choice is drawn once it has one, and placed by it.
-    const placement = layer.placementChoices?.[chosen.get(layer.id) ?? -1];
+    // A layer that awaits a choice, or a placement by hand, is drawn once it
+    // has one, and placed by it.
+    const placement = byHand.get(layer.id) ?? layer.placementChoices?.[chosen.get(layer.id) ?? -1];
     const visible = !hidden.has(layer.id) && (layer.visible || placement !== undefined);
     if (
       opacity === undefined &&

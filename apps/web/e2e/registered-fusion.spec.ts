@@ -12,6 +12,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { preAcknowledge, requireWebGpu } from './fixtures/app';
 import { fuseChipByDrag, importFiles } from './fixtures/load';
+import { chipOf, probeAt, showCt } from './fixtures/registered-pair';
 
 // Two images in two frames of reference, fused through the rigid registration
 // between them (#76). The synthetic pair is a planning CT and a follow-up MR
@@ -21,55 +22,6 @@ import { fuseChipByDrag, importFiles } from './fixtures/load';
 //
 // The probe is the CPU's side of the geometry. That the shader reads the same
 // place is held by the unit tests of the matrix both are given, and by looking.
-
-/** The chip of the series of a modality, in whichever study has it; the study is opened. */
-async function chipOf(page: Page, modality: string): Promise<Locator> {
-  const tile = page
-    .locator('.study-tile')
-    .filter({ has: page.locator('.modality-badge', { hasText: new RegExp(`^${modality}$`) }) })
-    .first();
-  await expect(tile).toBeVisible({ timeout: 30_000 });
-  if ((await tile.getAttribute('aria-expanded')) !== 'true') await tile.click();
-  await expect(tile).toHaveAttribute('aria-expanded', 'true');
-  const chip = page
-    .locator('app-series-chip')
-    .filter({ has: page.locator('.chip-modality', { hasText: new RegExp(`^${modality}$`) }) })
-    .first();
-  await expect(chip).toBeVisible();
-  return chip;
-}
-
-/** Show the planning CT, by itself. */
-async function showCt(page: Page): Promise<void> {
-  const chip = await chipOf(page, 'CT');
-  const layout = page.getByRole('button', { name: /layout/i });
-  // A click before the renderer is ready does nothing: asked again until a volume is up.
-  await expect(async () => {
-    await chip.click();
-    await expect(layout).toBeEnabled({ timeout: 2_000 });
-  }).toPass({ timeout: 60_000 });
-  await expect(page.locator('div.status')).toContainText(
-    `volume ${PAIR.size} × ${PAIR.size} × ${PAIR.count}`,
-  );
-}
-
-/** What the probe says at a place of the main (axial) pane, in fractions of its width and height. */
-async function probeAt(
-  page: Page,
-  fx: number,
-  fy: number,
-): Promise<{ voxel: [number, number, number]; ct: number; mr: number | null }> {
-  const pane = page.locator('.pane-overlay .pane').first();
-  const box = (await pane.boundingBox())!;
-  await page.mouse.move(box.x + box.width * fx, box.y + box.height * fy);
-  const probe = page.locator('.probe');
-  await expect(probe).toBeVisible();
-  const text = await probe.innerText();
-  const match = /voxel \((\d+), (\d+), (\d+)\).* · value (-?\d+) HU(?: · MR (-?\d+))?$/.exec(text);
-  expect(match, `unexpected probe text: ${text}`).not.toBeNull();
-  const [x, y, z, ct] = match!.slice(1, 5).map(Number);
-  return { voxel: [x, y, z], ct, mr: match![5] === undefined ? null : Number(match![5]) };
-}
 
 test.beforeEach(async ({ page }) => {
   await preAcknowledge(page);
@@ -150,7 +102,9 @@ test('a series of another frame of reference is fused through its registration',
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
-test('without the registration the series is not fused; opened later, it is', async ({ page }) => {
+test('without a registration the series is not drawn; dropped again once one is opened, it is', async ({
+  page,
+}) => {
   await requireWebGpu(page);
 
   const pair = syntheticRegisteredPair();
@@ -158,14 +112,18 @@ test('without the registration the series is not fused; opened later, it is', as
   await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
   await showCt(page);
 
-  // Nothing connects the two frames: refused, and the CT stays as it was.
+  // Nothing connects the two frames. The series is taken as a layer, and not
+  // drawn: no place is guessed for it (placing it by hand is #78).
   const mr = await chipOf(page, 'MR');
   await fuseChipByDrag(page, mr);
   await expect(page.locator('.notice')).toHaveText(
-    'Can’t fuse: drop a series that shares the current scan’s frame of reference, or that an opened registration connects to it.',
+    'No registration connects this series to the one on screen. Register it by hand under Layers to show it.',
   );
+  await expect(page.locator('.layer-panel [data-unplaced]')).toHaveText(
+    'No registration places this image over the base.',
+  );
+  await expect(page.locator('.layer-panel [data-layer] input[type="checkbox"]')).toBeDisabled();
   await expect(page.locator('.blend-bar')).toHaveCount(0);
-  await expect(page.locator('.layer-panel')).toHaveCount(0);
   expect((await probeAt(page, 0.4, 0.5)).mr).toBeNull();
 
   // The registration by itself: kept, and the CT stays on screen.
@@ -175,9 +133,12 @@ test('without the registration the series is not fused; opened later, it is', as
     `volume ${PAIR.size} × ${PAIR.size} × ${PAIR.count}`,
   );
 
+  // Dropped again, it is placed by the registration: one layer of it, not two.
   await fuseChipByDrag(page, mr);
   await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.layer-panel [data-placement]')).toBeVisible();
+  await expect(page.locator('.layer-panel [data-unplaced]')).toHaveCount(0);
+  await expect(page.locator('.layer-panel [data-layer]')).toHaveCount(2);
   const { voxel, mr: value } = await probeAt(page, 0.4, 0.5);
   expect(value).toBe(registeredMrValueAtCtVoxel(...voxel));
   expect(value).not.toBeNull();

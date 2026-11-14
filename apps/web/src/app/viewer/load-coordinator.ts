@@ -26,7 +26,8 @@ export type LoadOutcome =
   /**
    * Keep the base and add `result`'s overlay layer; `compare` also opens the
    * columns. `notice` is something to tell the user about the layer: that it
-   * waits for them to choose among several registrations.
+   * waits for them to choose among several registrations, or to place it by
+   * hand.
    */
   | {
       readonly kind: 'overlay';
@@ -49,15 +50,23 @@ export type LoadOutcome =
   | { readonly kind: 'noop'; readonly compare: boolean };
 
 /**
- * Feedback when a held-modifier drop can't apply: ⌥ fuse and ⇧ compare both need a
- * series in the current scan's frame of reference, or one that a registration
- * connects to it, so a different study (or nothing loaded to fuse against)
- * degrades to this notice instead of replacing.
+ * Feedback when a held-modifier drop can't apply: ⌥ fuse and ⇧ compare both
+ * need a scan on screen and a series of the same patient that says where it
+ * is (a frame of reference and positions), so anything else degrades to this
+ * notice instead of replacing. A series of another frame of reference is
+ * taken: a registration places it, or the user does by hand.
  */
 export function cantFuseMessage(intent: 'overlay' | 'compare'): string {
   const action = intent === 'overlay' ? 'fuse' : 'compare';
-  return `Can’t ${action}: drop a series that shares the current scan’s frame of reference, or that an opened registration connects to it.`;
+  return `Can’t ${action}: drop another series of the patient on screen, one with a frame of reference, onto a scan that is showing.`;
 }
+
+/**
+ * What is said when a series was added that no registration places: it is
+ * not drawn until the user places it by hand, and this says where.
+ */
+export const REGISTER_BY_HAND_MESSAGE =
+  'No registration connects this series to the one on screen. Register it by hand under Layers to show it.';
 
 /**
  * What is said when a series was added that several registrations could
@@ -79,6 +88,7 @@ function outcomeForMerged(merged: MergedLoad, intent: 'overlay' | 'compare'): Lo
     result: merged.result,
     compare: intent === 'compare',
     ...(merged.choices ? { notice: chooseRegistrationMessage(merged.choices) } : {}),
+    ...(merged.unplaced ? { notice: REGISTER_BY_HAND_MESSAGE } : {}),
   };
 }
 
@@ -198,7 +208,10 @@ export interface SeriesLoadDeps {
 export async function planSeriesLoad(deps: SeriesLoadDeps): Promise<LoadOutcome> {
   const { previous, seriesUid, intent, fetchSeries, loadSeries, merge } = deps;
   // Decided before anything is fetched: a series that is shown needs no fetch.
-  if (intent !== 'primary' && previous?.layers.some((layer) => layer.id === seriesUid)) {
+  // One that waits to be placed is not shown: it is fetched again, with the
+  // registrations there are for it now.
+  const shown = previous?.layers.some((layer) => layer.id === seriesUid && !layer.frames);
+  if (intent !== 'primary' && shown) {
     return { kind: 'noop', compare: intent === 'compare' };
   }
   // Every structure set the source holds for it (more than any one displayed

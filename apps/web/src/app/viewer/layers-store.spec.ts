@@ -7,9 +7,12 @@ import {
   findPlacement,
   overlayImageLayer,
   overlayLayerAwaitingChoice,
+  overlayLayerUnplaced,
+  transformPoint,
   type Layer,
   type LayerPlacement,
   type Volume,
+  type VolumeGeometry,
 } from '@open-rt-studio/dicom';
 import { registrationObject } from '../registration-testing';
 import { shiftMatrix } from '../registration-testing';
@@ -282,5 +285,163 @@ describe('LayersStore.reset', () => {
     expect(store.windowFor(registry()[1])).toEqual({ center: 1000, width: 2000 });
     // A stale checkerboard no longer carries into a fresh load (#206).
     expect(store.checkerboardEnabled()).toBe(false);
+  });
+});
+
+describe('a registration made by hand (#78)', () => {
+  const geometry = (origin: [number, number, number]): VolumeGeometry =>
+    ({
+      origin,
+      iStep: [1, 0, 0],
+      jStep: [0, 1, 0],
+      kStep: [0, 0, 1],
+    }) as unknown as VolumeGeometry;
+  const base = { ...makeVolume('CT'), dims: [11, 11, 11], geometry: geometry([0, 0, 0]) } as Volume;
+  const moving = {
+    ...makeVolume('MR'),
+    dims: [5, 5, 5],
+    geometry: geometry([100, 200, 300]),
+  } as Volume;
+  const frames = { baseFrame: 'frame-1', layerFrame: 'frame-2' };
+  const unplaced = (): readonly Layer[] => [
+    baseImageLayer('base', base),
+    overlayLayerUnplaced('ov', moving, frames),
+  ];
+  const fromFile = (): LayerPlacement => {
+    const found = findPlacement('frame-1', 'frame-2', [
+      registrationObject('reg', 'frame-2', 'frame-1', shiftMatrix(5, -3, 2)),
+    ]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    return found.placement;
+  };
+
+  it('begins with the image’s middle on the base’s when nothing places it', () => {
+    const store = new LayersStore();
+    const layers = unplaced();
+    expect(store.apply(layers)[1]).toBe(layers[1]);
+
+    store.beginByHand(layers[1], base);
+    const hand = store.byHand().get('ov')!;
+    // The middles: (5, 5, 5) of the base, (102, 202, 302) of the image.
+    expect(hand.params).toEqual({
+      translation: [-97, -197, -297],
+      rotation: [0, 0, 0],
+      centre: [102, 202, 302],
+    });
+    expect(hand).toMatchObject({ start: hand.params, saved: false });
+
+    const placed = store.apply(layers)[1];
+    expect(placed.visible).toBe(true);
+    expect(placed.placement).toMatchObject({ baseFrame: 'frame-1', layerFrame: 'frame-2' });
+    expect(placed.placement!.steps[0].byHand).toBe(true);
+    expect(transformPoint(placed.placement!.layerToBase, [102, 202, 302])).toEqual([5, 5, 5]);
+  });
+
+  it('begins from the registration that places the image, when it only moves and turns', () => {
+    const store = new LayersStore();
+    const layer = overlayImageLayer('ov', moving, fromFile());
+    store.beginByHand(layer, base);
+    const { params } = store.byHand().get('ov')!;
+    expect(params.translation.map((value) => Math.round(value * 1e9) / 1e9)).toEqual([5, -3, 2]);
+    expect(params.rotation.map((value) => Math.abs(value))).toEqual([0, 0, 0]);
+    // The image is where it was.
+    const before = layer.placement!.layerToBase;
+    const after = store.apply([baseImageLayer('base', base), layer])[1].placement!.layerToBase;
+    after.forEach((value, i) => expect(value).toBeCloseTo(before[i], 9));
+  });
+
+  it('does not begin for a layer in the base’s frame, or without positions', () => {
+    const store = new LayersStore();
+    store.beginByHand(overlayImageLayer('same', moving), base);
+    store.beginByHand(overlayLayerUnplaced('bare', makeVolume('MR'), frames), base);
+    store.beginByHand(overlayLayerUnplaced('ov', moving, frames), makeVolume('CT'));
+    expect(store.byHand().size).toBe(0);
+  });
+
+  it('takes new numbers, goes back to where it began, and is let go of', () => {
+    const store = new LayersStore();
+    const layers = unplaced();
+    store.beginByHand(layers[1], base);
+    const { start } = store.byHand().get('ov')!;
+
+    const moved = { ...start, translation: [1, 2, 3] as const, rotation: [0, 0, 90] as const };
+    store.setByHand('ov', moved);
+    expect(store.byHand().get('ov')!.params).toBe(moved);
+    // The centre goes to itself and (1, 2, 3) further.
+    const matrix = store.apply(layers)[1].placement!.layerToBase;
+    transformPoint(matrix, [102, 202, 302]).forEach((value, i) =>
+      expect(value).toBeCloseTo([103, 204, 305][i], 9),
+    );
+
+    // What is not a number changes nothing; nor do numbers for a layer that has none.
+    store.setByHand('ov', { ...moved, translation: [Number.NaN, 0, 0] });
+    store.setByHand('other', moved);
+    expect(store.byHand().get('ov')!.params).toBe(moved);
+    expect(store.byHand().has('other')).toBe(false);
+
+    store.resetByHand('ov');
+    expect(store.byHand().get('ov')!.params).toBe(start);
+
+    store.discardByHand('ov');
+    expect(store.byHand().has('ov')).toBe(false);
+    expect(store.apply(layers)[1]).toBe(layers[1]);
+  });
+
+  it('is saved only as it was when the save began, and not once it changes', () => {
+    const store = new LayersStore();
+    store.beginByHand(unplaced()[1], base);
+    const { start } = store.byHand().get('ov')!;
+    const moved = { ...start, translation: [1, 2, 3] as const };
+
+    // Changed while the save was under way: what was saved is not what is there.
+    store.setByHand('ov', moved);
+    store.markByHandSaved('ov', start);
+    expect(store.byHand().get('ov')!.saved).toBe(false);
+
+    store.markByHandSaved('ov', moved);
+    expect(store.byHand().get('ov')!.saved).toBe(true);
+    store.setByHand('ov', { ...moved, rotation: [1, 0, 0] });
+    expect(store.byHand().get('ov')!.saved).toBe(false);
+  });
+
+  it('goes before a registration from a file, and before a choice among several', () => {
+    const store = new LayersStore();
+    const placement = fromFile();
+    const awaiting = overlayLayerAwaitingChoice('ov', moving, [placement, placement]);
+    const layers = [baseImageLayer('base', base), awaiting];
+    store.beginByHand(awaiting, base);
+    const composed = store.apply(layers);
+    expect(composed[1].placement!.steps[0].byHand).toBe(true);
+
+    const [, row] = layerLegend(composed, store.byHand());
+    expect(row).toMatchObject({
+      placement: 'Placed by hand',
+      placementChoices: null,
+      placementChosen: null,
+      unplaced: false,
+      canRegisterByHand: true,
+    });
+    expect(row.byHand).toBe(store.byHand().get('ov'));
+  });
+
+  it('is offered for a layer of another frame only, and an unplaced one says so', () => {
+    const rows = layerLegend([
+      ...unplaced(),
+      overlayImageLayer('same', moving),
+      overlayImageLayer('placed', moving, fromFile()),
+    ]);
+    expect(rows.map((row) => [row.id, row.unplaced, row.canRegisterByHand, row.byHand])).toEqual([
+      ['base', false, false, null],
+      ['ov', true, true, null],
+      ['same', false, false, null],
+      ['placed', false, true, null],
+    ]);
+  });
+
+  it('goes with the other overrides when a new base is loaded', () => {
+    const store = new LayersStore();
+    store.beginByHand(unplaced()[1], base);
+    store.reset();
+    expect(store.byHand().size).toBe(0);
   });
 });

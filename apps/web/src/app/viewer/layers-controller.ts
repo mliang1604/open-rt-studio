@@ -206,7 +206,9 @@ export class LayersController {
   readonly hasLayersPanel = computed(() => this.layers().length > 1);
 
   /** The layers for the panel, each with its display controls (base first). */
-  readonly layerLegend = computed<LayerLegendEntry[]>(() => layerLegend(this.layers()));
+  readonly layerLegend = computed<LayerLegendEntry[]>(() =>
+    layerLegend(this.layers(), this.layerStore.byHand()),
+  );
 
   /** Toggle an overlay layer's visibility (the base underlay is never hidden). */
   toggleLayerVisible(id: string): void {

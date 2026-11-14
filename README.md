@@ -93,6 +93,9 @@ by git) if you want files on disk to open.
 - Fusion and Compare of a series from another frame of reference through a
   rigid DICOM Spatial Registration, opened from files beside it or kept on
   the server, with a choice when several registrations connect the two
+- Rigid registration by hand: shift and turn one series over another with
+  numbers, see the fused picture follow, and save the result as a DICOM
+  Spatial Registration object
 - Curved planar reformat: draw a path through the volume and see the image
   straightened along it
 - Distance, angle and region measurements; cine; PNG and spin-video capture

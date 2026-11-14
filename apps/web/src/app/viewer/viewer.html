@@ -231,7 +231,9 @@
                   <input
                     type="checkbox"
                     [checked]="layer.visible"
-                    [disabled]="!!layer.placementChoices && layer.placementChosen === null"
+                    [disabled]="
+                      layer.unplaced || (!!layer.placementChoices && layer.placementChosen === null)
+                    "
                     (change)="layersCtl.toggleLayerVisible(layer.id)"
                     [attr.aria-label]="'Show ' + layer.label + ' overlay'"
                   />
@@ -301,6 +303,37 @@
                     {{ choices[layer.placementChosen] }}
                   </div>
                 }
+              }
+              @if (layer.unplaced) {
+                <!-- Nothing says where this image is over the base, and no
+                     place is guessed: it is drawn once the user gives it one. -->
+                <div class="layer-note" [attr.data-unplaced]="layer.id">
+                  No registration places this image over the base.
+                </div>
+              }
+              @if (layer.byHand; as hand) {
+                <app-manual-registration
+                  [params]="hand.params"
+                  [image]="layer.label"
+                  [saved]="hand.saved"
+                  [saving]="manualRegistration.saving() === layer.id"
+                  [changed]="hand.params !== hand.start"
+                  (paramsChange)="manualRegistration.set(layer.id, $event)"
+                  (resetAsked)="manualRegistration.reset(layer.id)"
+                  (saveAsked)="manualRegistration.save(layer.id)"
+                  (discardAsked)="manualRegistration.discard(layer.id)"
+                  [attr.data-by-hand]="layer.id"
+                />
+              } @else if (layer.canRegisterByHand) {
+                <button
+                  type="button"
+                  class="layer-note"
+                  (click)="manualRegistration.begin(layer.id)"
+                  [attr.data-register-by-hand]="layer.id"
+                  title="Shift and turn this image over the base yourself, and save that as a registration"
+                >
+                  {{ layer.unplaced ? 'Register by hand' : 'Adjust by hand' }}
+                </button>
               }
             }
           </div>

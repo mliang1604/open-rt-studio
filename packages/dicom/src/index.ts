@@ -72,6 +72,14 @@ export {
   samePath,
   transformPath,
 } from './registration.js';
+export {
+  type RigidParams,
+  manualPlacement,
+  rigidParamsMatrix,
+  rigidParamsOf,
+  startingRigidParams,
+  volumeCentre,
+} from './rigid-params.js';
 export { type Series, groupSeries, largestSeries, middleSlice } from './series.js';
 export {
   type LayerPlacement,
@@ -124,6 +132,9 @@ export {
   modalityUnit,
   overlayImageLayer,
   overlayLayerAwaitingChoice,
+  overlayLayerUnplaced,
+  layerFrames,
+  type LayerFrames,
 } from './types.js';
 export { add, cross, dot, length, normalize, scale, sub } from './vec3.js';
 export { VolumeBuildError, buildVolume, patientToVoxel, voxelToPatient } from './volume.js';

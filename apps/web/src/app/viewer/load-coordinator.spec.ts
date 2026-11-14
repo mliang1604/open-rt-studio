@@ -7,6 +7,7 @@ import { registrationObject } from '../registration-testing';
 import type { LoadResult, MergedLoad } from '../volume-loader';
 import {
   cantFuseMessage,
+  REGISTER_BY_HAND_MESSAGE,
   chooseRegistrationMessage,
   planFileLoad,
   planSeriesLoad,
@@ -70,11 +71,14 @@ function fileDeps(overrides: Partial<FileLoadDeps>): FileLoadDeps {
 const merged = (result: LoadResult, added: boolean): MergedLoad => ({ result, added });
 
 describe('cantFuseMessage', () => {
-  it('names the action that could not apply and the frame-of-reference reason', () => {
+  it('names the action that could not apply and what a series needs', () => {
     expect(cantFuseMessage('overlay')).toContain('fuse');
     expect(cantFuseMessage('compare')).toContain('compare');
     expect(cantFuseMessage('overlay')).toContain('frame of reference');
-    expect(cantFuseMessage('overlay')).toContain('registration');
+    expect(cantFuseMessage('overlay')).toContain('patient on screen');
+    expect(REGISTER_BY_HAND_MESSAGE).toBe(
+      'No registration connects this series to the one on screen. Register it by hand under Layers to show it.',
+    );
     expect(chooseRegistrationMessage(2)).toBe(
       '2 registrations connect this series to the one on screen. Choose one under Layers to show it.',
     );
@@ -346,6 +350,32 @@ describe('planSeriesLoad', () => {
       }),
     );
     expect(outcome).toEqual({ kind: 'noop', compare: false });
+  });
+
+  it('fetches again a series that waits to be placed, and says that it still does (#78)', async () => {
+    const previous = {
+      ...result('shown'),
+      layers: [{ id: 'shown' }, { id: 'incoming', frames: { baseFrame: 'a', layerFrame: 'b' } }],
+    } as unknown as LoadResult;
+    let fetched = 0;
+    const outcome = await planSeriesLoad(
+      seriesDeps({
+        previous,
+        intent: 'overlay',
+        fetchSeries: () => {
+          fetched++;
+          return Promise.resolve({ series: FETCHED, structureSets: [], registrations: [] });
+        },
+        merge: (current) => ({ result: current, added: true, unplaced: true }),
+      }),
+    );
+    expect(fetched).toBe(1);
+    expect(outcome).toEqual({
+      kind: 'overlay',
+      result: previous,
+      compare: false,
+      notice: REGISTER_BY_HAND_MESSAGE,
+    });
   });
 
   it('reloads (replaces) the current base when it is re-picked as primary (#241)', async () => {

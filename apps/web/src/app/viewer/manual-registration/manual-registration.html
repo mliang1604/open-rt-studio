@@ -1,0 +1,64 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<fieldset>
+  <legend>Shift, mm</legend>
+  @for (field of shifts; track field.axis) {
+    <label [title]="field.label">
+      <span aria-hidden="true">{{ field.name }}</span>
+      <input
+        type="number"
+        [step]="field.step"
+        [value]="shown(field)"
+        (input)="onInput(field, $event)"
+        [attr.aria-label]="field.label"
+        [attr.data-shift]="field.axis"
+      />
+    </label>
+  }
+</fieldset>
+<fieldset>
+  <legend>Turn, °</legend>
+  @for (field of turns; track field.axis) {
+    <label [title]="field.label">
+      <span aria-hidden="true">{{ field.name }}</span>
+      <input
+        type="number"
+        [step]="field.step"
+        [value]="shown(field)"
+        (input)="onInput(field, $event)"
+        [attr.aria-label]="field.label"
+        [attr.data-turn]="field.axis"
+      />
+    </label>
+  }
+</fieldset>
+<div class="actions">
+  <button
+    type="button"
+    (click)="resetAsked.emit()"
+    [disabled]="!changed()"
+    title="Put the numbers back to where they were when you began"
+  >
+    Reset
+  </button>
+  <button
+    type="button"
+    (click)="saveAsked.emit()"
+    [disabled]="saving() || saved()"
+    title="Save as a DICOM Spatial Registration object"
+  >
+    {{ saving() ? 'Saving…' : saved() ? 'Saved' : 'Save' }}
+  </button>
+  <button
+    type="button"
+    (click)="discardAsked.emit()"
+    title="Let go of the registration by hand: the image is again as the files have it"
+  >
+    Discard
+  </button>
+</div>
+<p class="state" role="status">
+  {{ saved() ? 'Saved as it is.' : 'Not saved: it is in the viewer only.' }}
+</p>

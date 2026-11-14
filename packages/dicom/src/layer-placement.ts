@@ -36,6 +36,11 @@ export interface PlacementStep {
    * a file usually has it for a secondary image, is taken inverted here.
    */
   readonly inverted: boolean;
+  /**
+   * True for a registration that was set by hand in the viewer and is in no
+   * object yet: `sopInstanceUid` is then empty.
+   */
+  readonly byHand?: boolean;
 }
 
 /** How a layer in another frame of reference is placed over the base. */

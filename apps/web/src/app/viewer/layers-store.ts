@@ -2,16 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { Injectable, signal } from '@angular/core';
+import { Injectable, computed, signal } from '@angular/core';
 import {
   clamp,
   clamp01,
   applyLayerOverrides,
+  layerFrames,
+  manualPlacement,
+  matrixKind,
+  placementSize,
+  rigidParamsMatrix,
+  rigidParamsOf,
+  startingRigidParams,
+  volumeCentre,
   type Layer,
   type LayerDisplay,
-  placementSize,
   type LayerPlacement,
+  type Mat4,
   type PlacementStep,
+  type RigidParams,
+  type Volume,
 } from '@open-rt-studio/dicom';
 import { DEFAULT_CHECKER_CELLS, type WindowLevel } from '@open-rt-studio/render';
 
@@ -49,6 +59,29 @@ export interface LayerLegendEntry {
   readonly placementChoices: readonly string[] | null;
   /** Which of {@link placementChoices} is in use; null while none was chosen. */
   readonly placementChosen: number | null;
+  /**
+   * True for a layer in another frame of reference that nothing places yet:
+   * no registration, and none made by hand. It is not drawn.
+   */
+  readonly unplaced: boolean;
+  /**
+   * Whether the layer can be registered by hand: it is in another frame of
+   * reference than the base's. (Within one frame there is nothing to
+   * register.)
+   */
+  readonly canRegisterByHand: boolean;
+  /** The registration being made by hand for the layer, or null. */
+  readonly byHand: ByHand | null;
+}
+
+/** A registration that is being made by hand for a layer. */
+export interface ByHand {
+  /** As it is set now. */
+  readonly params: RigidParams;
+  /** As it was when the user began: what Reset goes back to. */
+  readonly start: RigidParams;
+  /** Whether it was saved as it is now. */
+  readonly saved: boolean;
 }
 
 /** The name a registration goes by: its description, else its label. */
@@ -65,6 +98,7 @@ export function placementText(placement: LayerPlacement): string {
   const { steps } = placement;
   if (steps.length === 1) {
     const [step] = steps;
+    if (step.byHand) return 'Placed by hand';
     const written = step.inverted ? 'this image → base' : 'base → this image';
     return `Placed by registration “${registrationName(step)}” (written ${written})`;
   }
@@ -91,23 +125,38 @@ export function placementChoiceText(placement: LayerPlacement): string {
   return `${names}${written} · translation ${shiftMm.toFixed(1)} mm, rotation ${turnDeg.toFixed(1)}°`;
 }
 
-/** Project the composed layers into panel rows (base first), each with its controls. */
-export function layerLegend(layers: readonly Layer[]): LayerLegendEntry[] {
-  return layers.map((layer) => ({
-    id: layer.id,
-    label: layer.modality ?? 'Image',
-    roleBadge: layer.role === 'base' ? 'BASE' : 'OVERLAY',
-    isBase: layer.role === 'base',
-    visible: layer.visible,
-    opacityPercent: Math.round(layer.opacity * 100),
-    displayValue: layer.display.kind === 'grayscale' ? 'grayscale' : layer.display.name,
-    placement: layer.placement && !layer.placementChoices ? placementText(layer.placement) : null,
-    placementChoices: layer.placementChoices?.map(placementChoiceText) ?? null,
-    placementChosen:
-      layer.placement && layer.placementChoices?.includes(layer.placement)
-        ? layer.placementChoices.indexOf(layer.placement)
-        : null,
-  }));
+/**
+ * Project the composed layers into panel rows (base first), each with its
+ * controls. A layer that is being registered by hand (`byHand`, by layer id)
+ * says so, and offers no choice among registrations while it is: the hand
+ * goes before them.
+ */
+export function layerLegend(
+  layers: readonly Layer[],
+  byHand: ReadonlyMap<string, ByHand> = new Map(),
+): LayerLegendEntry[] {
+  return layers.map((layer) => {
+    const hand = byHand.get(layer.id) ?? null;
+    const choices = hand ? undefined : layer.placementChoices;
+    return {
+      id: layer.id,
+      label: layer.modality ?? 'Image',
+      roleBadge: layer.role === 'base' ? 'BASE' : 'OVERLAY',
+      isBase: layer.role === 'base',
+      visible: layer.visible,
+      opacityPercent: Math.round(layer.opacity * 100),
+      displayValue: layer.display.kind === 'grayscale' ? 'grayscale' : layer.display.name,
+      placement: layer.placement && !choices ? placementText(layer.placement) : null,
+      placementChoices: choices?.map(placementChoiceText) ?? null,
+      placementChosen:
+        layer.placement && choices?.includes(layer.placement)
+          ? choices.indexOf(layer.placement)
+          : null,
+      unplaced: !!layer.frames && !layer.placement,
+      canRegisterByHand: layer.role === 'overlay' && layerFrames(layer) !== null,
+      byHand: hand,
+    };
+  });
 }
 
 /**
@@ -155,6 +204,28 @@ export class LayersStore {
    */
   private readonly _placements = signal<ReadonlyMap<string, number>>(new Map());
 
+  /**
+   * The registrations being made by hand (#78), keyed by {@link Layer.id}. A
+   * layer listed here is placed by its numbers, whatever a file says, until
+   * the user discards them. They are in the viewer only until they are saved.
+   */
+  private readonly _byHand = signal<ReadonlyMap<string, ByHand>>(new Map());
+
+  /** The registrations being made by hand, by layer id. */
+  readonly byHand = this._byHand.asReadonly();
+
+  /**
+   * The placement each of them gives its layer. Kept apart from
+   * {@link apply}, so that a matrix is made when the numbers change and not
+   * each time the layers are composed.
+   */
+  private readonly handMatrices = computed<ReadonlyMap<string, Mat4>>(
+    () =>
+      new Map(
+        [...this._byHand()].map(([id, { params }]) => [id, rigidParamsMatrix(params)] as const),
+      ),
+  );
+
   /** Checkerboard the overlay (alternating cells) instead of a uniform blend. */
   readonly checkerboardEnabled = signal(false);
 
@@ -166,13 +237,86 @@ export class LayersStore {
    * registry, producing the composed layers every consumer reads.
    */
   apply(rawLayers: readonly Layer[]): readonly Layer[] {
+    const matrices = this.handMatrices();
+    const byHand = new Map<string, LayerPlacement>();
+    for (const layer of rawLayers) {
+      const matrix = matrices.get(layer.id);
+      const frames = matrix ? layerFrames(layer) : null;
+      if (matrix && frames) {
+        byHand.set(layer.id, manualPlacement(frames.baseFrame, frames.layerFrame, matrix));
+      }
+    }
     return applyLayerOverrides(
       rawLayers,
       this._hidden(),
       this._opacities(),
       this._displays(),
       this._placements(),
+      byHand,
     );
+  }
+
+  /**
+   * Begin registering a layer by hand over the base. It starts from where the
+   * layer is: at the registration that places it now, when that one only
+   * moves and turns; else with the layer's middle on the base's and nothing
+   * turned, which is a place to start from and no more. Does nothing for a
+   * layer that is already being registered, one in the base's own frame, or
+   * when either image does not say where it is.
+   */
+  beginByHand(layer: Layer, base: Volume): void {
+    if (this._byHand().has(layer.id) || !layerFrames(layer)) return;
+    const centre = volumeCentre(layer.volume);
+    const placed = layer.placement?.layerToBase;
+    const start =
+      centre && placed && matrixKind(placed) === 'rigid'
+        ? rigidParamsOf(placed, centre)
+        : startingRigidParams(base, layer.volume);
+    if (!start) return;
+    this._byHand.update((map) =>
+      new Map(map).set(layer.id, { params: start, start, saved: false }),
+    );
+  }
+
+  /** Set the numbers of a registration that is being made by hand. */
+  setByHand(id: string, params: RigidParams): void {
+    const all = [...params.translation, ...params.rotation, ...params.centre];
+    if (!all.every(Number.isFinite)) return;
+    this._byHand.update((map) => {
+      const current = map.get(id);
+      return current ? new Map(map).set(id, { ...current, params, saved: false }) : map;
+    });
+  }
+
+  /** Put a registration by hand back to where it began. */
+  resetByHand(id: string): void {
+    this._byHand.update((map) => {
+      const current = map.get(id);
+      if (!current || current.params === current.start) return map;
+      return new Map(map).set(id, { ...current, params: current.start, saved: false });
+    });
+  }
+
+  /**
+   * Let go of a registration by hand: the layer is again as the files have
+   * it, placed by their registration or not drawn.
+   */
+  discardByHand(id: string): void {
+    this._byHand.update((map) => {
+      if (!map.has(id)) return map;
+      const next = new Map(map);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  /** Note that a registration by hand was saved, if it is still as `params` has it. */
+  markByHandSaved(id: string, params: RigidParams): void {
+    this._byHand.update((map) => {
+      const current = map.get(id);
+      if (!current || current.params !== params) return map;
+      return new Map(map).set(id, { ...current, saved: true });
+    });
   }
 
   /** Choose which of a layer's registrations places it, by its index among the choices. */
@@ -243,6 +387,7 @@ export class LayersStore {
     this._displays.set(new Map());
     this._windows.set(new Map());
     this._placements.set(new Map());
+    this._byHand.set(new Map());
     this.checkerboardEnabled.set(false);
   }
 }
