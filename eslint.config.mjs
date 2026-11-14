@@ -59,7 +59,7 @@ export default tseslint.config(
   {
     // The server runs in Node and inside the desktop application's main
     // process. It has no user interface and is reached over HTTP only.
-    files: ['services/*/src/**/*.ts'],
+    files: ['services/*/src/**/*.{ts,mjs}'],
     languageOptions: { globals: globals.node },
     rules: {
       'no-restricted-imports': [

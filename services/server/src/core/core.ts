@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createIngest, type Ingest } from '../ingest/ingest.js';
+import type { JobManager } from '../jobs/job-manager.js';
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
 import type { PacsIndex } from '../pacs-index/pacs-index.js';
 import type { DicomStore } from '../store/dicom-store.js';
@@ -52,6 +53,8 @@ export interface CoreOptions {
    * index when it is disposed. Without them the core has no PACS.
    */
   readonly pacs?: { readonly store: DicomStore; readonly index: PacsIndex };
+  /** A job manager for the core to have. The core shuts it down when it is disposed. */
+  readonly jobs?: JobManager;
   /** Milliseconds on a clock that only goes forward, for tests. */
   readonly now?: () => number;
 }
@@ -68,6 +71,8 @@ export interface CoreOptions {
 export interface ServerCore {
   /** Null for a core that was given no store and index. */
   readonly pacs: Pacs | null;
+  /** Null for a core that was given no job manager. */
+  readonly jobs: JobManager | null;
   health(): Health;
   /**
    * Do a piece of work that a shutdown must wait for. Refused with
@@ -117,8 +122,11 @@ export function createCore(options: CoreOptions = {}): ServerCore {
     };
   }
 
+  const jobs = options.jobs ?? null;
+
   return {
     pacs,
+    jobs,
     health: () => ({
       status: disposal ? 'stopping' : 'ok',
       version: SERVER_VERSION,
@@ -136,10 +144,13 @@ export function createCore(options: CoreOptions = {}): ServerCore {
           onSettled = null;
           const result = { finished: inFlight === 0, abandoned: inFlight };
           if (!result.finished) logger.warn('work-abandoned', { count: result.abandoned });
-          // The index is closed once nothing is using it, or the wait is over.
-          const closed = pacs ? pacs.index.close() : Promise.resolve();
-          void closed
-            .catch((error: unknown) => logger.error('index-close-failed', errorFields(error)))
+          // Workers are stopped, and the index is closed, once nothing is using
+          // them or the wait is over.
+          void (async () => {
+            await jobs?.shutdown();
+            await pacs?.index.close();
+          })()
+            .catch((error: unknown) => logger.error('core-close-failed', errorFields(error)))
             .then(() => resolve(result));
         };
         if (inFlight === 0) return end();

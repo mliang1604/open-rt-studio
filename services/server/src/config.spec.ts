@@ -48,6 +48,7 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS: '0',
       OPEN_RT_STUDIO_DATA_DIR: ' /var/lib/open-rt-studio ',
       OPEN_RT_STUDIO_MAX_UPLOAD_BYTES: '1048576',
+      OPEN_RT_STUDIO_JOB_CONCURRENCY: '4',
     });
     // Port 0 asks the operating system for a free port; it is a valid setting.
     expect(config).toEqual({
@@ -57,6 +58,7 @@ describe('resolveConfig', () => {
       shutdownTimeoutMs: 0,
       dataDir: '/var/lib/open-rt-studio',
       maxUploadBytes: 1_048_576,
+      jobConcurrency: 4,
     });
   });
 
@@ -76,6 +78,10 @@ describe('resolveConfig', () => {
     [
       { maxUploadBytes: 0 },
       'The config file\'s "maxUploadBytes" must be a whole number of bytes, 1 or more.',
+    ],
+    [
+      { jobConcurrency: 0 },
+      'The config file\'s "jobConcurrency" must be a whole number from 1 to 64.',
     ],
   ])('says what is wrong with the PACS settings: %j', (file, message) => {
     expect(() => resolveConfig(file)).toThrow(new ConfigError(message));
@@ -114,7 +120,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes.',
+        'The config file has an unknown setting "prot". Known: host, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency.',
       ),
     );
   });

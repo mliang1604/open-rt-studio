@@ -32,13 +32,13 @@ export interface ApiOptions {
   readonly described?: readonly Route[];
 }
 
-const LIMIT: ParameterDoc = {
+export const LIMIT: ParameterDoc = {
   name: 'limit',
   in: 'query',
   description: `How many items to give, at most ${MAX_LIMIT}. Default ${DEFAULT_LIMIT}.`,
   schema: { type: 'integer', minimum: 0, maximum: MAX_LIMIT, default: DEFAULT_LIMIT },
 };
-const OFFSET: ParameterDoc = {
+export const OFFSET: ParameterDoc = {
   name: 'offset',
   in: 'query',
   description: 'How many items to pass over first.',
@@ -51,8 +51,8 @@ const uidParameter = (name: string, of: string): ParameterDoc => ({
   description: `The ${of}.`,
   schema: { type: 'string', pattern: '^[0-9]+(\\.[0-9]+)*$', maxLength: 64 },
 });
-const NOT_FOUND = { description: 'The server does not have it.', schema: 'Error' } as const;
-const BAD_REQUEST = {
+export const NOT_FOUND = { description: 'The server does not have it.', schema: 'Error' } as const;
+export const BAD_REQUEST = {
   description: 'A parameter is unknown or of the wrong form.',
   schema: 'Error',
 } as const;
@@ -65,7 +65,7 @@ function uidOf(request: RouteRequest, name: string): string {
 }
 
 /** The query's values, by name, once every name is one the route knows. */
-function queryOf(request: RouteRequest, known: readonly ParameterDoc[]) {
+export function queryOf(request: RouteRequest, known: readonly ParameterDoc[]) {
   const names = known.filter((parameter) => parameter.in === 'query').map((p) => p.name);
   for (const name of request.query.keys()) {
     if (!names.includes(name)) {
@@ -80,7 +80,12 @@ function queryOf(request: RouteRequest, known: readonly ParameterDoc[]) {
   return (name: string): string | undefined => request.query.get(name) ?? undefined;
 }
 
-function whole(value: string | undefined, name: string, otherwise: number, most: number): number {
+export function whole(
+  value: string | undefined,
+  name: string,
+  otherwise: number,
+  most: number,
+): number {
   if (value === undefined) return otherwise;
   const number = /^\d+$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(number) || number > most) {
@@ -94,7 +99,7 @@ function whole(value: string | undefined, name: string, otherwise: number, most:
 }
 
 /** Which part of a list is asked for. */
-function pageOf(get: (name: string) => string | undefined): Required<Page> {
+export function pageOf(get: (name: string) => string | undefined): Required<Page> {
   return {
     limit: whole(get('limit'), 'limit', DEFAULT_LIMIT, MAX_LIMIT),
     offset: whole(get('offset'), 'offset', 0, Number.MAX_SAFE_INTEGER),
@@ -129,7 +134,7 @@ async function listOf<T>(
   };
 }
 
-function found<T>(value: T | null): T {
+export function found<T>(value: T | null): T {
   if (value === null) throw new HttpError(404, 'not-found', 'The server does not have it.');
   return value;
 }

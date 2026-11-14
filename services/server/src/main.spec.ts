@@ -27,9 +27,20 @@ interface Running {
 
 const running: ChildProcess[] = [];
 
+// A server without a data directory makes a temporary one for its jobs, and
+// one that is killed cannot clear it up. The servers here are given a place
+// for such things that goes when the specs are done.
+let temporary: string;
+beforeAll(async () => {
+  temporary = await mkdtemp(join(tmpdir(), 'open-rt-studio-main-'));
+});
+afterAll(async () => {
+  await rm(temporary, { recursive: true, force: true, maxRetries: 5 });
+});
+
 function run(environment: Record<string, string>): Running {
   const child = spawn(process.execPath, [MAIN], {
-    env: { PATH: process.env['PATH'], ...environment },
+    env: { PATH: process.env['PATH'], TMPDIR: temporary, ...environment },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   running.push(child);
