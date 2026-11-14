@@ -78,6 +78,14 @@ export interface RegistrationOptions {
   readonly translation?: readonly [number, number, number];
   /** The series of `study` the registration names as the image it moves. Default its CT. */
   readonly movingSeriesIndex?: number;
+  /**
+   * Which instance of the registration series this is, from 1. Default 1. A
+   * second registration of the same images is another instance, with a SOP
+   * Instance UID of its own.
+   */
+  readonly instanceNumber?: number;
+  /** Content Description (0070,0081). Default none. */
+  readonly description?: string;
 }
 
 /** The 4x4 matrix of a translation, row by row, as DICOM writes it. */
@@ -113,9 +121,10 @@ export function syntheticRegistration(options: RegistrationOptions = {}): Synthe
   const fixed = options.fixed ?? SYNTHETIC_STUDY;
   const translation = options.translation ?? ([5, -3, 2] as const);
   const moving = options.movingSeriesIndex ?? CT_SERIES_INDEX;
+  const instance = options.instanceNumber ?? 1;
   const bytes = part10(
     SPATIAL_REGISTRATION_SOP_CLASS,
-    instanceUid(study, REGISTRATION_SERIES_INDEX, 1),
+    instanceUid(study, REGISTRATION_SERIES_INDEX, instance),
     [
       ...identityElements(study),
       el(0x0008, 0x0060, 'CS', text('REG')), // Modality
@@ -133,9 +142,12 @@ export function syntheticRegistration(options: RegistrationOptions = {}): Synthe
       ]),
       el(0x0020, 0x000e, 'UI', uid(seriesUid(study, REGISTRATION_SERIES_INDEX))), // SeriesInstanceUID
       el(0x0020, 0x0011, 'IS', numbers([REGISTRATION_SERIES_INDEX])), // SeriesNumber
-      el(0x0020, 0x0013, 'IS', numbers([1])), // InstanceNumber
+      el(0x0020, 0x0013, 'IS', numbers([instance])), // InstanceNumber
       el(0x0020, 0x0052, 'UI', uid(frameOfReferenceUid(fixed))), // FrameOfReferenceUID
       el(0x0070, 0x0080, 'CS', text('REGISTRATION')), // ContentLabel
+      ...(options.description === undefined
+        ? []
+        : [el(0x0070, 0x0081, 'LO', text(options.description))]), // ContentDescription
       // RegistrationSequence
       sequence(0x0070, 0x0308, [
         registrationItem(frameOfReferenceUid(fixed), translationMatrix([0, 0, 0])),
@@ -144,7 +156,10 @@ export function syntheticRegistration(options: RegistrationOptions = {}): Synthe
     ],
   );
   return {
-    name: `synthetic-registration-s${study.index}.dcm`,
+    name:
+      instance === 1
+        ? `synthetic-registration-s${study.index}.dcm`
+        : `synthetic-registration-s${study.index}-${instance}.dcm`,
     mimeType: 'application/dicom',
     bytes,
   };

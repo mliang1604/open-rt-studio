@@ -13,6 +13,7 @@ import {
   baseLayer,
   findPlacement,
   overlayImageLayer,
+  overlayLayerAwaitingChoice,
   type Layer,
   type SpatialRegistration,
   type StructureSet,
@@ -231,9 +232,10 @@ export interface MergedLoad {
   readonly added: boolean;
   /**
    * Set when the series is in another frame of reference and more than one
-   * registration leads to it: none was chosen, and nothing was added.
+   * registration leads to it: how many. The layer was added, but is not
+   * drawn until the user chooses one of them.
    */
-  readonly why?: 'several-registrations';
+  readonly choices?: number;
 }
 
 /**
@@ -247,8 +249,9 @@ export interface MergedLoad {
  * frame to its own, it is added too, placed by them (#76). Otherwise it's a
  * different study and *replaces* the current load. A series with no frame of
  * reference never matches, so it always replaces — there's nothing to align it
- * against. Between several registrations none is chosen: the series is not
- * added, and `why` says so.
+ * against. Between several registrations none is chosen: the series is added
+ * as a layer that is not drawn until the user chooses one, and `choices` says
+ * how many there are.
  *
  * Pure for unit testing the add-vs-replace rule and the resulting registry.
  */
@@ -263,9 +266,6 @@ export function mergeLoad(
     registrations,
   );
   if (found.kind === 'none') return { result: incoming, added: false };
-  if (found.kind === 'several') {
-    return { result: incoming, added: false, why: 'several-registrations' };
-  }
 
   // Co-sampling an overlay in the base's patient frame maps each pane pixel
   // through both grids' index→patient affines, so both volumes need geometry;
@@ -286,12 +286,16 @@ export function mergeLoad(
     return { result: incoming, added: false };
   }
 
-  const overlay = overlayImageLayer(
-    uniqueLayerId(current.layers, incoming.selectedUid),
-    overlayVolume,
-    found.kind === 'placed' ? found.placement : undefined,
-  );
-  return { result: { ...current, layers: [...current.layers, overlay] }, added: true };
+  const id = uniqueLayerId(current.layers, incoming.selectedUid);
+  const overlay =
+    found.kind === 'several'
+      ? overlayLayerAwaitingChoice(id, overlayVolume, found.placements)
+      : overlayImageLayer(id, overlayVolume, found.kind === 'placed' ? found.placement : undefined);
+  return {
+    result: { ...current, layers: [...current.layers, overlay] },
+    added: true,
+    ...(found.kind === 'several' ? { choices: found.placements.length } : {}),
+  };
 }
 
 /** The series a load currently shows (its base layer's source), or undefined. */

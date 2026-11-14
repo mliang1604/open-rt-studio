@@ -78,6 +78,7 @@ export {
   type PlacementSearch,
   type PlacementStep,
   findPlacement,
+  placementSize,
   pointBetweenLayers,
   registrationsOfPatient,
 } from './layer-placement.js';
@@ -122,6 +123,7 @@ export {
   framesMatch,
   modalityUnit,
   overlayImageLayer,
+  overlayLayerAwaitingChoice,
 } from './types.js';
 export { add, cross, dot, length, normalize, scale, sub } from './vec3.js';
 export { VolumeBuildError, buildVolume, patientToVoxel, voxelToPatient } from './volume.js';

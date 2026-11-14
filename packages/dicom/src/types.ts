@@ -290,6 +290,13 @@ export interface Layer {
    * the base's own frame.
    */
   readonly placement?: LayerPlacement;
+  /**
+   * The placements to choose among, when more than one registration leads
+   * from the base's frame to the layer's. Until one is chosen the layer has
+   * no {@link placement} and is not drawn (`visible` is false): none is
+   * picked for the user.
+   */
+  readonly placementChoices?: readonly LayerPlacement[];
 }
 
 /**
@@ -337,9 +344,23 @@ export function overlayImageLayer(id: string, volume: Volume, placement?: LayerP
 }
 
 /**
+ * An overlay layer for a volume in another frame of reference that more than
+ * one registration could place: it carries the choices and is not drawn until
+ * one of them is chosen ({@link applyLayerOverrides}).
+ */
+export function overlayLayerAwaitingChoice(
+  id: string,
+  volume: Volume,
+  choices: readonly LayerPlacement[],
+): Layer {
+  return { ...overlayImageLayer(id, volume), visible: false, placementChoices: choices };
+}
+
+/**
  * Apply the layers panel's user overrides onto the loaded registry: per-layer
- * visibility, composite opacity, and display transform (grayscale ⇄ colormap),
- * keyed by {@link Layer.id}. Mirrors the structures panel's override maps — the
+ * visibility, composite opacity, display transform (grayscale ⇄ colormap) and,
+ * for a layer with several placements to choose among, the one that was chosen
+ * (by its index), keyed by {@link Layer.id}. Mirrors the structures panel's override maps — the
  * loaded layers stay immutable and the panel layers its edits on top, so a reload
  * starts clean. A layer with no override is returned unchanged (same reference).
  */
@@ -348,17 +369,28 @@ export function applyLayerOverrides(
   hidden: ReadonlySet<string>,
   opacities: ReadonlyMap<string, number>,
   displays: ReadonlyMap<string, LayerDisplay>,
+  chosen: ReadonlyMap<string, number> = new Map(),
 ): Layer[] {
   return layers.map((layer) => {
     const opacity = opacities.get(layer.id);
     const display = displays.get(layer.id);
-    const visible = !hidden.has(layer.id) && layer.visible;
-    if (opacity === undefined && display === undefined && visible === layer.visible) return layer;
+    // A layer that awaits a choice is drawn once it has one, and placed by it.
+    const placement = layer.placementChoices?.[chosen.get(layer.id) ?? -1];
+    const visible = !hidden.has(layer.id) && (layer.visible || placement !== undefined);
+    if (
+      opacity === undefined &&
+      display === undefined &&
+      visible === layer.visible &&
+      placement === undefined
+    ) {
+      return layer;
+    }
     return {
       ...layer,
       visible,
       opacity: opacity ?? layer.opacity,
       display: display ?? layer.display,
+      ...(placement ? { placement } : {}),
     };
   });
 }

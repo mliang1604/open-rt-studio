@@ -6,12 +6,14 @@ import {
   baseImageLayer,
   findPlacement,
   overlayImageLayer,
+  overlayLayerAwaitingChoice,
   type Layer,
   type LayerPlacement,
   type Volume,
 } from '@open-rt-studio/dicom';
 import { registrationObject } from '../registration-testing';
-import { LayersStore, layerLegend, placementText } from './layers-store';
+import { shiftMatrix } from '../registration-testing';
+import { LayersStore, layerLegend, placementChoiceText, placementText } from './layers-store';
 
 function makeVolume(modality: string, windowCenter = 40, windowWidth = 400): Volume {
   return {
@@ -116,6 +118,62 @@ describe('a placement in words', () => {
       overlayImageLayer('placed', makeVolume('CT'), placement),
     ]);
     expect(rows.map((row) => row.placement)).toEqual([null, null, placementText(placement)]);
+  });
+});
+
+describe('a choice among several registrations', () => {
+  const found = findPlacement('planning', 'follow-up', [
+    registrationObject('reg-a', 'follow-up', 'planning', shiftMatrix(3, 0, 4)),
+    registrationObject('reg-b', 'follow-up', 'planning', shiftMatrix(6, 0, 8), {
+      description: 'Second try',
+    }),
+  ]);
+  if (found.kind !== 'several') throw new Error(found.kind);
+  const choices = found.placements;
+  const registry = (): Layer[] => [
+    baseImageLayer('base', makeVolume('CT')),
+    overlayLayerAwaitingChoice('over', makeVolume('MR'), choices),
+  ];
+
+  it('is told apart by name, direction, and how far each moves and turns', () => {
+    expect(choices.map(placementChoiceText)).toEqual([
+      '“REGISTRATION” (written this image → base) · translation 5.0 mm, rotation 0.0°',
+      '“Second try” (written this image → base) · translation 10.0 mm, rotation 0.0°',
+    ]);
+  });
+
+  it('is offered in the legend, with none in use until the user chooses', () => {
+    const store = new LayersStore();
+    const row = () => layerLegend(store.apply(registry()))[1];
+    expect(row()).toMatchObject({
+      visible: false,
+      placement: null,
+      placementChoices: choices.map(placementChoiceText),
+      placementChosen: null,
+    });
+
+    store.choosePlacement('over', 1);
+    expect(row()).toMatchObject({ visible: true, placement: null, placementChosen: 1 });
+    expect(store.apply(registry())[1].placement).toBe(choices[1]);
+
+    // Another can be chosen after, and a number that is no index changes nothing.
+    store.choosePlacement('over', 0);
+    store.choosePlacement('over', Number.NaN);
+    store.choosePlacement('over', -1);
+    expect(row().placementChosen).toBe(0);
+
+    // A new load starts without a choice.
+    store.reset();
+    expect(row()).toMatchObject({ visible: false, placementChosen: null });
+  });
+
+  it('is not offered for a layer one registration places, or none', () => {
+    const rows = layerLegend([
+      baseImageLayer('base', makeVolume('CT')),
+      overlayImageLayer('placed', makeVolume('MR'), choices[0]),
+    ]);
+    expect(rows.map((row) => row.placementChoices)).toEqual([null, null]);
+    expect(rows.map((row) => row.placementChosen)).toEqual([null, null]);
   });
 });
 

@@ -312,3 +312,66 @@ test('Compare shows the registered image in the base’s planes: both columns ar
 
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('between two registrations none is picked: the user chooses, and may choose again', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+  });
+  await requireWebGpu(page);
+
+  const pair = syntheticRegisteredPair();
+  await importFiles(page, [
+    ...pair.planningCt,
+    ...pair.followUpMr,
+    pair.registration,
+    pair.otherRegistration,
+  ]);
+  await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
+  await showCt(page);
+  await fuseChipByDrag(page, await chipOf(page, 'MR'));
+
+  // The MR is listed but not drawn, and the notice says where to choose.
+  await expect(page.locator('.notice')).toHaveText(
+    '2 registrations connect this series to the one on screen. Choose one under Layers to show it.',
+  );
+  const layerPanel = page.locator('.layer-panel');
+  await expect(layerPanel.locator('.layer-item')).toHaveCount(2);
+  await expect(page.locator('.blend-bar')).toHaveCount(0);
+  expect((await probeAt(page, 0.4, 0.5)).mr).toBeNull();
+  const choice = layerPanel.locator('select[data-placement-choice]');
+  // Told apart by name, and by how far each moves the image: the length of its translation.
+  const shift = (translation: readonly number[]): string => Math.hypot(...translation).toFixed(1);
+  await expect(choice.locator('option')).toHaveText([
+    'Choose one of 2…',
+    `“REGISTRATION” (written this image → base) · translation ${shift(PAIR.translation)} mm, rotation 0.0°`,
+    `“${PAIR.otherDescription}” (written this image → base) · translation ${shift(PAIR.otherTranslation)} mm, rotation 0.0°`,
+  ]);
+  await expect(layerPanel.locator('.layer-item input[type="checkbox"]')).toBeDisabled();
+
+  // The second: the MR is drawn, six voxels along x from the CT's voxel of its index.
+  await choice.selectOption({ index: 2 });
+  await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
+  await expect(layerPanel.locator('.layer-item input[type="checkbox"]')).toBeEnabled();
+  // The one in use is also written out in full under the select, which cuts it short.
+  await expect(layerPanel.locator('[data-placement]')).toHaveText(
+    `“${PAIR.otherDescription}” (written this image → base) · translation ${shift(PAIR.otherTranslation)} mm, rotation 0.0°`,
+  );
+  const second = await probeAt(page, 0.6, 0.5);
+  expect(second.mr).toBe(registeredMrValueAtCtVoxel(...second.voxel, PAIR.otherShiftVoxels));
+  expect(second.mr).not.toBeNull();
+  expect(second.mr).not.toBe(registeredMrValueAtCtVoxel(...second.voxel));
+
+  // And then the first after all: the same voxel reads the MR two voxels along.
+  await choice.selectOption({ index: 0 });
+  await expect(choice.locator('option')).toHaveCount(2);
+  const first = await probeAt(page, 0.6, 0.5);
+  expect(first.voxel).toEqual(second.voxel);
+  expect(first.mr).toBe(registeredMrValueAtCtVoxel(...first.voxel));
+  expect(first.mr).not.toBe(second.mr);
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});
