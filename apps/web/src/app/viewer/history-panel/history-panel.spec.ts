@@ -2,7 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { formatStudyDate, nextOpenStudy, seriesCountLabel, studyCountLabel } from './history-panel';
+import {
+  formatStudyDate,
+  nextOpenStudy,
+  patientOptionLabel,
+  seriesCountLabel,
+  studyCountLabel,
+} from './history-panel';
 import { imageCountLabel, modalityGlyph, seriesChipLabel } from './series-chip';
 import type { Series } from '@open-rt-studio/dicom';
 
@@ -63,6 +69,22 @@ describe('studyCountLabel', () => {
     expect(studyCountLabel(1)).toBe('1 study');
     expect(studyCountLabel(3)).toBe('3 studies');
     expect(studyCountLabel(0)).toBe('0 studies');
+  });
+});
+
+describe('patientOptionLabel', () => {
+  const patient = (name: string | null, patientId: string) => ({ key: 'k', name, patientId });
+
+  it('gives the name and the ID when there are both', () => {
+    expect(patientOptionLabel(patient('SYNTHETIC^PHANTOM', 'SYN-0001'))).toBe(
+      'SYNTHETIC^PHANTOM (SYN-0001)',
+    );
+  });
+
+  it('gives whichever there is, and says when there is neither', () => {
+    expect(patientOptionLabel(patient(null, 'SYN-0001'))).toBe('SYN-0001');
+    expect(patientOptionLabel(patient(' SYNTHETIC^PHANTOM ', ''))).toBe('SYNTHETIC^PHANTOM');
+    expect(patientOptionLabel(patient('  ', ' '))).toBe('Unknown patient');
   });
 });
 

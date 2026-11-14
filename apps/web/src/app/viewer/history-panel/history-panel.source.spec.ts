@@ -218,4 +218,66 @@ describe('the history panel on a data source', () => {
     await fixture.whenStable();
     expect(text('.chip-sets')).toEqual([]);
   });
+
+  describe('with a choice of patients', () => {
+    const first = { key: 'k1', patientId: 'SYN-0001', name: 'SYNTHETIC^PHANTOM' };
+    const second = { key: 'k2', patientId: 'SYN-0002', name: 'SYNTHETIC^OTHER' };
+
+    it('names the patient in plain text while there is no one else to turn to', async () => {
+      const { fixture, host, text } = await render(withPatient());
+      expect(text('.history-patient')).toEqual(['SYNTHETIC^PHANTOM']);
+      expect(host.querySelector('select.history-patient-select')).toBeNull();
+      fixture.componentRef.setInput('patients', [first]);
+      await fixture.whenStable();
+      expect(host.querySelector('select.history-patient-select')).toBeNull();
+    });
+
+    it('offers the patients to choose among, on the one the timeline is of', async () => {
+      const { fixture, host } = await render(withPatient());
+      fixture.componentRef.setInput('patients', [first, second]);
+      await fixture.whenStable();
+      const select = host.querySelector<HTMLSelectElement>('select.history-patient-select')!;
+      expect(select.getAttribute('aria-label')).toBe('Patient');
+      expect([...select.options].map((option) => option.textContent.trim())).toEqual([
+        'SYNTHETIC^PHANTOM (SYN-0001)',
+        'SYNTHETIC^OTHER (SYN-0002)',
+      ]);
+      expect(select.value).toBe('k1');
+      // The plain label gives way to it: the patient is named once.
+      expect(host.querySelectorAll('.history-patient')).toHaveLength(1);
+    });
+
+    it('asks for the patient chosen, and stays on its own until the timeline turns', async () => {
+      const source = withPatient();
+      const { fixture, host } = await render(source);
+      fixture.componentRef.setInput('patients', [first, second]);
+      await fixture.whenStable();
+      const asked: string[] = [];
+      fixture.componentInstance.choosePatient.subscribe((key) => asked.push(key));
+      const select = host.querySelector<HTMLSelectElement>('select.history-patient-select')!;
+
+      select.value = 'k2';
+      select.dispatchEvent(new Event('change'));
+      expect(asked).toEqual(['k2']);
+      // The viewer may refuse (it asks first): until the timeline turns, the selector says k1.
+      expect(select.value).toBe('k1');
+
+      // The viewer agreed: the timeline is of the other patient, and so is the selector.
+      source.currentPatient.set({ ...fakePatient(), ...second });
+      await fixture.whenStable();
+      expect(select.value).toBe('k2');
+
+      // Choosing the patient it is on asks for nothing.
+      select.dispatchEvent(new Event('change'));
+      expect(asked).toEqual(['k2']);
+    });
+
+    it('keeps the selector on the bar when the panel is folded', async () => {
+      const { fixture, host, click } = await render(withPatient());
+      fixture.componentRef.setInput('patients', [first, second]);
+      await fixture.whenStable();
+      await click('.history-toggle');
+      expect(host.querySelector('select.history-patient-select')).not.toBeNull();
+    });
+  });
 });

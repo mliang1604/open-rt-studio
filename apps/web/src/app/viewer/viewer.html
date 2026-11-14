@@ -1398,6 +1398,8 @@
 <app-history-panel
   [loadedSeriesUids]="status.loadedSeriesUids()"
   [server]="serverLabel()"
+  [patients]="openPatients()"
   (loadSeries)="loadCtl.loadSeriesFromPanel($event.uid)"
   (openServer)="serverPanelOpen.set(true)"
+  (choosePatient)="loadCtl.switchPatient($event)"
 />

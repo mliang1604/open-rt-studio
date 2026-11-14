@@ -168,6 +168,7 @@ are not regressions. Each has an issue.
 | #155  | Tree view expansion remembered (added since)                                                                                                  | #33          |
 | #156  | Reopening a recent selection without picking the files again (added since, for a folder or a single file in Chromium browsers)                | #34          |
 | #157  | Probe position in patient millimetres (added since)                                                                                           | #21          |
+| #35   | Several patients open at once, with a selector to turn between them (added since: opening another patient's files no longer drops the first)  | #34          |
 
 #148 asked whether captured images and video should carry a
 not-for-clinical-use mark, which #29 left open. Decided on 2026-11-13: no.

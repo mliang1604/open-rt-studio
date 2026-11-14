@@ -131,6 +131,61 @@ describe('LocalFilesSource', () => {
     expect(source.thumbnail('9.9.9')).toEqual({ kind: 'icon', modality: null });
   });
 
+  describe('with files of two patients', () => {
+    const other = { patientId: 'SYN-0002', patientName: 'SYNTHETIC^OTHER', studyUid: '2.1' };
+    beforeEach(() => {
+      source.add([series('1.1.1'), series('2.1.1', other)]);
+    });
+
+    it('lists both, and shows the timeline of the first', () => {
+      expect(source.patients()).toEqual([
+        { key: 'SYN-0001', patientId: 'SYN-0001', name: 'SYNTHETIC^PHANTOM' },
+        { key: 'SYN-0002', patientId: 'SYN-0002', name: 'SYNTHETIC^OTHER' },
+      ]);
+      expect(source.currentPatient()?.key).toBe('SYN-0001');
+      expect(listedSeries(source).map((one) => one.uid)).toEqual(['1.1.1']);
+    });
+
+    it('turns to the other, whose timeline has only what is theirs', () => {
+      source.selectPatient('SYN-0002');
+      expect(source.currentPatient()?.key).toBe('SYN-0002');
+      expect(listedSeries(source).map((one) => one.uid)).toEqual(['2.1.1']);
+      // Both are still open.
+      expect(source.patients()).toHaveLength(2);
+    });
+
+    it('gives a series only of the patient it is on', async () => {
+      expect((await source.fetchSeries('1.1.1')).series.uid).toBe('1.1.1');
+      await expect(source.fetchSeries('2.1.1')).rejects.toThrow(
+        'That series belongs to another of the opened patients.',
+      );
+      source.selectPatient('SYN-0002');
+      expect((await source.fetchSeries('2.1.1')).series.uid).toBe('2.1.1');
+      await expect(source.fetchSeries('1.1.1')).rejects.toThrow('another of the opened patients');
+    });
+
+    it('stays with its patient when more of their files come, with or without another patient', () => {
+      source.selectPatient('SYN-0002');
+      source.add([
+        series('2.1.2', other),
+        series('3.1.1', { patientId: 'SYN-0003', studyUid: '3.1' }),
+      ]);
+      expect(source.currentPatient()?.key).toBe('SYN-0002');
+      expect(source.patients().map((patient) => patient.key)).toEqual([
+        'SYN-0001',
+        'SYN-0002',
+        'SYN-0003',
+      ]);
+    });
+
+    it('refuses to turn to a patient that is not open', () => {
+      expect(() => source.selectPatient('SYN-0009')).toThrow(
+        'That patient is not among the opened files.',
+      );
+      expect(source.currentPatient()?.key).toBe('SYN-0001');
+    });
+  });
+
   it('says with each series how many of the opened structure sets belong to it', () => {
     const count = (uid: string): number =>
       listedSeries(source).find((one) => one.uid === uid)!.structureSets;

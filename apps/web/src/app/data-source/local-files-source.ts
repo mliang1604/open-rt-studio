@@ -74,6 +74,11 @@ export class LocalFilesSource implements DataSource {
     }
     const series = this.catalog.seriesByUid(seriesUid);
     if (!series) return Promise.reject(new Error('That series is not among the opened files.'));
+    // Files of several patients may be open. A series is given only for the
+    // patient the source is on, so that nothing of another reaches a view.
+    if ((series.patientId ?? '') !== this.catalog.currentPatientId()) {
+      return Promise.reject(new Error('That series belongs to another of the opened patients.'));
+    }
     return Promise.resolve({ series, structureSets: this.catalog.structureSets() });
   }
 
@@ -89,9 +94,19 @@ export class LocalFilesSource implements DataSource {
     return Promise.resolve({ kind: 'downloaded' });
   }
 
-  /** Take in series parsed from files, and turn to their patient. */
+  /**
+   * Take in series parsed from files. The source stays with the patient it is
+   * on when the batch holds files of theirs, and otherwise turns to a patient
+   * of the batch, the first by Patient ID; every patient in it is listed, in
+   * that order.
+   */
   add(series: readonly Series[]): void {
     this.catalog.add(series);
+  }
+
+  /** Turn to one of {@link patients}. Throws for a key that is none of theirs. */
+  selectPatient(key: string): void {
+    if (!this.catalog.select(key)) throw new Error('That patient is not among the opened files.');
   }
 
   /** Take in structure sets parsed from files, for the series they belong to. */

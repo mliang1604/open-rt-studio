@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, inject } from '@angular/core';
-import { importKeepsOnePatient, type Series } from '@open-rt-studio/dicom';
+import { importKeepsOnePatient, importLeavesPatient, type Series } from '@open-rt-studio/dicom';
 import { DATA_SOURCE, type FetchedSeries, type FetchOptions } from '../data-source/data-source';
 import { LocalFilesSource } from '../data-source/local-files-source';
 import { VolumeLoader, type LoadResult, type MergedLoad } from '../volume-loader';
@@ -28,8 +28,8 @@ export type LoadOutcome =
   /**
    * A plain file import: the batch was catalogued into the history but not shown —
    * the viewport waits for the user to pick a series (#241). `cleared` is true when
-   * a confirmed patient switch emptied the catalog, so the viewer also unloads the
-   * stale view.
+   * the import turned the viewer to another patient (confirmed), so the viewer
+   * also unloads the stale view. The patient it left stays in the catalog.
    */
   | { readonly kind: 'imported'; readonly cleared: boolean }
   /** A held-modifier drop that can't fuse: restore the prior view and flash `message`. */
@@ -63,7 +63,6 @@ function outcomeForMerged(merged: MergedLoad, intent: 'overlay' | 'compare'): Lo
 export interface CatalogOps {
   readonly add: (series: readonly Series[]) => void;
   readonly addStructureSets: (sets: LoadResult['allStructureSets']) => void;
-  readonly clear: () => void;
 }
 
 /** Everything the file-load policy needs, injected so it can be tested without a GPU. */
@@ -76,7 +75,10 @@ export interface FileLoadDeps {
   /** Confirm a patient switch (injected so the policy never calls `window.confirm`). */
   readonly confirm: () => boolean;
   readonly currentPatientId: string | null;
+  /** Whether the batch is of the current patient and no other: what may be fused. */
   readonly keepsOnePatient: (id: string | null, series: readonly Series[]) => boolean;
+  /** Whether the batch holds nothing of the current patient, so that importing it leaves them. */
+  readonly leavesPatient: (id: string | null, series: readonly Series[]) => boolean;
   readonly merge: (current: LoadResult, incoming: LoadResult) => MergedLoad;
   readonly catalog: CatalogOps;
 }
@@ -86,15 +88,22 @@ export interface FileLoadDeps {
  * catalog as it goes. A held modifier (⌥/⇧) is an explicit fusion request: it
  * forces the overlay path against the current view, applying only to a
  * same-patient, same-frame series — else a graceful reject. A plain load is
- * ingest-only (#241): it runs the one-patient guard — a different patient prompts
- * the injected confirm (clearing the catalog on a switch, or cancelling) — then
- * catalogues the series into the history *without* displaying anything, leaving
- * the user to pick which series to view. A confirmed switch reports `cleared` so
- * the viewer also unloads the now-stale view of the previous patient.
+ * ingest-only (#241): it catalogues the series into the history *without*
+ * displaying anything, leaving the user to pick which series to view.
+ *
+ * The catalog holds every patient opened (#35), and the view is of one. A
+ * batch with files of the patient on screen leaves the viewer with them, and
+ * any other patients in it join the catalog. A batch with nothing of theirs
+ * turns the viewer to another patient. While a series is showing that asks
+ * the injected confirm first, and a refusal imports nothing; with nothing on
+ * screen there is nothing to give up, and nothing is asked. Either way it
+ * reports `cleared`, so that the viewer unloads the view of the patient it
+ * left; they stay in the catalog to be turned back to.
  */
 export function planFileLoad(deps: FileLoadDeps): LoadOutcome {
   const { previous, result, intent, confirm, currentPatientId, keepsOnePatient, merge, catalog } =
     deps;
+  const { leavesPatient } = deps;
 
   if (intent !== 'primary') {
     const samePatient = keepsOnePatient(currentPatientId, result.series);
@@ -105,12 +114,8 @@ export function planFileLoad(deps: FileLoadDeps): LoadOutcome {
     return { kind: 'overlay', result: merged.result, compare: intent === 'compare' };
   }
 
-  let cleared = false;
-  if (!keepsOnePatient(currentPatientId, result.series)) {
-    if (!confirm()) return { kind: 'cancel' };
-    catalog.clear();
-    cleared = true;
-  }
+  const cleared = leavesPatient(currentPatientId, result.series);
+  if (cleared && previous && !confirm()) return { kind: 'cancel' };
   catalog.add(result.series);
   // Retain any RTSTRUCTs from this batch so a later history pick of the image
   // they annotate still shows their contours — the ingest-only import (#241)
@@ -190,11 +195,11 @@ export class LoadCoordinator {
       confirm,
       currentPatientId: this.files.currentPatientId(),
       keepsOnePatient: importKeepsOnePatient,
+      leavesPatient: importLeavesPatient,
       merge: (current, incoming) => this.loader.merge(current, incoming),
       catalog: {
         add: (series) => this.files.add(series),
         addStructureSets: (sets) => this.files.addStructureSets(sets),
-        clear: () => this.files.clear(),
       },
     });
   }

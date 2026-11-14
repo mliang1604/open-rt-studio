@@ -8,6 +8,7 @@ import {
   groupPatients,
   groupStudies,
   importKeepsOnePatient,
+  importLeavesPatient,
   importPatientIds,
   initialImportSeries,
 } from './catalog.js';
@@ -230,6 +231,36 @@ describe('importPatientIds', () => {
 
   it('is empty for no series', () => {
     expect(importPatientIds([])).toEqual([]);
+  });
+});
+
+describe('importLeavesPatient', () => {
+  const p1 = series('s1', { uid: 'a', patientId: 'p1' });
+  const p2 = series('s2', { uid: 'b', patientId: 'p2' });
+
+  it('leaves no one when no patient is on screen', () => {
+    expect(importLeavesPatient(null, [p1])).toBe(false);
+    expect(importLeavesPatient(null, [p1, p2])).toBe(false);
+  });
+
+  it('stays with the patient whose files are in the batch, alone or among others', () => {
+    expect(importLeavesPatient('p1', [p1])).toBe(false);
+    expect(importLeavesPatient('p1', [p2, p1])).toBe(false);
+  });
+
+  it('leaves the patient when nothing in the batch is theirs', () => {
+    expect(importLeavesPatient('p1', [p2])).toBe(true);
+    expect(importLeavesPatient('p3', [p1, p2])).toBe(true);
+  });
+
+  it('takes files without a Patient ID as one patient of their own', () => {
+    const unnamed = series('s3', { uid: 'c', patientId: null });
+    expect(importLeavesPatient('', [unnamed])).toBe(false);
+    expect(importLeavesPatient('p1', [unnamed])).toBe(true);
+  });
+
+  it('leaves no one for an empty batch', () => {
+    expect(importLeavesPatient('p1', [])).toBe(false);
   });
 });
 
