@@ -269,6 +269,46 @@ could not be reached.
 Not there: TLS for DIMSE (with #49), a certificate re-read without a
 restart, client certificates.
 
+## In a container
+
+The repository has an image for the server (`services/server/Dockerfile`)
+and a compose file that runs it (`compose.yaml`). From the repository root:
+
+```sh
+docker compose up --build --detach
+docker compose run --rm server account add <name> --admin   # asks for a password
+curl http://127.0.0.1:4300/health
+```
+
+The second line makes the first account. Until there is one, the server runs
+and no one can log in; its log says `no-accounts`.
+
+- **What is in the image**: the built server, the DICOM package it uses, and
+  the packages those two need to run. No compiler, no tests, no viewer. It
+  runs as a user that is not root, and writes to `/data` and nowhere else
+  (the compose file makes the rest read-only).
+- **What it keeps is in the volume `data`**, at `/data`: instances, the
+  index, accounts and the audit log. Guard and back up the volume like the
+  data it is. `docker compose down --volumes` deletes it.
+- **Reached from this machine only**, as the compose file publishes the
+  port. The server in the container speaks plain HTTP unless it is given a
+  certificate. Before the port is opened to other machines, give it one
+  (mount the files and set `OPEN_RT_STUDIO_TLS_CERT` and `_KEY`; see
+  [HTTPS](#https)) or put a proxy that speaks HTTPS in front.
+- **Settings are environment variables**, as [below](#settings). The compose
+  file passes `OPEN_RT_STUDIO_ALLOWED_ORIGINS` and
+  `OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS` from the shell or an `.env` file, and
+  `OPEN_RT_STUDIO_PUBLISHED_PORT` changes the port on this machine.
+- **Its health** is the server's `health` command (`node dist/main.js
+health`), which asks the server with the same settings, on the same
+  machine, and exits with 0 when it answers. Over HTTPS it does not check
+  the certificate: the question is whether the server answers, not who it is.
+- `scripts/container-check.sh` builds the image, starts it and checks it from
+  outside; CI runs it (the `Container` job). It needs Docker.
+
+Not there yet: the image is not published anywhere, and the compose file has
+no PostgreSQL (#44) and no DICOM port (#49).
+
 ## Settings
 
 Every setting has a default. A JSON file named by `OPEN_RT_STUDIO_CONFIG` can
@@ -418,6 +458,8 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   (`src/host/host.ts`); a route says what it is recorded as (`audit` on the
   route) and whose data it touched (`request.audit(...)`).
 - `src/account-cli.ts`: the `account` command.
+- `src/health-check.ts`: the `health` command, which a container's health
+  check runs.
 - `src/config.ts`: the settings above, typed and checked.
 - `src/logger.ts`: the log.
 - `src/server.ts`: `startServer(config, logger)`, which makes a core, puts the

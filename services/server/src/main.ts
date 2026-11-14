@@ -4,7 +4,8 @@
 
 // The server as a process: configuration from the environment, logs on
 // standard output, and a clean stop on SIGTERM or SIGINT. With `account` as
-// its first argument it is the command that makes and changes accounts.
+// its first argument it is the command that makes and changes accounts; with
+// `health`, the one that asks the running server whether it is well.
 
 import { mkdirSync } from 'node:fs';
 import { userInfo } from 'node:os';
@@ -14,6 +15,7 @@ import { runAccountCommand, terminalPasswords } from './account-cli.js';
 import { openSqliteAccountStore } from './accounts/account-store.js';
 import { createAccounts } from './accounts/accounts.js';
 import { ConfigError, ENVIRONMENT_VARIABLES, loadConfig, type ServerConfig } from './config.js';
+import { askHealth } from './health-check.js';
 import { createLogger, errorFields } from './logger.js';
 import { ACCOUNTS_FILE, openAudit, startServer } from './server.js';
 
@@ -24,6 +26,12 @@ try {
   if (!(error instanceof ConfigError)) throw error;
   process.stderr.write(`${error.message}\n`);
   process.exit(2);
+}
+
+if (process.argv[2] === 'health') {
+  // For a container runtime or a supervisor: 0 when the server with this
+  // configuration answers on this machine, 1 when it does not.
+  process.exit((await askHealth(config)) ? 0 : 1);
 }
 
 if (process.argv[2] === 'account') {

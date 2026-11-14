@@ -148,3 +148,18 @@ jobs:
             apps/web/playwright-report/
           retention-days: 7
           if-no-files-found: ignore
+
+  # The server's container image: built, started as compose.yaml starts it,
+  # and checked from outside (healthy, closed without a login, open to an
+  # account made by its command, not root, data kept, a clean stop). Not a
+  # required check. Nothing is published: the image stays on the runner.
+  container:
+    name: Container
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build, run and check the container
+        run: scripts/container-check.sh
