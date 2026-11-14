@@ -7,10 +7,12 @@
 
 import {
   parseFileAsync,
+  parseSpatialRegistration,
   parseStructureSet,
   readInstanceHeader,
   type InstanceHeader,
   type Slice,
+  type SpatialRegistration,
   type StructureSet,
 } from '@open-rt-studio/dicom';
 import type { SyntheticFile } from '@open-rt-studio/testdata';
@@ -22,14 +24,17 @@ import type { AuditEntry } from './server-source';
 export async function parseHere(files: readonly File[]): Promise<ParsedFiles> {
   const slices: Slice[] = [];
   const structureSets: StructureSet[] = [];
+  const registrations: SpatialRegistration[] = [];
   for (const file of files) {
     const buffer = await file.arrayBuffer();
     const parsed = await parseFileAsync(file.name, buffer);
     slices.push(...parsed);
     const set = parsed.length === 0 ? parseStructureSet(file.name, buffer) : null;
     if (set) structureSets.push(set);
+    const registration = parsed.length === 0 && !set ? parseSpatialRegistration(buffer) : null;
+    if (registration) registrations.push(registration);
   }
-  return { slices, structureSets, registrations: [], skipped: [] };
+  return { slices, structureSets, registrations, skipped: [] };
 }
 
 interface Held {
@@ -351,6 +356,18 @@ export function fakeServer(
         );
       };
 
+      // The registrations that name the series, or the frame of reference it is in.
+      const registrationsOf = (uid: string): Held[] => {
+        const frame = seriesOf(uid)[0]?.header.series.frameOfReferenceUid ?? null;
+        return held.filter((one) =>
+          one.header.references.some(
+            (reference) =>
+              (reference.relation === 'registration.series' && reference.targetUid === uid) ||
+              (reference.relation === 'registration.frame' && reference.targetUid === frame),
+          ),
+        );
+      };
+
       // A number for each patient, in the order their files came.
       const patientIds = [...new Set(held.map((one) => one.header.patient.id))];
       const keyOf = (one: Held): number => patientIds.indexOf(one.header.patient.id) + 1;
@@ -460,7 +477,10 @@ export function fakeServer(
       }
       if ((match = /^\/series\/([\d.]+)\/related$/.exec(path))) {
         if (seriesOf(match[1]).length === 0) return missing();
-        return json({ structureSets: structureSetsOf(match[1]).map(instance) });
+        return json({
+          structureSets: structureSetsOf(match[1]).map(instance),
+          registrations: registrationsOf(match[1]).map(instance),
+        });
       }
       if ((match = /^\/instances\/([\d.]+)\/file$/.exec(path))) {
         const found = held.find((one) => one.header.sopInstanceUid === match![1]);

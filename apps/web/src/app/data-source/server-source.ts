@@ -713,14 +713,16 @@ export class ServerSource implements DataSource {
       if (options.signal?.aborted) throw new DOMException('The fetch was abandoned.', 'AbortError');
       const [instances, related] = await Promise.all([
         this.all<ServerInstance>(`/series/${seriesUid}/instances`, stop.signal),
-        this.json<{ structureSets: readonly ServerInstance[] }>(
-          `/series/${seriesUid}/related`,
-          stop.signal,
-        ),
+        this.json<{
+          structureSets: readonly ServerInstance[];
+          registrations: readonly ServerInstance[];
+        }>(`/series/${seriesUid}/related`, stop.signal),
       ]);
       // The structure sets that refer to the series come with it, as they
-      // would lie beside it in a folder.
-      const wanted = [...instances, ...related.structureSets];
+      // would lie beside it in a folder. So do the registrations that name
+      // the series or its frame of reference: what may place it over a
+      // series of another frame, or one of another frame over it (#228).
+      const wanted = [...instances, ...related.structureSets, ...related.registrations];
       const files = new Array<File>(wanted.length);
       let arrived = 0;
       options.onProgress?.(0, wanted.length);
@@ -748,8 +750,11 @@ export class ServerSource implements DataSource {
           unreadable ? `${unreadable.reason}.` : 'No DICOM image slices were found in that series.',
         );
       }
-      // The server does not give registrations with a series yet (#228).
-      return { series, structureSets: parsed.structureSets, registrations: [] };
+      return {
+        series,
+        structureSets: parsed.structureSets,
+        registrations: parsed.registrations,
+      };
     } catch (error) {
       // Aborted by the caller: say so in the way a caller looks for.
       if (options.signal?.aborted && !isAbortError(error)) {
