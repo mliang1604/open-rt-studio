@@ -909,7 +909,12 @@
       />
     }
     @if (showEmptyState()) {
-      <app-empty-state [busy]="loadCtl.demoLoading()" (loadDemo)="loadCtl.loadDemo()" />
+      <app-empty-state
+        [busy]="loadCtl.demoLoading()"
+        [server]="serverLabel()"
+        (loadDemo)="loadCtl.loadDemo()"
+        (openServer)="serverPanelOpen.set(true)"
+      />
     }
     <canvas
       #canvas
@@ -1367,6 +1372,14 @@
     @if (loadCtl.importReport(); as report) {
       <app-import-report [report]="report" (dismissed)="loadCtl.dismissImportReport()" />
     }
+
+    @if (serverPanelOpen()) {
+      <app-server-panel
+        (use)="loadCtl.useSource($event)"
+        (leavePatient)="loadCtl.leavePatient()"
+        (closed)="serverPanelOpen.set(false)"
+      />
+    }
   </main>
 </div>
 
@@ -1374,5 +1387,7 @@
      imported. Highlights the currently-loaded series' chip (read-only; #173). -->
 <app-history-panel
   [loadedSeriesUids]="status.loadedSeriesUids()"
+  [server]="serverLabel()"
   (loadSeries)="loadCtl.loadSeriesFromPanel($event.uid)"
+  (openServer)="serverPanelOpen.set(true)"
 />

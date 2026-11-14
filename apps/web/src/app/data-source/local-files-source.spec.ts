@@ -46,8 +46,9 @@ describe('LocalFilesSource', () => {
     source = TestBed.inject(LocalFilesSource);
   });
 
-  it('is the data source the viewer reads from unless another is provided', () => {
-    expect(TestBed.inject(DATA_SOURCE)).toBe(source);
+  it('is what the viewer reads from until another source is put in use', () => {
+    source.add([series('1.1.1')]);
+    expect(TestBed.inject(DATA_SOURCE).currentPatient()?.key).toBe('SYN-0001');
   });
 
   it('lists nothing before anything was opened', () => {

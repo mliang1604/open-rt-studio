@@ -677,7 +677,29 @@ describe('radiotherapy relationships', () => {
     });
   });
 
-  it('finds only the registration for the follow-up CT, and nothing radiotherapy for the MR', async () => {
+  it('finds a structure set that names only the frame of reference, for every series in that frame', async () => {
+    // Some systems, and the thorax phantom, write the frame and no series.
+    const byFrame = entry(PLANNING, 'RTSTRUCT', 11, 1, {
+      frame: false,
+      references: [{ relation: 'structure-set.frame', targetUid: RT.planningFrame }],
+    });
+    const index = await memory([
+      ...[1, 2].map((n) => entry(PLANNING, 'CT', SERIES.CT, n)),
+      entry(PLANNING, 'MR', SERIES.MR, 1),
+      entry(FOLLOW_UP, 'CT', SERIES.CT, 1),
+      byFrame,
+    ]);
+    for (const series of [RT.ct, RT.mr]) {
+      const related = (await index.relatedToSeries(series))!;
+      expect(related.structureSets.map((one) => one.sopInstanceUid)).toEqual([
+        byFrame.instance.uid,
+      ]);
+    }
+    // Another frame: not its structure set.
+    expect((await index.relatedToSeries(RT.followUpCt))!.structureSets).toEqual([]);
+  });
+
+  it('finds only the registration for the follow-up CT, and the planning objects for the MR in their frame', async () => {
     const index = await memory(syntheticRtDataset());
     expect(await index.relatedToSeries(RT.followUpCt)).toEqual({
       structureSets: [],
@@ -686,11 +708,13 @@ describe('radiotherapy relationships', () => {
       registrations: [expect.objectContaining({ sopInstanceUid: RT.registration })],
       sameFrame: [],
     });
-    // The MR shares the planning frame, which the registration connects.
+    // The MR shares the planning frame, which the registration connects. The
+    // structure set names that frame, so it is the MR's too, once, and with it
+    // the plan and the dose.
     const mr = (await index.relatedToSeries(RT.mr))!;
-    expect(mr.structureSets).toEqual([]);
-    expect(mr.plans).toEqual([]);
-    expect(mr.doses).toEqual([]);
+    expect(mr.structureSets.map((one) => one.sopInstanceUid)).toEqual([RT.structureSet]);
+    expect(mr.plans.map((one) => one.sopInstanceUid)).toEqual([RT.plan]);
+    expect(mr.doses.map((one) => one.sopInstanceUid)).toEqual([RT.dose]);
     expect(mr.registrations.map((one) => one.sopInstanceUid)).toEqual([RT.registration]);
     expect(mr.sameFrame.map((series) => series.modality)).toEqual(['CT', 'RTDOSE']);
   });

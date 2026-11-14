@@ -22,6 +22,7 @@ const SAMPLE: ViewPreferences = {
   historyView: 'tree',
   lastOpenedStudyUid: '1.2.840.113619.2.55.3.123',
   historyPatientExpanded: false,
+  serverAddress: 'http://127.0.0.1:4300',
 };
 
 describe('serializePreferences / parsePreferences', () => {
@@ -62,6 +63,17 @@ describe('serializePreferences / parsePreferences', () => {
     // The rest of what was stored is kept: the schema version did not change.
     expect(restored.historyView).toBe('tree');
     expect(restored.windowWidth).toBe(400);
+  });
+
+  it('remembers the server address, and has none in a blob written before there was one', () => {
+    expect(parsePreferences(serializePreferences(SAMPLE)).serverAddress).toBe(
+      'http://127.0.0.1:4300',
+    );
+    const older = JSON.parse(serializePreferences(SAMPLE)) as Record<string, unknown>;
+    delete older['serverAddress'];
+    expect(parsePreferences(JSON.stringify(older)).serverAddress).toBeNull();
+    older['serverAddress'] = 4300;
+    expect(parsePreferences(JSON.stringify(older)).serverAddress).toBeNull();
   });
 });
 

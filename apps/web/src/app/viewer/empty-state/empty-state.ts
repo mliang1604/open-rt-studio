@@ -20,4 +20,8 @@ export class EmptyState {
   readonly busy = input(false);
   /** The user asked for the synthetic demo patient. */
   readonly loadDemo = output<void>();
+  /** What to call the server the viewer is connected to; null when it reads opened files. */
+  readonly server = input<string | null>(null);
+  /** Asks for the card where a server is connected to and its patients are chosen. */
+  readonly openServer = output<void>();
 }

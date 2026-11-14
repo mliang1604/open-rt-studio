@@ -49,6 +49,7 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_DATA_DIR: ' /var/lib/open-rt-studio ',
       OPEN_RT_STUDIO_MAX_UPLOAD_BYTES: '1048576',
       OPEN_RT_STUDIO_JOB_CONCURRENCY: '4',
+      OPEN_RT_STUDIO_ALLOWED_ORIGINS: 'http://localhost:4200, https://Example.org',
     });
     // Port 0 asks the operating system for a free port; it is a valid setting.
     expect(config).toEqual({
@@ -59,6 +60,7 @@ describe('resolveConfig', () => {
       dataDir: '/var/lib/open-rt-studio',
       maxUploadBytes: 1_048_576,
       jobConcurrency: 4,
+      allowedOrigins: ['http://localhost:4200', 'https://example.org'],
     });
   });
 
@@ -85,6 +87,41 @@ describe('resolveConfig', () => {
     ],
   ])('says what is wrong with the PACS settings: %j', (file, message) => {
     expect(() => resolveConfig(file)).toThrow(new ConfigError(message));
+  });
+
+  it('allows no origin unless told to, and takes a list from the file or the environment', () => {
+    expect(DEFAULT_CONFIG.allowedOrigins).toEqual([]);
+    expect(
+      resolveConfig({ allowedOrigins: ['http://localhost:4200', 'http://localhost:4200'] })
+        .allowedOrigins,
+    ).toEqual(['http://localhost:4200']);
+    expect(resolveConfig({ allowedOrigins: [] }).allowedOrigins).toEqual([]);
+    // The environment wins, and a stray comma is no origin.
+    expect(
+      resolveConfig(
+        { allowedOrigins: ['http://localhost:4200'] },
+        { OPEN_RT_STUDIO_ALLOWED_ORIGINS: 'https://example.org:8443,' },
+      ).allowedOrigins,
+    ).toEqual(['https://example.org:8443']);
+  });
+
+  // Until there is a login, a page that may call the server may read all of it.
+  it.each([
+    ['any origin', ['*']],
+    ['a pattern', ['https://*.example.org']],
+    ['an address with a path', ['https://example.org/app']],
+    ['an address with a trailing slash', ['https://example.org/']],
+    ['a host without a scheme', ['localhost:4200']],
+    ['another scheme', ['file:///home']],
+    ['the word null', ['null']],
+    ['something that is not text', [4200]],
+    ['something that is not a list', { origin: 'https://example.org' }],
+  ])('refuses %s as an allowed origin', (_what, allowedOrigins) => {
+    expect(() => resolveConfig({ allowedOrigins })).toThrow(
+      new ConfigError(
+        'The config file\'s "allowedOrigins" must be a list of web origins such as "http://localhost:4200": a scheme, a host and perhaps a port, and nothing more.',
+      ),
+    );
   });
 
   it('treats an empty environment variable as not set', () => {
@@ -120,7 +157,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency.',
+        'The config file has an unknown setting "prot". Known: host, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins.',
       ),
     );
   });

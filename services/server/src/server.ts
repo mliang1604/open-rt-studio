@@ -94,6 +94,10 @@ export async function startServer(
     }),
   ];
   const host = createHost(core, { ...config, logger, routes });
+  if (config.allowedOrigins.length > 0) {
+    // Pages of these origins can read everything, until there is a login (#55).
+    logger.warn('origins-allowed', { count: config.allowedOrigins.length });
+  }
   let address: HostAddress;
   try {
     address = await host.listen();

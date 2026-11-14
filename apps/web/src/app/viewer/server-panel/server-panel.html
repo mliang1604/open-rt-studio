@@ -1,0 +1,71 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<div class="server-head">
+  <h2 id="server-panel-title">Server</h2>
+  <button type="button" (click)="closed.emit()" title="Close this card">Close</button>
+</div>
+
+@if (server(); as connected) {
+  <p class="server-state" role="status">Connected: {{ connected.label }}.</p>
+  <div class="server-actions">
+    <button type="button" (click)="onRefresh()" [disabled]="busy()">Refresh</button>
+    <button
+      type="button"
+      (click)="onDisconnect()"
+      title="Go back to opened files. The viewport is emptied"
+    >
+      Disconnect
+    </button>
+  </div>
+
+  @if (connected.patients().length === 0) {
+    <p class="server-note">The server holds no patients.</p>
+  } @else {
+    <ul class="server-patients" aria-label="Patients on the server">
+      @for (patient of connected.patients(); track patient.key) {
+        <li>
+          <button
+            type="button"
+            class="server-patient"
+            [class.active]="patient.key === chosenKey()"
+            [attr.aria-current]="patient.key === chosenKey() ? 'true' : null"
+            [disabled]="busy()"
+            (click)="onPatient(patient.key)"
+          >
+            <span class="server-patient-name">{{ patient.name || 'No name' }}</span>
+            <span class="server-patient-id">{{ patient.patientId || 'No ID' }}</span>
+            <span class="server-patient-count">{{ studiesLabel(patient.studies) }}</span>
+          </button>
+        </li>
+      }
+    </ul>
+    @if (connected.morePatients()) {
+      <p class="server-note">Only the first {{ listedAtMost }} patients by name are listed.</p>
+    }
+  }
+} @else {
+  <form (submit)="onConnect($event)">
+    <label for="server-address">Address of an Open RT Studio server</label>
+    <div class="server-row">
+      <input
+        id="server-address"
+        type="text"
+        inputmode="url"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="address()"
+        (input)="onAddress($event)"
+      />
+      <button type="submit" [disabled]="busy()">{{ busy() ? 'Connecting…' : 'Connect' }}</button>
+    </div>
+  </form>
+  <p class="server-note">
+    Nothing is contacted until you connect. Files you open stay on this computer either way.
+  </p>
+}
+
+@if (problem(); as message) {
+  <p class="server-problem" role="alert">{{ message }}</p>
+}

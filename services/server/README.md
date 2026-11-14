@@ -37,15 +37,16 @@ set them, and an environment variable wins over the file. A wrong or misspelt
 setting stops the server from starting, with a message that names it (exit
 code 2).
 
-| Setting             | Environment variable                 | Default     | Meaning                                                                                                                  |
-| ------------------- | ------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `host`              | `OPEN_RT_STUDIO_HOST`                | `127.0.0.1` | Address to listen on                                                                                                     |
-| `port`              | `OPEN_RT_STUDIO_PORT`                | `4300`      | Port to listen on; `0` takes a free one, which the log then names                                                        |
-| `logLevel`          | `OPEN_RT_STUDIO_LOG_LEVEL`           | `info`      | `debug`, `info`, `warn`, `error` or `silent`                                                                             |
-| `shutdownTimeoutMs` | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS` | `10000`     | How long a stop waits for requests, and then for the core's work                                                         |
-| `dataDir`           | `OPEN_RT_STUDIO_DATA_DIR`            | none        | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops |
-| `maxUploadBytes`    | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`    | `536870912` | The largest instance an upload may hold                                                                                  |
-| `jobConcurrency`    | `OPEN_RT_STUDIO_JOB_CONCURRENCY`     | `1`         | How many jobs run at once; the rest wait their turn                                                                      |
+| Setting             | Environment variable                 | Default     | Meaning                                                                                                                                                                              |
+| ------------------- | ------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `host`              | `OPEN_RT_STUDIO_HOST`                | `127.0.0.1` | Address to listen on                                                                                                                                                                 |
+| `port`              | `OPEN_RT_STUDIO_PORT`                | `4300`      | Port to listen on; `0` takes a free one, which the log then names                                                                                                                    |
+| `logLevel`          | `OPEN_RT_STUDIO_LOG_LEVEL`           | `info`      | `debug`, `info`, `warn`, `error` or `silent`                                                                                                                                         |
+| `shutdownTimeoutMs` | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS` | `10000`     | How long a stop waits for requests, and then for the core's work                                                                                                                     |
+| `dataDir`           | `OPEN_RT_STUDIO_DATA_DIR`            | none        | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops                                                             |
+| `maxUploadBytes`    | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`    | `536870912` | The largest instance an upload may hold                                                                                                                                              |
+| `jobConcurrency`    | `OPEN_RT_STUDIO_JOB_CONCURRENCY`     | `1`         | How many jobs run at once; the rest wait their turn                                                                                                                                  |
+| `allowedOrigins`    | `OPEN_RT_STUDIO_ALLOWED_ORIGINS`     | none        | The web origins whose pages may use the server from a browser, such as `http://localhost:4200`. A list in the file; separated by commas in the environment. No patterns and no "any" |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -110,8 +111,23 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   pointing a name of its own at 127.0.0.1.
 - The API is **not DICOMweb**; see docs/architecture.md for why, and what
   would change that. Other systems are to talk to the server by DIMSE.
-- A browser page on another origin cannot call the API yet: no CORS headers
-  are sent. That comes with the client that needs it (#47).
+- **A web page uses the server only if its origin was allowed.** A browser
+  names the page a request comes from (`Origin`). A request that names an
+  origin other than the server's own is refused (403 `forbidden-origin`)
+  before any route runs, unless the origin is in `allowedOrigins`; then it is
+  answered with the headers that let the page read the answer. A caller that
+  names no origin is not a page (curl, a script, the desktop application) and
+  is answered as before. There is no "any origin": until there is a login
+  (#55), a page that may call the server may read everything in it, so each
+  origin is listed by name, and the server warns at start when any is.
+
+  To use the server from the web application in development:
+
+  ```sh
+  OPEN_RT_STUDIO_ALLOWED_ORIGINS=http://localhost:4200 npm start -w @open-rt-studio/server
+  ```
+
+  then, in the viewer, "Connect to a server…" and the server's address.
 
 ## Layout
 
@@ -288,8 +304,9 @@ be in the index: objects arrive in any order, and some never arrive.
 | `registration.series`  | registration | a series it connects                    |
 
 `relatedToSeries(uid)` answers the question the viewer asks of an image
-series: its structure sets, the plans on those, the doses for those plans or
-structure sets, the registrations that connect it or its frame, and the other
+series: its structure sets (those that name the series, and those that name
+the frame of reference it is in, as some name nothing else), the plans on
+those, the doses for those plans or structure sets, the registrations that connect it or its frame, and the other
 series that say they are in its frame (images and doses, and also a plan or a
 registration that names the frame; pick by modality). `referencesFrom` and `referencesTo` follow one relation
 in either direction.

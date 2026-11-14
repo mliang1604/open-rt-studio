@@ -123,7 +123,13 @@ also builds on its own to `dist/` for consumers outside the workspace.
   `DataSource` in `apps/web/src/app/data-source`. The timeline, the status
   line and the load path read the injected `DATA_SOURCE` and do not know
   whether it is files the user opened (`LocalFilesSource`, the default) or a
-  server (#47). A source **lists as signals** (its patients; the current
+  server (`ServerSource`, #47). `DATA_SOURCE` is the `ActiveDataSource`, which
+  passes everything on to the source in use; changing the source empties the
+  viewport, and opening files goes back to the files. A series from the
+  server arrives as its stored DICOM files, a few at a time, and goes through
+  the same worker-pool parser as opened files, so from there on nothing
+  differs: an end-to-end test loads one series both ways against the real
+  server and compares the two pixel for pixel. A source **lists as signals** (its patients; the current
   patient with studies and series) and **fetches as promises** (a series
   ready to build into a volume, a preview, a save). The list is on screen all
   the time, so it is state; with signals the local source stays synchronous
@@ -178,6 +184,15 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
 - A server listening on a loopback address refuses requests whose `Host`
   header is another name, so that a web page cannot reach the PACS through
   the user's browser by DNS rebinding.
+- **Web pages are let in by origin, by name** (#47). A request that carries
+  an `Origin` other than the server's own is refused before any route runs,
+  unless that origin is in `allowedOrigins` (none by default; no wildcard).
+  That is the CORS policy and also what stops a page elsewhere from making
+  the server do something through a plain form or image request. Without a
+  login (#55) an allowed page can read everything, so the list is short and
+  explicit. A server that listens beyond this machine cannot know its own
+  names, so there the `Host` check does not apply; that case waits for
+  accounts.
 - The file store (#42) names an instance's files by the SHA-256 of its SOP
   Instance UID, so that paths hold no patient identifier and not the UID
   either. It keeps the bytes as an ordinary DICOM file beside a small record

@@ -59,6 +59,11 @@ export interface ViewPreferences {
    * study is open under it is {@link lastOpenedStudyUid}, shared with the timeline.
    */
   readonly historyPatientExpanded: boolean;
+  /**
+   * The address of the server last connected to, to offer it again; null when
+   * there was none. Only the address: nothing is connected to by itself.
+   */
+  readonly serverAddress: string | null;
 }
 
 /** The preferences applied when nothing valid is stored. */
@@ -73,6 +78,7 @@ export const DEFAULT_PREFERENCES: ViewPreferences = {
   historyView: 'timeline',
   lastOpenedStudyUid: null,
   historyPatientExpanded: true,
+  serverAddress: null,
 };
 
 /**
@@ -150,6 +156,10 @@ export function parsePreferences(raw: string | null): ViewPreferences {
       typeof obj['historyPatientExpanded'] === 'boolean'
         ? obj['historyPatientExpanded']
         : DEFAULT_PREFERENCES.historyPatientExpanded,
+    serverAddress:
+      typeof obj['serverAddress'] === 'string'
+        ? obj['serverAddress']
+        : DEFAULT_PREFERENCES.serverAddress,
   };
 }
 
@@ -165,7 +175,8 @@ function samePreferences(a: ViewPreferences, b: ViewPreferences): boolean {
     a.historyCollapsed === b.historyCollapsed &&
     a.historyView === b.historyView &&
     a.lastOpenedStudyUid === b.lastOpenedStudyUid &&
-    a.historyPatientExpanded === b.historyPatientExpanded
+    a.historyPatientExpanded === b.historyPatientExpanded &&
+    a.serverAddress === b.serverAddress
   );
 }
 

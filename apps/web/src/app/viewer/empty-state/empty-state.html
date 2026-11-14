@@ -6,6 +6,12 @@
 <p>
   Use <strong>Open folder…</strong> or <strong>Open files…</strong> above, or drop DICOM files here.
   Files are read in this browser and are not uploaded.
+  <!-- A line of text and not a second button: a taller or wider block runs
+       into the pane tags behind it. -->
+  <br />
+  <button type="button" class="server" (click)="openServer.emit()">
+    {{ server() ? 'Choose a patient on the server…' : 'Connect to a server…' }}
+  </button>
 </p>
 <button type="button" class="demo" (click)="loadDemo.emit()" [disabled]="busy()">
   {{ busy() ? 'Generating…' : 'Load the synthetic demo patient' }}

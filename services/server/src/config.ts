@@ -29,6 +29,13 @@ export interface ServerConfig {
   readonly maxUploadBytes: number;
   /** How many jobs run at once; the rest wait their turn. */
   readonly jobConcurrency: number;
+  /**
+   * The web origins, other than the server's own, whose pages may use the
+   * server from a browser: `https://example.org`, `http://localhost:4200`.
+   * None by default. There is no "any origin": until there is a login (#55),
+   * a page that may call the server may read everything in it.
+   */
+  readonly allowedOrigins: readonly string[];
 }
 
 export const DEFAULT_CONFIG: ServerConfig = {
@@ -39,6 +46,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   dataDir: null,
   maxUploadBytes: 512 * 1024 * 1024,
   jobConcurrency: 1,
+  allowedOrigins: [],
 };
 
 /** The environment variable naming a JSON config file. */
@@ -53,6 +61,7 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   dataDir: 'OPEN_RT_STUDIO_DATA_DIR',
   maxUploadBytes: 'OPEN_RT_STUDIO_MAX_UPLOAD_BYTES',
   jobConcurrency: 'OPEN_RT_STUDIO_JOB_CONCURRENCY',
+  allowedOrigins: 'OPEN_RT_STUDIO_ALLOWED_ORIGINS',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -96,7 +105,40 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 64
         ? { value }
         : { wrong: 'must be a whole number from 1 to 64' },
+    allowedOrigins: (value) => {
+      // The environment gives one text, with commas between the origins.
+      const given = typeof value === 'string' ? value.split(',') : value;
+      const wrong = {
+        wrong:
+          'must be a list of web origins such as "http://localhost:4200": a scheme, a host and perhaps a port, and nothing more',
+      };
+      if (!Array.isArray(given)) return wrong;
+      const origins: string[] = [];
+      for (const one of given as unknown[]) {
+        if (typeof one !== 'string') return wrong;
+        const origin = one.trim().toLowerCase();
+        if (origin === '') continue;
+        if (!isOrigin(origin)) return wrong;
+        if (!origins.includes(origin)) origins.push(origin);
+      }
+      return { value: origins };
+    },
   };
+
+/** Whether a text is a web origin as a browser writes one in an `Origin` header. */
+function isOrigin(text: string): boolean {
+  try {
+    const url = new URL(text);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.origin === text &&
+      // A name or an address, and no pattern: an origin is matched whole.
+      /^([a-z0-9.-]+|\[[0-9a-f:]+\])$/.test(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** The keys that are numbers, which the environment gives as text. */
 const NUMERIC: ReadonlySet<keyof ServerConfig> = new Set([

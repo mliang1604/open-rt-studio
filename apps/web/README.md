@@ -29,6 +29,10 @@ drives the application in Chromium. Useful variations:
   GPU-dependent tests skip
 - `npm run e2e:smoke` to run only `e2e/smoke.spec.ts`, the tests CI requires
   before a merge
+- `e2e/server.spec.ts` loads from a real server. Its fixture
+  (`e2e/fixtures/server.ts`) builds `services/server` and starts it on a free
+  port, in memory, allowing the page's origin; nothing has to be started by
+  hand.
 
 Test inputs come from `@open-rt-studio/testdata` and exist only in memory;
 `e2e/fixtures/files.ts` turns them into file-input payloads.
@@ -82,9 +86,14 @@ Loading:
 - `data-source/`: where patient data comes from. `data-source.ts` is the
   interface (`DataSource`) and the `DATA_SOURCE` token the timeline, the
   status line and the load path inject. `local-files-source.ts` is the
-  source for opened files, and the default. `testing.ts` has a fake for
-  specs; provide it as `DATA_SOURCE` to drive the timeline or the load path
-  without a file. A new consumer of patient data injects `DATA_SOURCE`, not
+  source for opened files, and the default. `server-source.ts` is the source
+  for an Open RT Studio server: it lists patients and studies from the
+  server's API, downloads a series' files a few at a time with progress and
+  cancellation, and hands them to the worker-pool parser.
+  `active-data-source.ts` is what `DATA_SOURCE` provides: it passes on to
+  whichever of the two is in use. `testing.ts` has a fake source for specs
+  (provide it as `DATA_SOURCE` to drive the timeline or the load path without
+  a file) and `server-testing.ts` a stand-in for the server's API. A new consumer of patient data injects `DATA_SOURCE`, not
   the catalog.
 - `patient-catalog.ts`, `recent-store.ts`: the catalog of everything imported
   in this session (what the local source holds), and the list of recent
@@ -118,6 +127,11 @@ Viewer (`src/app/viewer`):
   is in the list at the top of `capture-overlays.ts`.
 - `history-panel/`: the patient timeline and tree with series chips. It
   shows what the data source lists and asks the source for each preview.
+- `server-panel/`: the card for connecting to a server and choosing one of
+  its patients. It is opened from the empty state or from the history bar,
+  not from the toolbar, which has no room left at 1280 pixels. Nothing is
+  contacted until Connect is pressed; the address is remembered, and is not
+  connected to by itself.
 - `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
   the data source and then built. A fetch that takes time shows progress, and
   is abandoned by a later pick, by Cancel or by an import.

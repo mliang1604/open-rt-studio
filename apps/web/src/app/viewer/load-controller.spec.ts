@@ -7,6 +7,7 @@ import { TestBed } from '@angular/core/testing';
 import { baseImageLayer, Orientation, type Series, type Volume } from '@open-rt-studio/dicom';
 import { NO_OBLIQUE, type SliceRenderer } from '@open-rt-studio/render';
 
+import { ActiveDataSource } from '../data-source/active-data-source';
 import { DATA_SOURCE } from '../data-source/data-source';
 import { FakeDataSource, fakePatient } from '../data-source/testing';
 import { mergeLoad, VolumeLoader, type FileImport, type LoadResult } from '../volume-loader';
@@ -68,24 +69,13 @@ interface Made {
   readonly imports: ((imported: FileImport) => void)[];
 }
 
-function setup(): Made {
-  const source = new FakeDataSource();
-  source.currentPatient.set(fakePatient());
-  const imports: ((imported: FileImport) => void)[] = [];
-  const loader: Partial<VolumeLoader> = {
-    loadSeries: (series) => built(series),
-    merge: mergeLoad,
-    importFiles: () => new Promise<FileImport>((resolve) => imports.push(resolve)),
-  };
-  TestBed.configureTestingModule({
-    providers: [
-      { provide: DATA_SOURCE, useValue: source },
-      { provide: VolumeLoader, useValue: loader },
-      ...[LoadController, LoadCoordinator, LayersController, LayersStore, CompareStore],
-      ...[RoiController, EditableStructuresStore, Camera3dStore, CineStore, MeasurementStore],
-    ],
-  });
-  const controller = TestBed.inject(LoadController);
+/** The viewer's side of the controller: its state, and a renderer that draws nothing. */
+function viewState(): {
+  readonly init: LoadInit;
+  readonly load: WritableSignal<LoadState>;
+  readonly notice: WritableSignal<string | null>;
+  readonly statuses: string[];
+} {
   const load = signal<LoadState>({ status: 'idle' });
   const statuses: string[] = [];
   const set = load.set.bind(load);
@@ -118,6 +108,28 @@ function setup(): Made {
     focusVoxel: signal<readonly [number, number, number] | null>(null),
     activeCompareGroup: signal(0),
   };
+  return { init, load, notice, statuses };
+}
+
+function setup(): Made {
+  const source = new FakeDataSource();
+  source.currentPatient.set(fakePatient());
+  const imports: ((imported: FileImport) => void)[] = [];
+  const loader: Partial<VolumeLoader> = {
+    loadSeries: (series) => built(series),
+    merge: mergeLoad,
+    importFiles: () => new Promise<FileImport>((resolve) => imports.push(resolve)),
+  };
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: DATA_SOURCE, useValue: source },
+      { provide: VolumeLoader, useValue: loader },
+      ...[LoadController, LoadCoordinator, LayersController, LayersStore, CompareStore],
+      ...[RoiController, EditableStructuresStore, Camera3dStore, CineStore, MeasurementStore],
+    ],
+  });
+  const controller = TestBed.inject(LoadController);
+  const { init, load, notice, statuses } = viewState();
   controller.init(init);
   return {
     controller,
@@ -256,6 +268,20 @@ describe('picking a series from a data source', () => {
     await importing;
   });
 
+  it('keeps the series on screen when another cannot be had, and says why', async () => {
+    const { controller, source, shown, notice, load } = setup();
+    await controller.loadSeriesFromPanel('1.1.1');
+    source.holdFetches = true;
+    const picking = controller.loadSeriesFromPanel('1.2.1');
+    await settle();
+    source.fetches[1].options.onProgress!(2, 60);
+    expect(load().status).toBe('loading');
+    source.fetches[1].fail(new Error('The connection to the server was lost.'));
+    await picking;
+    expect(shown()).toBe('1.1.1');
+    expect(notice()).toBe('The connection to the server was lost.');
+  });
+
   it('loads a dropped chip by its UID, and ignores a UID that is not on the timeline', async () => {
     const { controller, source, shown } = setup();
     const drop = (uid: string) =>
@@ -270,5 +296,101 @@ describe('picking a series from a data source', () => {
     expect(shown()).toBeNull();
     await controller.onDrop(drop('1.2.1'));
     expect(shown()).toBe('1.2.1');
+  });
+});
+
+describe('changing the data source', () => {
+  beforeEach(() => localStorage.clear());
+
+  /** The same set-up, on the real switchable source with a fake put in use. */
+  function onActive(): Made & {
+    readonly sources: ActiveDataSource;
+    readonly other: FakeDataSource;
+  } {
+    const other = new FakeDataSource();
+    other.currentPatient.set(fakePatient());
+    const imports: ((imported: FileImport) => void)[] = [];
+    const loader: Partial<VolumeLoader> = {
+      loadSeries: (series) => built(series),
+      merge: mergeLoad,
+      importFiles: () => new Promise<FileImport>((resolve) => imports.push(resolve)),
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: VolumeLoader, useValue: loader },
+        ...[LoadController, LoadCoordinator, LayersController, LayersStore, CompareStore],
+        ...[RoiController, EditableStructuresStore, Camera3dStore, CineStore, MeasurementStore],
+      ],
+    });
+    const sources = TestBed.inject(ActiveDataSource);
+    const controller = TestBed.inject(LoadController);
+    const { init, load, notice, statuses } = viewState();
+    controller.init(init);
+    return {
+      controller,
+      source: other,
+      other,
+      sources,
+      load,
+      notice,
+      statuses,
+      imports,
+      shown: () => {
+        const state = load();
+        return state.status === 'ready' ? state.result.selectedUid : null;
+      },
+    };
+  }
+
+  it('empties the viewport when the source changes, and abandons what was being fetched', async () => {
+    const { controller, other, sources, shown, load } = onActive();
+    controller.useSource(other);
+    expect(sources.source()).toBe(other);
+    await controller.loadSeriesFromPanel('1.1.1');
+    expect(shown()).toBe('1.1.1');
+
+    other.holdFetches = true;
+    const picking = controller.loadSeriesFromPanel('1.2.1');
+    await settle();
+    controller.useSource(null);
+    expect(other.fetches[1].options.signal!.aborted).toBe(true);
+    expect(sources.isFiles()).toBe(true);
+    expect(load()).toEqual({ status: 'idle' });
+    await picking;
+    expect(load()).toEqual({ status: 'idle' });
+  });
+
+  it('leaves the view alone when asked for the source already in use', async () => {
+    const { controller, other, shown } = onActive();
+    controller.useSource(other);
+    await controller.loadSeriesFromPanel('1.1.1');
+    controller.useSource(other);
+    expect(shown()).toBe('1.1.1');
+  });
+
+  it('goes back to the opened files when files are imported', async () => {
+    const { controller, other, sources, shown, imports, load } = onActive();
+    controller.useSource(other);
+    await controller.loadSeriesFromPanel('1.1.1');
+    const importing = controller.loadFiles([new File([], 'a.dcm')], null);
+    expect(sources.isFiles()).toBe(true);
+    imports[0]({ kind: 'nothing', skipped: [] });
+    await importing;
+    // What was on screen came from the server; it is not put back.
+    expect(shown()).toBeNull();
+    expect(load()).toEqual({ status: 'idle' });
+  });
+
+  it('empties the viewport and abandons a fetch when the timeline turns to another patient', async () => {
+    const { controller, other, load } = onActive();
+    controller.useSource(other);
+    await controller.loadSeriesFromPanel('1.1.1');
+    other.holdFetches = true;
+    const picking = controller.loadSeriesFromPanel('1.2.1');
+    await settle();
+    controller.leavePatient();
+    expect(other.fetches[1].options.signal!.aborted).toBe(true);
+    expect(load()).toEqual({ status: 'idle' });
+    await picking;
   });
 });
