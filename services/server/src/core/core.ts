@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { SILENT_LOGGER, type Logger } from '../logger.js';
+import { createIngest, type Ingest } from '../ingest/ingest.js';
+import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
+import type { PacsIndex } from '../pacs-index/pacs-index.js';
+import type { DicomStore } from '../store/dicom-store.js';
 import { SERVER_VERSION } from '../version.js';
 
 /** How the core is: taking work, or finishing what it has before it stops. */
@@ -31,8 +34,24 @@ export class CoreStoppingError extends Error {
   }
 }
 
+/** The PACS a core has: where instances are kept, what is known of them, and the way in. */
+export interface Pacs {
+  readonly store: DicomStore;
+  readonly index: PacsIndex;
+  /**
+   * Ingest through the core: each call is work the core counts, so a
+   * shutdown waits for it, and it is refused once the core is stopping.
+   */
+  readonly ingest: Ingest;
+}
+
 export interface CoreOptions {
   readonly logger?: Logger;
+  /**
+   * A store and an index for the core to run a PACS on. The core closes the
+   * index when it is disposed. Without them the core has no PACS.
+   */
+  readonly pacs?: { readonly store: DicomStore; readonly index: PacsIndex };
   /** Milliseconds on a clock that only goes forward, for tests. */
   readonly now?: () => number;
 }
@@ -47,6 +66,8 @@ export interface CoreOptions {
  * work to end.
  */
 export interface ServerCore {
+  /** Null for a core that was given no store and index. */
+  readonly pacs: Pacs | null;
   health(): Health;
   /**
    * Do a piece of work that a shutdown must wait for. Refused with
@@ -70,7 +91,34 @@ export function createCore(options: CoreOptions = {}): ServerCore {
   /** Called each time a piece of work ends while a disposal is waiting. */
   let onSettled: (() => void) | null = null;
 
+  const run = async <T>(work: () => Promise<T>): Promise<T> => {
+    if (disposal) throw new CoreStoppingError();
+    inFlight++;
+    try {
+      return await work();
+    } finally {
+      inFlight--;
+      onSettled?.();
+    }
+  };
+
+  let pacs: Pacs | null = null;
+  if (options.pacs) {
+    const { store, index } = options.pacs;
+    const ingest = createIngest({ store, index, logger });
+    pacs = {
+      store,
+      index,
+      ingest: {
+        ingest: (bytes, ingestOptions) => run(() => ingest.ingest(bytes, ingestOptions)),
+        importFolder: (directory, importOptions) =>
+          run(() => ingest.importFolder(directory, importOptions)),
+      },
+    };
+  }
+
   return {
+    pacs,
     health: () => ({
       status: disposal ? 'stopping' : 'ok',
       version: SERVER_VERSION,
@@ -78,16 +126,7 @@ export function createCore(options: CoreOptions = {}): ServerCore {
       inFlight,
     }),
 
-    async run(work) {
-      if (disposal) throw new CoreStoppingError();
-      inFlight++;
-      try {
-        return await work();
-      } finally {
-        inFlight--;
-        onSettled?.();
-      }
-    },
+    run,
 
     dispose({ timeoutMs } = {}) {
       disposal ??= new Promise<Disposal>((resolve) => {
@@ -97,7 +136,11 @@ export function createCore(options: CoreOptions = {}): ServerCore {
           onSettled = null;
           const result = { finished: inFlight === 0, abandoned: inFlight };
           if (!result.finished) logger.warn('work-abandoned', { count: result.abandoned });
-          resolve(result);
+          // The index is closed once nothing is using it, or the wait is over.
+          const closed = pacs ? pacs.index.close() : Promise.resolve();
+          void closed
+            .catch((error: unknown) => logger.error('index-close-failed', errorFields(error)))
+            .then(() => resolve(result));
         };
         if (inFlight === 0) return end();
         logger.info('waiting-for-work', { count: inFlight });

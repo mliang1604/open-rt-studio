@@ -12,15 +12,18 @@ import {
   identityElements,
   instanceUid,
   seriesUid,
+  studyUid,
   SYNTHETIC_STUDY,
   type SyntheticFile,
   type SyntheticStudy,
 } from './identity.js';
 
 const RTSTRUCT_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.3';
+/** Detached Study Management, the class an RT Referenced Study names (retired, still written). */
+const DETACHED_STUDY_SOP_CLASS = '1.2.840.10008.3.1.2.3.1';
 
 /** Series index the structure set uses within its study. */
-const RTSTRUCT_SERIES_INDEX = 10;
+export const RTSTRUCT_SERIES_INDEX = 10;
 
 /** What a synthetic ROI is, so tests can check geometry against it. */
 export interface SyntheticRoi {
@@ -39,6 +42,11 @@ export interface SyntheticRoi {
 export interface RtStructOptions {
   readonly study?: SyntheticStudy;
   readonly label?: string;
+  /**
+   * Series Instance UID of the image series the contours were drawn on, in the
+   * same study. Not written by default.
+   */
+  readonly referencedSeriesUid?: string;
 }
 
 /**
@@ -93,6 +101,12 @@ export interface RtStructSpec {
   readonly label: string;
   readonly fileName: string;
   readonly rois: readonly RtStructRoi[];
+  /**
+   * Series Instance UID for the ReferencedFrameOfReferenceSequence, which names
+   * the frame, the study and the series the contours were drawn on. The whole
+   * sequence is left out when this is absent.
+   */
+  readonly referencedSeriesUid?: string;
 }
 
 /** Write an RTSTRUCT in the study's Frame of Reference. */
@@ -106,6 +120,26 @@ export function writeRtStruct(spec: RtStructSpec): SyntheticFile {
     el(0x0020, 0x000e, 'UI', uid(seriesUid(study, RTSTRUCT_SERIES_INDEX))), // SeriesInstanceUID
     el(0x0020, 0x0011, 'IS', numbers([RTSTRUCT_SERIES_INDEX])), // SeriesNumber
     el(0x3006, 0x0002, 'SH', text(spec.label)), // StructureSetLabel
+    ...(spec.referencedSeriesUid === undefined
+      ? []
+      : [
+          // ReferencedFrameOfReferenceSequence > RTReferencedStudySequence >
+          // RTReferencedSeriesSequence
+          sequence(0x3006, 0x0010, [
+            [
+              el(0x0020, 0x0052, 'UI', uid(frame)),
+              sequence(0x3006, 0x0012, [
+                [
+                  el(0x0008, 0x1150, 'UI', uid(DETACHED_STUDY_SOP_CLASS)),
+                  el(0x0008, 0x1155, 'UI', uid(studyUid(study))),
+                  sequence(0x3006, 0x0014, [
+                    [el(0x0020, 0x000e, 'UI', uid(spec.referencedSeriesUid))],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ]),
     // StructureSetROISequence: number, referenced frame of reference, name.
     sequence(
       0x3006,
@@ -182,5 +216,6 @@ export function syntheticRtStruct(
       color: roi.color,
       contours: roi.zs.map((z) => circlePoints(roi, z)),
     })),
+    referencedSeriesUid: options.referencedSeriesUid,
   });
 }

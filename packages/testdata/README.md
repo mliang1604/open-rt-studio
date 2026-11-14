@@ -11,19 +11,30 @@ const files = [...syntheticCtSeries(12, 32), syntheticRtStruct(12)];
 // Each file is { name, mimeType, bytes: Uint8Array }.
 ```
 
-| Generator           | Produces                                                                             |
-| ------------------- | ------------------------------------------------------------------------------------ |
-| `syntheticCtSeries` | Axial CT stack, 1 mm voxels. Voxel value is `syntheticCtValue(x, z, size)`.          |
-| `syntheticMrSeries` | MR stack with the CT's geometry and Frame of Reference, so the two fuse.             |
-| `syntheticRtStruct` | RTSTRUCT on the CT: stacked circles, described by `syntheticRois`.                   |
-| `syntheticRtDose`   | Multi-frame RTDOSE in Gy inside the CT. Value is `syntheticDoseGy(col, row, frame)`. |
-| `syntheticPatient`  | One patient, two studies: CT, MR, RTSTRUCT and RTDOSE, then a follow-up CT.          |
+| Generator           | Produces                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| `syntheticCtSeries` | Axial CT stack, 1 mm voxels. Voxel value is `syntheticCtValue(x, z, size)`.                  |
+| `syntheticMrSeries` | MR stack with the CT's geometry and Frame of Reference, so the two fuse.                     |
+| `syntheticRtStruct` | RTSTRUCT on the CT: stacked circles, described by `syntheticRois`.                           |
+| `syntheticRtDose`   | Multi-frame RTDOSE in Gy inside the CT. Value is `syntheticDoseGy(col, row, frame)`.         |
+| `syntheticPatient`  | One patient, two studies: CT, MR, RTSTRUCT and RTDOSE, then a follow-up CT.                  |
+| `syntheticRtCourse` | The same patient with the objects naming each other: RTSTRUCT, RTPLAN, RTDOSE, registration. |
 
 `syntheticThoraxPatient` is the one made for looking at: a geometric thorax
 phantom (body, lungs, heart, spine, a target) with a planning CT in Hounsfield
 units, an MR, a matching structure set, a dose on the target and a follow-up
 CT. The web client loads it as its demo patient. `thoraxTissueAt`,
 `thoraxRois` and `thoraxDoseGy` say what is at any position in millimetres.
+
+`syntheticRtCourse` is for tests of references, such as the server's ingest:
+the structure set names the CT, the plan names the structure set, the dose
+names both, and a registration connects the planning and follow-up frames.
+`SYNTHETIC_RT_COURSE` has the UIDs. `syntheticRtPlan` and
+`syntheticRegistration` write a minimal plan and a rigid registration: they
+carry identity and references, not a plan to treat from. `syntheticRtStruct`
+and `syntheticRtDose` write their references only when asked
+(`referencedSeriesUid`, `referencedPlanUid`, `referencedStructureSetUid`), so
+the files other tests use are byte for byte what they were.
 
 The package has no runtime dependencies and uses no Node-only or DOM-only
 APIs, so the same generators run in Vitest, in Playwright and in a browser.

@@ -17,6 +17,13 @@ export {
   initialImportSeries,
 } from './catalog.js';
 export { type RasterizeResult, rasterizeRoiContours } from './contour-raster.js';
+export {
+  type InstanceHeader,
+  type InstanceHeaderResult,
+  type InstanceReference,
+  type InstanceRelation,
+  readInstanceHeader,
+} from './instance-header.js';
 export { f32ToF16, floatsToHalf } from './half.js';
 export {
   type DirtyBox,

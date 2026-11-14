@@ -6,7 +6,17 @@
 // Reference, placed inside the CT, so the loader treats it as a fusion overlay.
 // Ported from dicom-workspace e2e/fixtures/synthetic-rtdose.ts.
 
-import { el, numbers, part10, pixelData16, text, u16le, uid } from './dicom-writer.js';
+import {
+  el,
+  numbers,
+  part10,
+  pixelData16,
+  sequence,
+  text,
+  u16le,
+  uid,
+  type DataElement,
+} from './dicom-writer.js';
 import {
   frameOfReferenceUid,
   identityElements,
@@ -20,7 +30,10 @@ import {
 const RTDOSE_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.2';
 
 /** Series index the dose uses within its study. */
-const RTDOSE_SERIES_INDEX = 20;
+export const RTDOSE_SERIES_INDEX = 20;
+
+const RTPLAN_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.5';
+const RTSTRUCT_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.3';
 
 /** Dose Grid Scaling: stored value times this is the dose in Gy. */
 export const SYNTHETIC_DOSE_GRID_SCALING = 0.1;
@@ -34,6 +47,10 @@ export const SYNTHETIC_DOSE_GEOMETRY = {
 
 export interface RtDoseOptions {
   readonly study?: SyntheticStudy;
+  /** SOP Instance UID of the RTPLAN the dose was computed for. Not written by default. */
+  readonly referencedPlanUid?: string;
+  /** SOP Instance UID of the RTSTRUCT the dose refers to. Not written by default. */
+  readonly referencedStructureSetUid?: string;
 }
 
 /**
@@ -61,6 +78,25 @@ export interface RtDoseSpec {
   readonly scaling: number;
   /** The stored (unsigned 16-bit) value at a column, row and frame. */
   readonly stored: (column: number, row: number, frame: number) => number;
+  /** SOP Instance UID for the ReferencedRTPlanSequence; left out when absent. */
+  readonly referencedPlanUid?: string;
+  /** SOP Instance UID for the ReferencedStructureSetSequence; left out when absent. */
+  readonly referencedStructureSetUid?: string;
+}
+
+/** A sequence with one item that names an instance by class and UID. */
+function referencedInstance(
+  group: number,
+  element: number,
+  sopClassUid: string,
+  sopInstanceUid: string,
+): DataElement {
+  return sequence(group, element, [
+    [
+      el(0x0008, 0x1150, 'UI', uid(sopClassUid)), // ReferencedSOPClassUID
+      el(0x0008, 0x1155, 'UI', uid(sopInstanceUid)), // ReferencedSOPInstanceUID
+    ],
+  ]);
 }
 
 /** Write a multi-frame physical RTDOSE in Gy in the study's Frame of Reference. */
@@ -99,6 +135,12 @@ export function writeRtDose(spec: RtDoseSpec): SyntheticFile {
     el(0x3004, 0x000a, 'CS', text('PLAN')), // DoseSummationType
     el(0x3004, 0x000c, 'DS', numbers(offsets)), // GridFrameOffsetVector
     el(0x3004, 0x000e, 'DS', numbers([spec.scaling])), // DoseGridScaling
+    ...(spec.referencedPlanUid === undefined
+      ? []
+      : [referencedInstance(0x300c, 0x0002, RTPLAN_SOP_CLASS, spec.referencedPlanUid)]),
+    ...(spec.referencedStructureSetUid === undefined
+      ? []
+      : [referencedInstance(0x300c, 0x0060, RTSTRUCT_SOP_CLASS, spec.referencedStructureSetUid)]),
     pixelData16(samples),
   ]);
   return { name: spec.fileName, mimeType: 'application/dicom', bytes };
@@ -121,5 +163,7 @@ export function syntheticRtDose(frames = 6, size = 12, options: RtDoseOptions = 
     frameSpacing: SYNTHETIC_DOSE_GEOMETRY.frameSpacing,
     scaling: SYNTHETIC_DOSE_GRID_SCALING,
     stored: (column, row, frame) => (column + row + frame) * 4,
+    referencedPlanUid: options.referencedPlanUid,
+    referencedStructureSetUid: options.referencedStructureSetUid,
   });
 }
