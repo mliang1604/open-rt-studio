@@ -318,6 +318,12 @@
                   [saved]="hand.saved"
                   [saving]="manualRegistration.saving() === layer.id"
                   [changed]="hand.params !== hand.start"
+                  [dragMode]="
+                    manualRegistration.drag()?.id === layer.id
+                      ? manualRegistration.drag()!.mode
+                      : null
+                  "
+                  (dragAsked)="tools.toggleRegistrationDrag(layer.id, $event)"
                   (paramsChange)="manualRegistration.set(layer.id, $event)"
                   (resetAsked)="manualRegistration.reset(layer.id)"
                   (saveAsked)="manualRegistration.save(layer.id)"
@@ -997,7 +1003,7 @@
       #canvas
       [class.grabbable]="isReady()"
       [class.grabbing]="isPanning()"
-      [class.movable]="interaction.overCrosshair()"
+      [class.movable]="interaction.overCrosshair() || manualRegistration.dragActive()"
       (wheel)="interaction.onWheel($event)"
       (pointerdown)="interaction.onPointerDown($event)"
       (pointermove)="interaction.onPointerMove($event)"
@@ -1196,7 +1202,7 @@
           role="slider"
           [attr.aria-label]="toolbar.orientationName(gizmo.orientation) + ' oblique tilt'"
           (pointerdown)="
-            $event.shiftKey
+            $event.shiftKey || manualRegistration.dragActive()
               ? interaction.onPointerDown($event)
               : view3d.onObliqueHandleDown($event, gizmo.orientation)
           "

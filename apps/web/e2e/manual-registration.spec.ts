@@ -32,6 +32,45 @@ const form = (page: Page): Locator => page.locator('app-manual-registration');
 const shift = (page: Page, axis: number): Locator => form(page).locator(`[data-shift="${axis}"]`);
 const turn = (page: Page, axis: number): Locator => form(page).locator(`[data-turn="${axis}"]`);
 
+/** The axial pane: the first, and the large one. */
+const axial = (page: Page): Locator => page.locator('.pane-overlay .pane').first();
+
+/** Where the centre of a voxel of the CT is in the axial pane (its image is a centred square). */
+async function voxelPoint(page: Page, x: number, y: number): Promise<{ x: number; y: number }> {
+  const box = (await axial(page).boundingBox())!;
+  const side = Math.min(box.width, box.height);
+  const voxel = side / PAIR.size;
+  return {
+    x: box.x + (box.width - side) / 2 + (x + 0.5) * voxel,
+    y: box.y + (box.height - side) / 2 + (y + 0.5) * voxel,
+  };
+}
+
+/** What the probe reads at the centre of a voxel of the CT's axial slice on screen. */
+async function probeAtVoxel(page: Page, x: number, y: number) {
+  const box = (await axial(page).boundingBox())!;
+  const point = await voxelPoint(page, x, y);
+  const read = await probeAt(page, (point.x - box.x) / box.width, (point.y - box.y) / box.height);
+  expect(read.voxel.slice(0, 2)).toEqual([x, y]);
+  return read;
+}
+
+/** Press at one place, go to another in a few moves, and let go. */
+async function drag(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2);
+  await page.mouse.move(to.x, to.y);
+  await page.mouse.up();
+}
+
+/** A box's number. */
+const numberIn = async (box: Locator): Promise<number> => Number(await box.inputValue());
+
 async function open(page: Page, files: readonly SyntheticFile[]): Promise<void> {
   await preAcknowledge(page);
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -172,4 +211,100 @@ test('a turn by hand moves what the probe reads as the numbers say', async ({ pa
       return mr === registeredMrValueAtCtVoxel(last - (x - sx) + sx, last - (y - sy) + sy, z);
     })
     .toBe(true);
+});
+
+test('dragging in a plane shifts the image by what the pointer moved', async ({ page }) => {
+  const problems = watchProblems(page);
+  const pair = syntheticRegisteredPair();
+  await open(page, [...pair.planningCt, ...pair.followUpMr]);
+  await page.locator('[data-register-by-hand]').click();
+  await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
+  // Begun middle on middle: each MR voxel over the CT voxel of the same index.
+  const [tx, ty, tz] = PAIR.translation;
+  const [sx, sy, sz] = PAIR.shiftVoxels;
+  const start = [tx - sx, ty - sy, tz - sz];
+  await expect(shift(page, 0)).toHaveValue(String(start[0]));
+
+  const shifting = form(page).locator('[data-drag="shift"]');
+  await shifting.click();
+  await expect(shifting).toHaveAttribute('aria-pressed', 'true');
+
+  // In the axial pane, by the known offset in that plane: 2 voxels (of 1 mm)
+  // to the patient's left and 3 to their back. The pointer's place is a whole
+  // pixel, so the shift is the offset to within a fraction of a voxel.
+  await drag(page, await voxelPoint(page, 10, 10), await voxelPoint(page, 10 + sx, 10 + sy));
+  expect(Math.abs((await numberIn(shift(page, 0))) - (start[0] + sx))).toBeLessThan(0.2);
+  expect(Math.abs((await numberIn(shift(page, 1))) - (start[1] + sy))).toBeLessThan(0.2);
+  // Nothing moved out of the plane, and nothing turned.
+  await expect(shift(page, 2)).toHaveValue(String(start[2]));
+  for (const axis of [0, 1, 2]) await expect(turn(page, axis)).toHaveValue('0');
+  // The view did not pan: the CT's voxel is where it was, and the MR over it
+  // is the one the formula has for that shift.
+  for (const [x, y] of [
+    [12, 14],
+    [20, 9],
+  ]) {
+    const { voxel, mr } = await probeAtVoxel(page, x, y);
+    expect(mr).not.toBeNull();
+    expect(mr).toBe(registeredMrValueAtCtVoxel(...voxel, [sx, sy, 0]));
+  }
+
+  // The handle that tilts a plane sits at the pane's middle, where one takes
+  // hold of an image to shift it. While dragging is on, a press on it moves
+  // the image like a press anywhere else, and the plane is not tilted.
+  const tag = await axial(page).locator('.pane-tag').innerText();
+  const centre = await voxelPoint(page, (PAIR.size - 1) / 2, (PAIR.size - 1) / 2);
+  await page.mouse.move(centre.x, centre.y);
+  await expect(page.locator('.oblique-knob').first()).toBeVisible();
+  const beforeKnob = await numberIn(shift(page, 0));
+  await drag(page, centre, { x: centre.x + 40, y: centre.y });
+  expect(await numberIn(shift(page, 0))).toBeGreaterThan(beforeKnob + 1);
+  await expect(page.locator('.oblique-gizmo.active')).toHaveCount(0);
+  await expect(axial(page).locator('.pane-tag')).toHaveText(tag);
+
+  // Escape puts the dragging down, and a drag pans again.
+  await page.keyboard.press('Escape');
+  await expect(shifting).toHaveAttribute('aria-pressed', 'false');
+  const before = await numberIn(shift(page, 0));
+  await drag(page, await voxelPoint(page, 10, 10), await voxelPoint(page, 14, 10));
+  expect(await numberIn(shift(page, 0))).toBe(before);
+  expectNoProblems(problems);
+});
+
+test('dragging in a plane turns the image about its middle', async ({ page }) => {
+  const pair = syntheticRegisteredPair();
+  await open(page, [...pair.planningCt, ...pair.followUpMr]);
+  await page.locator('[data-register-by-hand]').click();
+  await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
+  const turning = form(page).locator('[data-drag="turn"]');
+  await turning.click();
+  await expect(turning).toHaveAttribute('aria-pressed', 'true');
+  const before = await Promise.all([0, 1, 2].map((axis) => numberIn(shift(page, axis))));
+
+  // The image's middle is the CT's, between voxels 15 and 16. From 8 voxels
+  // to its right (the patient's left) to 8 below it (the patient's back): a
+  // quarter turn about the head–foot axis.
+  const middle = (PAIR.size - 1) / 2;
+  await drag(
+    page,
+    await voxelPoint(page, middle + 8, middle),
+    await voxelPoint(page, middle, middle + 8),
+  );
+  expect(Math.abs((await numberIn(turn(page, 2))) - 90)).toBeLessThan(1);
+  expect(Math.abs(await numberIn(turn(page, 0)))).toBeLessThan(0.01);
+  expect(Math.abs(await numberIn(turn(page, 1)))).toBeLessThan(0.01);
+  // The middle stayed: nothing shifted.
+  for (const axis of [0, 1, 2]) expect(await numberIn(shift(page, axis))).toBe(before[axis]);
+
+  // The MR voxel (i, j) is now where its voxel was a quarter turn back: over
+  // the CT's voxel (x, y) lies the MR's (y, last − x). Read near the middle,
+  // where a turn that is off by under a degree is off by less than a voxel.
+  const last = PAIR.size - 1;
+  for (const [x, y] of [
+    [18, 14],
+    [13, 19],
+  ]) {
+    const { voxel, mr } = await probeAtVoxel(page, x, y);
+    expect(mr).toBe(registeredMrValueAtCtVoxel(y, last - x, voxel[2], [0, 0, 0]));
+  }
 });

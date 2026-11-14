@@ -506,6 +506,10 @@ export class Viewer {
       beginStroke: (placement, event) => this.brushCtl.beginStroke(placement, event),
       extendStroke: (placement, event) => this.brushCtl.extendStroke(placement, event),
       endStroke: () => this.brushCtl.endStroke(),
+      registerDragActive: () => this.manualRegistration.dragActive(),
+      beginRegisterDrag: (placement, event) => this.manualRegistration.beginDrag(placement, event),
+      moveRegisterDrag: (event) => this.manualRegistration.moveDrag(event),
+      endRegisterDrag: () => this.manualRegistration.endDrag(),
     });
 
     // Wire the 3D-pane editing controller: it owns the TF / clip-plane / oblique /
@@ -617,6 +621,9 @@ export class Viewer {
     this.manualRegistration.init({
       baseSeries: () => this.baseSeries(),
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
+      canvasBounds: () => this.canvasRef().nativeElement.getBoundingClientRect(),
+      sagittalFlipped: () => this.sagittalFlipped(),
+      obliques: () => this.obliques(),
     });
 
     // Wire the render controller: it owns the WebGPU lifecycle, the resize sync and

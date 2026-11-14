@@ -6,6 +6,7 @@ import { Injectable, type WritableSignal, inject } from '@angular/core';
 
 import { BrushController, type BrushMode } from './brush-controller';
 import { CprStore } from './cpr/cpr-store';
+import { LayersStore, type ByHandDrag } from './layers-store';
 import { type ToolMode } from './measure-controller';
 import { MeasurementStore, type MeasureTool } from './measurement-store';
 
@@ -20,6 +21,7 @@ import { MeasurementStore, type MeasureTool } from './measurement-store';
 export class ToolSwitch {
   private readonly brush = inject(BrushController);
   private readonly cpr = inject(CprStore);
+  private readonly layers = inject(LayersStore);
   private readonly measurements = inject(MeasurementStore);
   private activeTool: WritableSignal<ToolMode> | null = null;
 
@@ -37,6 +39,7 @@ export class ToolSwitch {
     if (next !== 'none') {
       this.brush.deactivate();
       this.cpr.drawing.set(false);
+      this.layers.stopByHandDrag();
     }
   }
 
@@ -60,20 +63,33 @@ export class ToolSwitch {
   }
 
   /**
+   * Switch dragging a layer that is being registered by hand on in a mode
+   * (shift or turn), or off when it is on in that mode already.
+   */
+  toggleRegistrationDrag(id: string, mode: ByHandDrag['mode']): void {
+    this.layers.toggleByHandDrag(id, mode);
+    if (this.layers.byHandDrag() !== null) this.putDownAllBut('register');
+  }
+
+  /**
    * Put down whichever tool is on, for Escape. Returns whether one was, so the
    * caller knows the key did something.
    */
   putDown(): boolean {
     const wasOn =
-      this.activeTool!() !== 'none' || this.brush.mode() !== 'off' || this.cpr.drawing();
+      this.activeTool!() !== 'none' ||
+      this.brush.mode() !== 'off' ||
+      this.cpr.drawing() ||
+      this.layers.byHandDrag() !== null;
     this.putDownAllBut(null);
     return wasOn;
   }
 
-  private putDownAllBut(keep: 'brush' | 'cpr' | null): void {
+  private putDownAllBut(keep: 'brush' | 'cpr' | 'register' | null): void {
     this.measurements.cancelPending();
     this.activeTool!.set('none');
     if (keep !== 'brush') this.brush.deactivate();
     if (keep !== 'cpr') this.cpr.drawing.set(false);
+    if (keep !== 'register') this.layers.stopByHandDrag();
   }
 }

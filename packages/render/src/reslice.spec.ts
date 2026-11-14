@@ -15,6 +15,7 @@ import {
   sub,
   transformPoint,
 } from '@open-rt-studio/dicom';
+import { planeNormal } from './plane-basis.js';
 import {
   clipLineToUnitSquare,
   clipPlaneTex,
@@ -523,6 +524,37 @@ describe('slabTRange', () => {
   it('accounts for the eye offset so the slab tracks the actual view depth', () => {
     // Move the eye twice as far; depth0 = −40, so the centre (and slab) shift to t = 40.
     expect(slabTRange(bounds, [0, 0, -40], forward, 6)).toEqual([37, 43]);
+  });
+});
+
+describe('planeNormal', () => {
+  const volume = makeVolume([4, 6, 8]);
+
+  it('is the patient axis the slices of an orientation follow one another along', () => {
+    expectVec(planeNormal(volume, Orientation.Axial), [0, 0, 1]);
+    expectVec(planeNormal(volume, Orientation.Coronal), [0, 1, 0]);
+    expectVec(planeNormal(volume, Orientation.Sagittal), [1, 0, 0]);
+    expectVec(planeNormal(volume, Orientation.Axial, NO_OBLIQUE), [0, 0, 1]);
+  });
+
+  it('tilts with the plane, and stays of length one', () => {
+    // Tilted about the plane's own horizontal axis (patient x for an axial
+    // plane): the normal leans in the y–z plane by that angle, and stays
+    // square to x.
+    const pitched = planeNormal(volume, Orientation.Axial, { tiltU: 0.4, tiltV: 0 });
+    expect(Math.hypot(...pitched)).toBeCloseTo(1, 12);
+    expect(pitched[0]).toBeCloseTo(0, 12);
+    expect(pitched[2]).toBeCloseTo(Math.cos(0.4), 12);
+    expect(Math.abs(pitched[1])).toBeCloseTo(Math.sin(0.4), 12);
+
+    const both = planeNormal(volume, Orientation.Coronal, { tiltU: 0.4, tiltV: -0.25 });
+    expect(Math.hypot(...both)).toBeCloseTo(1, 12);
+    expect(both[1]).toBeLessThan(1);
+    // The point a plane turns about does not change which way it faces.
+    expectVec(
+      planeNormal(volume, Orientation.Coronal, { tiltU: 0.4, tiltV: -0.25, pivot: [9, 9, 9] }),
+      both,
+    );
   });
 });
 

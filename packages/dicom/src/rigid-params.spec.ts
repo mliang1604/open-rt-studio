@@ -8,7 +8,10 @@ import {
   manualPlacement,
   rigidParamsMatrix,
   rigidParamsOf,
+  shiftedBy,
   startingRigidParams,
+  turnBetween,
+  turnedAbout,
   volumeCentre,
   type RigidParams,
 } from './rigid-params.js';
@@ -129,6 +132,92 @@ describe('the numbers of a rigid matrix', () => {
     });
     close(rigidParamsOf(matrix, [10, 0, 0]).translation, [-10, 10, 0]);
     close(rigidParamsOf(matrix, [0, 0, 0]).translation, [0, 0, 0]);
+  });
+});
+
+describe('dragging a registration by hand', () => {
+  const params: RigidParams = {
+    translation: [5, -3, 2],
+    rotation: [10, 20, 30],
+    centre: [100, 200, 300],
+  };
+  const middle: Vec3 = [105, 197, 302];
+
+  it('shifts by what the drag moved, and turns nothing', () => {
+    const shifted = shiftedBy(params, [1.5, 0, -4]);
+    expect(shifted).toEqual({ ...params, translation: [6.5, -3, -2] });
+  });
+
+  it('turns about the image’s middle where it is: the middle stays', () => {
+    const turned = turnedAbout(params, [0, 0, 1], 25);
+    expect(turned.translation).toBe(params.translation);
+    expect(turned.centre).toBe(params.centre);
+    close(transformPoint(rigidParamsMatrix(turned), params.centre), middle);
+  });
+
+  it('turns every other point about the axis through the middle', () => {
+    const before = rigidParamsMatrix(params);
+    const after = rigidParamsMatrix(turnedAbout(params, [0, 0, 2], 90));
+    // Where a point of the image was, relative to the middle, and where it is now.
+    const was = transformPoint(before, [110, 200, 300]);
+    const arm: Vec3 = [was[0] - middle[0], was[1] - middle[1], was[2] - middle[2]];
+    // A quarter turn about z: (x, y, z) goes to (−y, x, z).
+    close(transformPoint(after, [110, 200, 300]), [
+      middle[0] - arm[1],
+      middle[1] + arm[0],
+      middle[2] + arm[2],
+    ]);
+  });
+
+  it('adds up: two turns about one axis are their sum, and back again is nothing', () => {
+    const axis: Vec3 = [1, 2, -1];
+    const twice = rigidParamsMatrix(turnedAbout(turnedAbout(params, axis, 15), axis, 25));
+    const once = rigidParamsMatrix(turnedAbout(params, axis, 40));
+    twice.forEach((value, i) => expect(value).toBeCloseTo(once[i], 9));
+    const back = rigidParamsMatrix(turnedAbout(turnedAbout(params, axis, 15), axis, -15));
+    back.forEach((value, i) => expect(value).toBeCloseTo(rigidParamsMatrix(params)[i], 9));
+  });
+
+  it('about z from nothing turned is the turn about z', () => {
+    const still: RigidParams = { ...params, rotation: [0, 0, 0] };
+    close(turnedAbout(still, [0, 0, 1], 33).rotation, [0, 0, 33]);
+    close(turnedAbout(still, [1, 0, 0], -12).rotation, [-12, 0, 0]);
+  });
+});
+
+describe('how far a drag turns', () => {
+  const about: Vec3 = [10, 20, 30];
+
+  it('is the angle between the two arms, by the right-hand rule about the normal', () => {
+    // In the axial plane, seen from the head (z towards the viewer): x to y is +90.
+    expect(turnBetween([11, 20, 30], [10, 21, 30], about, [0, 0, 1])).toBeCloseTo(90, 9);
+    expect(turnBetween([10, 21, 30], [11, 20, 30], about, [0, 0, 1])).toBeCloseTo(-90, 9);
+    // About the opposite normal the same drag is the opposite turn.
+    expect(turnBetween([11, 20, 30], [10, 21, 30], about, [0, 0, -1])).toBeCloseTo(-90, 9);
+    expect(turnBetween([15, 20, 30], [15, 25, 30], about, [0, 0, 3])).toBeCloseTo(45, 9);
+  });
+
+  it('does not depend on how far from the middle the points are, or how far off the plane', () => {
+    expect(turnBetween([12, 20, 37], [10, 29, 21], about, [0, 0, 1])).toBeCloseTo(90, 9);
+  });
+
+  it('is nothing for a point on the axis, or without a normal', () => {
+    expect(turnBetween([10, 20, 35], [11, 20, 30], about, [0, 0, 1])).toBe(0);
+    expect(turnBetween([11, 20, 30], [10, 20, 30], about, [0, 0, 1])).toBe(0);
+    expect(turnBetween([11, 20, 30], [10, 21, 30], about, [0, 0, 0])).toBe(0);
+  });
+
+  it('with turnedAbout, takes the point that was dragged to under the cursor', () => {
+    const params: RigidParams = { translation: [0, 0, 0], rotation: [0, 0, 0], centre: about };
+    const [from, to]: [Vec3, Vec3] = [
+      [14, 20, 30],
+      [13, 23, 30],
+    ];
+    const angle = turnBetween(from, to, about, [0, 0, 1]);
+    const moved = transformPoint(rigidParamsMatrix(turnedAbout(params, [0, 0, 1], angle)), from);
+    // On the ray from the middle through the cursor, as far out as it was.
+    const scale = 4 / Math.hypot(3, 3);
+    close(moved, [10 + 3 * scale, 20 + 3 * scale, 30]);
   });
 });
 

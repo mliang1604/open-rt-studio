@@ -531,6 +531,18 @@ of reference over a series of another, as a fusion overlay.
   source (a download for opened files, an upload for a server, where it
   comes back with either series). A new load of the base lets go of what
   was not saved, without asking.
+  The image can also be dragged in any plane. "Drag to shift" and "Drag to
+  turn" are a tool like the brush (`ToolSwitch`: one at a time, Escape puts
+  it down), and while one is on a left drag on an MPR pane moves the image
+  where it would pan. The pointer's place is read as the probe reads it, as
+  a point of the patient in the base's frame. A shift moves the image by the
+  difference of two such points, so the anatomy that was pressed on stays
+  under the pointer; a turn is about the pane's normal (`planeNormal`)
+  through the image's middle, by the angle the pointer went round it. Each
+  move is worked out from where the drag began, not from the last move, so
+  nothing adds up over a long drag. The handle that tilts a plane sits at
+  the pane's middle, where one takes hold of an image: while dragging by
+  hand is on, a press on it moves the image too.
 
 Not there, and not assumed: what other systems' files do differently (the
 vendor spike, #71, needs Michael's sample files), and how a Deformable

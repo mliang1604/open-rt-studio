@@ -34,6 +34,28 @@
     </label>
   }
 </fieldset>
+<div class="actions" role="group" aria-label="Drag in the planes">
+  <button
+    type="button"
+    (click)="dragAsked.emit('shift')"
+    [class.active]="dragMode() === 'shift'"
+    [attr.aria-pressed]="dragMode() === 'shift'"
+    data-drag="shift"
+    title="Drag in a plane to shift the image along it"
+  >
+    Drag to shift
+  </button>
+  <button
+    type="button"
+    (click)="dragAsked.emit('turn')"
+    [class.active]="dragMode() === 'turn'"
+    [attr.aria-pressed]="dragMode() === 'turn'"
+    data-drag="turn"
+    title="Drag in a plane to turn the image in it, about the image’s middle"
+  >
+    Drag to turn
+  </button>
+</div>
 <div class="actions">
   <button
     type="button"
