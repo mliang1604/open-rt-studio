@@ -49,10 +49,16 @@ export interface PlaneBasis {
  *     that swings its left/right out of plane (the second, double-oblique, axis).
  * `{ tiltU: 0, tiltV: 0 }` (see {@link NO_OBLIQUE}) is the orthogonal default and
  * reproduces the axis-aligned views exactly.
+ *
+ * `pivot` is the patient point (LPS, mm) the plane turns about: it stays where
+ * it is, in the patient and in the pane, whatever the angles. Without one the
+ * plane turns about the centre of the volume. A pivot is a point in the
+ * patient, so two volumes in one frame of reference tilt about the same place.
  */
 export interface ObliqueRotation {
   readonly tiltU: number;
   readonly tiltV: number;
+  readonly pivot?: Vec3;
 }
 
 /** The orthogonal (untilted) default: both oblique angles zero. */
@@ -261,15 +267,18 @@ function planeBasis(orientation: Orientation, bounds: Bounds): PlaneBasis {
 
 /**
  * Tilt a plane basis off its orthogonal default by an {@link ObliqueRotation},
- * pivoting about the plane's centre so the slice rotates in place.
+ * pivoting about the rotation's `pivot`, or about the plane's centre when it
+ * has none, so the slice rotates in place.
  *
  * The two angles rotate the basis about its own (orthonormal) in-plane axes —
  * `tiltU` about `axisU`, `tiltV` about `axisV` — preserving each axis's length,
  * so the field of view and the through-plane spacing are unchanged and only the
  * plane's orientation tilts. The centre (`origin + ½(axisU+axisV+axisS)`, the
  * volume centre for every orthogonal basis) is held fixed, and the origin is
- * re-derived from the rotated axes. A zero/absent rotation returns the basis
- * untouched, so the orthogonal path is bit-for-bit unchanged.
+ * re-derived from the rotated axes. With a pivot, that point is held fixed
+ * instead: the whole frame, origin included, turns about it. A zero/absent
+ * rotation returns the basis untouched, so the orthogonal path is bit-for-bit
+ * unchanged, pivot or not.
  */
 function obliqueBasis(basis: PlaneBasis, rotation: ObliqueRotation | undefined): PlaneBasis {
   if (!isOblique(rotation)) return basis;
@@ -283,6 +292,10 @@ function obliqueBasis(basis: PlaneBasis, rotation: ObliqueRotation | undefined):
   const axisU = scale(rot(uHat), length(basis.axisU));
   const axisV = scale(rot(vHat), length(basis.axisV));
   const axisS = scale(rot(sHat), length(basis.axisS));
+  if (rotation.pivot) {
+    const origin = add(rotation.pivot, rot(sub(basis.origin, rotation.pivot)));
+    return { origin, axisU, axisV, axisS };
+  }
   const center = add(basis.origin, scale(add(add(basis.axisU, basis.axisV), basis.axisS), 0.5));
   const origin = sub(center, scale(add(add(axisU, axisV), axisS), 0.5));
   return { origin, axisU, axisV, axisS };

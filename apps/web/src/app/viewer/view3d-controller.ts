@@ -6,6 +6,7 @@ import { Injectable, computed, inject, type Signal, type WritableSignal } from '
 import { clamp, Orientation, type Vec3, type Volume } from '@open-rt-studio/dicom';
 import {
   volumeBounds,
+  isOblique,
   NO_OBLIQUE,
   type ObliqueRotation,
   type PatientPlane,
@@ -73,6 +74,8 @@ export interface View3dInit {
   readonly crosshairsEnabled: () => boolean;
   /** The per-orientation oblique tilt signal (read + write). */
   readonly obliques: WritableSignal<PerOrientationOblique>;
+  /** The crosshair as a patient point, for a tilt to turn about; undefined when there is none. */
+  readonly crosshairPoint: () => Vec3 | undefined;
   /** The 3D slab thickness signal (read + write). */
   readonly slabThicknessMm: WritableSignal<number>;
   /** The shared pointer-drag signal (read + write); clip/oblique gizmos drive it. */
@@ -391,6 +394,10 @@ export class View3dController {
       startY: event.clientY,
       startTiltU: tilt.tiltU,
       startTiltV: tilt.tiltV,
+      // A plane that is flat takes the crosshair as its pivot. One that is
+      // already tilted keeps the pivot it has: turning the same angles about
+      // another point would be another plane, and the image would jump.
+      pivot: isOblique(tilt) ? tilt.pivot : d.crosshairPoint(),
     });
   }
 
@@ -412,7 +419,10 @@ export class View3dController {
       -MAX_OBLIQUE_RAD,
       MAX_OBLIQUE_RAD,
     );
-    d.obliques.update((obliques) => withOblique(obliques, drag.orientation, { tiltU, tiltV }));
+    const rotation: ObliqueRotation = drag.pivot
+      ? { tiltU, tiltV, pivot: drag.pivot }
+      : { tiltU, tiltV };
+    d.obliques.update((obliques) => withOblique(obliques, drag.orientation, rotation));
   }
 
   /** End an oblique knob drag. */

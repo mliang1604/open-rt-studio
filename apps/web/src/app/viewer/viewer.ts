@@ -20,6 +20,7 @@ import {
   type Vec2,
   SliceRenderer,
   NO_OBLIQUE,
+  focusPatientPoint,
 } from '@open-rt-studio/render';
 import { Orientation, clamp } from '@open-rt-studio/dicom';
 import { RecentStore } from '../recent-store';
@@ -62,6 +63,7 @@ import { downloadBlob, dropHeadlineText } from './viewer-dom';
 import { paneKeyOf } from './pane-placement';
 import { SHORTCUTS, MEASURE_TOOLS, CINE_FPS_OPTIONS } from './viewer-consts';
 import {
+  OBLIQUE_KNOB_RADIUS,
   type PerOrientation,
   type PerOrientationOblique,
   type PerOrientationPan,
@@ -274,6 +276,8 @@ export class Viewer {
   private readonly shortcutHelp = viewChild(ShortcutHelp);
   /** The shortcuts listed in the help overlay, in display order. */
   protected readonly shortcuts = SHORTCUTS;
+  /** Radius the tilt knob is drawn with; the gizmo's placement counts on it. */
+  protected readonly obliqueKnobRadius = OBLIQUE_KNOB_RADIUS;
   /** Cine playback state/logic; provided per-component (see providers). */
   private readonly cine = inject(CineStore);
   // Cine state lives in CineStore; these alias its signals so the template reads
@@ -469,6 +473,13 @@ export class Viewer {
       sliceIndices: this.sliceIndices,
       crosshairsEnabled: () => this.crosshairsEnabled(),
       obliques: this.obliques,
+      crosshairPoint: () => {
+        const volume = this.layersCtl.volume();
+        const voxel = this.focusVoxel();
+        return volume && voxel && this.crosshairsEnabled()
+          ? focusPatientPoint(volume, voxel)
+          : undefined;
+      },
       slabThicknessMm: this.slabThicknessMm,
       drag: this.drag,
       markMipSettling: () => this.render.markMipSettling(),

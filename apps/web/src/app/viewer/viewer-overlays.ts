@@ -100,7 +100,10 @@ export interface ObliqueGizmo {
   readonly orientation: Orientation;
   /** The pane's rectangle in CSS pixels; the overlay is positioned to it. */
   readonly rect: PaneRect;
-  /** Ring centre in pane-local CSS pixels (the orthogonal "home"). */
+  /**
+   * Ring centre in pane-local CSS pixels (the orthogonal "home"): the middle
+   * of the pane, or beside the crosshair when there is one in the pane.
+   */
   readonly cx: number;
   readonly cy: number;
   /** Ring radius in CSS pixels: the largest tilt the knob reaches. */
@@ -153,6 +156,80 @@ export const MAX_OBLIQUE_RAD = Math.PI / 3; // 60°
 const OBLIQUE_RING_RADIUS = 56;
 /** CSS pixels the knob travels per radian of tilt. */
 export const OBLIQUE_PX_PER_RAD = OBLIQUE_RING_RADIUS / MAX_OBLIQUE_RAD;
+/** Radius (CSS px) of the knob itself, as drawn. */
+export const OBLIQUE_KNOB_RADIUS = 8;
+/** How close to the crosshair's intersection a press grabs it, in CSS pixels. */
+export const CROSSHAIR_GRAB_RADIUS = 10;
+/**
+ * The nearest the knob's centre may come to the crosshair: the knob and the
+ * crosshair's grab disc, edge to edge, with a few pixels between them.
+ */
+export const OBLIQUE_CROSSHAIR_CLEARANCE = CROSSHAIR_GRAB_RADIUS + OBLIQUE_KNOB_RADIUS + 4;
+/** The smallest ring worth drawing; a pane with no room for it gets no gizmo. */
+const OBLIQUE_MIN_RADIUS = 8;
+/** Space kept between the ring and the pane's edge. */
+const OBLIQUE_EDGE_MARGIN = 4;
+
+/** Where a pane's tilt gizmo goes: its ring centre and radius, in pane-local pixels. */
+export interface ObliqueGizmoPlace {
+  readonly cx: number;
+  readonly cy: number;
+  readonly radius: number;
+}
+
+/**
+ * Place the tilt gizmo in a pane of the given size.
+ *
+ * Without a crosshair in the pane the ring sits in the middle. With one, it
+ * sits beside the crosshair, which is the point the plane turns about. The
+ * knob rests at the ring's centre and travels at most the ring's radius from
+ * it, so with the ring a clearance away from the crosshair the knob can never
+ * cover the crosshair's handle: both can be grabbed wherever the crosshair is
+ * and whatever the tilt.
+ *
+ * The ring goes to the right of the crosshair when a full-size ring fits
+ * there, then left, below, above; when none takes a full-size ring, to the
+ * side that takes the largest. It is level with the crosshair, or as near as
+ * the pane's edges allow. `crosshair` is in pane-local pixels. Returns null
+ * when the pane has no room for a ring.
+ */
+export function placeObliqueGizmo(
+  width: number,
+  height: number,
+  crosshair: { readonly x: number; readonly y: number } | null,
+): ObliqueGizmoPlace | null {
+  const fit = Math.min(width, height) / 2 - OBLIQUE_EDGE_MARGIN;
+  if (!crosshair) {
+    const radius = Math.min(OBLIQUE_RING_RADIUS, fit);
+    return radius < OBLIQUE_MIN_RADIUS ? null : { cx: width / 2, cy: height / 2, radius };
+  }
+  const gap = OBLIQUE_CROSSHAIR_CLEARANCE;
+  // For each side: the room for a ring between the clearance and the pane's
+  // edge, and the ring that goes there.
+  const side = (room: number, across: number, place: (r: number) => ObliqueGizmoPlace) => {
+    const radius = Math.min(
+      OBLIQUE_RING_RADIUS,
+      (room - gap - OBLIQUE_EDGE_MARGIN) / 2,
+      across / 2 - OBLIQUE_EDGE_MARGIN,
+    );
+    return radius < OBLIQUE_MIN_RADIUS ? null : place(radius);
+  };
+  /** Keep a ring of radius `r` inside the pane along one axis. */
+  const within = (value: number, r: number, size: number) =>
+    Math.min(Math.max(value, r + OBLIQUE_EDGE_MARGIN), size - r - OBLIQUE_EDGE_MARGIN);
+  const { x, y } = crosshair;
+  const sides = [
+    side(width - x, height, (r) => ({ cx: x + gap + r, cy: within(y, r, height), radius: r })),
+    side(x, height, (r) => ({ cx: x - gap - r, cy: within(y, r, height), radius: r })),
+    side(height - y, width, (r) => ({ cx: within(x, r, width), cy: y + gap + r, radius: r })),
+    side(y, width, (r) => ({ cx: within(x, r, width), cy: y - gap - r, radius: r })),
+  ];
+  let best: ObliqueGizmoPlace | null = null;
+  for (const candidate of sides) {
+    if (candidate && (!best || candidate.radius > best.radius)) best = candidate;
+  }
+  return best;
+}
 
 /** Longest an MPR pane's scale bar may grow: a fraction of the pane width… */
 const SCALE_BAR_MAX_FRACTION = 0.3;
@@ -228,8 +305,16 @@ export function buildReferenceLines(
   );
 }
 
-/** The oblique rotation gizmo for each hovered or already-tilted MPR pane. */
-export function buildObliqueGizmos(view: OverlayView, hovered: string | null): ObliqueGizmo[] {
+/**
+ * The oblique rotation gizmo for each hovered or already-tilted MPR pane, kept
+ * off the crosshair of that pane (`crosshairs`, as {@link buildCrosshairs}
+ * returns them) by {@link placeObliqueGizmo}.
+ */
+export function buildObliqueGizmos(
+  view: OverlayView,
+  hovered: string | null,
+  crosshairs: readonly CrosshairOverlay[] = [],
+): ObliqueGizmo[] {
   const result: ObliqueGizmo[] = [];
   for (const pane of view.panes) {
     if (pane.kind !== 'mpr') continue;
@@ -238,10 +323,14 @@ export function buildObliqueGizmos(view: OverlayView, hovered: string | null): O
     const active = tilt.tiltU !== 0 || tilt.tiltV !== 0;
     // Show the knob only where it's discoverable (hovered pane) or already in use.
     if (key !== hovered && !active) continue;
-    const cx = pane.rect.width / 2;
-    const cy = pane.rect.height / 2;
-    const radius = Math.min(OBLIQUE_RING_RADIUS, Math.min(cx, cy) - 4);
-    if (radius < 8) continue;
+    const mark = crosshairs.find((c) => c.key === key);
+    const place = placeObliqueGizmo(
+      pane.rect.width,
+      pane.rect.height,
+      mark ? { x: mark.x - pane.rect.x, y: mark.y - pane.rect.y } : null,
+    );
+    if (!place) continue;
+    const { cx, cy, radius } = place;
     const px = OBLIQUE_PX_PER_RAD;
     result.push({
       key,

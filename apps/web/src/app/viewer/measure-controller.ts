@@ -25,6 +25,7 @@ import { LayersController } from './layers-controller';
 import { formatProbe } from './viewer-format';
 import {
   buildCrosshairs,
+  CROSSHAIR_GRAB_RADIUS,
   buildMeasurementOverlay,
   buildObliqueGizmos,
   buildPaneAnnotations,
@@ -91,9 +92,6 @@ export interface MeasureInit {
   readonly cutPlane: () => PatientPlane | null;
   readonly transferFunction: () => TransferFunction;
 }
-
-/** How close to the crosshair's intersection a press grabs it, in CSS pixels. */
-export const CROSSHAIR_GRAB_RADIUS = 10;
 
 /**
  * Owns the measurement-tool gestures (place / drag a distance, angle, ellipse or
@@ -188,7 +186,7 @@ export class MeasureController {
   readonly obliqueGizmos = computed<ObliqueGizmo[]>(() => {
     const d = this.deps!;
     if (!d.crosshairsEnabled() || !d.isReady()) return [];
-    return buildObliqueGizmos(this.overlayView(), d.hoveredKey());
+    return buildObliqueGizmos(this.overlayView(), d.hoveredKey(), this.crosshairs());
   });
 
   /** Per-MPR-pane 2D overlays: anatomical edge letters and a physical scale bar. */

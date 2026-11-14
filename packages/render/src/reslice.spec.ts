@@ -209,6 +209,98 @@ describe('planeToTex oblique rotation', () => {
   });
 });
 
+describe('planeToTex oblique rotation about a pivot', () => {
+  // Anisotropic, off-origin grid: 2 x 1 x 3 mm voxels, first voxel at (10, -20, 5).
+  const geometry: VolumeGeometry = {
+    iStep: [2, 0, 0],
+    jStep: [0, 1, 0],
+    kStep: [0, 0, 3],
+    origin: [10, -20, 5],
+  };
+  const volume = makeVolume([8, 12, 6], geometry);
+  const ORIENTATIONS = [Orientation.Axial, Orientation.Coronal, Orientation.Sagittal];
+  const TILTS: ObliqueRotation[] = [
+    { tiltU: 0.3, tiltV: 0 },
+    { tiltU: 0, tiltV: -0.5 },
+    { tiltU: -0.7, tiltV: 0.4 },
+  ];
+  /** Texture coordinate and patient point of a voxel centre on this grid. */
+  const tex = (v: Vec3): Vec3 => [(v[0] + 0.5) / 8, (v[1] + 0.5) / 12, (v[2] + 0.5) / 6];
+  const patient = (v: Vec3): Vec3 => [10 + 2 * v[0], -20 + v[1], 5 + 3 * v[2]];
+  const offCentre: Vec3 = [1, 9, 4];
+
+  it('leaves the pivot where it was in the plane, whatever the tilt', () => {
+    for (const orientation of ORIENTATIONS) {
+      const flat = planeCoordsAt(planeToTex(volume, orientation), tex(offCentre));
+      for (const tilt of TILTS) {
+        const rotation = { ...tilt, pivot: patient(offCentre) };
+        const tilted = planeCoordsAt(planeToTex(volume, orientation, rotation), tex(offCentre));
+        expect(tilted.u).toBeCloseTo(flat.u, 6);
+        expect(tilted.v).toBeCloseTo(flat.v, 6);
+        expect(tilted.slicePos).toBeCloseTo(flat.slicePos, 6);
+      }
+    }
+  });
+
+  it('without a pivot the same point does leave its slice', () => {
+    const flat = planeCoordsAt(planeToTex(volume, Orientation.Axial), tex(offCentre));
+    const tilted = planeCoordsAt(
+      planeToTex(volume, Orientation.Axial, { tiltU: 0.3, tiltV: 0 }),
+      tex(offCentre),
+    );
+    expect(Math.abs(tilted.slicePos - flat.slicePos)).toBeGreaterThan(0.05);
+  });
+
+  it('a pivot at the centre of the volume is the same as no pivot', () => {
+    const centre: Vec3 = [3.5, 5.5, 2.5]; // the middle of 8 x 12 x 6 voxels
+    for (const orientation of ORIENTATIONS) {
+      for (const tilt of TILTS) {
+        const about = planeToTex(volume, orientation, { ...tilt, pivot: patient(centre) });
+        const plain = planeToTex(volume, orientation, tilt);
+        expectVec(about.dU, plain.dU);
+        expectVec(about.dV, plain.dV);
+        expectVec(about.dS, plain.dS);
+        expectVec(about.origin, plain.origin);
+      }
+    }
+  });
+
+  it('turns the plane by the same angles as without a pivot', () => {
+    const tilt = TILTS[2];
+    const about = planeToTex(volume, Orientation.Coronal, { ...tilt, pivot: patient(offCentre) });
+    const plain = planeToTex(volume, Orientation.Coronal, tilt);
+    // Same axes; only where the plane sits differs.
+    expectVec(about.dU, plain.dU);
+    expectVec(about.dV, plain.dV);
+    expectVec(about.dS, plain.dS);
+    expect(Math.hypot(...sub(about.origin, plain.origin))).toBeGreaterThan(0.01);
+  });
+
+  it('a pivot with no tilt changes nothing', () => {
+    const rotation = { tiltU: 0, tiltV: 0, pivot: patient(offCentre) };
+    expect(isOblique(rotation)).toBe(false);
+    const map = planeToTex(volume, Orientation.Sagittal, rotation);
+    const base = planeToTex(volume, Orientation.Sagittal);
+    expect(map.origin).toEqual(base.origin);
+    expect(map.dS).toEqual(base.dS);
+  });
+
+  it('keeps linked slices together across two grids that share the pivot', () => {
+    // A coarser grid over the same patient box: 4 x 6 x 3 voxels of twice the size.
+    const coarse = makeVolume([4, 6, 3], {
+      iStep: [4, 0, 0],
+      jStep: [0, 2, 0],
+      kStep: [0, 0, 6],
+      origin: [11, -19.5, 6.5],
+    });
+    const rotation = { tiltU: 0.25, tiltV: -0.2, pivot: patient(offCentre) };
+    // Slice 4 of 6 on the fine grid covers z = 15.5..18.5; the coarse slice
+    // covering that level through the pivot is index 2 (z = 15.5..21.5).
+    expect(linkedSliceIndex(volume, coarse, Orientation.Axial, 4, rotation)).toBe(2);
+    expect(linkedSliceIndex(volume, volume, Orientation.Axial, 4, rotation)).toBe(4);
+  });
+});
+
 describe('referenceLine / clipLineToUnitSquare', () => {
   const volume = makeVolume([4, 4, 4]);
 
