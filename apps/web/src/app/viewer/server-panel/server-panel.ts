@@ -18,6 +18,7 @@ import { ActiveDataSource } from '../../data-source/active-data-source';
 import type { DataSource, PatientSummary } from '../../data-source/data-source';
 import { connectToServer, ServerSource } from '../../data-source/server-source';
 import { PreferencesStore } from '../../preferences-store';
+import { AuditPanel } from '../audit-panel/audit-panel';
 import { ServerBrowser } from '../server-browser/server-browser';
 import { confirmLeavePatient } from '../viewer-dom';
 
@@ -42,7 +43,7 @@ export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
 @Component({
   selector: 'app-server-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ServerBrowser],
+  imports: [AuditPanel, ServerBrowser],
   templateUrl: './server-panel.html',
   styleUrls: ['../panel-card.css', './server-panel.css'],
   host: {
@@ -114,6 +115,10 @@ export class ServerPanel {
     const who = this.loggedInAs();
     return `Connected: ${this.server()?.label ?? ''}${who ? `, as ${who}` : ''}.`;
   });
+  /** What the card holds once connected: the studies to choose from, or the audit log. */
+  protected readonly view = signal<'studies' | 'audit'>('studies');
+  /** Whether the audit log is offered: to an administrator, not to a user. */
+  protected readonly mayAudit = computed(() => this.server()?.mayReadAudit() ?? false);
   protected readonly name = signal('');
   /**
    * What is typed as the password. It is held only while the form is filled
@@ -187,7 +192,13 @@ export class ServerPanel {
     this.waiting.set(null);
   }
 
+  protected onView(view: 'studies' | 'audit'): void {
+    this.problem.set(null);
+    this.view.set(view);
+  }
+
   protected onDisconnect(): void {
+    this.view.set('studies');
     this.problem.set(null);
     this.forgetPassword();
     // The server is told to end the login; the viewer has forgotten it already.

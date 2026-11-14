@@ -16,6 +16,7 @@ import {
 import type { SyntheticFile } from '@open-rt-studio/testdata';
 
 import type { ParsedFiles } from '../parse-pool';
+import type { AuditEntry } from './server-source';
 
 /** What the worker pool does, on this thread. */
 export async function parseHere(files: readonly File[]): Promise<ParsedFiles> {
@@ -76,6 +77,8 @@ export const FAKE_LOGIN_ATTEMPTS = 5;
 export function fakeServer(
   files: readonly SyntheticFile[],
   accounts?: readonly FakeAccount[],
+  /** The records of its audit log, the earliest first. Without, it keeps none (404). */
+  audit?: readonly AuditEntry[],
 ): FakeServer {
   const sessions = new Map<string, FakeAccount>();
   const failures = new Map<string, number>();
@@ -173,6 +176,41 @@ export function fakeServer(
       }
       if (accounts && !who) {
         return json({ error: 'unauthenticated', message: 'Log in to use this server.' }, 401);
+      }
+      if (audit && (path === '/audit' || path === '/audit/export')) {
+        if (who && who.role !== 'admin') {
+          return json({ error: 'forbidden', message: 'This is for an administrator.' }, 403);
+        }
+        const asked = url.searchParams;
+        const same = (name: string, value: string | null): boolean =>
+          !asked.has(name) || asked.get(name) === value;
+        const fits = audit.filter(
+          (record) =>
+            same('actor', record.actor) &&
+            same('action', record.action) &&
+            same('outcome', record.outcome) &&
+            same('patientId', record.patientId) &&
+            (!asked.has('from') || Date.parse(record.until) >= Date.parse(asked.get('from')!)) &&
+            (!asked.has('before') || Date.parse(record.time) < Date.parse(asked.get('before')!)),
+        );
+        if (path === '/audit/export') {
+          const lines = fits.map((record) =>
+            [record.id, record.time, record.actor ?? '', record.action, record.outcome].join(','),
+          );
+          return new Response(['id,time,actor,action,outcome', ...lines].join('\r\n') + '\r\n', {
+            status: 200,
+            headers: { 'Content-Type': 'text/csv; charset=utf-8' },
+          });
+        }
+        const limit = Number(asked.get('limit') ?? 100);
+        const offset = Number(asked.get('offset') ?? 0);
+        const latestFirst = [...fits].reverse();
+        return json({
+          items: latestFirst.slice(offset, offset + limit),
+          limit,
+          offset,
+          more: latestFirst.length > offset + limit,
+        });
       }
 
       const page = <T>(items: readonly T[]): Response => {

@@ -333,8 +333,11 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
     were typed, and must be guarded like the data.
   - **Requests without a login are not recorded.** Anyone can send them, and
     recording them would let anyone fill the disk.
-  - Not there: retention and clearing of old records and a screen in the
-    viewer (#213), DIMSE events (#212), a second copy off the machine.
+  - The viewer shows the log to an administrator (#213), from the server
+    card. The role is the server's to enforce: the viewer only decides
+    whether to offer the button.
+  - Not there: retention and clearing of old records (#216), DIMSE events
+    (#212), a second copy off the machine.
 
   Status: **decided, and Michael's to overturn**, most of all the choice to
   stop answering when the log cannot be written.

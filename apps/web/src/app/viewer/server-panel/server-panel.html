@@ -71,13 +71,32 @@
     >
       {{ loggedInAs() ? 'Log out and disconnect' : 'Disconnect' }}
     </button>
+    @if (mayAudit()) {
+      @if (view() === 'audit') {
+        <button type="button" (click)="onView('studies')" title="Back to the studies on the server">
+          Studies
+        </button>
+      } @else {
+        <button
+          type="button"
+          (click)="onView('audit')"
+          title="Who did what on this server. For administrators"
+        >
+          Audit log
+        </button>
+      }
+    }
   </div>
-  <app-server-browser
-    [server]="connected"
-    [chosenKey]="chosenKey()"
-    [disabled]="busy()"
-    (choose)="onPatient($event)"
-  />
+  @if (view() === 'audit' && mayAudit()) {
+    <app-audit-panel [server]="connected" />
+  } @else {
+    <app-server-browser
+      [server]="connected"
+      [chosenKey]="chosenKey()"
+      [disabled]="busy()"
+      (choose)="onPatient($event)"
+    />
+  }
 } @else {
   <form (submit)="onConnect($event)">
     <label for="server-address">Address of an Open RT Studio server</label>
