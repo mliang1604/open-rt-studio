@@ -3,7 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject } from '@angular/core';
-import { structureSetsForSeries, type Series, type StructureSet } from '@open-rt-studio/dicom';
+import {
+  structureSetsForSeries,
+  structureSetsOfPatient,
+  type Series,
+  type StructureSet,
+} from '@open-rt-studio/dicom';
 
 import { PatientCatalog } from '../patient-catalog';
 import { SeriesThumbnailCache, type SeriesThumbnail } from '../viewer/series-thumbnail';
@@ -79,7 +84,10 @@ export class LocalFilesSource implements DataSource {
     if ((series.patientId ?? '') !== this.catalog.currentPatientId()) {
       return Promise.reject(new Error('That series belongs to another of the opened patients.'));
     }
-    return Promise.resolve({ series, structureSets: this.catalog.structureSets() });
+    // Likewise the structure sets: those read from another patient's files
+    // are not among what the view is given, whatever UIDs they share.
+    const structureSets = structureSetsOfPatient(this.catalog.structureSets(), series.patientId);
+    return Promise.resolve({ series, structureSets });
   }
 
   thumbnail(seriesUid: string): SeriesThumbnail {
@@ -107,6 +115,20 @@ export class LocalFilesSource implements DataSource {
   /** Turn to one of {@link patients}. Throws for a key that is none of theirs. */
   selectPatient(key: string): void {
     if (!this.catalog.select(key)) throw new Error('That patient is not among the opened files.');
+  }
+
+  /**
+   * Close one of {@link patients}: their series, structure sets and previews
+   * are let go of, and the source turns to the first patient that is left, or
+   * to none. The files on disk are not touched. Throws for a key that is none
+   * of theirs.
+   */
+  closePatient(key: string): void {
+    const patient = this.catalog.patients().get(key);
+    if (!patient) throw new Error('That patient is not among the opened files.');
+    const uids = patient.studies.flatMap((study) => study.series.map((series) => series.uid));
+    this.catalog.close(key);
+    this.thumbnails.forget(uids);
   }
 
   /** Take in structure sets parsed from files, for the series they belong to. */

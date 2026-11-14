@@ -14,7 +14,7 @@ import {
 } from '@open-rt-studio/testdata';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { preAcknowledge, requireWebGpu } from './fixtures/app';
+import { answerNext, preAcknowledge, requireWebGpu } from './fixtures/app';
 import { pickSeries } from './fixtures/load';
 import { startTestServer, type TestServer } from './fixtures/server';
 import { connectTo, openServerCard, studyRows } from './fixtures/server-card';
@@ -252,9 +252,19 @@ test('choosing a study opens the timeline of its patient', async ({ page }) => {
       .filter((row) => row.id === THORAX_PATIENT.id).length,
   );
 
-  // Another patient: the viewport is emptied, and the timeline is theirs.
+  // Another patient, while a series is showing: asked first (#208). Refused, nothing changes.
   const willow = populationPatient(24);
+  let asked = answerNext(page, false);
   await studyRows(card).filter({ hasText: willow.id }).first().click();
+  expect(await asked).toContain(`Turn to ${willow.name} and empty the viewer?`);
+  await expect(card).toHaveCount(1);
+  await expect(page.locator('.history-patient')).toContainText(THORAX_PATIENT.name);
+  await expect(page.locator('div.status')).toContainText('volume 48 × 48 × 16');
+
+  // Agreed: the viewport is emptied, and the timeline is theirs.
+  asked = answerNext(page, true);
+  await studyRows(card).filter({ hasText: willow.id }).first().click();
+  await asked;
   await expect(card).toHaveCount(0);
   await expect(page.locator('.history-patient')).toContainText(willow.name);
   await expect(page.locator('.study-tile')).toHaveCount(

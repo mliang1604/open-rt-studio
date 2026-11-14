@@ -86,7 +86,11 @@
 
 /* The same label as a selector, when files of several patients are open. */
 .history-patient-select {
+  /* Gives way first when the bar is short of room: the name is cut, not the buttons. */
+  flex: 0 1 auto;
+  min-width: 90px;
   max-width: 260px;
+  text-overflow: ellipsis;
   padding: 3px 8px;
   font: inherit;
   font-size: 12px;
@@ -122,6 +126,26 @@
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
   cursor: pointer;
+}
+
+/* Closes the patient the bar names. Quiet: it is not what the bar is for. */
+.history-close {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.history-close:hover,
+.history-close:focus-visible {
+  color: var(--text);
+  border-color: var(--glass-border);
+  outline: none;
 }
 
 .history-source:hover,

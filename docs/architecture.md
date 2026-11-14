@@ -147,10 +147,19 @@ also builds on its own to `dist/` for consumers outside the workspace.
   asks first when a series is showing. Files that do hold something of the
   patient on screen leave the viewer where it is, and any other patients in
   them join the list. A batch of several patients with no one on screen opens
-  on the first by Patient ID, the order of the list. Two limits: an open
-  patient cannot be closed short of reloading the page, and structure sets
-  are kept in one list and joined to a series by UID (frame of reference or
-  referenced series), not by patient.
+  on the first by Patient ID, the order of the list. "Close patient" on the
+  history bar lets go of the patient the timeline is of, with their series,
+  structure sets and previews (#208); it asks first when a series of theirs is
+  showing, and the files on disk are not touched. Choosing another patient in
+  a server's study browser asks the same question.
+- **A structure set is of the patient its file names** (#208). Sets are joined
+  to a series by UID (frame of reference, or referenced series), and UIDs are
+  not always unique: one study exported under two pseudonyms shares all of
+  them. A parsed set keeps its Patient ID, and `structureSetsForSeries`, the
+  one place a join is made, refuses a set that names another patient than the
+  series does. When either gives no Patient ID there is nothing to compare,
+  and the UIDs decide. The server still relates by UID alone, so the count on
+  a chip from a server could include a set the viewer then refuses to draw.
 - **A server is browsed by its studies** (#37). The browser lists studies,
   each with its patient, because that is what can be searched by date and
   modality as well as by name and ID, and what the server already answers

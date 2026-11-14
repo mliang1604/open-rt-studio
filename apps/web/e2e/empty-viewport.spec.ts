@@ -11,7 +11,7 @@ import {
 } from '@open-rt-studio/testdata';
 import { expect, test, type Page } from '@playwright/test';
 
-import { preAcknowledge, requireWebGpu } from './fixtures/app';
+import { answerNext, preAcknowledge, requireWebGpu } from './fixtures/app';
 import { importFiles, pickSeries } from './fixtures/load';
 import { startTestServer, type TestServer } from './fixtures/server';
 import { connectTo, openServerCard, studyRows } from './fixtures/server-card';
@@ -147,7 +147,9 @@ test.describe('on a server', () => {
     await card.getByLabel('Patient ID').fill(other.id);
     await card.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(studyRows(card).first()).toContainText(other.id);
+    const asked = answerNext(page, true); // a series is showing, so it asks first (#208)
     await studyRows(card).first().click();
+    await asked;
     await expect(page.locator('.history-patient')).toContainText(other.name);
     await expectEmpty(page, readable);
 

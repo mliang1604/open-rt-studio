@@ -539,5 +539,65 @@ describe('changing the data source', () => {
       expect(controller.switchPatient('P2', confirm(true))).toBe(false);
       expect(files.currentPatient()?.key).toBe('P1');
     });
+
+    describe('closing the patient the timeline is of (#208)', () => {
+      it('closes without asking while nothing is showing, and turns to the patient left', () => {
+        const { controller, files, confirm, asked, notice, load } = twoPatients();
+        expect(controller.closePatient(confirm(false))).toBe(true);
+        expect(asked).toEqual([]);
+        expect(files.patients().map((patient) => patient.key)).toEqual(['P2']);
+        expect(files.currentPatient()?.key).toBe('P2');
+        expect(notice()).toBe('Closed P1^SYNTHETIC.');
+        expect(load()).toEqual({ status: 'idle' });
+      });
+
+      it('asks before it gives up a displayed series, and empties the canvas when told to', async () => {
+        const { controller, files, confirm, asked, shown, load, canvas } = twoPatients();
+        await controller.loadSeriesFromPanel('1.1');
+
+        // Refused: the patient stays open, and on screen.
+        expect(controller.closePatient(confirm(false))).toBe(false);
+        expect(asked).toEqual(['P1^SYNTHETIC']);
+        expect(files.patients()).toHaveLength(2);
+        expect(shown()).toBe('1.1');
+        expect(canvas.at(-1)).toBe('volume');
+
+        expect(controller.closePatient(confirm(true))).toBe(true);
+        expect(load()).toEqual({ status: 'idle' });
+        expect(canvas.at(-1)).toBe('empty');
+        expect(files.patients().map((patient) => patient.key)).toEqual(['P2']);
+        // Their series cannot be had any more.
+        await controller.loadSeriesFromPanel('1.1');
+        expect(shown()).toBeNull();
+      });
+
+      it('abandons a series of theirs that was on its way', async () => {
+        const { controller, files, confirm, imports, load } = twoPatients();
+        const importing = controller.loadFiles([new File([], 'a.dcm')], null);
+        expect(load().status).toBe('loading');
+        expect(controller.closePatient(confirm(true))).toBe(true);
+        imports[0]({ kind: 'nothing', skipped: [] });
+        await importing;
+        expect(load()).toEqual({ status: 'idle' });
+        expect(files.currentPatient()?.key).toBe('P2');
+      });
+
+      it('goes back to nothing open after the last patient', () => {
+        const { controller, files, confirm } = twoPatients();
+        expect(controller.closePatient(confirm(true))).toBe(true);
+        expect(controller.closePatient(confirm(true))).toBe(true);
+        expect(files.patients()).toEqual([]);
+        expect(files.currentPatient()).toBeNull();
+        // And there is no one left to close.
+        expect(controller.closePatient(confirm(true))).toBe(false);
+      });
+
+      it('closes no one while the viewer reads from a server', () => {
+        const { controller, other, files, confirm } = twoPatients();
+        controller.useSource(other);
+        expect(controller.closePatient(confirm(true))).toBe(false);
+        expect(files.patients()).toHaveLength(2);
+      });
+    });
   });
 });

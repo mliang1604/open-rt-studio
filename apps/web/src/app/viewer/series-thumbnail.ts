@@ -201,6 +201,11 @@ export class SeriesThumbnailCache {
     return thumbnail;
   }
 
+  /** Drop the previews of these series: they are no longer open. */
+  forget(seriesUids: Iterable<string>): void {
+    for (const uid of seriesUids) this.cache.delete(uid);
+  }
+
   /** Drop all cached previews (e.g. on a fresh import). */
   clear(): void {
     this.cache.clear();

@@ -4,9 +4,12 @@
 
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
+  populationPatient,
   SYNTHETIC_FOLLOW_UP_STUDY,
+  syntheticPopulation,
   syntheticRtCourse,
   SYNTHETIC_STUDY,
+  type SyntheticFile,
 } from '@open-rt-studio/testdata';
 
 import { ActiveDataSource } from '../../data-source/active-data-source';
@@ -31,8 +34,14 @@ interface Rendered {
 }
 
 /** Render the panel beside a stand-in server; the viewer's part is played here. */
-async function render(reachable = true): Promise<Rendered> {
-  const server = fakeServer(syntheticRtCourse());
+/** A second patient on the server, to turn to: the first of the synthetic population. */
+const OTHER = populationPatient(0);
+const OTHERS_FILES = syntheticPopulation().filter((file) =>
+  new TextDecoder('latin1').decode(file.bytes).includes(OTHER.id),
+);
+
+async function render(reachable = true, more: readonly SyntheticFile[] = []): Promise<Rendered> {
+  const server = fakeServer([...syntheticRtCourse(), ...more]);
   const fixture = TestBed.createComponent(ServerPanel);
   const sources = TestBed.inject(ActiveDataSource);
   const said: string[] = [];
@@ -155,6 +164,49 @@ describe('ServerPanel', () => {
     // The same patient again: what is on screen is theirs, and stays.
     await click(SYNTHETIC_STUDY.patient.name);
     expect(said.slice(3)).toEqual(['closed']);
+  });
+
+  describe('while a series is showing (#208)', () => {
+    /** Connected, on the course's patient, with a second patient on the server to turn to. */
+    async function showing(answer: boolean) {
+      const rendered = await render(true, OTHERS_FILES);
+      const asked: string[] = [];
+      rendered.fixture.componentRef.setInput('confirmLeave', (to: string) => {
+        asked.push(to);
+        return answer;
+      });
+      await rendered.click('Connect');
+      await rendered.click(SYNTHETIC_STUDY.patient.name);
+      rendered.fixture.componentRef.setInput('showing', true);
+      await rendered.fixture.whenStable();
+      rendered.said.length = 0;
+      return { ...rendered, asked };
+    }
+
+    it('does not ask for the patient who is on screen', async () => {
+      const { click, said, asked } = await showing(false);
+      await click(SYNTHETIC_STUDY.patient.name);
+      expect(asked).toEqual([]);
+      expect(said).toEqual(['closed']);
+    });
+
+    it('asks before it leaves them, and does nothing when refused', async () => {
+      const { click, said, asked } = await showing(false);
+      await click(OTHER.name);
+      expect(asked).toEqual([OTHER.name]);
+      expect(said).toEqual([]);
+      const source = TestBed.inject(ActiveDataSource).source() as ServerSource;
+      expect(source.currentPatient()?.patientId).toBe(SYNTHETIC_STUDY.patient.id);
+    });
+
+    it('turns to the other patient when told to', async () => {
+      const { click, said, asked } = await showing(true);
+      await click(OTHER.name);
+      expect(asked).toEqual([OTHER.name]);
+      expect(said).toEqual(['leave patient', 'closed']);
+      const source = TestBed.inject(ActiveDataSource).source() as ServerSource;
+      expect(source.currentPatient()?.patientId).toBe(OTHER.id);
+    });
   });
 
   it('goes back to opened files on Disconnect', async () => {

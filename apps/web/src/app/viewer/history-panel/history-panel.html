@@ -33,6 +33,16 @@
   } @else if (patientLabel(); as label) {
     <span class="history-patient" [title]="label">{{ label }}</span>
   }
+  @if (patients().length > 0) {
+    <button
+      type="button"
+      class="history-close"
+      (click)="closePatient.emit()"
+      title="Close this patient: their series leave the list. The files on this computer are not touched"
+    >
+      Close patient
+    </button>
+  }
   @if (server(); as from) {
     <span class="history-from">{{ from }}</span>
   }

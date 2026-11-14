@@ -1385,6 +1385,7 @@
 
     @if (serverPanelOpen()) {
       <app-server-panel
+        [showing]="isReady()"
         (use)="loadCtl.useSource($event)"
         (leavePatient)="loadCtl.leavePatient()"
         (closed)="serverPanelOpen.set(false)"
@@ -1402,4 +1403,5 @@
   (loadSeries)="loadCtl.loadSeriesFromPanel($event.uid)"
   (openServer)="serverPanelOpen.set(true)"
   (choosePatient)="loadCtl.switchPatient($event)"
+  (closePatient)="loadCtl.closePatient()"
 />

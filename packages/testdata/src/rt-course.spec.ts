@@ -129,6 +129,8 @@ describe('syntheticRtCourse', () => {
     const structureSet = parseStructureSet(rtstruct.name, buffer(rtstruct));
     expect(structureSet?.rois).toHaveLength(2);
     expect(structureSet?.frameOfReferenceUid).toBe(COURSE.planningFrame);
+    // Whose it is, so that it is never drawn on a series of another patient.
+    expect(structureSet?.patientId).toBe(SYNTHETIC_PATIENT.id);
   });
 });
 

@@ -178,6 +178,89 @@ describe('LocalFilesSource', () => {
       ]);
     });
 
+    // The helper gives every series the frame of reference 1.9: the two
+    // patients share it, as one study exported under two names would.
+    describe('whose structure sets share a frame of reference', () => {
+      const of = (patientId: string | null, name: string): StructureSet => ({
+        ...structures(name),
+        patientId,
+      });
+      const count = (uid: string): number =>
+        listedSeries(source).find((one) => one.uid === uid)!.structureSets;
+
+      beforeEach(() => {
+        source.addStructureSets([of('SYN-0001', 'first'), of('SYN-0002', 'second')]);
+      });
+
+      it('counts on a chip only the sets of that patient', () => {
+        expect(count('1.1.1')).toBe(1);
+        source.selectPatient('SYN-0002');
+        expect(count('2.1.1')).toBe(1);
+      });
+
+      it('gives with a series only the sets of its patient', async () => {
+        const names = async (uid: string): Promise<string[]> =>
+          (await source.fetchSeries(uid)).structureSets.map((set) => set.name);
+        expect(await names('1.1.1')).toEqual(['first']);
+        source.selectPatient('SYN-0002');
+        expect(await names('2.1.1')).toEqual(['second']);
+      });
+
+      it('gives a set that names no patient to whoever its UIDs say', async () => {
+        source.addStructureSets([of(null, 'unnamed')]);
+        expect(count('1.1.1')).toBe(2);
+        expect((await source.fetchSeries('1.1.1')).structureSets.map((set) => set.name)).toEqual([
+          'first',
+          'unnamed',
+        ]);
+      });
+    });
+
+    describe('closing one', () => {
+      it('lets go of their series, structure sets and previews, and stays where it was', async () => {
+        source.addStructureSets([
+          { ...structures('first'), patientId: 'SYN-0001' },
+          { ...structures('second'), patientId: 'SYN-0002' },
+        ]);
+        expect(source.thumbnail('2.1.1').kind).toBe('image');
+        source.closePatient('SYN-0002');
+        expect(source.patients().map((patient) => patient.key)).toEqual(['SYN-0001']);
+        expect(source.currentPatient()?.key).toBe('SYN-0001');
+        await expect(source.fetchSeries('2.1.1')).rejects.toThrow(
+          'That series is not among the opened files.',
+        );
+        // Not a picture kept from before: there is no such series any more.
+        expect(source.thumbnail('2.1.1')).toEqual({ kind: 'icon', modality: null });
+        expect((await source.fetchSeries('1.1.1')).structureSets.map((set) => set.name)).toEqual([
+          'first',
+        ]);
+      });
+
+      it('turns to the patient that is left when the one it is on is closed, and to none after the last', () => {
+        source.closePatient('SYN-0001');
+        expect(source.currentPatient()?.key).toBe('SYN-0002');
+        expect(listedSeries(source).map((one) => one.uid)).toEqual(['2.1.1']);
+        source.closePatient('SYN-0002');
+        expect(source.patients()).toEqual([]);
+        expect(source.currentPatient()).toBeNull();
+      });
+
+      it('opens them again from their files, as if for the first time', () => {
+        source.closePatient('SYN-0002');
+        source.add([series('2.1.1', other)]);
+        expect(source.patients().map((patient) => patient.key)).toEqual(['SYN-0001', 'SYN-0002']);
+        // It was on the first, and the files hold nothing of theirs.
+        expect(source.currentPatient()?.key).toBe('SYN-0002');
+      });
+
+      it('refuses a patient that is not open', () => {
+        expect(() => source.closePatient('SYN-0009')).toThrow(
+          'That patient is not among the opened files.',
+        );
+        expect(source.patients()).toHaveLength(2);
+      });
+    });
+
     it('refuses to turn to a patient that is not open', () => {
       expect(() => source.selectPatient('SYN-0009')).toThrow(
         'That patient is not among the opened files.',

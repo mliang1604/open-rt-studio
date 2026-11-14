@@ -81,6 +81,7 @@ export function parseStructureSet(name: string, buffer: ArrayBuffer): StructureS
     label: dataSet.string('x30060002')?.trim() || null, // Structure Set Label
     frameOfReferenceUid: references.frameOfReferenceUid ?? roiFrameOfReference,
     referencedSeriesUids: references.referencedSeriesUids,
+    patientId: dataSet.string('x00100020')?.trim() || null, // Patient ID
     rois: order.map((number) => freeze(rois.get(number)!)),
   };
 }
@@ -124,6 +125,13 @@ function readReferences(dataSet: DataSet): {
  * side, or doesn't match): the structure set names the series in its RT
  * Referenced Series Sequence (0020,000E). A structure set with no usable
  * reference is left unassociated rather than guessed onto a series.
+ *
+ * Before either: a set that names one patient does not annotate a series that
+ * names another. UIDs are meant to be unique, and are not always: one study
+ * exported twice under two pseudonyms shares every UID. Files of several
+ * patients can be open at once, and their sets are kept together, so the
+ * Patient IDs are compared here, where every join is made. When either side
+ * gives no Patient ID there is nothing to compare, and the UIDs decide.
  */
 export function structureSetsForSeries(
   structureSets: readonly StructureSet[],
@@ -134,8 +142,28 @@ export function structureSetsForSeries(
 
 /** Whether a structure set annotates a series by frame of reference or, failing that, by referenced series UID. */
 function associates(ss: StructureSet, series: Series): boolean {
+  if (namesAnotherPatient(ss.patientId, series.patientId)) return false;
   if (framesMatch(ss.frameOfReferenceUid, series.frameOfReferenceUid)) return true;
   return series.uid !== '' && ss.referencedSeriesUids.includes(series.uid);
+}
+
+/**
+ * The structure sets that may be a patient's: all but those that name another
+ * patient. What a view of that patient is given to choose from, so that a set
+ * of someone else is not in it at all, matched or not.
+ */
+export function structureSetsOfPatient(
+  structureSets: readonly StructureSet[],
+  patientId: string | null,
+): StructureSet[] {
+  return structureSets.filter((ss) => !namesAnotherPatient(ss.patientId, patientId));
+}
+
+/** Whether both give a Patient ID, and not the same one. */
+function namesAnotherPatient(a: string | null | undefined, b: string | null | undefined): boolean {
+  const one = a?.trim() ?? '';
+  const other = b?.trim() ?? '';
+  return one !== '' && other !== '' && one !== other;
 }
 
 /** An ROI under construction, before it is frozen into a {@link Roi}. */

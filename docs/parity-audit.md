@@ -154,21 +154,21 @@ Open RT Studio differs from dicom-workspace in these ways, on purpose.
 Things the backlog issues describe that dicom-workspace does not have. They
 are not regressions. Each has an issue.
 
-| Issue | What is missing                                                                                                                               | Mentioned in |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| #143  | Cancelling a load (added since)                                                                                                               | #20          |
-| #144  | One unreadable file failed the batch (such files are skipped and named since). JPEG Lossless and 12-bit JPEG are reported, not decoded (#183) | #20          |
-| #145  | Selecting, moving and deleting one measurement (added since)                                                                                  | #27          |
-| #146  | Cine direction and loop mode (added since)                                                                                                    | #28          |
-| #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only (all added since)                                                  | #29          |
-| #149  | Window/level linking in Compare (added since)                                                                                                 | #26          |
-| #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot (both done since)                                                  | #22          |
-| #151  | Filled display of imported structures (added since, with a fill opacity)                                                                      | #104         |
-| #152  | Rename, recolour and delete for painted structures; listing them under Structures (all added since, and import-to-edit is offered again)      | #105         |
-| #155  | Tree view expansion remembered (added since)                                                                                                  | #33          |
-| #156  | Reopening a recent selection without picking the files again (added since, for a folder or a single file in Chromium browsers)                | #34          |
-| #157  | Probe position in patient millimetres (added since)                                                                                           | #21          |
-| #35   | Several patients open at once, with a selector to turn between them (added since: opening another patient's files no longer drops the first)  | #34          |
+| Issue | What is missing                                                                                                                                                                              | Mentioned in |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| #143  | Cancelling a load (added since)                                                                                                                                                              | #20          |
+| #144  | One unreadable file failed the batch (such files are skipped and named since). JPEG Lossless and 12-bit JPEG are reported, not decoded (#183)                                                | #20          |
+| #145  | Selecting, moving and deleting one measurement (added since)                                                                                                                                 | #27          |
+| #146  | Cine direction and loop mode (added since)                                                                                                                                                   | #28          |
+| #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only (all added since)                                                                                                 | #29          |
+| #149  | Window/level linking in Compare (added since)                                                                                                                                                | #26          |
+| #150  | Oblique pivot on the crosshair; knob and crosshair handle on the same spot (both done since)                                                                                                 | #22          |
+| #151  | Filled display of imported structures (added since, with a fill opacity)                                                                                                                     | #104         |
+| #152  | Rename, recolour and delete for painted structures; listing them under Structures (all added since, and import-to-edit is offered again)                                                     | #105         |
+| #155  | Tree view expansion remembered (added since)                                                                                                                                                 | #33          |
+| #156  | Reopening a recent selection without picking the files again (added since, for a folder or a single file in Chromium browsers)                                                               | #34          |
+| #157  | Probe position in patient millimetres (added since)                                                                                                                                          | #21          |
+| #35   | Several patients open at once, with a selector to turn between them (added since: opening another patient's files no longer drops the first; a patient is closed from the history bar, #208) | #34          |
 
 #148 asked whether captured images and video should carry a
 not-for-clinical-use mark, which #29 left open. Decided on 2026-11-13: no.

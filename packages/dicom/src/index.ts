@@ -45,7 +45,11 @@ export {
   type StructureExportOptions,
   buildStructureSet,
 } from './structure-export.js';
-export { parseStructureSet, structureSetsForSeries } from './structure-set.js';
+export {
+  parseStructureSet,
+  structureSetsForSeries,
+  structureSetsOfPatient,
+} from './structure-set.js';
 export { type WriteOptions, writeStructureSet } from './structure-set-writer.js';
 export { tagName } from './tag-dictionary.js';
 export {

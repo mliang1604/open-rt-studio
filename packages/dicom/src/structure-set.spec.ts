@@ -3,7 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import type { Series } from './series.js';
-import { parseStructureSet, structureSetsForSeries } from './structure-set.js';
+import {
+  parseStructureSet,
+  structureSetsForSeries,
+  structureSetsOfPatient,
+} from './structure-set.js';
 import type { StructureSet } from './types.js';
 
 // --- Minimal Explicit-VR-Little-Endian DICOM P10 writer --------------------
@@ -360,6 +364,44 @@ describe('structureSetsForSeries', () => {
   it('does not associate when frames of reference differ', () => {
     const s = series({ frameOfReferenceUid: 'for-1' });
     expect(structureSetsForSeries([ss({ frameOfReferenceUid: 'for-2' })], s)).toEqual([]);
+  });
+
+  describe('of another patient', () => {
+    // One study exported twice under two pseudonyms: every UID is shared.
+    const s = series({ uid: 'series-uid', frameOfReferenceUid: 'for-1', patientId: 'P1' });
+    const shared = { frameOfReferenceUid: 'for-1', referencedSeriesUids: ['series-uid'] };
+
+    it('is not associated, though the frame of reference and the series UID both match', () => {
+      const theirs = ss({ ...shared, patientId: 'P1' });
+      const anothers = ss({ ...shared, name: 'rs2.dcm', patientId: 'P2' });
+      expect(structureSetsForSeries([theirs, anothers], s)).toEqual([theirs]);
+    });
+
+    it('is told by the Patient ID as written, give or take the padding', () => {
+      expect(structureSetsForSeries([ss({ ...shared, patientId: ' P1 ' })], s)).toHaveLength(1);
+      expect(structureSetsForSeries([ss({ ...shared, patientId: 'p1' })], s)).toEqual([]);
+    });
+
+    it('is left out of what a view of the patient is given', () => {
+      const theirs = ss({ patientId: 'P1' });
+      const anothers = ss({ name: 'rs2.dcm', patientId: 'P2' });
+      const unnamed = ss({ name: 'rs3.dcm', patientId: null });
+      const made = ss({ name: 'painted' });
+      const all = [theirs, anothers, unnamed, made];
+      expect(structureSetsOfPatient(all, 'P1')).toEqual([theirs, unnamed, made]);
+      // A patient with no ID cannot be told from anyone.
+      expect(structureSetsOfPatient(all, null)).toEqual(all);
+    });
+
+    it('cannot be told when either gives no Patient ID: the UIDs decide', () => {
+      for (const patientId of [null, '', '  ', undefined]) {
+        expect(structureSetsForSeries([ss({ ...shared, patientId })], s)).toHaveLength(1);
+      }
+      const unnamed = series({ uid: 'series-uid', frameOfReferenceUid: 'for-1', patientId: null });
+      expect(structureSetsForSeries([ss({ ...shared, patientId: 'P2' })], unnamed)).toHaveLength(1);
+      // And they still have to match by UID.
+      expect(structureSetsForSeries([ss({ frameOfReferenceUid: 'for-9' })], s)).toEqual([]);
+    });
   });
 
   it('falls back to a referenced series UID when the frame of reference is absent', () => {
