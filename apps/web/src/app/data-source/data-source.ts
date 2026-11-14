@@ -94,6 +94,12 @@ export interface SeriesSummary {
   readonly frameOfReferenceUid: string | null;
   /** How many images (or other instances) it holds. */
   readonly imageCount: number;
+  /**
+   * How many structure sets the source holds for the series: those drawn in
+   * its frame of reference, and those that name it. They come with the
+   * series when it is fetched.
+   */
+  readonly structureSets: number;
 }
 
 export interface FetchOptions {

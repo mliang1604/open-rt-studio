@@ -111,6 +111,11 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     description: nullableText,
     frameOfReferenceUid: nullableUid,
     instances: count,
+    structureSets: {
+      ...count,
+      description:
+        'How many structure sets belong to the series: those that name it or its frame of reference. They are listed by /series/{uid}/related.',
+    },
   }),
   Instance: object(instance),
   Reference: reference,

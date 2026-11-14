@@ -131,6 +131,30 @@ describe('LocalFilesSource', () => {
     expect(source.thumbnail('9.9.9')).toEqual({ kind: 'icon', modality: null });
   });
 
+  it('says with each series how many of the opened structure sets belong to it', () => {
+    const count = (uid: string): number =>
+      listedSeries(source).find((one) => one.uid === uid)!.structureSets;
+    source.add([
+      series('1.1.1'),
+      series('1.2.1', { studyUid: '1.2', modality: 'MR', frameOfReferenceUid: '2.9' }),
+    ]);
+    expect([count('1.1.1'), count('1.2.1')]).toEqual([0, 0]);
+
+    // One in the CT's frame of reference.
+    source.addStructureSets([structures('in the frame')]);
+    expect([count('1.1.1'), count('1.2.1')]).toEqual([1, 0]);
+
+    // One that names the MR, and no frame.
+    source.addStructureSets([
+      {
+        name: 'by series',
+        frameOfReferenceUid: null,
+        referencedSeriesUids: ['1.2.1'],
+      } as unknown as StructureSet,
+    ]);
+    expect([count('1.1.1'), count('1.2.1')]).toEqual([1, 1]);
+  });
+
   it('saves an object as a download, in the turn it was asked', async () => {
     const clicked: { download: string; href: string }[] = [];
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (

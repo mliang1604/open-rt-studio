@@ -116,6 +116,13 @@ export interface SeriesRecord {
   readonly description: string | null;
   readonly frameOfReferenceUid: string | null;
   readonly instances: number;
+  /**
+   * How many structure sets belong to the series: those that name it, and
+   * those that name its frame of reference. The same ones
+   * {@link PacsIndex.relatedToSeries} gives, counted here so that a list of
+   * series can say it without a question per series.
+   */
+  readonly structureSets: number;
 }
 
 export interface InstanceRecord {

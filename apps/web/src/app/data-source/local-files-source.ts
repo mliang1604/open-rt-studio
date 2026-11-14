@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject } from '@angular/core';
-import type { Series, StructureSet } from '@open-rt-studio/dicom';
+import { structureSetsForSeries, type Series, type StructureSet } from '@open-rt-studio/dicom';
 
 import { PatientCatalog } from '../patient-catalog';
 import { SeriesThumbnailCache, type SeriesThumbnail } from '../viewer/series-thumbnail';
@@ -46,7 +46,23 @@ export class LocalFilesSource implements DataSource {
 
   readonly currentPatient = computed<PatientHistory | null>(() => {
     const patient = this.catalog.currentPatient();
-    return patient ? { key: patient.patientId, ...patient } : null;
+    if (!patient) return null;
+    const sets = this.catalog.structureSets();
+    return {
+      key: patient.patientId,
+      ...patient,
+      studies: patient.studies.map((study) => ({
+        ...study,
+        series: study.series.map((series) => {
+          // By the rule that decides which sets are shown on the series.
+          const parsed = this.catalog.seriesByUid(series.uid);
+          return {
+            ...series,
+            structureSets: parsed ? structureSetsForSeries(sets, parsed).length : 0,
+          };
+        }),
+      })),
+    };
   });
 
   /** Patient ID of the patient imported last; null when nothing was imported. */

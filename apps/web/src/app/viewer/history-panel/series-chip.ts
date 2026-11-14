@@ -13,7 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import type { SeriesSummary } from '../../data-source/data-source';
-import { toImageData, type SeriesThumbnail } from '../series-thumbnail';
+import { isImageSeries, toImageData, type SeriesThumbnail } from '../series-thumbnail';
 
 /**
  * The DnD MIME type a dragged chip writes its SeriesInstanceUID under. Only
@@ -95,6 +95,17 @@ export class SeriesChip {
   protected readonly modality = computed(() => this.series().modality);
   /** Glyph shown when there's no grayscale preview (RT objects, no pixels). */
   protected readonly icon = computed(() => modalityGlyph(this.series().modality));
+  /**
+   * How many structure sets come with the series, for an image series: they
+   * are drawn on images. A dose in the same frame of reference has as many,
+   * and says nothing of them.
+   */
+  protected readonly structureSets = computed(() =>
+    isImageSeries(this.series().modality) ? this.series().structureSets : 0,
+  );
+  protected readonly structureSetsLabel = computed(() =>
+    structureSetCountLabel(this.structureSets()),
+  );
 
   constructor() {
     // Paint the preview onto the chip's canvas whenever the thumbnail (or the
@@ -115,10 +126,17 @@ export class SeriesChip {
 }
 
 /** A series' chip label: its description, falling back to `Series <number>`. */
-export function seriesChipLabel(series: SeriesSummary): string {
+export function seriesChipLabel(
+  series: Pick<SeriesSummary, 'description' | 'seriesNumber'>,
+): string {
   const description = series.description?.trim();
   if (description) return description;
   return series.seriesNumber !== null ? `Series ${series.seriesNumber}` : 'Series';
+}
+
+/** In words, for the badge's tooltip and for a screen reader: `1 structure set` / `2 structure sets`. */
+export function structureSetCountLabel(count: number): string {
+  return `${count} structure ${count === 1 ? 'set' : 'sets'}`;
 }
 
 /** Pluralised image-count summary, e.g. `1 img` / `120 img`. */

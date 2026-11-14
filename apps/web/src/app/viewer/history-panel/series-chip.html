@@ -8,6 +8,13 @@
   } @else {
     <span class="chip-icon" aria-hidden="true">{{ icon() }}</span>
   }
+  @if (structureSets() > 0) {
+    <!-- "RS", as RT Structure Set files are commonly prefixed. -->
+    <span class="chip-sets" [title]="structureSetsLabel()">
+      <span aria-hidden="true">RS {{ structureSets() }}</span>
+      <span class="visually-hidden">{{ structureSetsLabel() }}</span>
+    </span>
+  }
 </div>
 
 <div class="chip-meta">

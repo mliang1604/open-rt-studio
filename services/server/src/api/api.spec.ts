@@ -264,6 +264,8 @@ describe('browse', () => {
       modality: 'CT',
       instances: 3,
       frameOfReferenceUid: COURSE.planningFrame,
+      // The course's one structure set was drawn on it.
+      structureSets: 1,
     });
 
     const instances = await made.json<PageOf<{ number: number; sopInstanceUid: string }>>(

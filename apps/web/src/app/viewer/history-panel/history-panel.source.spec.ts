@@ -178,4 +178,44 @@ describe('the history panel on a data source', () => {
     await fixture.whenStable();
     expect(host.hasAttribute('hidden')).toBe(false);
   });
+
+  it('says on the chip of an image series how many structure sets come with it', async () => {
+    const source = new FakeDataSource();
+    const patient = fakePatient();
+    const [planning, ...later] = patient.studies;
+    const [ct, dose] = planning.series;
+    source.currentPatient.set({
+      ...patient,
+      studies: [
+        {
+          ...planning,
+          series: [
+            { ...ct, structureSets: 2 },
+            // A dose in the same frame has as many, and does not say so.
+            { ...dose, structureSets: 2 },
+          ],
+        },
+        ...later,
+      ],
+    });
+    const { fixture, host, text, click } = await render(source);
+    await click('.study-tile');
+    expect(text('.chip-sets [aria-hidden]')).toEqual(['RS 2']);
+    const badge = host.querySelector<HTMLElement>('app-series-chip .chip-sets')!;
+    expect(badge.title).toBe('2 structure sets');
+    expect(badge.querySelector('.visually-hidden')!.textContent).toBe('2 structure sets');
+    expect(badge.closest('app-series-chip')!.textContent).toContain('Planning CT');
+
+    // One fewer, as after the source is asked again; none, and the badge goes.
+    source.currentPatient.update((now) => ({
+      ...now!,
+      studies: [{ ...planning, series: [{ ...ct, structureSets: 1 }, dose] }, ...later],
+    }));
+    await fixture.whenStable();
+    expect(text('.chip-sets [aria-hidden]')).toEqual(['RS 1']);
+    expect(host.querySelector<HTMLElement>('.chip-sets')!.title).toBe('1 structure set');
+    source.currentPatient.update((now) => ({ ...now!, studies: [planning, ...later] }));
+    await fixture.whenStable();
+    expect(text('.chip-sets')).toEqual([]);
+  });
 });
