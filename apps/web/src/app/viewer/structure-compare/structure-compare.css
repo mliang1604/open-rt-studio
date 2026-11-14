@@ -1,0 +1,80 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-border);
+  font-size: 0.85em;
+}
+
+.title {
+  color: var(--muted);
+}
+
+label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+label span {
+  width: 48px;
+  flex: none;
+  color: var(--muted);
+}
+
+select {
+  flex: 1;
+  min-width: 0;
+  background: var(--glass-bg);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 3px 5px;
+  font: inherit;
+}
+
+button {
+  align-self: flex-start;
+  padding: 3px 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+caption {
+  text-align: left;
+  padding-bottom: 3px;
+  color: var(--muted);
+}
+
+th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--muted);
+  padding: 1px 6px 1px 0;
+}
+
+td {
+  text-align: right;
+  padding: 1px 0;
+}
+
+.note,
+.problem {
+  margin: 0;
+  color: var(--muted);
+}
+
+.problem {
+  color: var(--text);
+}

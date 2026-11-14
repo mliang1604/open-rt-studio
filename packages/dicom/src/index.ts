@@ -73,6 +73,15 @@ export {
   transformPath,
 } from './registration.js';
 export {
+  type DirectedSurfaceDistance,
+  type MaskComparison,
+  type RoiComparison,
+  type SurfaceDistances,
+  MaskComparisonError,
+  compareMasks,
+  compareRois,
+} from './contour-metrics.js';
+export {
   type RigidParams,
   manualPlacement,
   rigidParamsMatrix,
