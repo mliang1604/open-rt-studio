@@ -306,3 +306,28 @@ test('a boolean of a painted and an imported structure is previewed, made into a
   );
   expectNoProblems(problems);
 });
+
+test('the sphere brush shows where it reaches on the other panes, and one click paints a ball (#108)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByTitle('Create a new structure and paint it').click();
+  await expect(page.getByLabel('Brush shape')).toHaveValue('sphere');
+  // Near the middle of the axial pane, where the other panes' planes are, and
+  // off the oblique knob at the crosshair's centre, which takes a press there.
+  const middle = await at(page, 0.47, 0.47);
+  await page.mouse.move(middle.x, middle.y);
+  await expect(page.locator('[data-tool-preview-section]')).toHaveCount(2);
+  // A disk is of its slice alone.
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  await page.mouse.move(middle.x + 1, middle.y);
+  await expect(page.locator('[data-tool-preview-section]')).toHaveCount(0);
+  await page.getByLabel('Brush shape').selectOption({ label: 'Sphere (3D)' });
+  await page.mouse.click(middle.x, middle.y);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Paint (Ctrl/⌘+Z)',
+  );
+  expectNoProblems(problems);
+});

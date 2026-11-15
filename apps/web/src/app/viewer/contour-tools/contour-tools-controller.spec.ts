@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { TestBed } from '@angular/core/testing';
-import { labelIndex, type Roi } from '@open-rt-studio/dicom';
+import { Orientation, labelIndex, type Roi } from '@open-rt-studio/dicom';
 
 import { AXIAL_MID, pointer, setup } from '../brush-testing';
 import { CONTOUR_TOOLS } from './contour-tool';
@@ -221,6 +221,37 @@ describe('ContourToolsController (#106)', () => {
       expect(tools.held()?.id).toBe('brush');
       expect(tools.isActive()).toBe(true);
     });
+  });
+
+  it('shows the sphere brush’s cut through the other panes of the column, √(r² − d²) across (#108)', () => {
+    const pane = (orientation: Orientation, x: number) => ({
+      kind: 'mpr' as const,
+      orientation,
+      rect: { x, y: 0, width: 100, height: 100 },
+      group: 0,
+    });
+    const panes = [AXIAL_MID, pane(Orientation.Coronal, 100), pane(Orientation.Sagittal, 200)];
+    // The coronal pane is at slice 0, two slices from the voxel under the pointer.
+    const made = setup(undefined, undefined, panes, [2, 0, 2]);
+    made.brush.mode.set('paint');
+    made.brush.activeRoiId.set(made.store.createRoi().id);
+    made.brush.shape.set('sphere');
+    made.brush.radiusMm.set(1);
+    made.tools.hover(AXIAL_MID, pointer(50, 50));
+    // 25 px a mm. The sagittal plane runs through the centre: a 1 mm circle. The coronal is 2 mm off: none.
+    expect(made.tools.preview()?.others).toEqual([
+      expect.objectContaining({ rect: panes[2].rect, radiusPx: 25 }),
+    ]);
+    // At 3 mm the coronal pane is reached too: √(9 − 4) mm across.
+    made.brush.radiusMm.set(3);
+    const others = made.tools.preview()?.others ?? [];
+    expect(others).toHaveLength(2);
+    expect(others[0].rect).toEqual(panes[1].rect);
+    expect(others[0].radiusPx).toBeCloseTo(Math.sqrt(5) * 25, 6);
+    // A disk is of its slice: nothing on the other panes.
+    made.brush.shape.set('disk');
+    made.tools.hover(AXIAL_MID, pointer(50, 50));
+    expect(made.tools.preview()?.others).toBeUndefined();
   });
 
   it('draws the brush’s outline where the pointer is, its size in the pane’s pixels', () => {

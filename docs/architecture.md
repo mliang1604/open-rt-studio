@@ -367,6 +367,14 @@ its own.
   intersection is always empty; the operations say something with
   imported structures, which overlap as drawn. One click, one edit, under
   the shared constraints.
+- **The sphere brush** (#108) is the brush with its sphere shape: one
+  click paints a ball of the radius in millimetres across the slices about
+  the one clicked, by the voxels' spacing (`stampVoxels`). While it is over
+  a pane it shows, dashed, where the ball cuts each other MPR pane of the
+  same column: a circle √(r² − d²) across where the pane's plane is d from
+  the ball's centre, none where it does not reach (`sphere-section.ts`),
+  following the size as it is changed. The disk shape is of its slice and
+  shows nothing on the others. It is the brush, and not of the labs.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes
