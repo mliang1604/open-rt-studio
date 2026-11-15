@@ -41,6 +41,9 @@ the files other tests use are byte for byte what they were.
 that are formulas, each transform with its inverse, for the resampling
 validation suite (`resampling-validation.spec.ts`,
 [what it holds the code to](../../docs/resampling-validation.md)).
+`dose-phantom.ts` adds doses that are formulas on that image and those
+transforms, for the dose validation suite (`dose-validation.spec.ts`,
+[what it holds the code to](../../docs/dose-validation.md)).
 
 The package has no runtime dependencies and uses no Node-only or DOM-only
 APIs, so the same generators run in Vitest, in Playwright and in a browser.
