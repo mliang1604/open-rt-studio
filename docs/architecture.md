@@ -398,6 +398,14 @@ its own.
   point set on another pane or slice starts the curve over. On an oblique
   pane the curve fills the grid's nearest slice. Closing is one edit under
   the shared constraints; the points set are not part of the history.
+- **Push** (#117, labs) nudges the edge of the structure being edited with
+  the brush's round footprint and size. A painted structure is voxels and
+  not a contour, so pushing its edge is painting or clearing it where the
+  brush goes, the way being settled once, where the stroke begins: inside
+  the structure, out (it paints); outside, in (it clears the structure, and
+  never another, whatever the constraints: `only` on the erase). Only what
+  the brush touches changes. Its edit is named for which way it pushed:
+  a tool may name its edit once it has begun (`renameEdit`).
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

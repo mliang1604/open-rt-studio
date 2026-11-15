@@ -44,6 +44,7 @@ describe('MirrorTool (#113)', () => {
       'threshold',
       'wand',
       'points',
+      'push',
       'cleanup',
       'margin',
       'mirror',

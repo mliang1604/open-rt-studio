@@ -12,6 +12,7 @@ import { MagicWandTool } from './magic-wand-tool';
 import { MarginTool } from './margin-tool';
 import { MirrorTool } from './mirror-tool';
 import { PointTool } from './point-tool';
+import { PushTool } from './push-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { SampleTool } from './sample-tool';
 import { ThresholdBrushTool } from './threshold-brush-tool';
@@ -29,6 +30,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: MagicWandTool, multi: true },
   PointTool,
   { provide: CONTOUR_TOOLS, useExisting: PointTool, multi: true },
+  PushTool,
+  { provide: CONTOUR_TOOLS, useExisting: PushTool, multi: true },
   CleanupTool,
   { provide: CONTOUR_TOOLS, useExisting: CleanupTool, multi: true },
   MarginTool,

@@ -44,6 +44,8 @@ export interface ContourToolContext {
   } | null;
   /** The structure being edited; null for none. */
   activeRoiId(): number | null;
+  /** The structure a voxel holds: its id, 0 for none; 0 before an image is loaded. */
+  held(voxel: VoxelIndex): number;
   /**
    * The image's values on the label grid, voxel for voxel (the label grid
    * is the image's); null before an image is loaded.

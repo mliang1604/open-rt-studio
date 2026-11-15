@@ -49,6 +49,7 @@ describe('CleanupTool (#110)', () => {
       'threshold',
       'wand',
       'points',
+      'push',
       'cleanup',
       'margin',
       'mirror',

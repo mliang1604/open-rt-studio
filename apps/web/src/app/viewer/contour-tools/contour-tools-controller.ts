@@ -104,6 +104,12 @@ export class ContourToolsController {
       return label ? { dims: label.dims, spacing: label.spacing } : null;
     },
     activeRoiId: () => this.brush.activeRoiId(),
+    held: (voxel) => {
+      const label = this.store.labelVolume();
+      if (!label) return 0;
+      const [nx, ny] = label.dims;
+      return label.data[(voxel[2] * ny + voxel[1]) * nx + voxel[0]] ?? 0;
+    },
     image: () => this.store.imageData(),
     voxelAtCanvas: (placement, x, y) => this.brush.voxelAtCanvas(placement, x, y),
     change: (change) => this.store.applyChange(change, this.constraints()),
@@ -144,6 +150,8 @@ export class ContourToolsController {
     this.store.beginEdit(tool.editName());
     this.stroking = tool;
     tool.begin(this.context, { placement, event });
+    // What the edit is, the tool may know only now: a push in or out (#117).
+    this.store.renameEdit(tool.editName());
   }
 
   /** The pointer moved with its button down. */

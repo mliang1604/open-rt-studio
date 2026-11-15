@@ -53,6 +53,15 @@ describe('the constraints every change goes through (#106)', () => {
     expect(allowedVoxels(held, { kind: 'erase', roiId: null, voxels: ALL }, protect, null)).toEqual(
       [],
     );
+    // Told to clear only its own, it clears only its own, protected or not (#117).
+    expect(
+      allowedVoxels(
+        held,
+        { kind: 'erase', roiId: 2, voxels: ALL, only: true },
+        NO_CONSTRAINTS,
+        null,
+      ),
+    ).toEqual([4, 5, 6, 7]);
     // Unprotected, erasing clears whichever structure is there.
     expect(
       allowedVoxels(held, { kind: 'erase', roiId: 1, voxels: ALL }, NO_CONSTRAINTS, null),
