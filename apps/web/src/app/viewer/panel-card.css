@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /* Shared by the cards that float over the viewport: the metadata inspector,
-   the shortcut help and the DVR editor. Each of those components lists this
+   the shortcut help, the DVR editor and the dose-volume histograms. Each of those components lists this
    file in its styleUrls, ahead of its own. The controls repeat the viewer's
    base look, which does not reach into a child component. */
 button,
@@ -45,6 +45,7 @@ input:focus-visible {
    shortcut help centres one inside its backdrop. */
 :host(.info-panel),
 :host(.dvr-panel),
+:host(.dvh-panel),
 .help-panel {
   display: flex;
   flex-direction: column;

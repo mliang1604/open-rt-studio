@@ -1093,6 +1093,87 @@ Isodose lines and a colour wash, with levels the user sets and a legend
   window kept for images stays. A window remembered before its modality
   was kept is given to any image but a dose, as it was.
 
+### How a dose-volume histogram is made
+
+The dose a structure gets, as a histogram of its volume by dose (#96).
+`dvh.ts` in `packages/dicom` makes one; `apps/web/src/app/viewer/dvh/`
+shows them. Programs differ in how they make one, and their numbers differ
+with them, most for a small structure and where the dose changes fast. So
+this says what it does.
+
+- **A structure is its contours on the image's slices, each a slab one
+  slice thick:** from half a slice below the contour to half a slice above.
+  That is the structure the viewer fills and the comparison of two
+  structures measures. The loops of one slice are filled by the even-odd
+  rule, so a loop within another is a hole. Nothing is laid between slices
+  that have no contour, and nothing is rounded off at the two ends. Open
+  lines and points bound nothing; they are left out and the row says so.
+- **A structure that is not drawn on this image's slices is refused.**
+  Every contour must lie within 0.1 mm of a slice of the image on screen.
+  One drawn on another image's slices, tilted to these, or reaching past
+  them has no histogram and a line that says why: its slabs would be
+  somewhere other than where it was drawn.
+- **The dose is read at the points of a lattice that are in the
+  structure:** evenly apart along the image's rows and columns, on planes
+  evenly apart through each slab, each point at the middle of its cell and
+  standing for the same volume. The dose at a point is read between the
+  dose's voxels by linear interpolation, as the probe reads it (#95).
+- **200 000 points to a structure, or somewhat more,** whatever its size:
+  the spacing aimed at is the cube root of the volume a point then stands
+  for. The lattice divides the structure's reach along rows and columns,
+  and a slice's thickness, into whole cells no larger than that, so a
+  box's cells fill it exactly and a slab may have up to twice the planes
+  aimed at. A structure so large that the points would be further apart
+  than the dose's finest voxels gets more, at that spacing, up to about
+  4 000 000.
+- **Where the dose is not known, nothing is assumed.** A point outside the
+  dose's grid, or where a deformation field has no vector, has no dose. It
+  is in no bin and no statistic, and is not taken to be zero. The
+  histogram, every percent and every statistic are of the part of the
+  structure where the dose is known; the structure's volume is of all of
+  it; and a row says how much of the structure the dose reaches when that
+  is not all.
+- **A dose in another frame of reference is read where the registration
+  that places it puts each point,** by the same matrices and field as
+  resampling (`resampleMaps`). The panel says so: such a histogram is of
+  the dose as it is placed, and is no better than the registration.
+- **The statistics are of the points.** The least, the most and the mean
+  of their doses. The dose at a volume (`D95%`, `D2cc`) is by nearest rank:
+  the largest dose that at least that share of the points have. The volume
+  at a dose (`V20Gy`) is the share of the points with that dose or more. A
+  volume at a percent of a dose is not asked: nothing says of what dose.
+  Values and units only; nothing says whether a number is good.
+- **The plot** is cumulative (the volume that gets each dose or more) or
+  differential (the volume in each bin of doses, for each unit of dose, so
+  that it does not depend on the bins' width), in percent or in cm³. Its
+  curves are in the colours the structures have over the image, which the
+  user may have chosen; the table under it is its legend and has every
+  number it shows, pointing at a line of the table picks its curve out,
+  and pointing at the plot (or the arrow keys, with the plot focused)
+  reads every histogram at that dose.
+- **Made in a worker,** a structure at a time, while the panel is open.
+  The dose's values are copied to it. What is made is kept until the dose,
+  its placement or the image changes.
+- **The file** (CSV) has a line of what it is, with the not-for-clinical-use
+  notice, the table and the curves. The structures' names are in it and
+  nothing else of the patient. A name that begins as a spreadsheet formula
+  does is kept from being one.
+- **How close.** For a ball of 20 mm radius drawn on slices of 1 mm, in a
+  dose that rises evenly, the suite (`dvh.spec.ts`) holds the volume to 0.2 % of the
+  ball's, the share of the volume at every dose to 0.2 % of the volume
+  against the formula for a ball's cap, and the doses at 98, 95, 50, 5 and
+  2 % of the volume to 0.05 Gy in a dose that spans 25 Gy. Where a dose
+  changes only from plane to plane of the lattice, a histogram goes in
+  steps of what the dose rises between two planes. These say how the code
+  does on shapes that are formulas, and nothing of a dose from a planning
+  system: none was read, and nothing was compared with another program.
+- **Not there:** a histogram of a painted structure (one made editable is
+  refused, since its contours are no longer what is shown); a histogram
+  for a structure drawn on another image; reading a DVH that a dose file
+  carries (RT DVH Sequence), to compare with; percent of a prescription
+  on the dose axis; anything laid between or beyond a structure's
+  contours.
+
 ### What is read of a plan
 
 As much of an RT Plan (or RT Ion Plan) as dose summation and conversion
