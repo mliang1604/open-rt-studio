@@ -236,7 +236,9 @@ describe('a resampled image written as a derived series', () => {
     const tags = Object.keys(read(written.instances[0].bytes).elements).filter(
       (tag) => !tag.startsWith('x0002'),
     );
-    expect(tags).toHaveLength(48);
+    // Its Specific Character Set first among them (#249).
+    expect(tags).toHaveLength(49);
+    expect(tags[0]).toBe('x00080005');
     expect(tags).toEqual([...tags].sort());
     expect(tags.at(-1)).toBe('x7fe00010');
   });
@@ -494,36 +496,31 @@ describe('what a derived series refers to', () => {
     expect(read(written.instances[0].bytes).elements['x00081250']).toBeUndefined();
   });
 
-  it('declares the character set the patient’s name was read in, and writes its own words plainly', () => {
-    // A name as it is read from a Latin-1 file: a character to a byte.
+  it('is written in UTF-8 and says so, with the text it was given, whatever it was read in (#249)', () => {
     const written = writeDerivedSeries(
       contentOf(image, {
-        patientName: 'M\u00fcller^Zo\u00eb',
-        specificCharacterSet: 'ISO_IR 100',
-        seriesDescription: 'Resampled: T2 \u2192 Planung f\u00fcr \u4e2d',
-        derivationDescription: 'Resampled.\nLine two \u2014 dash',
+        patientName: 'Müller^Zoë 山田',
+        seriesDescription: 'Resampled: T2 → Planung für 中',
+        derivationDescription: 'Resampled.\nLine two — dash',
       }),
     );
-    const first = read(written.instances[0].bytes);
-    expect(first.string('x00080005')).toBe('ISO_IR 100');
-    // The name's bytes are the bytes that were read.
-    expect(first.string('x00100010')).toBe('M\u00fcller^Zo\u00eb');
-    expect(first.string('x0008103e')).toBe('Resampled: T2 ? Planung f?r ?');
-    expect(first.string('x00082111')).toBe('Resampled.?Line two ? dash');
-    const tags = Object.keys(first.elements).filter((tag) => !tag.startsWith('x0002'));
-    expect(tags[0]).toBe('x00080005');
-    // None declared, or what is no character set's name: none written.
-    for (const specificCharacterSet of [null, undefined, '', 'utf-8; drop']) {
-      const plainOnly = writeDerivedSeries(contentOf(image, { specificCharacterSet }));
-      expect(read(plainOnly.instances[0].bytes).elements['x00080005']).toBeUndefined();
-    }
-    // A set of several, as files with escapes declare them.
-    const several = writeDerivedSeries(
-      contentOf(image, { specificCharacterSet: 'ISO 2022 IR 6\\ISO 2022 IR 87' }),
-    );
-    expect(read(several.instances[0].bytes).string('x00080005')).toBe(
-      'ISO 2022 IR 6\\ISO 2022 IR 87',
-    );
+    const bytes = new Uint8Array(written.instances[0].bytes);
+    const raw = read(written.instances[0].bytes);
+    expect(raw.string('x00080005')).toBe('ISO_IR 192');
+    // The name is in UTF-8: the parser, a byte to a character, sees its bytes.
+    const name = raw.elements['x00100010'];
+    expect(
+      new TextDecoder()
+        .decode(bytes.subarray(name.dataOffset, name.dataOffset + name.length))
+        .trim(),
+    ).toBe('Müller^Zoë 山田');
+    // Read as a file is read here, the text is what was given.
+    const header = readInstanceHeader(bytes);
+    expect(header.ok && header.header.patient.name).toBe('Müller^Zoë 山田');
+    expect(header.ok && header.header.series.description).toBe('Resampled: T2 → Planung für 中');
+    const [slice] = parseFile('slice.dcm', written.instances[0].bytes);
+    // A character that prints nothing is no part of what is written.
+    expect(slice.metadata?.derivation?.description).toBe('Resampled.?Line two — dash');
   });
 
   it('writes no more of a description than the standard allows', () => {

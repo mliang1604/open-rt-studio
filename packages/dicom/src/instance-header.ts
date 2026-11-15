@@ -5,6 +5,7 @@
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 
+import { readTextByCharacterSet } from './character-set.js';
 import { imageDerivation } from './metadata.js';
 import { DOSE_OF_BEAMS_AT_MOST, type DoseOf } from './rt-dose.js';
 import { readPlanFacts, type PlanFacts } from './rt-plan.js';
@@ -260,6 +261,8 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
   let dataSet: DataSet;
   try {
     dataSet = dicomParser.parseDicom(bytes, { untilTag: 'x7fe00010' });
+    // Its text by the character set it says it is in (#249).
+    readTextByCharacterSet(dataSet);
   } catch {
     return { ok: false, reason: 'not-dicom' };
   }

@@ -13,6 +13,7 @@
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 
+import { readTextByCharacterSet } from './character-set.js';
 import { formatDicomDate, type CuratedField, type CuratedGroup } from './metadata.js';
 
 /**
@@ -166,6 +167,8 @@ export function parseRtPlan(name: string, buffer: ArrayBuffer): RtPlan | null {
   let dataSet: DataSet;
   try {
     dataSet = dicomParser.parseDicom(new Uint8Array(buffer));
+    // Its text by the character set it says it is in (#249).
+    readTextByCharacterSet(dataSet);
   } catch {
     return null;
   }

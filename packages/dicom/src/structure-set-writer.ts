@@ -15,6 +15,7 @@ import {
   sequence,
   text,
   uid,
+  writableText,
 } from './p10-encode.js';
 import type { Contour, Roi, StructureSet } from './types.js';
 
@@ -170,14 +171,7 @@ function structureSetRoiSequence(
         // ROI Generation Algorithm: the standard wants it there, empty when nothing is known.
         element(0x3006, 0x0036, 'CS', text(generationAlgorithm(roi))),
         ...(roi.generation?.description
-          ? [
-              element(
-                0x3006,
-                0x0038,
-                'LO',
-                text(asciiOnly(roi.generation.description).slice(0, 64)),
-              ),
-            ] // ROI Generation Description
+          ? [element(0x3006, 0x0038, 'LO', text(writableText(roi.generation.description, 64)))] // ROI Generation Description
           : []),
       ]),
     ),
@@ -189,9 +183,6 @@ function generationAlgorithm(roi: Roi): string {
   const algorithm = roi.generation?.algorithm?.trim().toUpperCase() ?? '';
   return ['AUTOMATIC', 'SEMIAUTOMATIC', 'MANUAL'].includes(algorithm) ? algorithm : '';
 }
-
-/** Text as plain ASCII: a character outside it becomes `?`. */
-const asciiOnly = (value: string): string => value.replace(/[^\x20-\x7e]/g, '?');
 
 /** ROI Contour Sequence (3006,0039): per ROI, its colour and contour stack. */
 function roiContourSequence(rois: readonly Roi[]): Uint8Array {

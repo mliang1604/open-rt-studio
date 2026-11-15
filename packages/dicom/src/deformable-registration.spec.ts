@@ -11,7 +11,7 @@ import {
   writeDeformableRegistration,
 } from './deformable-registration.js';
 import { IDENTITY_MAT4, rigidMat4, transformPoint, type Mat4 } from './mat4.js';
-import { ascii, concat, element, p10File, sequence, text, uid } from './p10-encode.js';
+import { ascii, concat, element, p10File, p10Head, sequence, text, uid } from './p10-encode.js';
 import {
   deformableTransform,
   mapPoint,
@@ -584,9 +584,7 @@ describe('what is not read of a deformable registration', () => {
       big(0x0064, 0x0002, 'SQ', concat([itemHead, body])),
     ]);
     // The file meta group is always little endian; it names the transfer syntax.
-    const little = new Uint8Array(
-      p10File(new Uint8Array(0), DEFORMABLE_SPATIAL_REGISTRATION_SOP_CLASS, SOP),
-    );
+    const little = p10Head(DEFORMABLE_SPATIAL_REGISTRATION_SOP_CLASS, SOP);
     const syntax = ascii('1.2.840.10008.1.2.1');
     const at = little.findIndex((_, i) => syntax.every((c, j) => little[i + j] === c));
     expect(at).toBeGreaterThan(0);

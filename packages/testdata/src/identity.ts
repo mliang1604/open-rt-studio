@@ -5,7 +5,7 @@
 // Fixed identifiers for the synthetic data. Nothing here refers to a real
 // person, study or device. UIDs are fixed so output is identical on every run.
 
-import { el, text, uid, type DataElement } from './dicom-writer.js';
+import { concat, el, text, uid, type DataElement } from './dicom-writer.js';
 
 /**
  * Root of every synthetic UID. `2.25` is the arc for UUID-derived UIDs, which
@@ -25,7 +25,54 @@ export interface SyntheticPatientIdentity {
   readonly id: string;
   /** DICOM PN, family^given. */
   readonly name: string;
+  /**
+   * The Specific Character Set the patient's files are written in (#249):
+   * their name and the study's description are encoded by it, and every
+   * file of theirs declares it. Left out for plain ASCII, which declares
+   * none.
+   */
+  readonly characterSet?: SyntheticCharacterSet;
 }
+
+/** The character sets synthetic files are written in: Latin-1 and UTF-8. */
+export type SyntheticCharacterSet = 'ISO_IR 100' | 'ISO_IR 192';
+
+/** Text as the bytes of a character set, space-padded to even length. */
+export function encodedText(
+  value: string,
+  characterSet: SyntheticCharacterSet | undefined,
+): Uint8Array {
+  if (characterSet === 'ISO_IR 192') {
+    const bytes = new TextEncoder().encode(value);
+    return bytes.length % 2 === 0 ? bytes : concat([bytes, Uint8Array.of(0x20)]);
+  }
+  if (characterSet === 'ISO_IR 100') {
+    for (const character of value) {
+      if (character.codePointAt(0)! > 0xff) {
+        throw new RangeError(`“${character}” is not in ISO_IR 100.`);
+      }
+    }
+  }
+  // ASCII, or Latin-1, which is a byte to a character.
+  return text(value);
+}
+
+/**
+ * A patient whose name is outside ASCII, written in UTF-8 (#249): Latin
+ * letters with marks, a letter Latin-1 does not have, and Han characters.
+ */
+export const SYNTHETIC_UTF8_PATIENT: SyntheticPatientIdentity = {
+  id: 'SYN-0192',
+  name: 'Łukasiewicz-Müller^Zoë 山田',
+  characterSet: 'ISO_IR 192',
+};
+
+/** A patient whose name is outside ASCII, written in Latin-1 (ISO_IR 100). */
+export const SYNTHETIC_LATIN1_PATIENT: SyntheticPatientIdentity = {
+  id: 'SYN-0100',
+  name: 'Ødegård^José',
+  characterSet: 'ISO_IR 100',
+};
 
 /** A synthetic study: one visit of the patient. */
 export interface SyntheticStudy {
@@ -89,8 +136,11 @@ export function identityElements(study: SyntheticStudy): DataElement[] {
   return [
     el(0x0008, 0x0020, 'DA', text(study.date)), // StudyDate
     el(0x0008, 0x0030, 'TM', text(study.time)), // StudyTime
-    el(0x0008, 0x1030, 'LO', text(study.description)), // StudyDescription
-    el(0x0010, 0x0010, 'PN', text(study.patient.name)), // PatientName
+    ...(study.patient.characterSet
+      ? [el(0x0008, 0x0005, 'CS', text(study.patient.characterSet))] // SpecificCharacterSet
+      : []),
+    el(0x0008, 0x1030, 'LO', encodedText(study.description, study.patient.characterSet)), // StudyDescription
+    el(0x0010, 0x0010, 'PN', encodedText(study.patient.name, study.patient.characterSet)), // PatientName
     el(0x0010, 0x0020, 'LO', text(study.patient.id)), // PatientID
     el(0x0020, 0x000d, 'UI', uid(studyUid(study))), // StudyInstanceUID
   ];

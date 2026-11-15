@@ -14,6 +14,7 @@ import {
   type Series,
   seriesInstanceUidOf,
   type StructureSet,
+  writableText,
   writeStructureSet,
 } from '@open-rt-studio/dicom';
 
@@ -91,9 +92,6 @@ export interface PropagatedFile {
   readonly description: string;
 }
 
-/** Text as plain ASCII: a character outside it becomes `?`. */
-const plain = (value: string): string => value.replace(/[^\x20-\x7e]/g, '?');
-
 /**
  * Write propagated structures as a new RT Structure Set. `filed` is the base
  * image's frame of reference and study, which whoever calls has made sure
@@ -113,8 +111,8 @@ export function propagatedFile(
     studyDate: base.studyDate,
     studyTime: base.studyTime,
     studyDescription: base.studyDescription,
-    seriesDescription: plain(description).slice(0, 64),
-    description: plain(propagationText(facts)).slice(0, 1024),
+    seriesDescription: writableText(description, 64),
+    description: writableText(propagationText(facts), 1024),
     predecessorSopInstanceUid: set.sopInstanceUid,
     createdAt: now,
   });

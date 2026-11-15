@@ -7,6 +7,8 @@
 // objects this application writes (structure sets, registrations) are put
 // together with these. Not exported from the package.
 
+import { UTF8_CHARACTER_SET, encodeText } from './character-set.js';
+
 /** Manufacturer (0008,0070) written into every object this writer produces. */
 export const MANUFACTURER = 'Open RT Studio';
 
@@ -28,23 +30,33 @@ export const EXPLICIT_VR_LE = '1.2.840.10008.1.2.1';
 /** VRs that use the 2-reserved-byte + 4-byte-length header form. */
 export const LONG_VRS = new Set(['OB', 'OW', 'OF', 'SQ', 'UT', 'UN']);
 
-/** Assemble a full P10 file: preamble + DICM + file meta group + data set. */
-export function p10File(
-  dataSet: Uint8Array,
-  sopClassUid: string,
-  sopInstanceUid: string,
-): ArrayBuffer {
+/** The head of a P10 file: preamble, `DICM` and the file meta group, which is always little endian. */
+export function p10Head(sopClassUid: string, sopInstanceUid: string): Uint8Array {
   const metaBody = concat([
     element(0x0002, 0x0002, 'UI', uid(sopClassUid)), // MediaStorageSOPClassUID
     element(0x0002, 0x0003, 'UI', uid(sopInstanceUid)), // MediaStorageSOPInstanceUID
     element(0x0002, 0x0010, 'UI', uid(EXPLICIT_VR_LE)), // TransferSyntaxUID
   ]);
   const groupLength = element(0x0002, 0x0000, 'UL', u32le(metaBody.length));
+  return concat([new Uint8Array(128), ascii('DICM'), groupLength, metaBody]);
+}
+
+/**
+ * Assemble a full P10 file: preamble + DICM + file meta group + data set.
+ *
+ * The data set is given without a Specific Character Set (0008,0005): it
+ * is put first here, the lowest element any writer has, and says UTF-8,
+ * which is what `text` writes. So every object written here says how its
+ * text is to be read (#249).
+ */
+export function p10File(
+  dataSet: Uint8Array,
+  sopClassUid: string,
+  sopInstanceUid: string,
+): ArrayBuffer {
   const file = concat([
-    new Uint8Array(128), // preamble
-    ascii('DICM'),
-    groupLength,
-    metaBody,
+    p10Head(sopClassUid, sopInstanceUid),
+    element(0x0008, 0x0005, 'CS', text(UTF8_CHARACTER_SET)), // SpecificCharacterSet
     dataSet,
   ]);
   return file.buffer.slice(0, file.length) as ArrayBuffer;
@@ -101,9 +113,12 @@ export function ascii(s: string): Uint8Array {
   return Uint8Array.from(s, (c) => c.charCodeAt(0));
 }
 
-/** A text value (SH/LO/CS/PN…), space-padded to even length. */
+/**
+ * A text value (SH/LO/CS/PN…) in UTF-8, space-padded to even length. Text
+ * that is all ASCII is the bytes it always was.
+ */
 export function text(s: string): Uint8Array {
-  return padEven(ascii(s), 0x20);
+  return padEven(encodeText(s), 0x20);
 }
 
 /** A UID value, null-padded to even length. */
@@ -165,8 +180,8 @@ export function us(value: number): Uint8Array {
   return out;
 }
 
-/** Text as plain ASCII: a character outside it, or one that prints nothing, becomes `?`. */
-export const plain = (value: string): string => value.replace(/[^\x20-\x7e]/g, '?');
+// What is written as text: kept here for the writers that import it from here.
+export { plain, writableText } from './character-set.js';
 
 /** A coded entry: the Code Sequence Macro's three required elements. */
 export const code = (value: string, scheme: string, meaning: string): Uint8Array =>

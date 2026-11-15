@@ -279,7 +279,7 @@ describe('writeStructureSet', () => {
       }
     });
 
-    it('writes only an algorithm the standard knows, and a description in plain characters', () => {
+    it('writes only an algorithm the standard knows, and a description as it was given (#249)', () => {
       const odd: StructureSet = {
         ...sample,
         rois: [
@@ -295,7 +295,9 @@ describe('writeStructureSet', () => {
       };
       const [item] = roiItems(writeStructureSet(odd));
       expect(item.string('x30060036') ?? '').toBe('');
-      expect(item.string('x30060038')).toBe(`Verformt ? ${'x'.repeat(53)}`);
+      // Cut at 64 characters, and read back in the character set the file says.
+      const read = parseStructureSet('odd.dcm', writeStructureSet(odd))!;
+      expect(read.rois[0].generation?.description).toBe(`Verformt → ${'x'.repeat(53)}`);
       expect(item.elements['x00089215']).toBeUndefined();
     });
 

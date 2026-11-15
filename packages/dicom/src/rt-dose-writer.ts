@@ -58,12 +58,12 @@ import {
   generateUid,
   integers,
   p10File,
-  plain,
   preciseDs,
   sequence,
   text,
   uid,
   us,
+  writableText,
 } from './p10-encode.js';
 import {
   SUM_RECORD_CREATOR,
@@ -124,8 +124,6 @@ export interface SummedDoseContent {
   readonly frameOfReferenceUid: string;
   readonly patientName: string | null;
   readonly patientId: string | null;
-  /** Specific Character Set of the image the patient's name and ID were read from; null for none. */
-  readonly specificCharacterSet?: string | null;
   /** The study the dose is filed in. */
   readonly studyInstanceUid: string;
   readonly studyDate: string | null;
@@ -164,7 +162,9 @@ export interface WrittenDose {
 
 /** A summed dose's name in plain ASCII: `EQD2 (alpha/beta 3 Gy)`. */
 export function doseSumAsciiName(made: DoseSumMade): string {
-  return plain(doseSumName(made).replace('α/β', 'alpha/beta'));
+  return doseSumName(made)
+    .replace('α/β', 'alpha/beta')
+    .replace(/[^\x20-\x7e]/g, '?');
 }
 
 /** What the series of a written sum is called. That it is a sum comes first. */
@@ -335,8 +335,6 @@ export function writeSummedDose(
   const created = options.createdAt ?? new Date();
   const [date, time] = [dicomDate(created), dicomTime(created)];
   const seriesDescription = summedDoseDescription(made);
-  const declared = content.specificCharacterSet?.trim() ?? '';
-  const characterSet = /^[A-Z0-9_ \\]+$/.test(declared) ? declared : '';
   const orEmpty = (group: number, el: number, vr: string, value: string | null | undefined) =>
     element(group, el, vr, text(value ?? ''));
   const privateTag = (el: number): number => (0x10 << 8) | el;
@@ -347,7 +345,6 @@ export function writeSummedDose(
 
   // Elements are in ascending tag order, as the standard requires.
   const dataSet = concat([
-    ...(characterSet ? [element(0x0008, 0x0005, 'CS', text(characterSet))] : []), // SpecificCharacterSet
     element(0x0008, 0x0008, 'CS', text('DERIVED\\SECONDARY')), // ImageType
     element(0x0008, 0x0012, 'DA', text(date)), // InstanceCreationDate
     element(0x0008, 0x0013, 'TM', text(time)), // InstanceCreationTime
@@ -384,7 +381,7 @@ export function writeSummedDose(
           ),
         ]
       : []),
-    element(0x0008, 0x2111, 'ST', text(plain(content.derivationDescription).slice(0, 1024))), // DerivationDescription
+    element(0x0008, 0x2111, 'ST', text(writableText(content.derivationDescription, 1024))), // DerivationDescription
     // DerivationCodeSequence: each way it was composed.
     sequence(0x0008, 0x9215, [
       code('121370', 'DCM', 'Composed from prior doses'),

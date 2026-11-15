@@ -113,6 +113,24 @@ also builds on its own to `dist/` for consumers outside the workspace.
   `computed()`; rendering side effects in `effect()`.
 - All DICOM parsing and pixel decoding is in `packages/dicom` and runs in a
   pool of web workers so the UI stays responsive.
+- **Text is read by the character set a file says it is in** (#249). Every
+  file is read by its Specific Character Set (0008,0005) once it is parsed
+  (`readTextByCharacterSet`, `character-set.ts`), in the viewer and on the
+  server alike, so a name means the same in both. Decoded: the default
+  repertoire and ISO_IR 100 (Latin-1), which are a byte to a character as
+  the parser reads them; ISO_IR 192 (UTF-8); the other single-byte sets of
+  ISO 8859 and GB18030 and GBK, where the platform has a decoder. Not
+  decoded: a file that says several sets, which is text with ISO 2022
+  escapes as Japanese and Korean files have it, and a set not listed. Its
+  text stays a byte to a character, as all text was before, and nothing is
+  guessed. Only values with a byte above 127 change; a UID, a number or a
+  code is read as it always was.
+- **What is written here is UTF-8, and says so.** Every object written
+  (structure sets, registrations, derived series, summed doses) declares
+  ISO_IR 192 and writes its text in it: a name as it was read, and what is
+  said here as it was given, whatever the source file was in. A character
+  that prints nothing becomes `?`, and a value is cut at a whole character
+  (`writableText`).
 - All GPU work is in `packages/render`. The Angular layer owns the canvas and
   user interaction and calls the renderer; it holds no WGSL.
 - A volume is uploaded once as a 3D texture and every pane (axial, coronal,
@@ -850,9 +868,9 @@ over it, and saved as a new DICOM series (#89): `writeDerivedSeries` in
   between two that can be stored is rounded to the nearer; one that 16 bits
   cannot hold is held to the nearest that can, and counted. Voxels outside
   the source get the source's lowest value.
-- **Text.** The patient's name and ID are written as the bytes they were
-  read as, with the character set the base image declares. What is said of
-  the new series is plain ASCII.
+- **Text.** In UTF-8, and the series says so (see Web client): the
+  patient's name and ID as they were read, and what is said of the new
+  series as it was given.
 - **Two steps, each asked for.** The image is resampled and what was made is
   said (its size, how much of it is outside the source, the kind of object);
   then it is saved or let go. Saving is asked of the data source in the turn
@@ -942,9 +960,7 @@ application.
   program's propagation; the propagated structures are not drawn until the
   saved set is opened (or, on a server, the base series loaded again); only
   the base image can be propagated onto, and a whole set at a time;
-  contours name no image instance (the writer never has); structure names
-  outside plain ASCII are written a byte to a character, as before (#249);
-  very large structures were not timed, and the work is on the page's own
+  contours name no image instance (the writer never has); very large structures were not timed, and the work is on the page's own
   thread, a structure at a time.
 
 Status: **decided, and Michael's to overturn**.

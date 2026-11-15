@@ -22,7 +22,7 @@ import {
 
 import type { SavedObject } from '../../data-source/data-source';
 import { timestampSlug } from '../capture';
-import { DERIVED_NOTICE, characterSetOf, throughText } from '../derived-series/derived-export';
+import { DERIVED_NOTICE, throughText } from '../derived-series/derived-export';
 import type { SumMade } from './dose-sum-model';
 
 /** One dose a sum was made of, as it was when the sum was made. */
@@ -130,7 +130,6 @@ export function summedDoseFile(
       frameOfReferenceUid: filed.frameOfReferenceUid,
       patientName: base.patientName,
       patientId: base.patientId,
-      specificCharacterSet: characterSetOf(base),
       studyInstanceUid: filed.studyInstanceUid,
       studyDate: base.studyDate,
       studyTime: base.studyTime,
