@@ -57,6 +57,7 @@ describe('MarginTool (#112)', () => {
     const { tools } = holding();
     expect(tools.listed().map((tool) => tool.id)).toEqual([
       'threshold',
+      'wand',
       'cleanup',
       'margin',
       'mirror',

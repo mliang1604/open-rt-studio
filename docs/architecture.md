@@ -375,6 +375,16 @@ its own.
   the ball's centre, none where it does not reach (`sphere-section.ts`),
   following the size as it is changed. The disk shape is of its slice and
   shows nothing on the others. It is the brush, and not of the labs.
+- **The magic wand** (#109, labs): a click on a pane selects the voxels
+  joined to the one clicked, through faces, whose image value is within a
+  tolerance of its own (50 at first, in the image's units), in the pane's
+  slice (2D, across the axis the pane steps through, as the disk brush
+  keeps to) or through the volume (3D) (`region-grow.ts`). It adds them to
+  the structure the brush paints into or takes them away. A region that
+  would be larger than a limit (500 000 voxels at first) is not taken at
+  all, so that a leak through a gap does not flood the volume and nothing
+  half-filled is painted; it says so. One click, one edit, under the
+  shared constraints. It has no preview.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

@@ -47,6 +47,7 @@ describe('CleanupTool (#110)', () => {
     const { tools, brush, host } = holding();
     expect(tools.listed().map((tool) => tool.id)).toEqual([
       'threshold',
+      'wand',
       'cleanup',
       'margin',
       'mirror',

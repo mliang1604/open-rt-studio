@@ -331,3 +331,26 @@ test('the sphere brush shows where it reaches on the other panes, and one click 
   );
   expectNoProblems(problems);
 });
+
+test('the magic wand selects the region clicked, as one undo (#109)', async ({ page }) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  const before = await capturedColour(page);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="wand"]').click();
+  // Inside the left lung, on the image's right.
+  const lung = await at(page, 0.67, 0.5);
+  await page.mouse.click(lung.x, lung.y);
+  await expect(page.locator('[data-wand-said]')).toHaveText(
+    /^\d+ voxels about -?\d+(\.\d+)?; \d+ added\.$/,
+  );
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  expectNoProblems(problems);
+});

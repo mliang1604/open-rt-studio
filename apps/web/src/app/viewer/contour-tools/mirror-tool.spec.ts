@@ -42,6 +42,7 @@ describe('MirrorTool (#113)', () => {
     const { tools } = holding();
     expect(tools.listed().map((tool) => tool.id)).toEqual([
       'threshold',
+      'wand',
       'cleanup',
       'margin',
       'mirror',

@@ -8,6 +8,7 @@ import { BooleanTool } from './boolean-tool';
 import { BrushTool } from './brush-tool';
 import { CleanupTool } from './cleanup-tool';
 import { CONTOUR_TOOLS } from './contour-tool';
+import { MagicWandTool } from './magic-wand-tool';
 import { MarginTool } from './margin-tool';
 import { MirrorTool } from './mirror-tool';
 import { ContourToolsController } from './contour-tools-controller';
@@ -23,6 +24,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: BrushTool, multi: true },
   ThresholdBrushTool,
   { provide: CONTOUR_TOOLS, useExisting: ThresholdBrushTool, multi: true },
+  MagicWandTool,
+  { provide: CONTOUR_TOOLS, useExisting: MagicWandTool, multi: true },
   CleanupTool,
   { provide: CONTOUR_TOOLS, useExisting: CleanupTool, multi: true },
   MarginTool,
