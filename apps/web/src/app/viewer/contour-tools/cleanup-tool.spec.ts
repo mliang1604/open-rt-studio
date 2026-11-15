@@ -50,6 +50,7 @@ describe('CleanupTool (#110)', () => {
       'cleanup',
       'margin',
       'mirror',
+      'boolean',
       'sample',
     ]);
     expect(tools.held()?.id).toBe('cleanup');

@@ -98,6 +98,7 @@ describe('ThresholdBrushTool (#107)', () => {
       'cleanup',
       'margin',
       'mirror',
+      'boolean',
       'sample',
     ]);
     expect(tools.held()?.id).toBe('threshold');

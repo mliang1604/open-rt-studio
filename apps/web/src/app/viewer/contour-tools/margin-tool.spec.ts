@@ -60,6 +60,7 @@ describe('MarginTool (#112)', () => {
       'cleanup',
       'margin',
       'mirror',
+      'boolean',
       'sample',
     ]);
     expect(tools.held()?.id).toBe('margin');

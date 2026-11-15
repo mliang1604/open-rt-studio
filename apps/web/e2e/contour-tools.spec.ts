@@ -267,3 +267,39 @@ test('a structure is mirrored across the midline into a new one, as one undo (#1
   expect(await capturedColour(page)).toBeCloseTo(painted, 1);
   expectNoProblems(problems);
 });
+
+test('a boolean of a painted and an imported structure is previewed, made into a new one, and undone (#111)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByTitle('Create a new structure and paint it').click();
+  const middle = await at(page, 0.5, 0.5);
+  await page.mouse.click(middle.x, middle.y);
+
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="boolean"]').click();
+  // The imported structures are offered beside the painted one.
+  await expect(page.locator('[data-boolean-second] option')).toContainText(['GTV']);
+  await page.locator('[data-boolean-second]').selectOption({ label: 'GTV' });
+  await page.locator('[data-boolean-operation]').selectOption('union');
+  await expect(page.locator('[data-boolean-preview]')).toHaveText(
+    /^The result would be \d+ voxels, \d+\.\d\d cm³\.$/,
+  );
+  await page.locator('[data-boolean-apply]').click();
+  await expect(page.locator('[data-boolean-said]')).toHaveText(
+    /^Structure 1 ∪ GTV: \d+ voxels changed\.$/,
+  );
+  await expect(page.getByLabel('Name of Structure 1 ∪ GTV (painted)')).toHaveValue(
+    'Structure 1 ∪ GTV',
+  );
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Union (Ctrl/⌘+Z)',
+  );
+  expectNoProblems(problems);
+});

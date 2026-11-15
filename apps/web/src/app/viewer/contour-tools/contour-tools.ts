@@ -4,6 +4,7 @@
 
 import type { Provider } from '@angular/core';
 
+import { BooleanTool } from './boolean-tool';
 import { BrushTool } from './brush-tool';
 import { CleanupTool } from './cleanup-tool';
 import { CONTOUR_TOOLS } from './contour-tool';
@@ -28,6 +29,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: MarginTool, multi: true },
   MirrorTool,
   { provide: CONTOUR_TOOLS, useExisting: MirrorTool, multi: true },
+  BooleanTool,
+  { provide: CONTOUR_TOOLS, useExisting: BooleanTool, multi: true },
   { provide: CONTOUR_TOOLS, useClass: SampleTool, multi: true },
   ContourToolsController,
 ];
