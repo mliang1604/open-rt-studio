@@ -123,29 +123,108 @@ export function sampleVolumeAtPatient(volume: Volume, patient: Vec3): VoxelProbe
  * the outermost voxels: nothing is read from outside the grid.
  */
 export function interpolateVolumeAtPatient(volume: Volume, patient: Vec3): number | null {
+  return volumeInterpolator(volume)(patient);
+}
+
+/**
+ * {@link interpolateVolumeAtPatient} for many points of one volume: what is
+ * worked out of the volume's geometry is worked out once.
+ */
+export function volumeInterpolator(volume: Volume): (patient: Vec3) => number | null {
   const m = patientToTexMatrix(volume); // column-major patient → texcoord
-  const tex = [
-    m[0] * patient[0] + m[4] * patient[1] + m[8] * patient[2] + m[12],
-    m[1] * patient[0] + m[5] * patient[1] + m[9] * patient[2] + m[13],
-    m[2] * patient[0] + m[6] * patient[1] + m[10] * patient[2] + m[14],
-  ];
-  if (tex.some((t) => !(t >= 0 && t <= 1))) return null;
   const [dimX, dimY, dimZ] = volume.dims;
-  // A voxel's middle is at (index + 0.5) / dim: the place in voxels, held within the middles.
-  const at = (t: number, dim: number): { low: number; high: number; part: number } => {
-    const place = Math.min(dim - 1, Math.max(0, t * dim - 0.5));
-    const low = Math.min(dim - 1, Math.floor(place));
-    return { low, high: Math.min(dim - 1, low + 1), part: place - low };
+  const data = volume.data;
+  return (patient) => {
+    const tx = m[0] * patient[0] + m[4] * patient[1] + m[8] * patient[2] + m[12];
+    const ty = m[1] * patient[0] + m[5] * patient[1] + m[9] * patient[2] + m[13];
+    const tz = m[2] * patient[0] + m[6] * patient[1] + m[10] * patient[2] + m[14];
+    if (!(tx >= 0 && tx <= 1 && ty >= 0 && ty <= 1 && tz >= 0 && tz <= 1)) return null;
+    // A voxel's middle is at (index + 0.5) / dim: the place in voxels, held within the middles.
+    const px = Math.min(dimX - 1, Math.max(0, tx * dimX - 0.5));
+    const py = Math.min(dimY - 1, Math.max(0, ty * dimY - 0.5));
+    const pz = Math.min(dimZ - 1, Math.max(0, tz * dimZ - 0.5));
+    const x0 = Math.min(dimX - 1, Math.floor(px));
+    const y0 = Math.min(dimY - 1, Math.floor(py));
+    const z0 = Math.min(dimZ - 1, Math.floor(pz));
+    const x1 = Math.min(dimX - 1, x0 + 1);
+    const y1 = Math.min(dimY - 1, y0 + 1);
+    const z1 = Math.min(dimZ - 1, z0 + 1);
+    const fx = px - x0;
+    const fy = py - y0;
+    const fz = pz - z0;
+    const along = (j: number, k: number): number => {
+      const row = (k * dimY + j) * dimX;
+      return data[row + x0] + (data[row + x1] - data[row + x0]) * fx;
+    };
+    const across = (k: number): number => along(y0, k) + (along(y1, k) - along(y0, k)) * fy;
+    return across(z0) + (across(z1) - across(z0)) * fz;
   };
-  const x = at(tex[0], dimX);
-  const y = at(tex[1], dimY);
-  const z = at(tex[2], dimZ);
-  const read = (i: number, j: number, k: number): number => volume.data[(k * dimY + j) * dimX + i];
-  const along = (j: number, k: number): number =>
-    read(x.low, j, k) + (read(x.high, j, k) - read(x.low, j, k)) * x.part;
-  const across = (k: number): number =>
-    along(y.low, k) + (along(y.high, k) - along(y.low, k)) * y.part;
-  return across(z.low) + (across(z.high) - across(z.low)) * z.part;
+}
+
+/**
+ * The plane a pane shows, as patient points: the point at plane coordinates
+ * `(u, v)`, each from 0 to 1 across the image as the shader has them before
+ * the pane's flip, pan and zoom, is `origin + u·alongU + v·alongV`.
+ */
+export interface PlaneFrame {
+  readonly origin: Vec3;
+  readonly alongU: Vec3;
+  readonly alongV: Vec3;
+}
+
+/**
+ * The {@link PlaneFrame} of a slice of `volume`: by the same `planeToTex`
+ * the shader and {@link probeVoxel} go by, so that what is worked out on the
+ * plane lies where the picture is.
+ */
+export function planeFrame(
+  volume: Volume,
+  orientation: Orientation,
+  sliceIndex: number,
+  rotation?: ObliqueRotation,
+): PlaneFrame {
+  const count = sliceCountFor(volume, orientation);
+  const slicePos = count > 1 ? (sliceIndex + 0.5) / count : 0.5;
+  const map = planeToTex(volume, orientation, rotation);
+  const [dimX, dimY, dimZ] = volume.dims;
+  const geom = resolveGeometry(volume);
+  const at = (u: number, v: number): Vec3 => {
+    const coord = texCoordAt(map, u, v, slicePos);
+    return add(
+      geom.origin,
+      add(
+        add(scale(geom.iStep, coord[0] * dimX - 0.5), scale(geom.jStep, coord[1] * dimY - 0.5)),
+        scale(geom.kStep, coord[2] * dimZ - 0.5),
+      ),
+    );
+  };
+  const origin = at(0, 0);
+  const less = (a: Vec3): Vec3 => [a[0] - origin[0], a[1] - origin[1], a[2] - origin[2]];
+  return { origin, alongU: less(at(1, 0)), alongV: less(at(0, 1)) };
+}
+
+/**
+ * Where a point of the plane is in a pane: the inverse of the pan, letterbox
+ * and zoom of {@link probeVoxel}, as {@link import('./crosshair.js').focusPanePoint}
+ * has it. `u` is the plane's own, before the flip. The point may lie outside
+ * the pane's rectangle.
+ */
+export function planeToPanePoint(
+  volume: Volume,
+  orientation: Orientation,
+  u: number,
+  v: number,
+  zoom: number,
+  rect: PaneRect,
+  flipX = false,
+  pan: Vec2 = { x: 0, y: 0 },
+): { x: number; y: number } {
+  const planeX = flipX ? 1 - u : u;
+  const z = zoom > 0 ? zoom : 1;
+  const [scaleX, scaleY] = aspectScale(volume, orientation, rect.width, rect.height);
+  const paneU = (planeX - 0.5) * (z / scaleX) + 0.5 + pan.x;
+  const paneV = (v - 0.5) * (z / scaleY) + 0.5 + pan.y;
+  return { x: rect.x + paneU * rect.width, y: rect.y + paneV * rect.height };
 }
 
 /** Floor a texture coordinate into `volume`'s grid and read the value there. */

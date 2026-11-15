@@ -90,6 +90,44 @@ describe('buildVolume', () => {
     expect(volume.windowCenter).toBe(10);
   });
 
+  it('windows a dose from nothing to its most, exactly, by the shader’s arithmetic (#94)', () => {
+    const dose = {
+      units: 'GY',
+      type: 'PHYSICAL',
+      summationType: null,
+      scaling: 0.1,
+      sopInstanceUid: '1.2.3',
+      frameOffsets: 'single',
+      interpolatedPlanes: 0,
+    } as const;
+    const of = (low: number, high: number) =>
+      buildVolume([
+        { ...axialSlice(0, low, 1), modality: 'RTDOSE', dose },
+        { ...axialSlice(2, high, 2), modality: 'RTDOSE', dose },
+      ]);
+    /** The two values the linear windowing maps to 0 and to 1. */
+    const ends = (volume: { windowCenter: number; windowWidth: number }): [number, number] => {
+      const low = volume.windowCenter - 0.5 - (volume.windowWidth - 1) / 2;
+      return [low, low + volume.windowWidth - 1];
+    };
+    // From nothing, though the least dose in the grid is above it.
+    const [low, high] = ends(of(3, 13.2));
+    expect(low).toBeCloseTo(0, 9);
+    // To a single float's figures, which the values are kept in.
+    expect(high).toBeCloseTo(13.2, 5);
+    // From its least, when that is below nothing.
+    const error = ends(of(-2, 6));
+    expect(error[0]).toBeCloseTo(-2, 9);
+    expect(error[1]).toBeCloseTo(6, 9);
+    // A dose of nothing anywhere has the window of any flat image.
+    expect(of(0, 0).windowWidth).toBe(1);
+    // The file's own window comes first, as for an image.
+    const said = buildVolume([
+      { ...axialSlice(0, 0, 1), modality: 'RTDOSE', dose, windowCenter: 30, windowWidth: 60 },
+    ]);
+    expect([said.windowCenter, said.windowWidth]).toEqual([30, 60]);
+  });
+
   it('carries the modality through from the first slice', () => {
     const volume = buildVolume([axialSlice(0, 0, 1), axialSlice(2, 20, 2)]);
 

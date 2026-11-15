@@ -4,7 +4,14 @@
 
 import { Orientation, type Vec3, type Volume, type VolumeGeometry } from '@open-rt-studio/dicom';
 import type { PaneRect } from './layout.js';
-import { interpolateVolumeAtPatient, probeVoxel, sampleVolumeAtPatient } from './probe.js';
+import {
+  interpolateVolumeAtPatient,
+  planeFrame,
+  planeToPanePoint,
+  probeVoxel,
+  sampleVolumeAtPatient,
+  volumeInterpolator,
+} from './probe.js';
 import { rezoomPan } from './slice-renderer.js';
 
 /** A dims[0]×dims[1]×dims[2] volume whose every voxel holds its flat index. */
@@ -328,5 +335,111 @@ describe('interpolateVolumeAtPatient (#95)', () => {
   it('reads a volume of one slice', () => {
     const flat = makeVolume([4, 4, 1], 1, 0, GEOMETRY);
     expect(interpolateVolumeAtPatient(flat, at(1.5, 2, 0))).toBeCloseTo(1.5 + 8, 6);
+  });
+});
+
+describe('the plane of a pane, as patient points (#94)', () => {
+  // 2 by 3 by 5 mm voxels, askew in no way; a pane wider than it is tall.
+  const volume = makeVolume([8, 6, 4], 1, 0, {
+    iStep: [2, 0, 0],
+    jStep: [0, 3, 0],
+    kStep: [0, 0, 5],
+    origin: [10, 20, 30],
+  });
+  const RECT: PaneRect = { x: 40, y: 10, width: 300, height: 200 };
+  const PAN = { x: 0.07, y: -0.04 };
+
+  it.each([
+    [Orientation.Axial, 2, false],
+    [Orientation.Coronal, 3, false],
+    [Orientation.Sagittal, 5, true],
+  ])(
+    'is where the probe finds the cursor, and comes back to the cursor (orientation %s)',
+    (orientation, sliceIndex, flipX) => {
+      const frame = planeFrame(volume, orientation, sliceIndex);
+      // Places of the plane, through the pane, read by the probe: the same patient point.
+      for (const [u, v] of [
+        [0.5, 0.5],
+        [0.2, 0.7],
+        [0.83, 0.31],
+      ]) {
+        const at = planeToPanePoint(volume, orientation, u, v, 1.6, RECT, flipX, PAN);
+        const probe = probeVoxel(
+          volume,
+          orientation,
+          sliceIndex,
+          1.6,
+          RECT,
+          at.x,
+          at.y,
+          flipX,
+          PAN,
+        );
+        expect(probe).not.toBeNull();
+        for (const axis of [0, 1, 2]) {
+          expect(probe!.patient[axis]).toBeCloseTo(
+            frame.origin[axis] + u * frame.alongU[axis] + v * frame.alongV[axis],
+            4,
+          );
+        }
+      }
+    },
+  );
+
+  it('spans the image: its sides are the image’s sides, in mm', () => {
+    const axial = planeFrame(volume, Orientation.Axial, 1);
+    expect(Math.hypot(...axial.alongU)).toBeCloseTo(16, 4);
+    expect(Math.hypot(...axial.alongV)).toBeCloseTo(18, 4);
+    // The slice's own depth: the middle of the second slice.
+    expect(axial.origin[2]).toBeCloseTo(35, 4);
+  });
+
+  it('follows a plane that is turned', () => {
+    const rotation = { tiltU: 0.2, tiltV: -0.15 };
+    const turned = planeFrame(volume, Orientation.Axial, 1, rotation);
+    const flat = planeFrame(volume, Orientation.Axial, 1);
+    expect(turned.alongU).not.toEqual(flat.alongU);
+    const at = planeToPanePoint(volume, Orientation.Axial, 0.45, 0.55, 1, RECT);
+    const probe = probeVoxel(
+      volume,
+      Orientation.Axial,
+      1,
+      1,
+      RECT,
+      at.x,
+      at.y,
+      false,
+      { x: 0, y: 0 },
+      rotation,
+    );
+    expect(probe).not.toBeNull();
+    for (const axis of [0, 1, 2]) {
+      expect(probe!.patient[axis]).toBeCloseTo(
+        turned.origin[axis] + 0.45 * turned.alongU[axis] + 0.55 * turned.alongV[axis],
+        4,
+      );
+    }
+  });
+});
+
+describe('volumeInterpolator (#94)', () => {
+  it('reads what interpolateVolumeAtPatient reads, at any number of points', () => {
+    const volume = makeVolume([4, 5, 6], 1, 0, {
+      iStep: [0, 2, 0],
+      jStep: [-2, 0, 0],
+      kStep: [0, 0, 3],
+      origin: [5, 5, 5],
+    });
+    const read = volumeInterpolator(volume);
+    for (const point of [
+      [5, 5, 5],
+      [4.1, 7.3, 9.9],
+      [-1.5, 9.25, 14],
+      [100, 0, 0],
+    ] as Vec3[]) {
+      expect(read(point)).toBe(interpolateVolumeAtPatient(volume, point));
+    }
+    expect(read([100, 0, 0])).toBeNull();
+    expect(read([Number.NaN, 5, 5])).toBeNull();
   });
 });

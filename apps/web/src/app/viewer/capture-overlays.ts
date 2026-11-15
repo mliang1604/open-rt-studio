@@ -20,6 +20,7 @@
 const OVERLAYS = [
   ':scope > .pane-overlay',
   ':scope > svg.contours',
+  ':scope > app-isodose-layer svg',
   ':scope > app-cpr-overlay svg',
   ':scope > svg.reference-line',
   ':scope > svg.slice-planes',

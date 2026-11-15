@@ -1,0 +1,174 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (ctl.display(); as display) {
+  <div class="row" role="group" aria-label="Levels in">
+    <span class="name">Levels in</span>
+    <button
+      type="button"
+      [class.active]="display.mode === 'absolute'"
+      [attr.aria-pressed]="display.mode === 'absolute'"
+      data-dose-mode="absolute"
+      title="Levels are doses"
+      (click)="setMode('absolute')"
+    >
+      {{ ctl.unit() || 'Dose' }}
+    </button>
+    <button
+      type="button"
+      [class.active]="display.mode === 'relative'"
+      [attr.aria-pressed]="display.mode === 'relative'"
+      data-dose-mode="relative"
+      title="Levels are percent of a dose you choose"
+      (click)="setMode('relative')"
+    >
+      %
+    </button>
+    <label class="check" title="Draw a line where the dose is at each level">
+      <input type="checkbox" [checked]="display.lines" (change)="toggleLines()" data-dose-lines />
+      Lines
+    </label>
+  </div>
+
+  <label class="row">
+    <span class="name">100 % is</span>
+    <select
+      (change)="onReference($event)"
+      data-dose-reference
+      aria-label="What 100 % is"
+      [title]="'100 % is ' + referenceSaid()"
+    >
+      <option value="maximum" [selected]="referenceChosen() === 'maximum'">
+        the dose’s maximum
+      </option>
+      @for (one of ctl.prescriptions(); track $index) {
+        <option
+          [value]="'prescription-' + $index"
+          [selected]="referenceChosen() === 'prescription-' + $index"
+        >
+          {{ one.label }}
+        </option>
+      }
+      <option value="typed" [selected]="referenceChosen() === 'typed'">a dose I type</option>
+    </select>
+  </label>
+  @if (referenceChosen() === 'typed') {
+    <label class="row">
+      <span class="name"></span>
+      <input
+        type="number"
+        min="0"
+        step="any"
+        [value]="typedDose()"
+        (change)="onTyped($event)"
+        data-dose-typed
+        aria-label="The dose that 100 % is"
+      />
+      <span class="value">{{ ctl.unit() }}</span>
+    </label>
+  }
+  <p class="note" data-dose-reference-said>
+    100 % is {{ referenceSaid() }}.
+    @if (!ctl.hasReference()) {
+      Percent of that is no dose: no line is drawn.
+    }
+  </p>
+
+  <ul class="levels" aria-label="Isodose levels" data-dose-legend>
+    @for (row of ctl.legend(); track row.level; let at = $index) {
+      <li [attr.data-dose-level]="row.dose === null ? '' : row.dose.toFixed(2)">
+        <span class="swatch" [style.background]="row.colour" aria-hidden="true"></span>
+        <input
+          type="number"
+          min="0"
+          step="any"
+          [value]="row.level"
+          (change)="onLevel(at, $event)"
+          [attr.aria-label]="'Level ' + (at + 1) + ', in ' + (levelUnit() || 'the dose’s numbers')"
+        />
+        <span class="value">{{ levelUnit() }}</span>
+        <span class="also">{{ row.also }}</span>
+        <button
+          type="button"
+          class="remove"
+          (click)="removeLevel(at)"
+          [attr.aria-label]="'Remove the level at ' + row.label"
+          title="Remove this level"
+        >
+          ✕
+        </button>
+      </li>
+    } @empty {
+      <li class="none">No levels: no line is drawn.</li>
+    }
+  </ul>
+
+  <div class="row">
+    <span class="name">Add</span>
+    <input
+      #add
+      type="number"
+      min="0"
+      step="any"
+      [disabled]="display.levels.length >= most"
+      (keydown.enter)="onAdd(add)"
+      data-dose-add
+      [attr.aria-label]="'A level to add, in ' + (levelUnit() || 'the dose’s numbers')"
+      [title]="
+        display.levels.length >= most
+          ? 'A dose is shown with at most ' + most + ' levels'
+          : 'A level to add; Enter adds it'
+      "
+    />
+    <span class="value">{{ levelUnit() }}</span>
+    <button type="button" [disabled]="display.levels.length >= most" (click)="onAdd(add)">
+      Add
+    </button>
+  </div>
+  <label class="row">
+    <span class="name">Presets</span>
+    <select (change)="onPreset($event)" data-dose-preset aria-label="Levels to take at once">
+      <option value="">Take levels…</option>
+      @for (preset of presets; track preset.id) {
+        <option [value]="preset.id">{{ preset.label }}</option>
+      }
+    </select>
+  </label>
+
+  <div class="row" role="group" aria-label="Colour wash from and to">
+    <span class="name">Wash</span>
+    <input
+      type="number"
+      step="any"
+      [value]="rangeShown()[0]"
+      (change)="onRange(0, $event)"
+      data-dose-range="low"
+      aria-label="The dose at the low end of the colour wash"
+      title="The dose at the low end of the colour wash"
+    />
+    <span class="value">to</span>
+    <input
+      type="number"
+      step="any"
+      [value]="rangeShown()[1]"
+      (change)="onRange(1, $event)"
+      data-dose-range="high"
+      aria-label="The dose at the high end of the colour wash"
+      title="The dose at the high end of the colour wash"
+    />
+    <span class="value">{{ ctl.unit() }}</span>
+    <button
+      type="button"
+      (click)="fitRange()"
+      data-dose-range-fit
+      title="From nothing to the dose’s maximum"
+    >
+      Fit
+    </button>
+  </div>
+  <p class="note">
+    A line has the colour the wash has at its dose. More than the wash’s high end is drawn as the
+    high end. The wash’s strength is the layer’s opacity; at none, the lines are alone.
+  </p>
+}

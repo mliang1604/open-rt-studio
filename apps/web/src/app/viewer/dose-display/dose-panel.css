@@ -1,0 +1,118 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* The whole width of the tool group, and no wider: what is in it gives way. */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  font-size: 0.85em;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.name {
+  flex: none;
+  width: 62px;
+  color: var(--muted);
+}
+
+.value,
+.also {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.also {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+button {
+  padding: 3px 10px;
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+select,
+input[type='number'] {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  padding: 3px 5px;
+}
+
+select {
+  background: var(--glass-bg);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+input[type='checkbox'] {
+  padding: 0;
+}
+
+.levels {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.levels li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.levels input[type='number'] {
+  flex: none;
+  width: 58px;
+}
+
+/* A line's colour as it is drawn: on black, with the line's dark edge. */
+.swatch {
+  flex: none;
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  outline: 1px solid rgba(0, 0, 0, 0.75);
+}
+
+.remove {
+  flex: none;
+  padding: 1px 6px;
+}
+
+.none,
+.note {
+  margin: 0;
+  color: var(--muted);
+}

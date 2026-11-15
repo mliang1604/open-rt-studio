@@ -62,6 +62,10 @@ import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
 import { FieldMetricsPanel } from './field-metrics/field-metrics-panel';
 import { FieldArrowsLayer } from './field-view/field-arrows-layer';
+import { DoseController } from './dose-display/dose-controller';
+import { DoseDisplayStore } from './dose-display/dose-display-store';
+import { DosePanel } from './dose-display/dose-panel';
+import { IsodoseLayer } from './dose-display/isodose-layer';
 import { FieldViewPanel } from './field-view/field-view-panel';
 import { LandmarkController } from './landmarks/landmark-controller';
 import { LandmarkMarkers } from './landmarks/landmark-markers';
@@ -152,6 +156,8 @@ const MAX_ZOOM = 20;
     FieldMetricsPanel,
     FieldViewPanel,
     FieldArrowsLayer,
+    DosePanel,
+    IsodoseLayer,
   ],
   providers: [
     MeasurementStore,
@@ -179,6 +185,8 @@ const MAX_ZOOM = 20;
     StructurePropagationController,
     ToolbarController,
     StatusController,
+    DoseDisplayStore,
+    DoseController,
     CprStore,
     CprController,
   ],
@@ -230,6 +238,7 @@ export class Viewer {
   protected readonly cprCtl = inject(CprController);
   /** Owns the layer registry / fusion / Compare domain (volume, window/level, blend); wired in the constructor. */
   protected readonly layersCtl = inject(LayersController);
+  protected readonly doseCtl = inject(DoseController);
   /** Owns the toolbar / keyboard view actions (layout, fit, reset, cine, capture); wired in the constructor. */
   protected readonly toolbar = inject(ToolbarController);
   /** Owns the read-only status / series / metadata derivations; wired in the constructor. */
@@ -636,6 +645,13 @@ export class Viewer {
     // Wire the measurement controller: it owns the measure-tool place/drag gestures
     // and the Shift+click crosshair-focus picks, reading the view tuples and driving
     // the focus/slice/tool signals and the MeasurementStore through these hooks.
+    this.doseCtl.init({
+      isReady: () => this.isReady(),
+      panes: () => this.panes(),
+      obliques: this.obliques,
+      sagittalFlipped: () => this.sagittalFlipped(),
+    });
+
     this.measureCtl.init({
       volume: () => this.layersCtl.volume(),
       isReady: () => this.isReady(),

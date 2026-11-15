@@ -24,7 +24,7 @@ export {
   rezoomCameraPan,
   viewBasis,
 } from './camera.js';
-export { COLORMAPS } from './colormap.js';
+export { COLORMAPS, DEFAULT_COLORMAP, colormap, sampleColormap } from './colormap.js';
 export { buildCenterline, type Centerline, type CprImage, straightenedCpr } from './cpr.js';
 export { focusPanePoint, focusPatientPoint, focusSliceIndex } from './crosshair.js';
 export {
@@ -84,11 +84,24 @@ export {
   resolveGeometry,
 } from './plane-basis.js';
 export {
+  type PlaneFrame,
   type VoxelProbe,
   interpolateVolumeAtPatient,
+  planeFrame,
+  planeToPanePoint,
   probeVoxel,
   sampleVolumeAtPatient,
+  volumeInterpolator,
 } from './probe.js';
+export {
+  type PlaneLine,
+  type PlaneSamples,
+  ISODOSE_SAMPLES_AT_LEAST,
+  ISODOSE_SAMPLES_AT_MOST,
+  isodoseLines,
+  isodoseSampleCounts,
+  samplePlane,
+} from './isodose.js';
 export { ProjectionMode, defaultSlabThicknessMm, isDvr } from './projection.js';
 export {
   type ReferenceLineGeometry,
