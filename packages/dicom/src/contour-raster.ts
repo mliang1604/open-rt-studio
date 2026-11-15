@@ -19,7 +19,7 @@
  */
 
 import { markDirty, type LabelVolume } from './label-volume.js';
-import type { Contour, Roi } from './types.js';
+import type { Contour, Roi, VolumeGeometry } from './types.js';
 import { patientToVoxel } from './volume.js';
 
 /** A planar loop in continuous voxel `(x, y)` coordinates, on a single slice. */
@@ -94,6 +94,73 @@ export function fillLoops(
   }
 }
 
+/** An ROI's fillable loops, each under the slice of a grid it lies on. */
+export interface SliceLoops {
+  /** The loops of each slice that has any, in continuous voxel `(x, y)`. */
+  readonly bySlice: Map<number, VoxelLoop[]>;
+  /** How many contours bound no area (`OPEN_PLANAR`, `POINT`) and were left out. */
+  readonly skipped: number;
+  /** How many fillable contours lie on no slice of the grid, and were left out. */
+  readonly beyond: number;
+  /**
+   * How far the contours that were kept lie from the slices they were put
+   * on, at most, in slices: 0 for contours drawn on this grid's slices, up
+   * to a half and more for ones drawn on another's, or tilted to them.
+   */
+  readonly offSlice: number;
+}
+
+/**
+ * Bucket each fillable contour of `roi` under the slice of a grid it lies on
+ * (the rounded mean of its points' `k`), as a loop in continuous voxel
+ * `(x, y)`: the loops of one slice, outer boundaries and their holes, are
+ * filled as a unit. A loop whose points cannot be mapped (a singular
+ * geometry) or that has fewer than three points is left out silently; what
+ * bounds no area and what lies on no slice of the grid are left out and
+ * counted.
+ *
+ * Shared by whatever fills a structure: the label volume
+ * ({@link rasterizeRoiContours}) and the dose-volume histogram, which fills
+ * at a finer step than the image's voxels.
+ */
+export function roiLoopsBySlice(geometry: VolumeGeometry, dimZ: number, roi: Roi): SliceLoops {
+  const bySlice = new Map<number, VoxelLoop[]>();
+  let [skipped, beyond, offSlice] = [0, 0, 0];
+  for (const contour of roi.contours) {
+    if (!isFillable(contour)) {
+      skipped++;
+      continue;
+    }
+    if (contour.points.length < 3) continue; // bounds no area
+    const loop: [number, number][] = [];
+    let zSum = 0;
+    let [zLeast, zMost] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+    let mappable = true;
+    for (const point of contour.points) {
+      const voxel = patientToVoxel(geometry, point);
+      if (!voxel) {
+        mappable = false;
+        break;
+      }
+      loop.push([voxel[0], voxel[1]]);
+      zSum += voxel[2];
+      zLeast = Math.min(zLeast, voxel[2]);
+      zMost = Math.max(zMost, voxel[2]);
+    }
+    if (!mappable) continue;
+    const z = Math.round(zSum / contour.points.length);
+    if (z < 0 || z >= dimZ) {
+      beyond++;
+      continue;
+    }
+    offSlice = Math.max(offSlice, z - zLeast, zMost - z);
+    const list = bySlice.get(z);
+    if (list) list.push(loop);
+    else bySlice.set(z, [loop]);
+  }
+  return { bySlice, skipped, beyond, offSlice };
+}
+
 /**
  * Rasterize an imported {@link Roi}'s planar contours into `label`, writing
  * `roiId` into the occupancy of every voxel its loops enclose, and return how many
@@ -114,36 +181,7 @@ export function fillLoops(
 export function rasterizeRoiContours(label: LabelVolume, roi: Roi, roiId: number): RasterizeResult {
   const [dimX, dimY, dimZ] = label.dims;
   const sliceVoxels = dimX * dimY;
-
-  // Bucket each fillable contour's (x, y) loop under the slice it lies on, so the
-  // loops on one slice (outer boundaries and their holes) are filled as a unit.
-  const bySlice = new Map<number, VoxelLoop[]>();
-  let skipped = 0;
-  for (const contour of roi.contours) {
-    if (!isFillable(contour)) {
-      skipped++;
-      continue;
-    }
-    if (contour.points.length < 3) continue; // bounds no area
-    const loop: [number, number][] = [];
-    let zSum = 0;
-    let mappable = true;
-    for (const point of contour.points) {
-      const voxel = patientToVoxel(label.geometry, point);
-      if (!voxel) {
-        mappable = false;
-        break;
-      }
-      loop.push([voxel[0], voxel[1]]);
-      zSum += voxel[2];
-    }
-    if (!mappable) continue;
-    const z = Math.round(zSum / contour.points.length);
-    if (z < 0 || z >= dimZ) continue;
-    const list = bySlice.get(z);
-    if (list) list.push(loop);
-    else bySlice.set(z, [loop]);
-  }
+  const { bySlice, skipped } = roiLoopsBySlice(label.geometry, dimZ, roi);
 
   let filled = 0;
   const { data } = label;

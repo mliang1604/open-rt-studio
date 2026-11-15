@@ -65,6 +65,8 @@ import { FieldArrowsLayer } from './field-view/field-arrows-layer';
 import { DoseController } from './dose-display/dose-controller';
 import { DoseDisplayStore } from './dose-display/dose-display-store';
 import { DosePanel } from './dose-display/dose-panel';
+import { DvhController } from './dvh/dvh-controller';
+import { DvhPanel } from './dvh/dvh-panel';
 import { IsodoseLayer } from './dose-display/isodose-layer';
 import { FieldViewPanel } from './field-view/field-view-panel';
 import { LandmarkController } from './landmarks/landmark-controller';
@@ -157,6 +159,7 @@ const MAX_ZOOM = 20;
     FieldViewPanel,
     FieldArrowsLayer,
     DosePanel,
+    DvhPanel,
     IsodoseLayer,
   ],
   providers: [
@@ -187,6 +190,7 @@ const MAX_ZOOM = 20;
     StatusController,
     DoseDisplayStore,
     DoseController,
+    DvhController,
     CprStore,
     CprController,
   ],
@@ -239,6 +243,7 @@ export class Viewer {
   /** Owns the layer registry / fusion / Compare domain (volume, window/level, blend); wired in the constructor. */
   protected readonly layersCtl = inject(LayersController);
   protected readonly doseCtl = inject(DoseController);
+  protected readonly dvhCtl = inject(DvhController);
   /** Owns the toolbar / keyboard view actions (layout, fit, reset, cine, capture); wired in the constructor. */
   protected readonly toolbar = inject(ToolbarController);
   /** Owns the read-only status / series / metadata derivations; wired in the constructor. */

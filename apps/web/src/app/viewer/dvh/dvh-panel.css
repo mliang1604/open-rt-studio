@@ -1,0 +1,218 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* A card pinned to the viewport's lower right (../panel-card.css has the card
+   itself), where it leaves most of the largest pane. It takes pointer input:
+   the plot is read by pointing at it. */
+:host {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 600px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  font-size: 12px;
+}
+
+/* Denser than the other cards: a plot is read against what is behind it. */
+:host(.dvh-panel) {
+  background: rgba(16, 19, 26, 0.92);
+}
+
+.info-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.controls,
+.ask {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pair {
+  display: flex;
+  gap: 4px;
+}
+
+button {
+  padding: 3px 10px;
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.working {
+  flex: 1;
+  color: var(--muted);
+}
+
+/* The plot. Its lines give way to the curves; its words are the page's. */
+.plot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.plot:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.grid {
+  stroke: var(--glass-border);
+  stroke-width: 1;
+}
+
+.tick,
+.title {
+  fill: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.title {
+  fill: var(--text);
+}
+
+.curve {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.curve.picked {
+  stroke-width: 3.5;
+}
+
+.curve.dimmed {
+  opacity: 0.3;
+}
+
+.cursor {
+  stroke: var(--text);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* A ring of the card's own colour keeps a mark apart from the curve it is on. */
+.mark {
+  stroke: #10141c;
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+/* The table: the plot's legend, and every number it shows. */
+.table {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: 3px 5px;
+  text-align: left;
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+thead th {
+  color: var(--muted);
+  border-bottom: 1px solid var(--glass-border);
+  vertical-align: top;
+}
+
+/* A column's unit, under its name: the numbers below are bare. A column
+   without one (a relative dose) keeps the line, so the heads stay level. */
+.unit {
+  display: block;
+  min-height: 1.2em;
+  opacity: 0.8;
+}
+
+tbody tr.picked {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.number {
+  text-align: right;
+}
+
+.show {
+  width: 1px;
+  padding-right: 0;
+}
+
+tbody th {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+td.problem,
+td.pending,
+td.note {
+  color: var(--muted);
+  white-space: normal;
+}
+
+.noted td {
+  padding-top: 0;
+}
+
+.remove {
+  padding: 0 5px;
+  margin-left: 2px;
+  font-size: 10px;
+}
+
+input[type='checkbox'] {
+  padding: 0;
+}
+
+.ask label {
+  color: var(--muted);
+}
+
+.ask input {
+  width: 170px;
+  padding: 3px 6px;
+}
+
+.ask .problem {
+  color: #f0b35a;
+}
+
+.none,
+.note {
+  margin: 0;
+  color: var(--muted);
+}

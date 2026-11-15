@@ -465,6 +465,16 @@
         <summary class="tool-group-label">Dose</summary>
         <div class="tool-group-body">
           <app-dose-panel />
+          <button
+            type="button"
+            [class.active]="dvhCtl.open()"
+            [attr.aria-expanded]="dvhCtl.open()"
+            data-dvh-open
+            title="Dose-volume histograms of the structures shown with this image"
+            (click)="dvhCtl.toggle()"
+          >
+            Histograms…
+          </button>
         </div>
       </details>
     }
@@ -1573,6 +1583,11 @@
        re-bake the LUT / repack the shader uniforms live. Never affects MPR panes. -->
     @if (isReady() && view3d.isDvrMode() && has3dPane()) {
       <app-dvr-panel />
+    }
+
+    <!-- Dose-volume histograms (#96): a card over the viewport, read by pointing at its plot. -->
+    @if (isReady() && dvhCtl.open()) {
+      <app-dvh-panel />
     }
 
     <!-- Keyboard & mouse shortcut help. A centred modal overlay; click outside or ✕/Esc to close. -->

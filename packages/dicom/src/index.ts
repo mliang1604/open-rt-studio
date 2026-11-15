@@ -17,7 +17,28 @@ export {
   importLeavesPatient,
   initialImportSeries,
 } from './catalog.js';
-export { type RasterizeResult, rasterizeRoiContours } from './contour-raster.js';
+export {
+  type RasterizeResult,
+  type SliceLoops,
+  rasterizeRoiContours,
+  roiLoopsBySlice,
+} from './contour-raster.js';
+export {
+  type DoseVolumeHistogram,
+  type DvhDose,
+  type DvhOptions,
+  type DvhSampling,
+  DVH_ON_SLICE_MM,
+  DVH_SAMPLES,
+  DVH_SAMPLES_AT_MOST,
+  DvhError,
+  doseAtVolume,
+  doseVolumeHistogram,
+  dvhBins,
+  dvhKnownShare,
+  roundStep,
+  volumeAtDose,
+} from './dvh.js';
 export {
   type DerivedInstance,
   type DerivedSeries,

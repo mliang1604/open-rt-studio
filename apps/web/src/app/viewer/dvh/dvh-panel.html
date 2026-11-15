@@ -1,0 +1,319 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<header class="info-header">
+  <strong>Dose-volume histograms</strong>
+  <button
+    type="button"
+    class="info-close"
+    aria-label="Close the histograms"
+    data-dvh-close
+    (click)="ctl.close()"
+  >
+    ✕
+  </button>
+</header>
+
+<div class="info-body">
+  @if (ctl.unavailable(); as why) {
+    <p class="none" data-dvh-unavailable>{{ why }}</p>
+  } @else {
+    <div class="controls">
+      <span class="pair" role="group" aria-label="What is plotted">
+        <button
+          type="button"
+          [class.active]="ctl.mode() === 'cumulative'"
+          [attr.aria-pressed]="ctl.mode() === 'cumulative'"
+          data-dvh-mode="cumulative"
+          title="The volume that gets each dose or more"
+          (click)="ctl.mode.set('cumulative')"
+        >
+          Cumulative
+        </button>
+        <button
+          type="button"
+          [class.active]="ctl.mode() === 'differential'"
+          [attr.aria-pressed]="ctl.mode() === 'differential'"
+          data-dvh-mode="differential"
+          title="The volume at each dose, for each unit of dose"
+          (click)="ctl.mode.set('differential')"
+        >
+          Differential
+        </button>
+      </span>
+      <span class="pair" role="group" aria-label="Volumes in">
+        <button
+          type="button"
+          [class.active]="ctl.volumeUnit() === 'percent'"
+          [attr.aria-pressed]="ctl.volumeUnit() === 'percent'"
+          data-dvh-unit="percent"
+          title="Volumes as percent of each structure"
+          (click)="ctl.volumeUnit.set('percent')"
+        >
+          %
+        </button>
+        <button
+          type="button"
+          [class.active]="ctl.volumeUnit() === 'cm3'"
+          [attr.aria-pressed]="ctl.volumeUnit() === 'cm3'"
+          data-dvh-unit="cm3"
+          title="Volumes in cubic centimetres"
+          (click)="ctl.volumeUnit.set('cm3')"
+        >
+          cm³
+        </button>
+      </span>
+      <span class="working" role="status" data-dvh-working>
+        @if (ctl.busy()) {
+          Working out…
+        }
+      </span>
+      <button
+        type="button"
+        data-dvh-csv
+        title="Save the table and the curves as a CSV file"
+        [disabled]="!ctl.hasCurves()"
+        (click)="saveCsv()"
+      >
+        Save as CSV
+      </button>
+    </div>
+
+    <svg
+      class="plot"
+      [attr.viewBox]="'0 0 ' + plot.width + ' ' + plot.height"
+      role="img"
+      tabindex="0"
+      data-dvh-plot
+      [attr.aria-label]="
+        'Dose-volume histograms of ' +
+        paths().length +
+        ' structures. Every number is in the table below. The arrow keys move a cursor along the dose axis.'
+      "
+      (pointermove)="onPoint($event)"
+      (pointerdown)="onPoint($event)"
+      (pointerleave)="cursor.set(null)"
+      (keydown)="onKey($event)"
+      (blur)="cursor.set(null)"
+    >
+      @for (tick of valueAxis().ticks; track tick) {
+        <line
+          class="grid"
+          [attr.x1]="plot.left"
+          [attr.x2]="plot.width - plot.right"
+          [attr.y1]="y(tick)"
+          [attr.y2]="y(tick)"
+        />
+        <text class="tick" text-anchor="end" [attr.x]="plot.left - 6" [attr.y]="y(tick) + 3.5">
+          {{ tickText(tick) }}
+        </text>
+      }
+      @for (tick of doseAxis().ticks; track tick) {
+        <line
+          class="grid"
+          [attr.x1]="x(tick)"
+          [attr.x2]="x(tick)"
+          [attr.y1]="plot.top"
+          [attr.y2]="plot.height - plot.bottom"
+        />
+        <text
+          class="tick"
+          text-anchor="middle"
+          [attr.x]="x(tick)"
+          [attr.y]="plot.height - plot.bottom + 14"
+        >
+          {{ tickText(tick) }}
+        </text>
+      }
+      <text
+        class="title"
+        text-anchor="middle"
+        [attr.x]="(plot.left + plot.width - plot.right) / 2"
+        [attr.y]="plot.height - 4"
+      >
+        {{ doseTitle() }}
+      </text>
+      <text
+        class="title"
+        text-anchor="middle"
+        [attr.transform]="'rotate(-90 12 ' + (plot.top + plot.height - plot.bottom) / 2 + ')'"
+        x="12"
+        [attr.y]="(plot.top + plot.height - plot.bottom) / 2"
+        data-dvh-value-title
+      >
+        Volume ({{ valueUnit() }})
+      </text>
+
+      @for (curve of paths(); track curve.key) {
+        <path
+          class="curve"
+          [class.picked]="emphasised() === curve.key"
+          [class.dimmed]="emphasised() !== null && emphasised() !== curve.key"
+          [attr.d]="curve.d"
+          [attr.stroke]="curve.colour"
+          [attr.data-dvh-curve]="curve.key"
+        >
+          <title>{{ curve.name }}</title>
+        </path>
+      }
+
+      @if (readout(); as at) {
+        <line
+          class="cursor"
+          [attr.x1]="at.x"
+          [attr.x2]="at.x"
+          [attr.y1]="plot.top"
+          [attr.y2]="plot.height - plot.bottom"
+        />
+        @for (mark of at.marks; track mark.key) {
+          <circle
+            class="mark"
+            r="4"
+            [attr.cx]="at.x"
+            [attr.cy]="mark.y"
+            [attr.fill]="mark.colour"
+          />
+        }
+      }
+    </svg>
+
+    <div class="table">
+      <table data-dvh-table>
+        <thead>
+          <tr>
+            <th scope="col" class="show">
+              <input
+                type="checkbox"
+                aria-label="Draw every structure’s curve"
+                title="Draw every structure’s curve, or none"
+                [checked]="allShown()"
+                (change)="onAllShown($event)"
+                data-dvh-all
+              />
+            </th>
+            <th scope="col">Structure</th>
+            <th
+              scope="col"
+              class="number"
+              title="What each histogram says at the dose the cursor is at"
+              data-dvh-cursor
+            >
+              @if (readout(); as at) {
+                At {{ at.dose }}
+              } @else {
+                At the cursor
+              }
+              <span class="unit">{{ valueUnit() }}</span>
+            </th>
+            <th scope="col" class="number" title="The structure’s whole volume">
+              Volume <span class="unit">cm³</span>
+            </th>
+            <th scope="col" class="number" title="The least dose in the structure">
+              Min <span class="unit">{{ ctl.unit() }}</span>
+            </th>
+            <th scope="col" class="number" title="The mean dose over the structure">
+              Mean <span class="unit">{{ ctl.unit() }}</span>
+            </th>
+            <th scope="col" class="number" title="The most dose in the structure">
+              Max <span class="unit">{{ ctl.unit() }}</span>
+            </th>
+            @for (column of queryColumns(); track column.label; let at = $index) {
+              <th scope="col" class="number" [title]="column.meaning" data-dvh-query-column>
+                <span class="asked">{{ column.label }}</span>
+                <button
+                  type="button"
+                  class="remove"
+                  [attr.aria-label]="'Take ' + column.label + ' away'"
+                  (click)="ctl.removeQuery(at)"
+                >
+                  ✕
+                </button>
+                <span class="unit">{{ column.unit }}</span>
+              </th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of ctl.rows(); track row.key) {
+            <tr
+              [attr.data-dvh-row]="row.key"
+              [class.picked]="emphasised() === row.key"
+              (pointerenter)="emphasised.set(row.key)"
+              (pointerleave)="emphasised.set(null)"
+              (focusin)="emphasised.set(row.key)"
+              (focusout)="emphasised.set(null)"
+            >
+              <td class="show">
+                <input
+                  type="checkbox"
+                  [attr.aria-label]="'Draw the curve of ' + row.name"
+                  [checked]="!ctl.hidden().has(row.key)"
+                  [disabled]="!row.found"
+                  (change)="onShown(row.key, $event)"
+                />
+              </td>
+              <th scope="row" [title]="row.name">
+                <span class="swatch" [style.background]="row.colour"></span>
+                <span class="structure">{{ row.name }}</span>
+              </th>
+              @if (row.problem) {
+                <td class="problem" [attr.colspan]="columns() - 2" data-dvh-problem>
+                  {{ row.problem }}
+                </td>
+              } @else if (row.pending) {
+                <td class="pending" [attr.colspan]="columns() - 2">Working out…</td>
+              } @else {
+                <td class="number" data-dvh-at>{{ readout()?.values?.get(row.key) ?? '' }}</td>
+                <td class="number" data-dvh-stat="volume">{{ row.volume }}</td>
+                <td class="number" data-dvh-stat="min">{{ row.min }}</td>
+                <td class="number" data-dvh-stat="mean">{{ row.mean }}</td>
+                <td class="number" data-dvh-stat="max">{{ row.max }}</td>
+                @for (answer of row.answers; track $index) {
+                  <td class="number" data-dvh-answer>{{ answer }}</td>
+                }
+              }
+            </tr>
+            @for (note of row.notes; track note) {
+              <tr class="noted">
+                <td></td>
+                <td class="note" [attr.colspan]="columns() - 1" data-dvh-note>{{ note }}</td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <form class="ask" (submit)="onAsk($event, asked)">
+      <label for="dvh-ask">Ask</label>
+      <input
+        #asked
+        id="dvh-ask"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="D95%, D2cc or V20Gy"
+        title="The dose a volume gets at least (D95%, D2cc), or the volume that gets a dose or more (V20Gy)"
+        data-dvh-ask
+      />
+      <button type="submit">Add</button>
+      @if (queryProblem(); as problem) {
+        <span class="problem" role="alert" data-dvh-ask-problem>{{ problem }}</span>
+      }
+    </form>
+
+    <p class="note">
+      A structure is its contours on this image’s slices, each a slab one slice thick, sampled at
+      {{ samples }} points or somewhat more. The dose is read between its voxels at each point.
+      Volumes are of the part of a structure where the dose is known.
+      @if (ctl.placedBy(); as by) {
+        <span data-dvh-placed>
+          The dose is placed over this image by a {{ by }}: these are of the dose where that puts
+          it.
+        </span>
+      }
+      Not for clinical use.
+    </p>
+  }
+</div>

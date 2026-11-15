@@ -99,6 +99,12 @@ by git) if you want files on disk to open.
 - Isodose lines at levels you set, in gray or in percent of the dose's
   maximum, of a plan's prescription or of a dose you type, with presets
   and a legend; a colour wash over a range you set
+- Dose-volume histograms of the structures shown with an image: cumulative
+  or differential, in percent or cm³, read by pointing at the plot, with
+  each structure's volume and its least, mean and most dose, answers to
+  questions such as `D95%`, `D2cc` and `V20Gy`, and the whole as a CSV
+  file. How a structure is sampled is in
+  [docs/architecture.md](docs/architecture.md)
 - An RT Plan's fractions and prescriptions on the timeline and in the
   metadata panel, each as the file has it
 - Fusion and Compare of a series from another frame of reference through a
