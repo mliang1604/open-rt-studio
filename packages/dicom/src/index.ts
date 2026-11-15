@@ -24,6 +24,8 @@ export {
   roiLoopsBySlice,
 } from './contour-raster.js';
 export {
+  type AlphaBeta,
+  type DoseConversion,
   type DoseSum,
   type DoseSumCandidate,
   type DoseSumRunning,
@@ -32,9 +34,14 @@ export {
   type DoseSumTermCount,
   DOSE_SUM_OUTSIDE,
   DOSE_SUM_TERMS_AT_MOST,
+  EQD_FRACTION_GY,
+  PHYSICAL_SUM,
   addDoseTerm,
+  bedGy,
   beginDoseSum,
+  doseConversionProblem,
   doseSumProblem,
+  eqdGy,
   fieldReaches,
   finishDoseSum,
   summedDoseVolume,
@@ -297,6 +304,7 @@ export { add, cross, dot, length, normalize, scale, sub } from './vec3.js';
 export { VolumeBuildError, buildVolume, patientToVoxel, voxelToPatient } from './volume.js';
 export {
   type DoseInfo,
+  type DoseSumMade,
   type DosePlane,
   type DoseProblem,
   type DoseType,
@@ -306,6 +314,8 @@ export {
   doseOrientation,
   dosePlanes,
   doseScaling,
+  doseSumName,
+  doseSumText,
   doseUnit,
   isDoseProblem,
 } from './rt-dose.js';

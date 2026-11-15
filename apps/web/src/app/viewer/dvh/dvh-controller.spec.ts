@@ -353,6 +353,24 @@ describe('DvhController', () => {
     expect(lines.at(-2)!.startsWith('14,')).toBe(true);
   });
 
+  it('calls the dose by what it is: a dose, an effective one, or what a sum is of', async () => {
+    const { ctl, layer, settle } = setUp();
+    expect(ctl.doseName()).toBe('Dose');
+    const volume = volumeOf(80, 'GY');
+    const withDose = (dose: object): Layer =>
+      doseLayer({ ...volume, dose: { units: 'GY', type: 'EFFECTIVE', ...dose } } as Volume);
+    layer.set(withDose({}));
+    await settle();
+    expect(ctl.doseName()).toBe('Effective dose');
+    layer.set(withDose({ sum: { doses: 2, model: 'eqd', fractionGy: 2, alphaBetaGy: 3 } }));
+    await settle();
+    expect(ctl.doseName()).toBe('EQD2 (α/β 3 Gy)');
+    expect(ctl.csv().split('\r\n')[0]).toContain('Dose-volume histograms of EQD2 (α/β 3 Gy).');
+    layer.set(null);
+    await settle();
+    expect(ctl.doseName()).toBe('Dose');
+  });
+
   it('gives a relative dose no unit', async () => {
     const { ctl, layer, settle } = setUp();
     layer.set(doseLayer(volumeOf(1.2, 'RELATIVE')));

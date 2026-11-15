@@ -118,6 +118,19 @@ describe('a dose beside its value (#95)', () => {
     expect(doseLabel({ type: 'PHYSICAL', units: 'RELATIVE' })).toBe('Dose, relative');
   });
 
+  it('is called by what it is a sum of, when it was made by summing (#98, #99)', () => {
+    const made = { type: 'EFFECTIVE', units: 'GY' } as const;
+    expect(
+      doseLabel({ ...made, sum: { doses: 2, model: 'eqd', fractionGy: 2, alphaBetaGy: 3 } }),
+    ).toBe('EQD2 (α/β 3 Gy)');
+    expect(doseLabel({ ...made, sum: { doses: 3, model: 'bed', alphaBetaGy: null } })).toBe(
+      'BED (α/β by voxel)',
+    );
+    expect(doseLabel({ type: 'PHYSICAL', units: 'GY', sum: { doses: 2, model: 'physical' } })).toBe(
+      'Summed dose',
+    );
+  });
+
   it('is shown to a hundredth of a gray, or to four figures when it is relative', () => {
     expect(formatDose(35.7249, { units: 'GY' })).toBe('35.72 Gy');
     expect(formatDose(0, { units: 'GY' })).toBe('0.00 Gy');
@@ -133,6 +146,22 @@ describe('what a dose says of itself, in a line (#93)', () => {
     expect(doseSaid(DOSE)).toBe('RT Dose: in Gy, physical, summation type PLAN');
     expect(doseSaid({ ...DOSE, units: 'RELATIVE', type: 'EFFECTIVE', summationType: null })).toBe(
       'RT Dose: relative, with no unit, effective, of no summation type',
+    );
+  });
+
+  it('says first that it was made here, and of what, when it was (#98, #99)', () => {
+    const made = { ...DOSE, summationType: null, sopInstanceUid: null };
+    expect(
+      doseSaid({
+        ...made,
+        type: 'EFFECTIVE',
+        sum: { doses: 2, model: 'eqd', fractionGy: 2, alphaBetaGy: 3 },
+      }),
+    ).toBe(
+      'Dose made here by summing, not read from a file: EQD2 (α/β 3 Gy), sum of 2 doses, each converted before it was added. In Gy, effective.',
+    );
+    expect(doseSaid({ ...made, sum: { doses: 3, model: 'physical' } })).toBe(
+      'Dose made here by summing, not read from a file: Physical dose, sum of 3 doses. In Gy, physical.',
     );
   });
 

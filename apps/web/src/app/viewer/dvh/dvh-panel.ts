@@ -104,7 +104,9 @@ export class DvhPanel {
   );
 
   protected readonly doseTitle = computed(() =>
-    this.ctl.unit() ? `Dose (${this.ctl.unit()})` : 'Dose (relative)',
+    this.ctl.unit()
+      ? `${this.ctl.doseName()} (${this.ctl.unit()})`
+      : `${this.ctl.doseName()} (relative)`,
   );
 
   /** Where a dose is across the plot. */

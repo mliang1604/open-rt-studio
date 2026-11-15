@@ -358,19 +358,21 @@ const figure = (value: number): number => Number(value.toPrecision(6));
 /**
  * The histograms as a CSV file: a line of what it is, the table of
  * statistics, then the curves, a row to each step of dose. The structures'
- * names are in it and nothing of the patient.
+ * names are in it and nothing of the patient. `doseName` is what the dose
+ * is called: for a dose that was made by summing, what it is a sum of.
  */
 export function dvhCsv(
   rows: readonly DvhRow[],
   queries: readonly DvhQuery[],
   dose: DoseUnitsOf,
   axis: Pick<PlotAxis, 'from' | 'to'>,
+  doseName = 'Dose',
 ): string {
   const unit = dose.units === 'GY' ? 'Gy' : 'relative';
   const made = rows.filter((row) => row.found !== null);
   const lines: (string | number)[][] = [
     [
-      'Dose-volume histograms. Made with Open RT Studio, which is not a medical device. Not for clinical use.',
+      `Dose-volume histograms${doseName === 'Dose' ? '' : ` of ${doseName}`}. Made with Open RT Studio, which is not a medical device. Not for clinical use.`,
     ],
     [
       'Volumes are of the part of each structure where the dose is known. Cumulative: the volume that gets the dose or more. Differential: the volume in the bin that begins at the dose, for each unit of dose.',
@@ -423,7 +425,7 @@ export function dvhCsv(
   lines.push(
     [],
     [
-      `Dose (${unit})`,
+      `${doseName} (${unit})`,
       ...made.flatMap((row) => [
         `${row.name}: cumulative (%)`,
         `${row.name}: cumulative (cm3)`,

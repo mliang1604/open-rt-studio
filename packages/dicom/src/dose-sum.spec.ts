@@ -5,16 +5,23 @@
 import {
   DOSE_SUM_OUTSIDE,
   DOSE_SUM_TERMS_AT_MOST,
+  EQD_FRACTION_GY,
+  PHYSICAL_SUM,
   addDoseTerm,
+  bedGy,
   beginDoseSum,
+  doseConversionProblem,
   doseSumProblem,
+  eqdGy,
   fieldReaches,
   finishDoseSum,
   summedDoseVolume,
   sumDoses,
+  type DoseConversion,
   type DoseSumSource,
   type DoseSumTerm,
 } from './dose-sum.js';
+import { doseSumName, doseSumText } from './rt-dose.js';
 import { IDENTITY_MAT4, rigidMat4, transformPoint, type Mat4 } from './mat4.js';
 import { sampleDeformation, type DeformationGrid } from './registration.js';
 import type { ResampleGrid, ResampleThrough } from './resample.js';
@@ -446,6 +453,7 @@ describe('a sum as a dose in memory', () => {
     expect(volume.dose).toEqual({
       units: 'GY',
       type: 'PHYSICAL',
+      sum: { doses: 2, model: 'physical' },
       summationType: null,
       scaling: 1,
       sopInstanceUid: null,
@@ -474,5 +482,220 @@ describe('a sum as a dose in memory', () => {
     addDoseTerm(none, Float32Array.of(OUT, OUT, OUT, OUT), { weight: 1 });
     const empty = summedDoseVolume(finishDoseSum(none), small);
     expect([empty.min, empty.max, empty.windowWidth]).toEqual([0, 0, 1]);
+  });
+});
+
+describe('the linear-quadratic model, by hand (#99)', () => {
+  it('gives the biologically effective dose', () => {
+    // 60 Gy in 30 fractions of 2 Gy, α/β 3 Gy: 60 × (1 + 2/3) = 100.
+    expect(bedGy(60, 30, 3)).toBeCloseTo(100, 12);
+    // The same with α/β 10 Gy: 60 × (1 + 2/10) = 72.
+    expect(bedGy(60, 30, 10)).toBeCloseTo(72, 12);
+    // 20 Gy in 5 fractions of 4 Gy, α/β 3 Gy: 20 × (1 + 4/3) = 46.67.
+    expect(bedGy(20, 5, 3)).toBeCloseTo(140 / 3, 12);
+    // 18 Gy in one fraction, α/β 10 Gy: 18 × (1 + 18/10) = 50.4.
+    expect(bedGy(18, 1, 10)).toBeCloseTo(50.4, 12);
+    expect(bedGy(0, 30, 3)).toBe(0);
+  });
+
+  it('gives the dose in fractions of 2 Gy, or of another size, that has the same effect', () => {
+    // Given in fractions of 2 Gy already, a dose is its own EQD2, whatever the α/β.
+    expect(eqdGy(60, 30, 3)).toBeCloseTo(60, 12);
+    expect(eqdGy(60, 30, 10)).toBeCloseTo(60, 12);
+    // 20 Gy in 5 fractions, α/β 3 Gy: 46.67 / (1 + 2/3) = 28.
+    expect(eqdGy(20, 5, 3)).toBeCloseTo(28, 12);
+    // α/β 10 Gy: 28 / (1 + 2/10) = 23.33.
+    expect(eqdGy(20, 5, 10)).toBeCloseTo(70 / 3, 12);
+    // 42.56 Gy in 16 fractions of 2.66 Gy, α/β 4 Gy: 42.56 × (2.66 + 4) / (2 + 4) = 47.24.
+    expect(eqdGy(42.56, 16, 4)).toBeCloseTo((42.56 * 6.66) / 6, 10);
+    // In fractions of 1.8 Gy instead: 20 Gy in 5, α/β 3 Gy: 46.67 / (1 + 1.8/3) = 29.17.
+    expect(eqdGy(20, 5, 3, 1.8)).toBeCloseTo(140 / 3 / 1.6, 12);
+    expect(EQD_FRACTION_GY).toBe(2);
+  });
+});
+
+describe('summing doses that are converted first (#99)', () => {
+  const small = gridOf([4, 3, 2], [2, 2, 2], [10, 10, 10]);
+  const uniform = (gray: number) => doseOf(gridOf([12, 12, 12], [2, 2, 2], [0, 0, 0]), () => gray);
+  const course = (gray: number, fractions: number, weight = 1): DoseSumTerm => ({
+    ...term(uniform(gray), weight),
+    fractions,
+  });
+  const EQD2_3: DoseConversion = { kind: 'eqd', alphaBetaGy: 3, fractionGy: 2 };
+
+  it('converts uniform doses to the values worked out by hand, and adds them', () => {
+    // 60 Gy in 30 and 20 Gy in 5, α/β 3 Gy.
+    const terms = [course(60, 30), course(20, 5)];
+    const bed = sumDoses(small, terms, { kind: 'bed', alphaBetaGy: 3 });
+    for (const value of bed.data) expect(value).toBeCloseTo(100 + 140 / 3, 4);
+    const eqd2 = sumDoses(small, terms, EQD2_3);
+    for (const value of eqd2.data) expect(value).toBeCloseTo(60 + 28, 4);
+    const late = sumDoses(small, terms, { kind: 'eqd', alphaBetaGy: 10, fractionGy: 2 });
+    for (const value of late.data) expect(value).toBeCloseTo(60 + 70 / 3, 4);
+    // Each alone is its own conversion.
+    for (const value of sumDoses(small, [course(20, 5)], EQD2_3).data)
+      expect(value).toBeCloseTo(28, 4);
+    // Not converted, they are 80 Gy; and that is what is done when nothing is asked.
+    for (const value of sumDoses(small, terms).data) expect(value).toBe(80);
+    expect(sumDoses(small, terms, PHYSICAL_SUM).data).toEqual(sumDoses(small, terms).data);
+    expect(eqd2.knownCount).toBe(24);
+    expect(eqd2.withoutAlphaBeta).toBe(0);
+  });
+
+  it('says what the sum is', () => {
+    const terms = [course(60, 30), course(20, 5), course(8, 1, 0)];
+    expect(sumDoses(small, terms).made).toEqual({ doses: 2, model: 'physical' });
+    const bed = sumDoses(small, terms, { kind: 'bed', alphaBetaGy: 3 });
+    expect(bed.made).toEqual({ doses: 2, model: 'bed', alphaBetaGy: 3 });
+    const eqd = sumDoses(small, terms, { kind: 'eqd', alphaBetaGy: 10, fractionGy: 1.8 });
+    expect(eqd.made).toEqual({ doses: 2, model: 'eqd', fractionGy: 1.8, alphaBetaGy: 10 });
+    // As a dose it is effective, and carries what it is.
+    const volume = summedDoseVolume(eqd, small);
+    expect(volume.dose).toMatchObject({ units: 'GY', type: 'EFFECTIVE', sum: eqd.made });
+    expect(summedDoseVolume(sumDoses(small, terms), small).dose!.type).toBe('PHYSICAL');
+    // And is named by its model and its α/β wherever it is shown.
+    expect(doseSumName(eqd.made)).toBe('EQD1.8 (α/β 10 Gy)');
+    expect(doseSumName(bed.made)).toBe('BED (α/β 3 Gy)');
+    expect(doseSumName({ doses: 2, model: 'eqd', fractionGy: 2, alphaBetaGy: null })).toBe(
+      'EQD2 (α/β by voxel)',
+    );
+    expect(doseSumName({ doses: 2, model: 'physical' })).toBe('Summed dose');
+    expect(doseSumText(bed.made)).toBe(
+      'BED (α/β 3 Gy), sum of 2 doses, each converted before it was added',
+    );
+    expect(doseSumText({ doses: 1, model: 'physical' })).toBe('Physical dose, sum of 1 dose');
+  });
+
+  it('multiplies the converted dose by the weight', () => {
+    const half = sumDoses(small, [course(60, 30), course(20, 5, 0.5)], EQD2_3);
+    for (const value of half.data) expect(value).toBeCloseTo(60 + 14, 4);
+    // Half of 28 Gy, not the conversion of half the dose: 10 Gy in 5 fractions
+    // of 2 Gy is 10 Gy, which would make 70.
+    expect(eqdGy(10, 5, 3)).toBeCloseTo(10, 12);
+  });
+
+  it('is the analytic sum for doses that rise evenly, through a transform', () => {
+    // Each dose at a voxel is its formula at the place its registration takes
+    // the voxel to; each is converted there by its own number of fractions.
+    const conversion: DoseConversion = { kind: 'eqd', alphaBetaGy: 2.5, fractionGy: 2 };
+    const sum = sumDoses(
+      GRID,
+      [
+        { ...term(FIRST, 1), fractions: 5 },
+        { ...term(SECOND_WIDE, 0.8, { baseToLayer: TO_SECOND }), fractions: 28 },
+      ],
+      conversion,
+    );
+    expect(sum.knownCount).toBe(VOXELS);
+    let worst = 0;
+    forEachVoxel(GRID, (voxel, p) => {
+      const [one, two] = [first(p), second(transformPoint(TO_SECOND, p))];
+      const analytic =
+        (one * (one / 5 + 2.5)) / (2 + 2.5) + (0.8 * (two * (two / 28 + 2.5))) / (2 + 2.5);
+      worst = Math.max(worst, Math.abs(sum.data[voxel] - analytic));
+    });
+    expect(worst).toBeLessThan(1e-4);
+    // The test is of something: converting changes these doses by gray, not by a hair.
+    const plain = sumDoses(GRID, [
+      term(FIRST, 1),
+      term(SECOND_WIDE, 0.8, { baseToLayer: TO_SECOND }),
+    ]);
+    expect(Math.abs(sum.data[100] - plain.data[100])).toBeGreaterThan(1);
+  });
+
+  it('converts each voxel with its own α/β, and has no sum where a voxel has none', () => {
+    // 3 Gy in the first half of the grid's voxels and 10 Gy in the rest, but
+    // for one voxel with nothing, one with less than nothing and one that is no number.
+    const ratios = Float32Array.from({ length: 24 }, (_, voxel) => (voxel < 12 ? 3 : 10));
+    ratios[5] = 0;
+    ratios[13] = -2;
+    ratios[20] = Number.NaN;
+    const sum = sumDoses(small, [course(60, 30), course(20, 5)], {
+      kind: 'eqd',
+      alphaBetaGy: ratios,
+      fractionGy: 2,
+    });
+    expect(sum.withoutAlphaBeta).toBe(3);
+    expect(sum.knownCount).toBe(21);
+    expect(sum.made).toEqual({ doses: 2, model: 'eqd', fractionGy: 2, alphaBetaGy: null });
+    sum.data.forEach((value, voxel) => {
+      if ([5, 13, 20].includes(voxel)) {
+        expect(sum.known[voxel]).toBe(0);
+        expect(value).toBe(0);
+      } else {
+        expect(sum.known[voxel]).toBe(1);
+        expect(value).toBeCloseTo(voxel < 12 ? 88 : 60 + 70 / 3, 4);
+      }
+    });
+    // The doses themselves are known there: it is the conversion that is not.
+    expect(sum.terms).toEqual([
+      { unknown: 0, nothing: 0 },
+      { unknown: 0, nothing: 0 },
+    ]);
+  });
+
+  it('converts a dose that is nothing beyond its grid to nothing', () => {
+    const sum = sumDoses(
+      GRID,
+      [
+        { ...term(FIRST, 1), fractions: 10 },
+        { ...term(SECOND_NARROW, 1, { baseToLayer: TO_SECOND }, 'nothing'), fractions: 10 },
+      ],
+      { kind: 'bed', alphaBetaGy: 3 },
+    );
+    expect(sum.knownCount).toBe(VOXELS);
+    expect(sum.terms[1].nothing).toBeGreaterThan(VOXELS / 5);
+    forEachVoxel(GRID, (voxel, p) => {
+      if (within(SECOND_NARROW, transformPoint(TO_SECOND, p))) return;
+      // Beyond the second dose there is the first alone, converted.
+      expect(Math.abs(sum.data[voxel] - bedGy(first(p), 10, 3))).toBeLessThan(1e-4);
+    });
+  });
+
+  it('refuses a conversion that cannot be made, and a dose that does not say its fractions', () => {
+    const physical = { units: 'GY', type: 'PHYSICAL' } as const;
+    const one = { dose: physical, weight: 1, fractions: 30 };
+    const bed = (alphaBetaGy: number): DoseConversion => ({ kind: 'bed', alphaBetaGy });
+    expect(doseSumProblem([one], bed(3))).toBeNull();
+    for (const ratio of [0, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(doseSumProblem([one], bed(ratio))).toBe(
+        'The α/β ratio is not a number of gray more than 0.',
+      );
+    }
+    for (const fractionGy of [0, -2, Number.NaN]) {
+      expect(doseSumProblem([one], { kind: 'eqd', alphaBetaGy: 3, fractionGy })).toBe(
+        'The fraction size to convert to is not a number of gray more than 0.',
+      );
+    }
+    expect(doseSumProblem([one, { dose: physical, weight: 1 }], bed(3))).toBe(
+      'Dose 2 does not say in how many fractions it was given: it cannot be converted.',
+    );
+    for (const fractions of [0, 2.5, -1, Number.NaN]) {
+      expect(doseSumProblem([{ dose: physical, weight: 1, fractions }], bed(3))).toBe(
+        'Dose 1 has a number of fractions that is not a whole number of 1 or more.',
+      );
+    }
+    // One with no weight is not read, and need not say; nor need any when nothing is converted.
+    expect(doseSumProblem([one, { dose: physical, weight: 0 }], bed(3))).toBeNull();
+    expect(doseSumProblem([{ dose: physical, weight: 1 }])).toBeNull();
+    // A ratio to each voxel must be one to each voxel.
+    expect(doseConversionProblem(bed(3), 24)).toBeNull();
+    expect(
+      doseConversionProblem({ kind: 'bed', alphaBetaGy: new Float32Array(24) }, 24),
+    ).toBeNull();
+    expect(doseConversionProblem({ kind: 'bed', alphaBetaGy: new Float32Array(23) }, 24)).toBe(
+      'The α/β ratios are not one to each voxel of the grid the doses are summed on.',
+    );
+    // The engine refuses the same, should it be asked all the same.
+    expect(() => sumDoses(small, [course(60, 30)], bed(0))).toThrow(RangeError);
+    expect(() =>
+      sumDoses(small, [course(60, 30)], { kind: 'bed', alphaBetaGy: new Float32Array(5) }),
+    ).toThrow('one to each voxel');
+    expect(() => sumDoses(small, [term(uniform(60), 1)], bed(3))).toThrow(
+      'must say in how many fractions',
+    );
+    expect(() => beginDoseSum(small, { kind: 'eqd', alphaBetaGy: 3, fractionGy: 0 })).toThrow(
+      RangeError,
+    );
   });
 });

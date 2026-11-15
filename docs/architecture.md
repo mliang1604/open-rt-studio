@@ -1176,8 +1176,9 @@ this says what it does.
 
 ### How doses are summed
 
-The physical doses of several timepoints on one grid, each taken there
-through the registration that places it, each times a weight (#98).
+The doses of several timepoints on one grid, each taken there through the
+registration that places it, each times a weight (#98), as they are or
+converted first to BED or EQDx (#99).
 `dose-sum.ts` in `packages/dicom` is the reference; `dose-sum.ts` in
 `packages/render` does the same with the GPU's help. There is no screen for
 it yet (#102): the result is a dose in memory.
@@ -1208,11 +1209,36 @@ it yet (#102): the result is a dose in memory.
 - **A weight** multiplies a dose before it is added. A dose with a weight
   of 0 is left out altogether: it is not read, and where it is not known
   takes nothing from the sum.
+- **Converted first, when asked** (#99): each dose to the biologically
+  effective dose, or to the dose in fractions of a chosen size (2 Gy unless
+  another is chosen) that has the same effect, by the linear-quadratic
+  model. For a dose D of the whole course at a voxel, given in n equal
+  fractions, with the tissue's α/β: `BED = D · (1 + (D / n) / (α/β))` and
+  `EQDx = BED / (1 + x / (α/β))`.
+- **A dose is converted after it is resampled,** with the α/β of the place
+  in the grid the sum is on. The dose at a place is what is read between
+  the dose's voxels, and it is that dose which is converted. Converting
+  first and reading between converted values is not the same, since the
+  model is not a straight line. The weight multiplies the converted dose.
+- **The α/β is one number, or a number to each voxel** of the sum's grid
+  (#100 makes those from structures). A voxel with none that is more than
+  0 has no converted sum, whatever the doses: it is marked not known and
+  counted.
+- **Each converted dose must say in how many fractions it was given,** a
+  whole number of 1 or more; one that does not is refused. Every fraction
+  is taken to give the same dose. The model has nothing for the time a
+  course takes or the time between courses, and neither has this.
+- **A converted sum is named by its model and its α/β wherever it is
+  shown:** `EQD2 (α/β 3 Gy)`, `BED (α/β by voxel)`. A number of gray means
+  nothing without them. The dose carries what it is (`dose.sum`), its Dose
+  Type is EFFECTIVE, the probe and the histograms' dose axis and file call
+  it by that name, and its line in the status says it was made here and
+  not read from a file.
 - **What may be summed:** up to 16 doses in gray of Dose Type PHYSICAL,
   each with a weight of 0 or more. A relative dose is a share of something
-  it does not name; an effective dose has been converted already (#99
-  converts and sums); a dose error is not a dose. Each is refused with the
-  reason, by its place among the doses.
+  it does not name; an effective dose has been converted already, by a
+  model and numbers this code does not know; a dose error is not a dose.
+  Each is refused with the reason, by its place among the doses.
 - **What is not checked here:** that the doses are of one patient, that a
   registration is good, and whether a dose is a whole plan's or one
   fraction's or one beam's. A file says its Dose Summation Type and the
@@ -1229,7 +1255,10 @@ it yet (#102): the result is a dose in memory.
   formula's answer voxel for voxel. On a real GPU (`resample-gpu.spec.ts`,
   a hardware adapter and Chromium's software one) the two ways agree on
   where the sum is known at every voxel, and differ by no more than one
-  part in 100 000 of the largest sum. These say how the code does on doses
+  part in 100 000 of the largest sum. The conversions are held to values
+  worked out by hand for uniform doses (60 Gy in 30 fractions and 20 Gy in
+  5, at α/β of 3 and 10 Gy), and a converted sum through a transform to its
+  formula within 0.0001 Gy. These say how the code does on doses
   that are formulas. No dose from a planning system was summed, and
   nothing was compared with another program.
 
