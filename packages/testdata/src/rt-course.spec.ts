@@ -8,6 +8,8 @@ import {
   parseSpatialRegistration,
   parseStructureSet,
   readInstanceHeader,
+  relateRtObjects,
+  rtObjectFacts,
   type InstanceHeader,
 } from '@open-rt-studio/dicom';
 
@@ -148,6 +150,45 @@ describe('syntheticRtCourse', () => {
       buffer(syntheticRegistration({ translation: [-1.5, 0, 12] })),
     )!;
     expect(mapPoint(other.registrations[0].transform, [0, 0, 0], direction)).toEqual([-1.5, 0, 12]);
+  });
+
+  it('is placed whole by what its objects say: each with its series, and the registration between the CTs (#38)', () => {
+    // The image series, as a timeline has them: a dose is none.
+    const images = new Map(
+      headers
+        .filter((h) => ['CT', 'MR'].includes(h.series.modality))
+        .map((h) => [h.series.uid, h.series] as const),
+    );
+    const objects = headers.flatMap((h) => rtObjectFacts(h) ?? []);
+    expect(objects.map((one) => one.kind)).toEqual([
+      'structure-set',
+      'plan',
+      'dose',
+      'registration',
+    ]);
+    const { bySeries, byStudy, links } = relateRtObjects([...images.values()], objects);
+    const ways = (uid: string): string[] =>
+      (bySeries.get(uid) ?? []).map((one) => `${one.sopInstanceUid} by ${one.by}`);
+    expect(ways(COURSE.ct)).toEqual([
+      `${COURSE.structureSet} by series`,
+      `${COURSE.plan} by structure-set`,
+      `${COURSE.dose} by plan`,
+    ]);
+    // The MR is in the frame the structures are drawn in.
+    expect(ways(COURSE.mr)).toEqual([
+      `${COURSE.structureSet} by frame`,
+      `${COURSE.plan} by structure-set`,
+      `${COURSE.dose} by plan`,
+    ]);
+    expect(ways(COURSE.followUpCt)).toEqual([]);
+    // Nothing is left over, and the registration is a link by a matrix.
+    expect(byStudy.size).toBe(0);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({
+      sopInstanceUid: COURSE.registration,
+      deformable: false,
+      ends: [[COURSE.ct], [COURSE.followUpCt]],
+    });
   });
 
   it("still loads in the viewer's own readers: images, structure set and dose", () => {

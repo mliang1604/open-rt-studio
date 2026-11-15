@@ -1,0 +1,76 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<span class="links-title" id="links-title">Registrations</span>
+<ul class="links" aria-labelledby="links-title">
+  @for (link of links(); track link.uid) {
+    <li [class.open]="open() === link.uid">
+      <button
+        type="button"
+        class="link"
+        [class.deformable]="link.deformable"
+        [attr.aria-expanded]="open() === link.uid"
+        [attr.data-link]="link.uid"
+        [title]="
+          (link.name ? 'Registration “' + link.name + '”. ' : '') +
+          kind(link).title +
+          '. Press to open the pair it connects'
+        "
+        (click)="toggle(link)"
+        (mouseenter)="point(link.uid)"
+        (mouseleave)="point(null)"
+        (focus)="point(link.uid)"
+        (blur)="point(null)"
+      >
+        <span class="link-line" aria-hidden="true"></span>
+        <span class="link-ends">
+          <span class="link-end">{{ endLabel(link.ends[0]) }}</span>
+          <span aria-hidden="true">⇄</span>
+          <span class="visually-hidden">and</span>
+          <span class="link-end">{{ endLabel(link.ends[1]) }}</span>
+        </span>
+        <span class="link-kind">{{ kind(link).word }}</span>
+      </button>
+      @if (open() === link.uid) {
+        <div class="offer" role="group" aria-label="Open the pair this registration connects">
+          @for (end of [0, 1]; track end) {
+            @if (link.ends[end].length > 1) {
+              <label>
+                <span>{{ end === 0 ? 'One end' : 'Other end' }}</span>
+                <!-- Each option says whether it is the one chosen: a select's
+                     own value is applied before its options are there. -->
+                <select
+                  (change)="choose(end === 0 ? 0 : 1, $event)"
+                  [attr.data-link-end]="end"
+                  title="Which series of this end to open"
+                >
+                  @for (series of link.ends[end]; track series.uid) {
+                    <option [value]="$index" [selected]="$index === chosen()[end]">
+                      {{ series.label }}
+                    </option>
+                  }
+                </select>
+              </label>
+            }
+          }
+          <button
+            type="button"
+            data-link-open="0"
+            (click)="pick(link, 0)"
+            title="Show the first as the image, with the second laid over it through this registration"
+          >
+            Open {{ at(link, 0).label }} with {{ at(link, 1).label }} over it
+          </button>
+          <button
+            type="button"
+            data-link-open="1"
+            (click)="pick(link, 1)"
+            title="Show the second as the image, with the first laid over it through this registration"
+          >
+            Open {{ at(link, 1).label }} with {{ at(link, 0).label }} over it
+          </button>
+        </div>
+      }
+    </li>
+  }
+</ul>

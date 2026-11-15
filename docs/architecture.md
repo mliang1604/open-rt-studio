@@ -183,6 +183,43 @@ also builds on its own to `dist/` for consumers outside the workspace.
   reference, or the series named); the server counts them in its series
   list, so the timeline asks nothing per series.
 
+- **Radiotherapy objects on the timeline** (#38). Structure sets, plans and
+  doses are shown as small chips beside the image series they belong to,
+  and a registration as a line between the series it connects, with a
+  button under the timeline that names its two ends. What belongs to what
+  is worked out in one place for both sources (`relateRtObjects` in
+  `packages/dicom`), from what the objects say of themselves, by the rules
+  of the server's own `relatedToSeries`: a structure set belongs to a
+  series it names and to those of the frame it names; a plan where its
+  structure set does; a dose where its plan or structure set does; a
+  registration connects the image series of its two frames, or those of
+  them it names. Each chip says which of these put it there. A dose that
+  names nothing held is laid by its own frame of reference, and says so,
+  since that tells only that it can be shown there. What belongs to no
+  image series is listed with its study, so that nothing held goes unshown.
+  A dose is a series to show and never an image for something to belong to.
+  - For opened files the parse worker reads the header of every file that
+    is no image, and of every dose (`readInstanceHeader`), and the catalog
+    keeps what each refers to. A plan is kept in no other way: nothing
+    else reads one.
+  - For a server the source asks, when a patient's timeline is opened, for
+    the instances of each structure set, plan, dose and registration series
+    and for what each refers to: two questions an object, at most 200
+    objects, after the timeline is on screen. The audit log records each
+    as a read of that instance. When the server does not answer them the
+    timeline stays as it is, without what belongs to what.
+  - A registration is called by what it is, **matrix** or **deformable**,
+    and drawn solid or dashed. A Spatial Registration holds a matrix that
+    may be rigid or affine, and the timeline does not read which, so it
+    does not say "rigid".
+  - Pressing a registration offers the pair either way round: one series
+    as the image and the other laid over it, which is the fusion the
+    registration places. Where an end has several series, one is chosen.
+  - Not there: a plan or a registration cannot be opened by itself; a
+    registration with image series at only one end is listed with its study
+    and not drawn; the lines are drawn in the timeline view only, the tree
+    lists the same registrations without them.
+
 ## Desktop
 
 Electron with secure defaults (context isolation, sandbox, no Node integration

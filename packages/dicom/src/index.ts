@@ -199,6 +199,18 @@ export {
   structureSetsOfPatient,
 } from './structure-set.js';
 export { type WriteOptions, writeStructureSet } from './structure-set-writer.js';
+export {
+  type AttachedBy,
+  type AttachedObject,
+  type LooseObject,
+  type RegistrationLink,
+  type RelatableSeries,
+  type RtObjectFacts,
+  type RtObjectKind,
+  type RtRelations,
+  relateRtObjects,
+  rtObjectFacts,
+} from './rt-relations.js';
 export { type IsoLoop, loopArea, traceIsoLoops } from './iso-contours.js';
 export {
   type PropagatedRoi,

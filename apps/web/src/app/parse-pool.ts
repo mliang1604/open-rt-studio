@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import type { Slice, RegistrationObject, StructureSet } from '@open-rt-studio/dicom';
+import type { Slice, RegistrationObject, RtObjectFacts, StructureSet } from '@open-rt-studio/dicom';
 import type { ParseRequest, ParseResponse } from './parse.worker';
 
 /** Reports parse progress: files finished out of the total selected. */
@@ -24,6 +24,8 @@ export interface ParsedFiles {
   readonly slices: Slice[];
   readonly structureSets: StructureSet[];
   readonly registrations: RegistrationObject[];
+  /** What each structure set, plan, dose and registration among the files refers to. */
+  readonly objects: RtObjectFacts[];
   readonly skipped: SkippedFile[];
 }
 
@@ -80,7 +82,9 @@ export async function parseFilesInWorkers(
   if (signal?.aborted) throw abortError();
   const total = files.length;
   onProgress?.(0, total);
-  if (total === 0) return { slices: [], structureSets: [], registrations: [], skipped: [] };
+  if (total === 0) {
+    return { slices: [], structureSets: [], registrations: [], objects: [], skipped: [] };
+  }
 
   // One result bucket per file, filled at the file's original index so the
   // flattened output preserves selection order despite out-of-order completion.
@@ -127,6 +131,7 @@ export async function parseFilesInWorkers(
     slices: perFile.flatMap((r) => r.slices),
     structureSets: perFile.flatMap((r) => r.structureSets),
     registrations: perFile.flatMap((r) => r.registrations),
+    objects: perFile.flatMap((r) => r.objects),
     skipped: perFile.flatMap((r) => r.skipped),
   };
 }
@@ -160,6 +165,7 @@ function parseInWorker(
           slices: data.slices,
           structureSets: data.structureSets,
           registrations: data.registrations,
+          objects: data.objects,
           skipped: [],
         });
       } else {
@@ -167,6 +173,7 @@ function parseInWorker(
           slices: [],
           structureSets: [],
           registrations: [],
+          objects: [],
           skipped: [{ name, reason: data.reason }],
         });
       }

@@ -3,7 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { computed, signal } from '@angular/core';
-import { groupSeries } from '@open-rt-studio/dicom';
+import {
+  groupSeries,
+  type InstanceReference,
+  type RtObjectFacts,
+  type RtObjectKind,
+} from '@open-rt-studio/dicom';
 
 import { isAbortError, parseFilesInWorkers } from '../parse-pool';
 import {
@@ -25,6 +30,7 @@ import type {
   StudySummary,
 } from './data-source';
 import { PartlySavedError } from './data-source';
+import { withRelations } from './rt-timeline';
 
 /** Where the server's API is, under its address. */
 const API = '/api/v1';
@@ -114,6 +120,27 @@ interface ServerInstance {
   readonly sopInstanceUid: string;
   readonly size: number;
 }
+/** One instance as the server tells of it by itself: what it is, and what it refers to. */
+interface ServerInstanceDetail {
+  readonly sopInstanceUid: string;
+  readonly sopClassUid: string;
+  readonly references: readonly InstanceReference[];
+}
+
+/** The modalities the timeline places by what they refer to, and what each is here. */
+const RT_KINDS: Readonly<Record<string, RtObjectKind>> = {
+  RTSTRUCT: 'structure-set',
+  RTPLAN: 'plan',
+  RTDOSE: 'dose',
+  REG: 'registration',
+};
+
+/**
+ * How many radiotherapy objects of a patient are asked about for the
+ * timeline. Each is two questions; a patient with more than this is shown
+ * with the first of them placed, and the rest not.
+ */
+const RT_OBJECTS_AT_MOST = 200;
 
 /** A patient the server lists, with how many studies it holds of them. */
 export interface ServerPatientSummary extends PatientSummary {
@@ -670,10 +697,19 @@ export class ServerSource implements DataSource {
       signal,
     );
     const history: StudySummary[] = new Array<StudySummary>(studies.length);
+    /** The series of radiotherapy objects, each with the study it is in. */
+    const rtSeries: { readonly study: string; readonly series: ServerSeries }[] = [];
     await inParallel(studies, this.parallel, async (study, index) => {
-      const series = (
-        await this.all<ServerSeries>(`/studies/${study.studyInstanceUid}/series`, signal)
-      )
+      const every = await this.all<ServerSeries>(
+        `/studies/${study.studyInstanceUid}/series`,
+        signal,
+      );
+      for (const one of every) {
+        if (RT_KINDS[one.modality.toUpperCase()]) {
+          rtSeries.push({ study: study.studyInstanceUid, series: one });
+        }
+      }
+      const series = every
         .filter((one) => !NO_PIXELS.has(one.modality.toUpperCase()))
         .map((one): SeriesSummary => {
           this.files.set(one.seriesInstanceUid, one.instances);
@@ -698,13 +734,60 @@ export class ServerSource implements DataSource {
     });
     // Another patient was asked for meanwhile: theirs is the answer that counts.
     if (selection !== this.selection) return;
-    this.current.set({
+    const shown: PatientHistory = {
       key: patient.key,
       patientId: patient.patientId,
       name: patient.name,
       // A study with nothing to show (a plan on its own) is left off.
       studies: history.filter((study) => study.series.length > 0).sort(byDate),
+    };
+    // The timeline is there at once; what belongs to what follows.
+    this.current.set(shown);
+    if (rtSeries.length === 0) return;
+    let related: PatientHistory;
+    try {
+      related = withRelations(shown, await this.rtObjects(rtSeries, patient.patientId, signal));
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      // The timeline stays as it is: the series are there, without what belongs to them.
+      return;
+    }
+    if (selection === this.selection) this.current.set(related);
+  }
+
+  /** What each radiotherapy object of a patient refers to, asked of the server one by one. */
+  private async rtObjects(
+    rtSeries: readonly { readonly study: string; readonly series: ServerSeries }[],
+    patientId: string,
+    signal?: AbortSignal,
+  ): Promise<RtObjectFacts[]> {
+    const instances: { readonly of: (typeof rtSeries)[number]; readonly uid: string }[] = [];
+    await inParallel(rtSeries, this.parallel, async (of) => {
+      const listed = await this.all<ServerInstance>(
+        `/series/${of.series.seriesInstanceUid}/instances`,
+        signal,
+      );
+      for (const one of listed) instances.push({ of, uid: one.sopInstanceUid });
     });
+    // In an order that does not depend on which answer came first.
+    instances.sort((a, b) => a.uid.localeCompare(b.uid));
+    const asked = instances.slice(0, RT_OBJECTS_AT_MOST);
+    const facts: RtObjectFacts[] = new Array<RtObjectFacts>(asked.length);
+    await inParallel(asked, this.parallel, async ({ of, uid }, index) => {
+      const detail = await this.json<ServerInstanceDetail>(`/instances/${uid}`, signal);
+      facts[index] = {
+        kind: RT_KINDS[of.series.modality.toUpperCase()],
+        sopInstanceUid: detail.sopInstanceUid,
+        sopClassUid: detail.sopClassUid,
+        seriesUid: of.series.seriesInstanceUid,
+        studyUid: of.study,
+        patientId,
+        description: of.series.description,
+        frameOfReferenceUid: of.series.frameOfReferenceUid,
+        references: detail.references,
+      };
+    });
+    return facts;
   }
 
   async fetchSeries(seriesUid: string, options: FetchOptions = {}): Promise<FetchedSeries> {

@@ -381,6 +381,17 @@ export class LoadController {
   }
 
   /**
+   * Open two series a registration connects: the first as the image, the
+   * second laid over it. The second is asked for only when the first came.
+   */
+  async openPair(baseUid: string, overlayUid: string): Promise<void> {
+    await this.loadSeriesFromPanel(baseUid, 'primary');
+    const state = this.deps?.load();
+    if (state?.status !== 'ready' || state.result.selectedUid !== baseUid) return;
+    await this.loadSeriesFromPanel(overlayUid, 'overlay');
+  }
+
+  /**
    * Load a series picked from the history panel (clicked, key-activated, or
    * dropped onto the viewport). Routed through the same smart-auto merge rule as a
    * file load; the {@link intent} (set by the held modifier on a drop) routes ⌥
@@ -574,7 +585,19 @@ export class LoadController {
         d.load.set(previous.status === 'ready' ? previous : { status: 'idle' });
         return true;
       }
+      if (imported.kind === 'objects') {
+        // Plans: nothing to show by themselves, and a place on the timeline.
+        this.files.addRtObjects(imported.objects);
+        d.load.set(previous.status === 'ready' ? previous : { status: 'idle' });
+        const count = imported.objects.length;
+        this.flashNotice(
+          `Imported ${count} plan${count === 1 ? '' : 's'}. The timeline shows ${count === 1 ? 'it' : 'them'} with what ${count === 1 ? 'it belongs' : 'they belong'} to.`,
+        );
+        if (entry) this.recentStore.record(entry);
+        return true;
+      }
       if (imported.kind === 'structures') {
+        this.files.addRtObjects(imported.objects);
         this.files.addRegistrations(imported.registrations);
         this.addStructureSets(imported.structureSets, previous);
         if (entry) this.recentStore.record(entry);
@@ -582,6 +605,7 @@ export class LoadController {
       }
       if (imported.kind === 'registrations') {
         // Nothing to show by itself: kept, for the series it connects.
+        this.files.addRtObjects(imported.objects);
         this.files.addRegistrations(imported.registrations);
         d.load.set(previous.status === 'ready' ? previous : { status: 'idle' });
         const count = imported.registrations.length;
@@ -604,6 +628,11 @@ export class LoadController {
         confirmPatientSwitch,
       );
       this.applyOutcome(outcome, previous, entry);
+      // After the catalog has taken the series, and only when it did: a
+      // batch that was turned away leaves nothing of itself.
+      if (outcome.kind !== 'cancel' && outcome.kind !== 'reject') {
+        this.files.addRtObjects(imported.objects);
+      }
       return true;
     } catch (error) {
       // A cancelled load has already had the previous state put back, and an

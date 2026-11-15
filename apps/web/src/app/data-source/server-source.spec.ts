@@ -482,7 +482,13 @@ describe('ServerSource', () => {
   it('says so when a series holds nothing that can be shown', async () => {
     const { source } = await withPatient({
       parse: () =>
-        Promise.resolve({ slices: [], structureSets: [], registrations: [], skipped: [] }),
+        Promise.resolve({
+          slices: [],
+          structureSets: [],
+          registrations: [],
+          objects: [],
+          skipped: [],
+        }),
     });
     await expect(source.fetchSeries(COURSE.ct)).rejects.toThrow(
       'No DICOM image slices were found in that series.',
@@ -1105,5 +1111,75 @@ describe('the accounts of a server (#219)', () => {
     expect(server.tokens()).toHaveLength(1);
     expect(source.login()).toMatchObject({ kind: 'in', name: 'ada' });
     await expect(source.findStudies()).resolves.toBeDefined();
+  });
+});
+
+describe('what belongs to what on a server (#38)', () => {
+  const seriesOf = (source: ServerSource, uid: string) =>
+    source
+      .currentPatient()!
+      .studies.flatMap((study) => study.series)
+      .find((one) => one.uid === uid)!;
+  const ways = (source: ServerSource, uid: string): string[] =>
+    (seriesOf(source, uid).attached ?? []).map((one) => `${one.kind} by ${one.by}`);
+
+  it('has each structure set, plan and dose with the image series it belongs to', async () => {
+    const { source } = await withPatient();
+    // The structure set names the CT; the plan names it; the dose names the plan.
+    expect(ways(source, COURSE.ct)).toEqual([
+      'structure-set by series',
+      'plan by structure-set',
+      'dose by plan',
+    ]);
+    expect(seriesOf(source, COURSE.ct).attached!.map((one) => one.sopInstanceUid)).toEqual([
+      COURSE.structureSet,
+      COURSE.plan,
+      COURSE.dose,
+    ]);
+    // The MR is in the frame the structure set is drawn in.
+    expect(ways(source, COURSE.mr)).toEqual([
+      'structure-set by frame',
+      'plan by structure-set',
+      'dose by plan',
+    ]);
+    expect(ways(source, COURSE.followUpCt)).toEqual([]);
+  });
+
+  it('has the registration as a link between the CTs it names, of its two frames', async () => {
+    const { source } = await withPatient();
+    expect(source.currentPatient()!.links).toEqual([
+      {
+        sopInstanceUid: COURSE.registration,
+        description: expect.any(String),
+        deformable: false,
+        ends: [[COURSE.ct], [COURSE.followUpCt]],
+      },
+    ]);
+  });
+
+  it('asks about the radiotherapy objects only, each once', async () => {
+    const { server } = await withPatient();
+    const details = server.asked.filter((path) => /\/instances\/[\d.]+$/.test(path.split('?')[0]));
+    expect(details.map((path) => path.split('/').pop()!.split('?')[0]).sort()).toEqual(
+      [COURSE.structureSet, COURSE.plan, COURSE.dose, COURSE.registration].sort(),
+    );
+  });
+
+  it('keeps the timeline when the server will not say what an object refers to', async () => {
+    const server = fakeServer(FILES);
+    const refusing: typeof fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      return /\/instances\/[\d.]+(\?|$)/.test(url)
+        ? Promise.resolve(new Response('{}', { status: 500 }))
+        : server.fetch(input, init);
+    };
+    const source = await connectToServer(ADDRESS, { fetch: refusing, parse: parseHere });
+    await source.selectPatient('1');
+    const history = source.currentPatient()!;
+    expect(history.studies.map((study) => study.series.length)).toEqual([3, 1]);
+    expect(history.links).toBeUndefined();
+    expect(history.studies.flatMap((study) => study.series).some((one) => one.attached)).toBe(
+      false,
+    );
   });
 });

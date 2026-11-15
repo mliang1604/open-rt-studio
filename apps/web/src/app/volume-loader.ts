@@ -17,6 +17,7 @@ import {
   overlayLayerUnplaced,
   type Layer,
   type RegistrationObject,
+  type RtObjectFacts,
   type StructureSet,
   VolumeBuildError,
 } from '@open-rt-studio/dicom';
@@ -44,8 +45,17 @@ export type FileImport = (
       readonly registrations: readonly RegistrationObject[];
     }
   | { readonly kind: 'registrations'; readonly registrations: readonly RegistrationObject[] }
+  | { readonly kind: 'objects' }
   | { readonly kind: 'nothing' }
-) & { readonly skipped: readonly SkippedFile[] };
+) & {
+  readonly skipped: readonly SkippedFile[];
+  /**
+   * What each structure set, plan, dose and registration of the batch refers
+   * to, for the timeline. A batch of `objects` holds nothing else that is
+   * kept: plans, which are shown there and nowhere else.
+   */
+  readonly objects: readonly RtObjectFacts[];
+};
 
 export interface LoadResult {
   /** Every series found, in picker order. */
@@ -140,24 +150,27 @@ export class VolumeLoader {
     onProgress?: LoadProgress,
     signal?: AbortSignal,
   ): Promise<FileImport> {
-    const { slices, structureSets, registrations, skipped } = await parseFilesInWorkers(
+    const { slices, structureSets, registrations, objects, skipped } = await parseFilesInWorkers(
       files,
       onProgress,
       undefined,
       signal,
     );
     if (slices.length === 0 && structureSets.length > 0) {
-      return { kind: 'structures', structureSets, registrations, skipped };
+      return { kind: 'structures', structureSets, registrations, objects, skipped };
     }
     if (slices.length === 0 && registrations.length > 0) {
-      return { kind: 'registrations', registrations, skipped };
+      return { kind: 'registrations', registrations, objects, skipped };
     }
+    // Plans and nothing else: there is nothing to show but their place on the timeline.
+    if (slices.length === 0 && objects.length > 0) return { kind: 'objects', objects, skipped };
     // Nothing came out and files were skipped: the list of them says why. The
     // "no slices found" error is for a batch with no DICOM image in it at all.
-    if (slices.length === 0 && skipped.length > 0) return { kind: 'nothing', skipped };
+    if (slices.length === 0 && skipped.length > 0) return { kind: 'nothing', objects, skipped };
     return {
       kind: 'images',
       result: this.buildFromSlices(slices, structureSets, registrations, files.length),
+      objects,
       skipped,
     };
   }

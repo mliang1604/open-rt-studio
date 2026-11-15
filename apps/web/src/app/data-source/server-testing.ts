@@ -38,7 +38,7 @@ export async function parseHere(files: readonly File[]): Promise<ParsedFiles> {
         : null;
     if (registration) registrations.push(registration);
   }
-  return { slices, structureSets, registrations, skipped: [] };
+  return { slices, structureSets, registrations, objects: [], skipped: [] };
 }
 
 interface Held {
@@ -484,6 +484,15 @@ export function fakeServer(
         return json({
           structureSets: structureSetsOf(match[1]).map(instance),
           registrations: registrationsOf(match[1]).map(instance),
+        });
+      }
+      if ((match = /^\/instances\/([\d.]+)$/.exec(path))) {
+        const found = held.find((one) => one.header.sopInstanceUid === match![1]);
+        if (!found) return missing();
+        return json({
+          ...instance(found),
+          sopClassUid: found.header.sopClassUid,
+          references: found.header.references,
         });
       }
       if ((match = /^\/instances\/([\d.]+)\/file$/.exec(path))) {

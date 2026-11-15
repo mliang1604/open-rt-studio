@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { TestBed } from '@angular/core/testing';
-import type { Series, Slice, StructureSet } from '@open-rt-studio/dicom';
+import type { RtObjectFacts, Series, Slice, StructureSet } from '@open-rt-studio/dicom';
 
 import { DATA_SOURCE, listedSeries } from './data-source';
 import { LocalFilesSource } from './local-files-source';
@@ -380,5 +380,89 @@ describe('LocalFilesSource', () => {
       click.mockRestore();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('what belongs to what among opened files (#38)', () => {
+  let source: LocalFilesSource;
+  beforeEach(() => {
+    source = TestBed.inject(LocalFilesSource);
+    source.clear();
+  });
+
+  const object = (
+    kind: RtObjectFacts['kind'],
+    uid: string,
+    references: [RtObjectFacts['references'][number]['relation'], string][],
+    more: Partial<RtObjectFacts> = {},
+  ): RtObjectFacts => ({
+    kind,
+    sopInstanceUid: uid,
+    sopClassUid: '1.2.840.10008.5.1.4.1.1.66.1',
+    seriesUid: `${uid}.1`,
+    studyUid: '1.1',
+    patientId: 'SYN-0001',
+    description: uid,
+    frameOfReferenceUid: null,
+    references: references.map(([relation, targetUid]) => ({ relation, targetUid })),
+    ...more,
+  });
+
+  it('shows with each series what belongs to it, and the registrations as links', () => {
+    source.add([
+      series('1.1.1'),
+      series('1.1.2', { modality: 'RTDOSE', description: 'Dose' }),
+      series('1.2.1', { studyUid: '1.2', studyDate: '20260316', frameOfReferenceUid: '2.9' }),
+    ]);
+    // Before anything is known of them, nothing is said.
+    expect(listedSeries(source).some((one) => one.attached)).toBe(false);
+    expect(source.currentPatient()!.links).toEqual([]);
+
+    source.addRtObjects([
+      object('structure-set', '5.1', [['structure-set.series', '1.1.1']]),
+      object('plan', '5.2', [['plan.structure-set', '5.1']]),
+      object('dose', '5.3', [['dose.plan', '5.2']], { seriesUid: '1.1.2' }),
+      object('registration', '5.4', [
+        ['registration.frame', '1.9'],
+        ['registration.frame', '2.9'],
+      ]),
+      object('plan', '5.5', []),
+    ]);
+    const listed = listedSeries(source);
+    const of = (uid: string) => listed.find((one) => one.uid === uid)!;
+    expect(of('1.1.1').attached!.map((one) => `${one.kind} by ${one.by}`)).toEqual([
+      'structure-set by series',
+      'plan by structure-set',
+      'dose by plan',
+    ]);
+    // The dose is a series to show, and no image for anything to belong to.
+    expect(of('1.1.2').attached).toBeUndefined();
+    expect(of('1.2.1').attached).toBeUndefined();
+    const history = source.currentPatient()!;
+    expect(history.links).toEqual([
+      {
+        sopInstanceUid: '5.4',
+        description: '5.4',
+        deformable: false,
+        ends: [['1.1.1'], ['1.2.1']],
+      },
+    ]);
+    expect(history.studies[0].loose!.map((one) => one.sopInstanceUid)).toEqual(['5.5']);
+  });
+
+  it('takes an object once, shows only the patient’s own, and lets go of them with the patient', () => {
+    source.add([series('1.1.1')]);
+    const set = object('structure-set', '5.1', [['structure-set.series', '1.1.1']]);
+    source.addRtObjects([set]);
+    source.addRtObjects([
+      set,
+      object('plan', '5.2', [['plan.structure-set', '5.1']], { patientId: 'SYN-0002' }),
+    ]);
+    // Another patient's plan names this patient's structure set: it is not this patient's to show.
+    expect(listedSeries(source)[0].attached!.map((one) => one.sopInstanceUid)).toEqual(['5.1']);
+
+    source.closePatient('SYN-0001');
+    source.add([series('1.1.1')]);
+    expect(listedSeries(source)[0].attached).toBeUndefined();
   });
 });

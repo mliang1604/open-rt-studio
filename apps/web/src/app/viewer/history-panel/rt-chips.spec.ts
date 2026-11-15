@@ -1,0 +1,82 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import { TestBed } from '@angular/core/testing';
+import type { AttachedObject, LooseObject } from '@open-rt-studio/dicom';
+
+import { RtChips, rtTitle, rtWhy } from './rt-chips';
+
+const attached = (
+  kind: AttachedObject['kind'],
+  by: AttachedObject['by'],
+  description: string | null = null,
+): AttachedObject => ({ kind, by, description, sopInstanceUid: `${kind}-${by}`, seriesUid: 's' });
+
+describe('what a radiotherapy object says of where it is shown', () => {
+  it('says why it is with a series, each way it can be', () => {
+    expect(rtWhy(attached('structure-set', 'series'))).toBe('It names this series.');
+    expect(rtWhy(attached('structure-set', 'frame'))).toBe(
+      'It names the frame of reference this series is in.',
+    );
+    expect(rtWhy(attached('plan', 'structure-set'))).toBe(
+      'It names a structure set that belongs to this series.',
+    );
+    expect(rtWhy(attached('dose', 'plan'))).toBe('It names a plan that belongs to this series.');
+    expect(rtWhy(attached('dose', 'own-frame'))).toBe(
+      'It names nothing that is here; its grid is in this series’ frame of reference.',
+    );
+  });
+
+  it('says of one that belongs to no series that it names none', () => {
+    const loose: LooseObject = {
+      kind: 'registration',
+      sopInstanceUid: 'r',
+      seriesUid: 's',
+      description: null,
+    };
+    expect(rtWhy(loose)).toBe('It names no image series that is here.');
+    expect(rtTitle(loose)).toBe('Registration. It names no image series that is here.');
+  });
+
+  it('names it by what it is and what its series is called', () => {
+    expect(rtTitle(attached('plan', 'structure-set', ' Prostate 78 Gy '))).toBe(
+      'Plan “Prostate 78 Gy”. It names a structure set that belongs to this series.',
+    );
+  });
+});
+
+describe('RtChips', () => {
+  it('lists each object with its two letters, its name, and why it is here', () => {
+    const fixture = TestBed.createComponent(RtChips);
+    fixture.componentRef.setInput('objects', [
+      attached('structure-set', 'series', 'Planning structures'),
+      attached('plan', 'structure-set'),
+      attached('dose', 'plan', 'Dose'),
+    ]);
+    fixture.componentRef.setInput('label', 'Belongs to this series');
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('ul')!.getAttribute('aria-label')).toBe('Belongs to this series');
+    const chips = [...host.querySelectorAll('li')];
+    expect(chips.map((chip) => chip.getAttribute('data-rt-kind'))).toEqual([
+      'structure-set',
+      'plan',
+      'dose',
+    ]);
+    expect(chips.map((chip) => chip.querySelector('.rt-code')!.textContent)).toEqual([
+      'RS',
+      'RP',
+      'RD',
+    ]);
+    // One without a description goes by what it is.
+    expect(chips.map((chip) => chip.querySelector('.rt-text')!.textContent)).toEqual([
+      'Planning structures',
+      'Plan',
+      'Dose',
+    ]);
+    expect(chips[0].title).toBe('Structure set “Planning structures”. It names this series.');
+    // The same is there for whoever does not hover.
+    expect(chips[0].querySelector('.visually-hidden')!.textContent).toBe(chips[0].title);
+  });
+});
