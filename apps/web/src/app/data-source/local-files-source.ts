@@ -81,7 +81,8 @@ export class LocalFilesSource implements DataSource {
     const objects = this.catalog
       .rtObjects()
       .filter((one) => one.patientId.trim() === patient.patientId);
-    return withRelations(history, objects);
+    // The structure sets were read whole, so a plan's target has its name.
+    return withRelations(history, objects, sets);
   });
 
   /** Patient ID of the patient imported last; null when nothing was imported. */

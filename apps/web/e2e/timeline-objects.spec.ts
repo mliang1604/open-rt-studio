@@ -4,7 +4,11 @@
 
 import {
   SYNTHETIC_PATIENT,
+  SYNTHETIC_PLAN_FRACTIONS as FRACTIONS,
+  SYNTHETIC_PLAN_PRESCRIPTION_GY as PRESCRIBED,
+  SYNTHETIC_PLAN_TARGET_ROI as TARGET_ROI,
   SYNTHETIC_RT_COURSE as COURSE,
+  syntheticRois,
   syntheticRtCourse,
 } from '@open-rt-studio/testdata';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -22,6 +26,8 @@ import { connectTo, studyRows } from './fixtures/server-card';
 
 const PAGE_ORIGIN = `http://localhost:${process.env['E2E_PORT'] ?? 4200}`;
 const PLANNING_CT = 'CT Synthetic CT ramp (2026-01-05)';
+/** The structure the synthetic plan prescribes to, by the name its structure set gives it. */
+const TARGET = syntheticRois(32).find((roi) => roi.number === TARGET_ROI)!.name;
 const FOLLOW_UP_CT = 'CT Synthetic follow-up CT (2026-03-16)';
 
 const chipOf = (page: Page, seriesUid: string): Locator =>
@@ -42,8 +48,12 @@ async function belongsTo(page: Page, seriesUid: string): Promise<string[]> {
     );
 }
 
-/** The synthetic course is on the timeline with everything where it belongs. */
-async function expectCourseOnTimeline(page: Page): Promise<void> {
+/**
+ * The synthetic course is on the timeline with everything where it belongs.
+ * `target` is what the plan's prescription is said to be to: the structure's
+ * name where its structure set was read, its number where it was not (#97).
+ */
+async function expectCourseOnTimeline(page: Page, target: string): Promise<void> {
   await tileOf(page, COURSE.planningStudy).click();
   const objects = ['RS Synthetic structures', 'RP Synthetic plan', 'RD Synthetic dose'];
   await expect.poll(() => belongsTo(page, COURSE.ct), { timeout: 30_000 }).toEqual(objects);
@@ -54,7 +64,21 @@ async function expectCourseOnTimeline(page: Page): Promise<void> {
     .locator('app-rt-chips li')
     .evaluateAll((chips) => chips.map((chip) => chip.getAttribute('title')));
   expect(structures).toBe('Structure set “Synthetic structures”. It names this series.');
-  expect(plan).toBe('Plan “Synthetic plan”. It names a structure set that belongs to this series.');
+  // The plan says its fractions and its prescription too (#97), and in brief beside its name.
+  expect(plan).toBe(
+    `Plan “Synthetic plan”. ${FRACTIONS} fractions · ${PRESCRIBED} Gy to “${target}”. It names a structure set that belongs to this series.`,
+  );
+  for (const series of [COURSE.ct, COURSE.mr]) {
+    await expect(chipOf(page, series).locator('app-rt-chips .rt-more')).toHaveText([
+      `${FRACTIONS} fx · ${PRESCRIBED} Gy`,
+    ]);
+    // And whole: the name gives way to it, not it to the name.
+    expect(
+      await chipOf(page, series)
+        .locator('app-rt-chips .rt-more')
+        .evaluate((more) => more.scrollWidth <= more.clientWidth),
+    ).toBe(true);
+  }
   expect(dose).toBe('Dose “Synthetic dose”. It names a plan that belongs to this series.');
   expect(
     await chipOf(page, COURSE.mr).locator('app-rt-chips li').first().getAttribute('title'),
@@ -82,7 +106,8 @@ test('the timeline shows structure sets, plans and doses with their series, and 
   await requireWebGpu(page);
   await importFiles(page, syntheticRtCourse(32));
   await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
-  await expectCourseOnTimeline(page);
+  // The structure set was opened with the plan, so the target has its name.
+  await expectCourseOnTimeline(page, TARGET);
 
   // Its line is drawn from the planning CT's chip to the follow-up study's
   // tile, which stands for the CT in it while it is closed.
@@ -130,6 +155,16 @@ test('the timeline shows structure sets, plans and doses with their series, and 
     page.locator('.series-strip li[data-series-uid] app-series-chip.loaded'),
   ).toHaveCount(1);
   await expect(page.locator('app-registration-links .offer')).toHaveCount(0);
+
+  // The metadata panel says what the plan of the image on screen says (#97).
+  await page.keyboard.press('i');
+  const planRows = page.locator('app-metadata-panel [data-info-plan] .info-row');
+  await expect(planRows).toHaveText([
+    'LabelSynthetic',
+    `Fractions${FRACTIONS} fractions`,
+    `Prescription${PRESCRIBED} Gy to “${TARGET}”`,
+  ]);
+  await expect(page.locator('app-metadata-panel [data-info-plan]')).toHaveCount(1);
   expectNoProblems(problems);
 });
 
@@ -145,7 +180,8 @@ test('a server’s timeline shows the same, from what its objects refer to', asy
     const card = await connectTo(page, server.address, 'empty state');
     await studyRows(card).filter({ hasText: SYNTHETIC_PATIENT.id }).first().click();
     await expect(page.locator('.study-tile')).toHaveCount(2, { timeout: 30_000 });
-    await expectCourseOnTimeline(page);
+    // The server tells of the structure set's file, not of its structures' names.
+    await expectCourseOnTimeline(page, `ROI ${TARGET_ROI}`);
     await expect(page.locator('.link-lines path')).toHaveCount(1);
     expectNoProblems(problems);
   } finally {

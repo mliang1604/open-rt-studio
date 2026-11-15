@@ -93,6 +93,8 @@ export {
 } from './mat4.js';
 export { clamp, clamp01, clampIndex } from './math.js';
 export {
+  type CuratedField,
+  type CuratedGroup,
   type DicomMetadata,
   type ImageDerivation,
   type RawTag,
@@ -269,3 +271,24 @@ export {
   doseUnit,
   isDoseProblem,
 } from './rt-dose.js';
+export {
+  type PlanDoseReference,
+  type PlanFacts,
+  type PlanFractionGroup,
+  type PlanPrescription,
+  type PlanStructures,
+  type PlanSummary,
+  type RtPlan,
+  PLAN_ITEMS_AT_MOST,
+  PLAN_TEXT_AT_MOST,
+  RTPLAN_SOP_CLASSES,
+  parseRtPlan,
+  planBrief,
+  planFractionsText,
+  planGroup,
+  planPrescriptionsText,
+  planSummary,
+  planSummaryText,
+  readPlanFacts,
+  readRtPlan,
+} from './rt-plan.js';

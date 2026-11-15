@@ -3,11 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import type { DicomMetadata, RawTag } from '@open-rt-studio/dicom';
+import type { CuratedGroup, DicomMetadata, RawTag } from '@open-rt-studio/dicom';
 
 /**
- * The metadata inspector of the displayed series: the curated groups, then
- * every raw tag with a filter. Read-only, and it never touches rendering. The
+ * The metadata inspector of the displayed series: the curated groups, what
+ * its plans say, then every raw tag with a filter. Read-only, and it never touches rendering. The
  * viewer owns the filter text and does the filtering; this shows the result.
  */
 @Component({
@@ -19,6 +19,11 @@ import type { DicomMetadata, RawTag } from '@open-rt-studio/dicom';
 })
 export class MetadataPanel {
   readonly metadata = input.required<DicomMetadata>();
+  /**
+   * What the plans of the images on screen say (#97): a group to each,
+   * shown after the series' own.
+   */
+  readonly plans = input<readonly CuratedGroup[]>([]);
   /** The raw tags that match {@link filter}. */
   readonly rawTags = input.required<readonly RawTag[]>();
   readonly filter = input('');

@@ -13,6 +13,9 @@ import {
 } from '@open-rt-studio/dicom';
 import {
   populationStudies,
+  SYNTHETIC_PLAN_FRACTIONS,
+  SYNTHETIC_PLAN_PRESCRIPTION_GY,
+  SYNTHETIC_PLAN_TARGET_ROI,
   SYNTHETIC_RT_COURSE as COURSE,
   SYNTHETIC_STUDY,
   syntheticPopulation,
@@ -1143,6 +1146,42 @@ describe('what belongs to what on a server (#38)', () => {
       'dose by plan',
     ]);
     expect(ways(source, COURSE.followUpCt)).toEqual([]);
+  });
+
+  it('has with a plan what it says of its fractions and prescription, the structure by its number (#97)', async () => {
+    const { source } = await withPatient();
+    for (const series of [COURSE.ct, COURSE.mr]) {
+      const plan = seriesOf(source, series).attached!.find((one) => one.kind === 'plan')!;
+      expect(plan.plan).toMatchObject({
+        label: 'Synthetic',
+        fractions: [SYNTHETIC_PLAN_FRACTIONS],
+        fractionGroups: 1,
+        // The server tells of a structure set's file, not of its structures' names.
+        prescriptions: [
+          {
+            gy: SYNTHETIC_PLAN_PRESCRIPTION_GY,
+            type: 'TARGET',
+            to: `ROI ${SYNTHETIC_PLAN_TARGET_ROI}`,
+          },
+        ],
+      });
+    }
+    // Nothing of the kind on what is no plan.
+    expect(
+      seriesOf(source, COURSE.ct)
+        .attached!.filter((one) => 'plan' in one)
+        .map((one) => one.kind),
+    ).toEqual(['plan']);
+  });
+
+  it('says nothing of a plan that an older server says nothing of, and places it all the same', async () => {
+    const server = fakeServer(FILES);
+    server.noPlans = true;
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await source.selectPatient('1');
+    const plan = seriesOf(source, COURSE.ct).attached!.find((one) => one.kind === 'plan')!;
+    expect(plan).toMatchObject({ sopInstanceUid: COURSE.plan, by: 'structure-set' });
+    expect(plan).not.toHaveProperty('plan');
   });
 
   it('has the registration as a link between the CTs it names, of its two frames', async () => {

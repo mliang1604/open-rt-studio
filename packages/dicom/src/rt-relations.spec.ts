@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { PlanFacts } from './rt-plan.js';
 import type { InstanceHeader, InstanceReference } from './instance-header.js';
 import {
   relateRtObjects,
@@ -55,6 +56,24 @@ const SET = object('structure-set', 'set', [
   ['structure-set.series', 'ct'],
 ]);
 const PLAN = object('plan', 'plan', [['plan.structure-set', 'set']]);
+const PLAN_FACTS: PlanFacts = {
+  label: 'Plan A',
+  planName: null,
+  date: null,
+  intent: null,
+  approvalStatus: null,
+  fractionGroups: [{ number: 1, fractionsPlanned: 30, beams: 2, beamDoseGy: 2 }],
+  doseReferences: [
+    {
+      number: 1,
+      structureType: 'VOLUME',
+      type: 'TARGET',
+      description: null,
+      roiNumber: 2,
+      prescriptionGy: 60,
+    },
+  ],
+};
 const DOSE = object('dose', 'dose', [['dose.plan', 'plan']], { frameOfReferenceUid: 'frame-1' });
 const REG = object(
   'registration',
@@ -192,6 +211,7 @@ describe('the facts of a file’s header', () => {
     instanceNumber: 1,
     frames: null,
     references: [{ relation: 'structure-set.series', targetUid: '1.2.8' }],
+    plan: null,
   });
 
   it('are taken for a structure set, a plan, a dose and a registration, and nothing else', () => {
@@ -211,5 +231,52 @@ describe('the facts of a file’s header', () => {
     expect(rtObjectFacts(header('REG'))?.kind).toBe('registration');
     expect(rtObjectFacts(header('CT'))).toBeNull();
     expect(rtObjectFacts(header('SEG'))).toBeNull();
+  });
+
+  it('carry what a plan says of itself, and nothing of the kind for anything else', () => {
+    expect(rtObjectFacts({ ...header('RTPLAN'), plan: PLAN_FACTS })?.plan).toBe(PLAN_FACTS);
+    expect(rtObjectFacts(header('RTPLAN'))).not.toHaveProperty('plan');
+    expect(rtObjectFacts(header('RTSTRUCT'))).not.toHaveProperty('plan');
+  });
+});
+
+describe('a plan’s fractions and prescription, where it is placed (#97)', () => {
+  const plan = { ...PLAN, plan: PLAN_FACTS };
+
+  it('goes with the plan to every series it is with, the structure by its number', () => {
+    const { bySeries } = relateRtObjects(IMAGES, [SET, plan, DOSE]);
+    for (const series of ['ct', 'mr']) {
+      const attached = bySeries.get(series)!.find((one) => one.kind === 'plan')!;
+      expect(attached.plan).toMatchObject({
+        label: 'Plan A',
+        fractions: [30],
+        fractionGroups: 1,
+        prescriptions: [{ gy: 60, type: 'TARGET', to: 'ROI 2' }],
+      });
+    }
+    // Nothing of the kind on what is no plan, or on a plan that was not read.
+    expect(
+      bySeries
+        .get('ct')!
+        .filter((one) => 'plan' in one)
+        .map((one) => one.kind),
+    ).toEqual(['plan']);
+    expect(relateRtObjects(IMAGES, [SET, PLAN]).bySeries.get('ct')![1]).not.toHaveProperty('plan');
+  });
+
+  it('names the structure by the structure set the plan names, and by no other', () => {
+    const named = { sopInstanceUid: 'set', rois: [{ number: 2, name: 'PTV' }] };
+    const other = { sopInstanceUid: 'set-2', rois: [{ number: 2, name: 'Bladder' }] };
+    const to = (structures: (typeof named)[]): string | null | undefined =>
+      relateRtObjects(IMAGES, [SET, plan], structures)
+        .bySeries.get('ct')!
+        .find((one) => one.kind === 'plan')!.plan?.prescriptions[0].to;
+    expect(to([other, named])).toBe('PTV');
+    expect(to([other])).toBe('ROI 2');
+  });
+
+  it('goes with a plan that belongs to no series here, too', () => {
+    const { byStudy } = relateRtObjects(IMAGES, [plan]);
+    expect(byStudy.get('study-1')![0].plan?.fractions).toEqual([30]);
   });
 });

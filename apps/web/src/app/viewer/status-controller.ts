@@ -5,9 +5,11 @@
 import { Injectable, computed, inject, type Signal } from '@angular/core';
 import {
   type Series,
+  type CuratedGroup,
   type DicomMetadata,
   type RawTag,
   baseLayer,
+  planGroup,
   type Layer,
   type Volume,
 } from '@open-rt-studio/dicom';
@@ -121,6 +123,29 @@ export class StatusController {
   readonly metadata = computed<DicomMetadata | null>(() => {
     const uid = this.selectedSeriesUid();
     return this.seriesList().find((series) => series.uid === uid)?.metadata ?? null;
+  });
+
+  /**
+   * What the plans of the images on screen say (#97), each as a group of
+   * the metadata panel: a plan belongs to an image by the structure set it
+   * names. Empty when no image on screen has a plan that was read.
+   */
+  readonly plans = computed<readonly CuratedGroup[]>(() => {
+    const loaded = new Set(this.loadedSeriesUids());
+    if (loaded.size === 0) return [];
+    const seen = new Set<string>();
+    const groups: CuratedGroup[] = [];
+    for (const study of this.source.currentPatient()?.studies ?? []) {
+      for (const series of study.series) {
+        if (!loaded.has(series.uid)) continue;
+        for (const object of series.attached ?? []) {
+          if (!object.plan || seen.has(object.sopInstanceUid)) continue;
+          seen.add(object.sopInstanceUid);
+          groups.push(planGroup(object.plan));
+        }
+      }
+    }
+    return groups;
   });
 
   /** Raw tags of the displayed series, narrowed by the search box. */

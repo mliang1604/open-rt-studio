@@ -22,6 +22,7 @@
 // filed in, so that nothing held goes unshown.
 
 import type { InstanceHeader, InstanceReference } from './instance-header.js';
+import { planSummary, type PlanFacts, type PlanStructures, type PlanSummary } from './rt-plan.js';
 
 const DEFORMABLE_SPATIAL_REGISTRATION = '1.2.840.10008.5.1.4.1.1.66.3';
 
@@ -49,6 +50,8 @@ export interface RtObjectFacts {
   /** The frame of reference its own series is in; a dose grid has one. */
   readonly frameOfReferenceUid: string | null;
   readonly references: readonly InstanceReference[];
+  /** For a plan, what it says of its fractions and prescriptions, where that is known. */
+  readonly plan?: PlanFacts | null;
 }
 
 /** The facts of a file's header when it is one of the objects placed here; null for anything else. */
@@ -65,6 +68,7 @@ export function rtObjectFacts(header: InstanceHeader): RtObjectFacts | null {
     description: header.series.description,
     frameOfReferenceUid: header.series.frameOfReferenceUid,
     references: header.references,
+    ...(header.plan ? { plan: header.plan } : {}),
   };
 }
 
@@ -90,6 +94,8 @@ export interface AttachedObject {
   readonly seriesUid: string;
   readonly description: string | null;
   readonly by: AttachedBy;
+  /** A plan's fractions and prescriptions, where they are known. */
+  readonly plan?: PlanSummary;
 }
 
 /** An object that belongs to no image series held: listed with the study it is filed in. */
@@ -98,6 +104,8 @@ export interface LooseObject {
   readonly sopInstanceUid: string;
   readonly seriesUid: string;
   readonly description: string | null;
+  /** A plan's fractions and prescriptions, where they are known. */
+  readonly plan?: PlanSummary;
 }
 
 /** A registration and the image series of the two frames it connects. */
@@ -133,11 +141,24 @@ const ORDER: Readonly<Record<RtObjectKind, number>> = {
  * Place a patient's radiotherapy objects by the image series they belong
  * to. `images` are the series that are images (not doses); `objects` are
  * the structure sets, plans, doses and registrations, each once.
+ * `structures` are the structure sets whose structures' names are at hand:
+ * a plan's prescription is said of a structure by its name when the
+ * structure set the plan names is among them, and by its number otherwise.
  */
 export function relateRtObjects(
   images: readonly RelatableSeries[],
   objects: readonly RtObjectFacts[],
+  structures: readonly PlanStructures[] = [],
 ): RtRelations {
+  const summaryOf = (object: RtObjectFacts): { plan?: PlanSummary } =>
+    object.plan
+      ? {
+          plan: planSummary(
+            { ...object.plan, structureSetUids: targets(object, 'plan.structure-set') },
+            structures,
+          ),
+        }
+      : {};
   const held = new Set(images.map((one) => one.uid));
   const inFrame = new Map<string, string[]>();
   for (const image of images) {
@@ -164,6 +185,7 @@ export function relateRtObjects(
           seriesUid: object.seriesUid,
           description: object.description,
           by,
+          ...summaryOf(object),
         },
       ]);
     }
@@ -239,6 +261,7 @@ export function relateRtObjects(
         sopInstanceUid: object.sopInstanceUid,
         seriesUid: object.seriesUid,
         description: object.description,
+        ...summaryOf(object),
       },
     ]);
   }

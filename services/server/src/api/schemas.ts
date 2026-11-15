@@ -12,6 +12,7 @@ const text = { type: 'string' } as const;
 const nullableText = { type: ['string', 'null'] } as const;
 const count = { type: 'integer', minimum: 0 } as const;
 const nullableInteger = { type: ['integer', 'null'] } as const;
+const nullableNumber = { type: ['number', 'null'] } as const;
 const uid = { type: 'string', pattern: '^[0-9]+(\\.[0-9]+)*$', maxLength: 64 } as const;
 const nullableUid = { ...uid, type: ['string', 'null'] } as const;
 const date = { type: ['string', 'null'], description: 'YYYYMMDD' } as const;
@@ -201,8 +202,43 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
   Instance: object(instance),
   Reference: reference,
   InstanceDetail: object(
-    { ...instance, references: { type: 'array', items: ref('Reference') } },
-    'An instance and what it refers to.',
+    {
+      ...instance,
+      references: { type: 'array', items: ref('Reference') },
+      plan: {
+        ...object({
+          label: nullableText,
+          planName: nullableText,
+          date,
+          intent: nullableText,
+          approvalStatus: nullableText,
+          fractionGroups: {
+            type: 'array',
+            items: object({
+              number: nullableInteger,
+              fractionsPlanned: nullableInteger,
+              beams: count,
+              beamDoseGy: nullableNumber,
+            }),
+          },
+          doseReferences: {
+            type: 'array',
+            items: object({
+              number: nullableInteger,
+              structureType: nullableText,
+              type: nullableText,
+              description: nullableText,
+              roiNumber: nullableInteger,
+              prescriptionGy: nullableNumber,
+            }),
+          },
+        }),
+        type: ['object', 'null'],
+        description:
+          'For an RT Plan, what it says of its fractions and prescriptions: every fraction group and dose reference as the file has it, doses in Gy. Null for anything else, and for a plan filed before this was kept.',
+      },
+    },
+    'An instance, what it refers to, and what a plan says.',
   ),
   Related: object(
     {

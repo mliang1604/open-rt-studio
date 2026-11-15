@@ -5,8 +5,11 @@
 import {
   mapPoint,
   parseFile,
+  parseRtPlan,
   parseSpatialRegistration,
   parseStructureSet,
+  planSummary,
+  planSummaryText,
   readInstanceHeader,
   relateRtObjects,
   rtObjectFacts,
@@ -22,6 +25,9 @@ import {
 } from './identity.js';
 import { syntheticCtSeries } from './image-series.js';
 import {
+  SYNTHETIC_PLAN_FRACTIONS,
+  SYNTHETIC_PLAN_PRESCRIPTION_GY,
+  SYNTHETIC_PLAN_TARGET_ROI,
   SYNTHETIC_RT_COURSE as COURSE,
   syntheticRegistration,
   syntheticRtCourse,
@@ -103,6 +109,57 @@ describe('syntheticRtCourse', () => {
     expect(byModality('RTPLAN')[0].references).toEqual([
       { relation: 'plan.structure-set', targetUid: COURSE.structureSet },
     ]);
+  });
+
+  it('the plan says its fractions and its prescription, to the planning target of its structure set (#97)', () => {
+    const file = files.find((one) => one.name.includes('rtplan'))!;
+    const plan = parseRtPlan(file.name, buffer(file))!;
+    expect(plan.sopInstanceUid).toBe(COURSE.plan);
+    expect(plan.structureSetUids).toEqual([COURSE.structureSet]);
+    expect(plan.fractionGroups).toEqual([
+      {
+        number: 1,
+        fractionsPlanned: SYNTHETIC_PLAN_FRACTIONS,
+        beams: 1,
+        beamDoseGy: SYNTHETIC_PLAN_PRESCRIPTION_GY / SYNTHETIC_PLAN_FRACTIONS,
+      },
+    ]);
+    expect(plan.doseReferences).toMatchObject([
+      {
+        type: 'TARGET',
+        roiNumber: SYNTHETIC_PLAN_TARGET_ROI,
+        prescriptionGy: SYNTHETIC_PLAN_PRESCRIPTION_GY,
+      },
+    ]);
+    // The same is read with the file's header, which is what an index keeps.
+    expect(byModality('RTPLAN')[0].plan).toMatchObject({
+      label: 'Synthetic',
+      fractionGroups: plan.fractionGroups,
+      doseReferences: plan.doseReferences,
+    });
+    expect(byModality('RTSTRUCT')[0].plan).toBeNull();
+    expect(byModality('RTDOSE')[0].plan).toBeNull();
+
+    // By the structure set it names, the structure has its name.
+    const set = files.find((one) => one.name.includes('rtstruct'))!;
+    const structures = parseStructureSet(set.name, buffer(set))!;
+    const target = structures.rois.find((roi) => roi.number === SYNTHETIC_PLAN_TARGET_ROI)!;
+    expect(target.interpretedType).toBe('PTV');
+    expect(planSummaryText(planSummary(plan, [structures]))).toBe(
+      `${SYNTHETIC_PLAN_FRACTIONS} fractions · ${SYNTHETIC_PLAN_PRESCRIPTION_GY} Gy to “${target.name}”`,
+    );
+  });
+
+  it('a plan may be written without fractions, without a prescription, or to no structure', () => {
+    const read = (options: Parameters<typeof syntheticRtPlan>[0]) => {
+      const file = syntheticRtPlan(options);
+      return planSummaryText(planSummary(parseRtPlan(file.name, buffer(file))!));
+    };
+    expect(read({ fractions: null })).toBe('fractions not said · 60 Gy to “ROI 2”');
+    expect(read({ prescriptionGy: null })).toBe('30 fractions · no prescription said');
+    expect(read({ fractions: 7, prescriptionGy: 42.7, targetRoi: null })).toBe(
+      '7 fractions · 42.7 Gy to “Synthetic target”',
+    );
   });
 
   it('the dose names the plan and the structure set', () => {
@@ -236,6 +293,7 @@ describe('readInstanceHeader on the synthetic generators', () => {
       // A slice in a file of its own says nothing of frames.
       frames: null,
       references: [],
+      plan: null,
     });
   });
 

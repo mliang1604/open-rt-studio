@@ -96,6 +96,8 @@ by git) if you want files on disk to open.
 - RT Dose read on its own grid, in gray or relative, in any orientation and
   with unevenly spaced frames; a dose that does not say how to scale or
   place its values is refused, with the reason
+- An RT Plan's fractions and prescriptions on the timeline and in the
+  metadata panel, each as the file has it
 - Fusion and Compare of a series from another frame of reference through a
   rigid DICOM Spatial Registration, opened from files beside it or kept on
   the server, with a choice when several registrations connect the two

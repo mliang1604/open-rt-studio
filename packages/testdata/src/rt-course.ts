@@ -38,16 +38,35 @@ export const REGISTRATION_SERIES_INDEX = 30;
 const CT_SERIES_INDEX = 1;
 const MR_SERIES_INDEX = 2;
 
+/** What the synthetic plan says, unless it is told otherwise (#97). */
+export const SYNTHETIC_PLAN_FRACTIONS = 30;
+export const SYNTHETIC_PLAN_PRESCRIPTION_GY = 60;
+/** The ROI Number the prescription is to: the synthetic structure set's planning target volume. */
+export const SYNTHETIC_PLAN_TARGET_ROI = 2;
+
 export interface RtPlanOptions {
   readonly study?: SyntheticStudy;
   /** SOP Instance UID of the RTSTRUCT the plan was made on. Default: the study's synthetic one. */
   readonly structureSetUid?: string;
+  /** Number of Fractions Planned; null to write a fraction group that gives none. */
+  readonly fractions?: number | null;
+  /** Target Prescription Dose in Gy; null to write no dose reference. */
+  readonly prescriptionGy?: number | null;
+  /** The ROI Number the prescription is to; null for a dose reference that names none. */
+  readonly targetRoi?: number | null;
 }
 
-/** A minimal RTPLAN in the study's Frame of Reference that names its structure set. */
+/**
+ * A minimal RTPLAN in the study's Frame of Reference that names its
+ * structure set, with one fraction group and one prescription to a target.
+ */
 export function syntheticRtPlan(options: RtPlanOptions = {}): SyntheticFile {
   const study = options.study ?? SYNTHETIC_STUDY;
   const structureSet = options.structureSetUid ?? instanceUid(study, RTSTRUCT_SERIES_INDEX, 1);
+  const fractions = options.fractions === undefined ? SYNTHETIC_PLAN_FRACTIONS : options.fractions;
+  const prescription =
+    options.prescriptionGy === undefined ? SYNTHETIC_PLAN_PRESCRIPTION_GY : options.prescriptionGy;
+  const target = options.targetRoi === undefined ? SYNTHETIC_PLAN_TARGET_ROI : options.targetRoi;
   const bytes = part10(RTPLAN_SOP_CLASS, instanceUid(study, RTPLAN_SERIES_INDEX, 1), [
     ...identityElements(study),
     el(0x0008, 0x0060, 'CS', text('RTPLAN')), // Modality
@@ -58,6 +77,45 @@ export function syntheticRtPlan(options: RtPlanOptions = {}): SyntheticFile {
     el(0x0020, 0x0052, 'UI', uid(frameOfReferenceUid(study))), // FrameOfReferenceUID
     el(0x300a, 0x0002, 'SH', text('Synthetic')), // RTPlanLabel
     el(0x300a, 0x000c, 'CS', text('PATIENT')), // RTPlanGeometry
+    ...(prescription === null
+      ? []
+      : [
+          // DoseReferenceSequence
+          sequence(0x300a, 0x0010, [
+            [
+              el(0x300a, 0x0012, 'IS', numbers([1])), // DoseReferenceNumber
+              el(0x300a, 0x0014, 'CS', text(target === null ? 'SITE' : 'VOLUME')), // DoseReferenceStructureType
+              el(0x300a, 0x0016, 'LO', text('Synthetic target')), // DoseReferenceDescription
+              el(0x300a, 0x0020, 'CS', text('TARGET')), // DoseReferenceType
+              el(0x300a, 0x0026, 'DS', numbers([prescription])), // TargetPrescriptionDose
+              ...(target === null ? [] : [el(0x3006, 0x0084, 'IS', numbers([target]))]), // ReferencedROINumber
+            ],
+          ]),
+        ]),
+    // FractionGroupSequence: one group of one beam, which gives a fraction's dose.
+    sequence(0x300a, 0x0070, [
+      [
+        el(0x300a, 0x0071, 'IS', numbers([1])), // FractionGroupNumber
+        ...(fractions === null ? [] : [el(0x300a, 0x0078, 'IS', numbers([fractions]))]), // NumberOfFractionsPlanned
+        el(0x300a, 0x0080, 'IS', numbers([1])), // NumberOfBeams
+        el(0x300a, 0x00a0, 'IS', numbers([0])), // NumberOfBrachyApplicationSetups
+        sequence(0x300c, 0x0004, [
+          [
+            ...(prescription === null || fractions === null
+              ? []
+              : [
+                  el(
+                    0x300a,
+                    0x0084,
+                    'DS',
+                    numbers([Number((prescription / fractions).toFixed(6))]),
+                  ),
+                ]), // BeamDose
+            el(0x300c, 0x0006, 'IS', numbers([1])), // ReferencedBeamNumber
+          ],
+        ]),
+      ],
+    ]),
     // ReferencedStructureSetSequence
     sequence(0x300c, 0x0060, [
       [

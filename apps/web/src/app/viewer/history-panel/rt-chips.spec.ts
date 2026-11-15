@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { TestBed } from '@angular/core/testing';
-import type { AttachedObject, LooseObject } from '@open-rt-studio/dicom';
+import type { AttachedObject, LooseObject, PlanSummary } from '@open-rt-studio/dicom';
 
 import { RtChips, rtTitle, rtWhy } from './rt-chips';
 
@@ -12,6 +12,17 @@ const attached = (
   by: AttachedObject['by'],
   description: string | null = null,
 ): AttachedObject => ({ kind, by, description, sopInstanceUid: `${kind}-${by}`, seriesUid: 's' });
+
+const SUMMARY: PlanSummary = {
+  label: 'Plan A',
+  planName: null,
+  date: null,
+  intent: null,
+  approvalStatus: null,
+  fractions: [30],
+  fractionGroups: 1,
+  prescriptions: [{ gy: 60, type: 'TARGET', to: 'PTV' }],
+};
 
 describe('what a radiotherapy object says of where it is shown', () => {
   it('says why it is with a series, each way it can be', () => {
@@ -43,6 +54,43 @@ describe('what a radiotherapy object says of where it is shown', () => {
     expect(rtTitle(attached('plan', 'structure-set', ' Prostate 78 Gy '))).toBe(
       'Plan “Prostate 78 Gy”. It names a structure set that belongs to this series.',
     );
+  });
+});
+
+describe('a plan on the timeline (#97)', () => {
+  const plan = { ...attached('plan', 'structure-set', 'Prostate'), plan: SUMMARY };
+
+  it('says its fractions and its prescription between what it is and why it is here', () => {
+    expect(rtTitle(plan)).toBe(
+      'Plan “Prostate”. 30 fractions · 60 Gy to “PTV”. It names a structure set that belongs to this series.',
+    );
+    const nothing = { ...SUMMARY, fractions: [], fractionGroups: 0, prescriptions: [] };
+    expect(rtTitle({ ...plan, plan: nothing })).toContain(
+      '. fractions not said · no prescription said. ',
+    );
+  });
+
+  it('shows them in brief beside its name, and nothing where they are not known or not said', () => {
+    const fixture = TestBed.createComponent(RtChips);
+    const nothing = { ...SUMMARY, fractions: [], fractionGroups: 0, prescriptions: [] };
+    fixture.componentRef.setInput('objects', [
+      plan,
+      { ...attached('plan', 'frame', 'Unread'), sopInstanceUid: 'unread' },
+      { ...plan, sopInstanceUid: 'silent', plan: nothing },
+      attached('dose', 'plan', 'Dose'),
+    ]);
+    fixture.detectChanges();
+    const chips = [...(fixture.nativeElement as HTMLElement).querySelectorAll('li')];
+    expect(chips.map((chip) => chip.querySelector('.rt-more')?.textContent ?? null)).toEqual([
+      '30 fx · 60 Gy',
+      null,
+      null,
+      null,
+    ]);
+    // The whole of it is in the title, and for whoever does not hover.
+    expect(chips[0].title).toContain('30 fractions · 60 Gy to “PTV”');
+    expect(chips[0].querySelector('.visually-hidden')!.textContent).toBe(chips[0].title);
+    expect(chips[2].title).toContain('fractions not said');
   });
 });
 

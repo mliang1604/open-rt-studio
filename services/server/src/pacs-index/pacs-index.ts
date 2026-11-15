@@ -20,6 +20,8 @@
  * - `registration.frame`: a registration, to a frame of reference it connects
  * - `registration.series`: a registration, to a series it connects
  */
+import type { PlanFacts } from '@open-rt-studio/dicom';
+
 export const RELATIONS = [
   'structure-set.series',
   'structure-set.frame',
@@ -80,6 +82,11 @@ export interface InstanceEntry {
     readonly sha256: string;
   };
   readonly references: readonly Reference[];
+  /**
+   * For an RT Plan, what it says of its fractions and prescriptions; left
+   * out or null for anything else.
+   */
+  readonly plan?: PlanFacts | null;
 }
 
 export interface PatientRecord {
@@ -273,6 +280,11 @@ export interface PacsIndex {
 
   /** What an instance refers to. */
   referencesFrom(sopInstanceUid: string): Promise<Reference[]>;
+  /**
+   * What a plan says of its fractions and prescriptions. Null for what is
+   * no plan, is not in the index, or was filed before this was kept.
+   */
+  planOf(sopInstanceUid: string): Promise<PlanFacts | null>;
   /** The instances that refer to a UID, by one relation or by any. */
   referencesTo(targetUid: string, relation?: Relation): Promise<InstanceRecord[]>;
   /** Null when the index does not have the series. */
