@@ -17,9 +17,17 @@
   gap: 6px;
 }
 
-.history button,
-.listed button {
+.history button {
   flex: 1 1 0;
+}
+
+/* The tools listed wrap to a second row rather than squeeze their names. */
+.listed {
+  flex-wrap: wrap;
+}
+
+.listed button {
+  flex: 1 1 auto;
 }
 
 button.active {

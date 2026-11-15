@@ -142,6 +142,16 @@ export {
 } from './field-metrics.js';
 export { f32ToF16, floatsToHalf } from './half.js';
 export {
+  type CleanupDimension,
+  type CleanupResult,
+  CleanupError,
+  SMOOTH_BALL_VOXELS_AT_MOST,
+  fillHoles,
+  keepLargest,
+  removeIslands,
+  smooth,
+} from './label-cleanup.js';
+export {
   type LabelChange,
   type LabelConstraints,
   type LabelEdit,
