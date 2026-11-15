@@ -1260,8 +1260,11 @@ chooses the doses and shows the sum is described after it
   part in 100 000 of the largest sum. The conversions are held to values
   worked out by hand for uniform doses (60 Gy in 30 fractions and 20 Gy in
   5, at α/β of 3 and 10 Gy), and a converted sum through a transform to its
-  formula within 0.0001 Gy. These say how the code does on doses
-  that are formulas. No dose from a planning system was summed, and
+  formula within 0.0001 Gy. The dose validation suite
+  ([dose-validation.md](dose-validation.md), #103) holds mapping, summing
+  and conversion to tolerances that are worked out and written down, on a
+  bent dose and through a bent field as well. These say how the code does
+  on doses that are formulas. No dose from a planning system was summed, and
   nothing was compared with another program.
 
 ### The summation screen

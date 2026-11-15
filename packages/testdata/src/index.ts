@@ -66,6 +66,15 @@ export {
   type PhantomTransform,
 } from './resampling-phantom.js';
 export {
+  DOSE_PHANTOM,
+  PHANTOM_HILL_DOSE_MOST,
+  PHANTOM_HILL_DOSE_SLOPE,
+  PHANTOM_LINEAR_DOSE_SLOPE,
+  phantomHillDose,
+  phantomHillInterpolationBound,
+  phantomLinearDose,
+} from './dose-phantom.js';
+export {
   SYNTHETIC_REGISTERED_PAIR,
   registeredMrValueAtCtVoxel,
   syntheticRegisteredPair,

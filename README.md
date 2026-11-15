@@ -50,6 +50,9 @@ It is not a treatment planning system and does not replace one.
 - [Resampling validation](docs/resampling-validation.md): what resampled
   images and propagated structures are held to on analytic shapes, and what
   they measured
+- [Dose validation](docs/dose-validation.md): what mapped, summed and
+  converted doses are held to on doses that are formulas, and what they
+  measured
 - [Contributing](CONTRIBUTING.md), including the required CI check
 - [Test data policy](docs/test-data.md): synthetic or clearly shareable data only
 - [License headers](docs/license-headers.md)
