@@ -12,6 +12,7 @@ import {
   resampleMaps,
   resampleVolume,
   resampledVolume,
+  knownAtIndex,
   sampleAtIndex,
   type ResampleGrid,
   type ResampleThrough,
@@ -131,6 +132,42 @@ describe('reading an image between its voxels', () => {
     expect(sampleAtIndex(data, dims, 1.51, 0, 0, 'linear')).toBeNaN();
     expect(sampleAtIndex(data, dims, 0, 0.51, 0, 'nearest')).toBeNaN();
     expect(sampleAtIndex(data, dims, 0, 0, -0.6, 'linear')).toBeNaN();
+  });
+});
+
+describe('whether a read between voxels is of what is known', () => {
+  // 3 by 2 by 2 voxels, all known but the one at (2, 1, 0).
+  const dims = [3, 2, 2] as const;
+  const known = new Uint8Array(12).fill(1);
+  known[(0 * 2 + 1) * 3 + 2] = 0;
+
+  it('is, where every voxel the read blends is known', () => {
+    expect(knownAtIndex(known, dims, 0, 0, 0)).toBe(true);
+    expect(knownAtIndex(known, dims, 0.5, 0.5, 0.5)).toBe(true);
+    expect(knownAtIndex(known, dims, 2, 0, 1)).toBe(true);
+    // Level with a voxel's middle, the next voxel that way has no share in the blend:
+    // (1, 1, 0) is beside the voxel that is not known, and is read all the same.
+    expect(knownAtIndex(known, dims, 1, 1, 0)).toBe(true);
+    expect(knownAtIndex(known, dims, 2, 0, 0)).toBe(true);
+    expect(knownAtIndex(known, dims, 2, 1, 1)).toBe(true);
+  });
+
+  it('is not, where one of them is not known', () => {
+    expect(knownAtIndex(known, dims, 2, 1, 0)).toBe(false);
+    expect(knownAtIndex(known, dims, 1.5, 0.5, 0.5)).toBe(false);
+    expect(knownAtIndex(known, dims, 1.001, 1, 0)).toBe(false);
+    expect(knownAtIndex(known, dims, 2, 0.001, 0)).toBe(false);
+    expect(knownAtIndex(known, dims, 2, 1, 0.999)).toBe(false);
+    expect(knownAtIndex(known, dims, 1.01, 0.99, 0.2)).toBe(false);
+    // In the outer half of the edge voxel that is not known.
+    expect(knownAtIndex(known, dims, 2.4, 1.4, -0.4)).toBe(false);
+  });
+
+  it('is not, outside the grid', () => {
+    expect(knownAtIndex(known, dims, -0.6, 0, 0)).toBe(false);
+    expect(knownAtIndex(known, dims, 0, 1.6, 0)).toBe(false);
+    expect(knownAtIndex(known, dims, 0, 0, 1.51)).toBe(false);
+    expect(knownAtIndex(new Uint8Array(12).fill(1), dims, 2.5, 1.5, 1.5)).toBe(true);
   });
 });
 

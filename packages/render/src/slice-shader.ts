@@ -16,6 +16,21 @@ import { FIELD_VIEW_WGSL } from './field-view.js';
  * esbuild-based builder has no `?raw` text loader. The `language=wgsl` hint
  * lets editors syntax-highlight the literal.
  */
+/**
+ * What a texel holds for a voxel whose value is not known (`Volume.known`:
+ * a summed dose, #98): a number far below anything an image or a dose has,
+ * and within a half float's reach. Read between voxels, a sample with any
+ * share of it worth the name is far below every window's low end.
+ */
+export const UNKNOWN_TEXEL = -65000;
+
+/**
+ * Below this, a sample of an overlay is of a voxel that is not known, more
+ * than of any other: the shader draws nothing there. Lower than any stored
+ * value a CT has, its padding included.
+ */
+export const UNKNOWN_TEXEL_BELOW = -40000;
+
 // language=wgsl
 export const SLICE_SHADER = /* wgsl */ `
 struct Params {
@@ -184,6 +199,11 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
     }
     if (mapped && all(ocoord >= vec3<f32>(0.0)) && all(ocoord <= vec3<f32>(1.0))) {
       let oraw = textureSampleLevel(overlayTex, volSamp, ocoord, 0.0).r;
+      // A voxel that is not known (a summed dose, where a dose was not: its
+      // texel is UNKNOWN_TEXEL) is not drawn. Beside one, the sample is far
+      // below any window, and a colour wash has nothing to show for it; the
+      // probe says "not known" over the same voxels (volumeInterpolator).
+      let oknown = oraw > ${UNKNOWN_TEXEL_BELOW}.0;
       let olo = P.overlayWindowCenter - 0.5 - (P.overlayWindowWidth - 1.0) * 0.5;
       var og = clamp((oraw - olo) / max(P.overlayWindowWidth - 1.0, 1.0), 0.0, 1.0);
       // By itself it is the pane's image, and inverted with the display as one.
@@ -212,6 +232,9 @@ fn fs(in : VSOut) -> @location(0) vec4<f32> {
       // is, as the standalone column draws a colour-mapped layer.
       if (alone) {
         amount = 1.0;
+      }
+      if (!oknown) {
+        amount = 0.0;
       }
       rgb = mix(rgb, orgb, amount);
     }

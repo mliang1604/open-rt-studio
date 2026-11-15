@@ -11,14 +11,15 @@ const files = [...syntheticCtSeries(12, 32), syntheticRtStruct(12)];
 // Each file is { name, mimeType, bytes: Uint8Array }.
 ```
 
-| Generator           | Produces                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------- |
-| `syntheticCtSeries` | Axial CT stack, 1 mm voxels. Voxel value is `syntheticCtValue(x, z, size)`.                  |
-| `syntheticMrSeries` | MR stack with the CT's geometry and Frame of Reference, so the two fuse.                     |
-| `syntheticRtStruct` | RTSTRUCT on the CT: stacked circles, described by `syntheticRois`.                           |
-| `syntheticRtDose`   | Multi-frame RTDOSE in Gy inside the CT. Value is `syntheticDoseGy(col, row, frame)`.         |
-| `syntheticPatient`  | One patient, two studies: CT, MR, RTSTRUCT and RTDOSE, then a follow-up CT.                  |
-| `syntheticRtCourse` | The same patient with the objects naming each other: RTSTRUCT, RTPLAN, RTDOSE, registration. |
+| Generator              | Produces                                                                                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `syntheticCtSeries`    | Axial CT stack, 1 mm voxels. Voxel value is `syntheticCtValue(x, z, size)`.                                                                                                                 |
+| `syntheticMrSeries`    | MR stack with the CT's geometry and Frame of Reference, so the two fuse.                                                                                                                    |
+| `syntheticRtStruct`    | RTSTRUCT on the CT: stacked circles, described by `syntheticRois`.                                                                                                                          |
+| `syntheticRtDose`      | Multi-frame RTDOSE in Gy inside the CT. Value is `syntheticDoseGy(col, row, frame)`.                                                                                                        |
+| `syntheticPatient`     | One patient, two studies: CT, MR, RTSTRUCT and RTDOSE, then a follow-up CT.                                                                                                                 |
+| `syntheticRtCourse`    | The same patient with the objects naming each other: RTSTRUCT, RTPLAN, RTDOSE, registration.                                                                                                |
+| `syntheticRetreatment` | One patient treated twice, in two frames of reference a registration connects: each course a CT, a plan and its dose. The doses are `retreatmentFirstDoseAt` and `retreatmentSecondDoseAt`. |
 
 `syntheticThoraxPatient` is the one made for looking at: a geometric thorax
 phantom (body, lungs, heart, spine, a target) with a planning CT in Hounsfield

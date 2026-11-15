@@ -168,6 +168,42 @@ export function sampleAtIndex(
 }
 
 /**
+ * Whether a linear read at a continuous voxel index ({@link sampleAtIndex})
+ * blends only voxels that `known` marks as known (1): the eight about the
+ * place, or fewer at the grid's edge and where the place is level with a
+ * voxel's middle, which leaves the next voxel that way out of the blend.
+ * False where the index is not in the grid. One voxel that is not known
+ * among them, and the read is of nothing.
+ */
+export function knownAtIndex(
+  known: Uint8Array,
+  dims: readonly [number, number, number],
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const [nx, ny, nz] = dims;
+  if (!within(x, nx) || !within(y, ny) || !within(z, nz)) return false;
+  const cx = Math.min(Math.max(x, 0), nx - 1);
+  const cy = Math.min(Math.max(y, 0), ny - 1);
+  const cz = Math.min(Math.max(z, 0), nz - 1);
+  const x0 = Math.floor(cx);
+  const y0 = Math.floor(cy);
+  const z0 = Math.floor(cz);
+  // The next voxel along an axis is in the blend only when the place is past this one's middle.
+  const x1 = cx > x0 ? Math.min(x0 + 1, nx - 1) : x0;
+  const y1 = cy > y0 ? Math.min(y0 + 1, ny - 1) : y0;
+  const z1 = cz > z0 ? Math.min(z0 + 1, nz - 1) : z0;
+  for (const k of [z0, z1]) {
+    for (const j of [y0, y1]) {
+      const at = (k * ny + j) * nx;
+      if (!known[at + x0] || !known[at + x1]) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Resample `source` onto the grid of `reference`, through the registration
  * `through` (null when both are in one frame of reference). With `slices`,
  * only those slices of the reference are worked out, into `into` when it is

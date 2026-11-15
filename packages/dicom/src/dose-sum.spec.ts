@@ -466,6 +466,18 @@ describe('a sum as a dose in memory', () => {
     expect(volume.max).toBeCloseTo(most, 4);
     expect(volume.windowCenter).toBeCloseTo(most / 2 + 0.5, 4);
     expect(volume.windowWidth).toBeCloseTo(most + 1, 4);
+    // Known everywhere, it is a dose like any other: there is nothing to say of where.
+    expect(volume.known).toBeUndefined();
+  });
+
+  it('is not summed again', () => {
+    const made = { units: 'GY', type: 'PHYSICAL', sum: { doses: 2, model: 'physical' } } as const;
+    expect(
+      doseSumProblem([
+        { dose: { units: 'GY', type: 'PHYSICAL' }, weight: 1 },
+        { dose: made, weight: 1 },
+      ]),
+    ).toBe('Dose 2 is itself a sum that was made here: sum the doses it was made of.');
   });
 
   it('takes its least and most from where it is known alone', () => {
@@ -477,6 +489,8 @@ describe('a sum as a dose in memory', () => {
     // The 0 that stands where nothing is known is not its least.
     expect([volume.min, volume.max]).toEqual([5, 9]);
     expect(volume.dose!.frameOffsets).toBe('single');
+    // It says where it is known, for whoever shows or measures it.
+    expect([...volume.known!]).toEqual([1, 0, 1, 1]);
     // Known nowhere: a dose of nothing, with a window all the same.
     const none = beginDoseSum(small);
     addDoseTerm(none, Float32Array.of(OUT, OUT, OUT, OUT), { weight: 1 });

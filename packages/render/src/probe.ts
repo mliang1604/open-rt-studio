@@ -120,7 +120,9 @@ export function sampleVolumeAtPatient(volume: Volume, patient: Vec3): VoxelProbe
  * field, not a picture: the value at a place is not that of the nearest
  * sample. Null when the point lies outside the volume. Within half a voxel
  * of the volume's faces, beyond the outermost middles, the value is that of
- * the outermost voxels: nothing is read from outside the grid.
+ * the outermost voxels: nothing is read from outside the grid. Null too
+ * where the volume says it is not known (`Volume.known`) at any of the
+ * voxels the blend is of: what is not known is not read as 0.
  */
 export function interpolateVolumeAtPatient(volume: Volume, patient: Vec3): number | null {
   return volumeInterpolator(volume)(patient);
@@ -133,7 +135,7 @@ export function interpolateVolumeAtPatient(volume: Volume, patient: Vec3): numbe
 export function volumeInterpolator(volume: Volume): (patient: Vec3) => number | null {
   const m = patientToTexMatrix(volume); // column-major patient → texcoord
   const [dimX, dimY, dimZ] = volume.dims;
-  const data = volume.data;
+  const { data, known } = volume;
   return (patient) => {
     const tx = m[0] * patient[0] + m[4] * patient[1] + m[8] * patient[2] + m[12];
     const ty = m[1] * patient[0] + m[5] * patient[1] + m[9] * patient[2] + m[13];
@@ -152,6 +154,15 @@ export function volumeInterpolator(volume: Volume): (patient: Vec3) => number | 
     const fx = px - x0;
     const fy = py - y0;
     const fz = pz - z0;
+    if (known) {
+      // Each voxel that has a share in the blend must be known.
+      for (const k of fz > 0 ? [z0, z1] : [z0]) {
+        for (const j of fy > 0 ? [y0, y1] : [y0]) {
+          const row = (k * dimY + j) * dimX;
+          if (!known[row + x0] || (fx > 0 && !known[row + x1])) return null;
+        }
+      }
+    }
     const along = (j: number, k: number): number => {
       const row = (k * dimY + j) * dimX;
       return data[row + x0] + (data[row + x1] - data[row + x0]) * fx;

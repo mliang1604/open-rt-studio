@@ -96,13 +96,17 @@ export class DoseController {
   }
 
   /**
-   * The dose that is shown: the first dose laid over the image, or the
-   * image itself when it is one. Null when there is no dose on screen.
+   * The dose that is shown: of the doses laid over the image, the first
+   * that is drawn, or the first when none is; or the image itself when it
+   * is one. Null when there is no dose on screen. With several doses over
+   * an image (#102) it is the one the user has left showing.
    */
   readonly layer = computed<Layer | null>(() => {
     const layers = this.layersCtl.layers();
+    const over = layers.filter((layer) => layer.role === 'overlay' && !!layer.volume.dose);
     return (
-      layers.find((layer) => layer.role === 'overlay' && !!layer.volume.dose) ??
+      over.find((layer) => layer.visible) ??
+      over[0] ??
       layers.find((layer) => !!layer.volume.dose) ??
       null
     );

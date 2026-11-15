@@ -1,0 +1,175 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* A card pinned to the viewport's upper left (../panel-card.css has the card
+   itself). It is for setting a sum up: once the sum is made it is closed, and
+   the sum is looked at behind it. */
+:host {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 620px;
+  max-width: calc(100% - 24px);
+  /* Short of the status line at the viewport's foot. */
+  max-height: calc(100% - 68px);
+  font-size: 12px;
+}
+
+/* Denser than the other cards: it is read, not looked through. */
+:host(.dose-sum-panel) {
+  background: rgba(16, 19, 26, 0.94);
+}
+
+.info-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.note,
+.said,
+.problem,
+p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.note,
+.said {
+  color: var(--muted);
+}
+
+/* What stands in the way is said in the text's own colour, with a mark: not by colour alone. */
+.problem::before {
+  content: '⚠ ';
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: 4px 8px 4px 0;
+  text-align: left;
+  font-weight: normal;
+  vertical-align: top;
+}
+
+thead th {
+  color: var(--muted);
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+
+tbody th {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+tbody tr + tr > * {
+  border-top: 1px solid var(--glass-border);
+}
+
+.name {
+  overflow-wrap: anywhere;
+}
+
+tr.out .name {
+  color: var(--muted);
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+input[type='number'] {
+  width: 64px;
+  padding: 2px 5px;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  padding: 0;
+}
+
+select {
+  max-width: 100%;
+  background: var(--glass-bg);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+legend {
+  padding: 0 4px;
+  color: var(--muted);
+}
+
+label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.primary {
+  flex: none;
+  border-color: var(--accent);
+}
+
+.made {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+h3 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+ul {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

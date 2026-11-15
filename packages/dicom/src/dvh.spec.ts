@@ -389,6 +389,26 @@ describe('where the dose is not known', () => {
     expect(Math.abs(volumeAtDose(found, 25)! - 5 / 11)).toBeLessThan(0.01);
   });
 
+  it('is where a dose that was made here says it is not known, though it holds 0 there', () => {
+    // A dose of x on the image's own grid, known only from x = 20 on: before that it holds 0.
+    const dose = doseOf(IMAGE, (p) => (p[0] >= 20 ? p[0] : 0));
+    const known = new Uint8Array(dose.data.length);
+    const [nx] = IMAGE.dims;
+    known.forEach((_, voxel) => (known[voxel] = voxel % nx >= 20 ? 1 : 0));
+    const box = roiOf([30, 31].map((z) => rectangle(10, 12, 30, 28, z)));
+    const masked = doseVolumeHistogram(IMAGE, box, { ...dose, known }, null);
+    // Of the box's 20 mm, from 10 to 30, the dose is read from 20 on: where
+    // every voxel a read blends is known.
+    expect(Math.abs(dvhKnownShare(masked) - 10 / 20)).toBeLessThan(0.01);
+    expect(masked.doses[0]).toBeGreaterThanOrEqual(20);
+    expect(Math.abs(masked.mean! - 25)).toBeLessThan(0.05);
+    // Without the mask the zeros would be taken for dose: that is what it is for.
+    const unmasked = doseVolumeHistogram(IMAGE, box, dose, null);
+    expect(dvhKnownShare(unmasked)).toBe(1);
+    expect(unmasked.doses[0]).toBe(0);
+    expect(unmasked.mean!).toBeLessThan(15);
+  });
+
   it('is everywhere, for a structure the dose does not reach', () => {
     const far = doseOf(gridOf([4, 4, 4], [2, 2, 2], [200, 200, 200]), () => 5);
     const found = doseVolumeHistogram(IMAGE, roiOf([rectangle(10, 10, 20, 20, 30)]), far, null);

@@ -65,6 +65,9 @@ import { FieldArrowsLayer } from './field-view/field-arrows-layer';
 import { DoseController } from './dose-display/dose-controller';
 import { DoseDisplayStore } from './dose-display/dose-display-store';
 import { DosePanel } from './dose-display/dose-panel';
+import { AlphaBetaStore } from './alpha-beta/alpha-beta-store';
+import { DoseSumController } from './dose-sum/dose-sum-controller';
+import { DoseSumPanel } from './dose-sum/dose-sum-panel';
 import { DvhController } from './dvh/dvh-controller';
 import { DvhPanel } from './dvh/dvh-panel';
 import { IsodoseLayer } from './dose-display/isodose-layer';
@@ -160,6 +163,7 @@ const MAX_ZOOM = 20;
     FieldArrowsLayer,
     DosePanel,
     DvhPanel,
+    DoseSumPanel,
     IsodoseLayer,
   ],
   providers: [
@@ -191,6 +195,8 @@ const MAX_ZOOM = 20;
     DoseDisplayStore,
     DoseController,
     DvhController,
+    AlphaBetaStore,
+    DoseSumController,
     CprStore,
     CprController,
   ],
@@ -244,6 +250,7 @@ export class Viewer {
   protected readonly layersCtl = inject(LayersController);
   protected readonly doseCtl = inject(DoseController);
   protected readonly dvhCtl = inject(DvhController);
+  protected readonly doseSum = inject(DoseSumController);
   /** Owns the toolbar / keyboard view actions (layout, fit, reset, cine, capture); wired in the constructor. */
   protected readonly toolbar = inject(ToolbarController);
   /** Owns the read-only status / series / metadata derivations; wired in the constructor. */
@@ -739,6 +746,12 @@ export class Viewer {
       device: () => this.render.device(),
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
       now: () => new Date(),
+    });
+    this.doseSum.init({
+      series: (uid) => this.loadedSeries(uid),
+      baseSeries: () => this.baseSeries(),
+      device: () => this.render.device(),
+      notify: (message, problem) => this.loadCtl.showNotice(message, problem),
     });
     this.propagation.init({
       series: (uid) => this.loadedSeries(uid),

@@ -96,6 +96,11 @@ export interface AttachedObject {
   readonly by: AttachedBy;
   /** A plan's fractions and prescriptions, where they are known. */
   readonly plan?: PlanSummary;
+  /**
+   * For a dose that names the plans it was computed for: their SOP Instance
+   * UIDs, held or not. Left out for anything else.
+   */
+  readonly plans?: readonly string[];
 }
 
 /** An object that belongs to no image series held: listed with the study it is filed in. */
@@ -106,6 +111,8 @@ export interface LooseObject {
   readonly description: string | null;
   /** A plan's fractions and prescriptions, where they are known. */
   readonly plan?: PlanSummary;
+  /** For a dose that names the plans it was computed for: their SOP Instance UIDs. */
+  readonly plans?: readonly string[];
 }
 
 /** A registration and the image series of the two frames it connects. */
@@ -159,6 +166,11 @@ export function relateRtObjects(
           ),
         }
       : {};
+  /** The plans a dose names, for whoever needs the fractions it was given in (#102). */
+  const plansOf = (object: RtObjectFacts): { plans?: readonly string[] } => {
+    const plans = object.kind === 'dose' ? [...new Set(targets(object, 'dose.plan'))] : [];
+    return plans.length > 0 ? { plans } : {};
+  };
   const held = new Set(images.map((one) => one.uid));
   const inFrame = new Map<string, string[]>();
   for (const image of images) {
@@ -186,6 +198,7 @@ export function relateRtObjects(
           description: object.description,
           by,
           ...summaryOf(object),
+          ...plansOf(object),
         },
       ]);
     }
@@ -262,6 +275,7 @@ export function relateRtObjects(
         seriesUid: object.seriesUid,
         description: object.description,
         ...summaryOf(object),
+        ...plansOf(object),
       },
     ]);
   }

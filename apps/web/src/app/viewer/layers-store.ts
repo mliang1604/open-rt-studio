@@ -7,6 +7,8 @@ import {
   clamp,
   clamp01,
   applyLayerOverrides,
+  baseLayer,
+  doseSumName,
   layerFrames,
   manualPlacement,
   matrixKind,
@@ -205,7 +207,10 @@ export function layerLegend(
     const choices = hand ? undefined : layer.placementChoices;
     return {
       id: layer.id,
-      label: layer.modality ?? 'Image',
+      // A dose that was made here goes by what it is (#99): `EQD2 (α/β 3 Gy)`.
+      label: layer.volume.dose?.sum
+        ? doseSumName(layer.volume.dose.sum)
+        : (layer.modality ?? 'Image'),
       said: layer.volume.dose ? doseSaid(layer.volume.dose) : (layer.modality ?? 'Image'),
       roleBadge: layer.role === 'base' ? 'BASE' : 'OVERLAY',
       isBase: layer.role === 'base',
@@ -226,6 +231,56 @@ export function layerLegend(
             : 'off'
           : null,
     };
+  });
+}
+
+/**
+ * A layer that was made here of the layers on screen (a summed dose, #102),
+ * with what it was made of. It is a layer only while that is what is on
+ * screen: {@link madeStill}.
+ */
+export interface MadeLayer {
+  readonly layer: Layer;
+  /** The base image it was made on. It is shown over no other. */
+  readonly base: Volume;
+  /** The layers it was made of, each as it was placed then. */
+  readonly of: readonly MadeOfLayer[];
+}
+
+export interface MadeOfLayer {
+  readonly id: string;
+  readonly volume: Volume;
+  readonly placement: LayerPlacement | undefined;
+}
+
+/**
+ * Whether two placements put a layer in the same place: the same matrix,
+ * through the same field or none. (A placement made by hand is a new object
+ * each time the layers are composed, so the objects are not compared.)
+ */
+export function samePlacement(
+  a: LayerPlacement | undefined,
+  b: LayerPlacement | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.field?.grid === b.field?.grid &&
+    a.baseToLayer.length === b.baseToLayer.length &&
+    a.baseToLayer.every((value, index) => value === b.baseToLayer[index])
+  );
+}
+
+/**
+ * Whether what a layer was made of is still what is on screen: the same
+ * base image, and each layer it was made of still there and placed as it
+ * was. Once it is not, the layer is of something else, and is not shown.
+ */
+export function madeStill(made: MadeLayer, layers: readonly Layer[]): boolean {
+  if (baseLayer(layers)?.volume !== made.base) return false;
+  return made.of.every((one) => {
+    const now = layers.find((layer) => layer.id === one.id);
+    return !!now && now.volume === one.volume && samePlacement(now.placement, one.placement);
   });
 }
 
@@ -297,6 +352,38 @@ export class LayersStore {
    * alone, to see what the field adds.
    */
   private readonly _rigidOnly = signal<ReadonlySet<string>>(new Set());
+
+  /**
+   * The layer that was made here of the layers on screen, if any: a summed
+   * dose (#102). There is one at a time, and it is a layer only while what
+   * it was made of is what is on screen.
+   */
+  private readonly _made = signal<MadeLayer | null>(null);
+  readonly made = this._made.asReadonly();
+
+  /** Take a layer that was made of the layers on screen, in place of any before it; null for none. */
+  setMade(made: MadeLayer | null): void {
+    this._made.set(made);
+  }
+
+  /**
+   * Show one overlay and hide every other, so that it is the one that is
+   * drawn. Gives back what was hidden before, for {@link setHidden} to put back.
+   */
+  showOnly(id: string, layers: readonly Layer[]): ReadonlySet<string> {
+    const before = this._hidden();
+    this._hidden.set(
+      new Set(
+        layers.filter((layer) => layer.role === 'overlay' && layer.id !== id).map((one) => one.id),
+      ),
+    );
+    return before;
+  }
+
+  /** Hide these layers and show every other. */
+  setHidden(ids: ReadonlySet<string>): void {
+    this._hidden.set(new Set(ids));
+  }
 
   /** Leave a layer's deformation field out, or put it back. */
   toggleDeformation(id: string): void {
@@ -382,15 +469,20 @@ export class LayersStore {
         byHand.set(layer.id, manualPlacement(frames.baseFrame, frames.layerFrame, matrix));
       }
     }
-    return applyLayerOverrides(
+    const [hidden, opacities, displays] = [this._hidden(), this._opacities(), this._displays()];
+    const applied = applyLayerOverrides(
       rawLayers,
-      this._hidden(),
-      this._opacities(),
-      this._displays(),
+      hidden,
+      opacities,
+      displays,
       this._placements(),
       byHand,
       this._rigidOnly(),
     );
+    // A layer that was made of these is one of them, last, while it is still of them.
+    const made = this._made();
+    if (!made || !madeStill(made, applied)) return applied;
+    return [...applied, ...applyLayerOverrides([made.layer], hidden, opacities, displays)];
   }
 
   /**
@@ -563,6 +655,7 @@ export class LayersStore {
    * series.
    */
   reset(): void {
+    this._made.set(null);
     this._hidden.set(new Set());
     this._opacities.set(new Map());
     this._displays.set(new Map());

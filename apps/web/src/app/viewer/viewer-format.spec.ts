@@ -138,6 +138,8 @@ describe('a dose beside its value (#95)', () => {
     expect(formatDose(0.456789, { units: 'RELATIVE' })).toBe('0.4568');
     expect(formatDose(98.76543, { units: 'RELATIVE' })).toBe('98.77');
     expect(formatDose(100, { units: 'RELATIVE' })).toBe('100');
+    // A sum that is not known at the place has no number there.
+    expect(formatDose(Number.NaN, { units: 'GY' })).toBe('not known here');
   });
 });
 

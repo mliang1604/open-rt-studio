@@ -1,0 +1,260 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<header class="info-header">
+  <strong>Sum doses</strong>
+  <button type="button" class="info-close" aria-label="Close" (click)="ctl.close()">✕</button>
+</header>
+
+<div class="info-body" #body>
+  @if (result(); as made) {
+    <section class="made" aria-label="The sum on screen" data-sum-made>
+      <h3>
+        On screen: <span data-sum-made-name>{{ made.name }}</span>
+      </h3>
+      <ul>
+        @for (dose of made.doses; track $index) {
+          <li data-sum-made-dose>
+            <strong>{{ dose.name }}</strong>: {{ dose.said }}
+          </li>
+        }
+      </ul>
+      @if (made.alphaBeta; as ratios) {
+        <p data-sum-made-alpha-beta>{{ ratios }}</p>
+      }
+      <p data-sum-made-known>{{ made.known }}</p>
+      <p class="note">
+        It is shown in place of the other layers over the image, with its own isodose lines, probe
+        and histograms. It is of the doses as they were placed when it was made, and is let go of
+        when that changes. Not for clinical use.
+      </p>
+      <button type="button" data-sum-discard (click)="ctl.discard()">Discard the sum</button>
+    </section>
+  }
+
+  <p class="note" data-sum-on>
+    On <strong>{{ ctl.imageName() }}</strong>, the image on screen: the sum is made on its grid,
+    each dose read where its registration puts it. Add doses to the image from the timeline.
+  </p>
+
+  @if (ctl.rows().length > 0) {
+    <table data-sum-doses>
+      <thead>
+        <tr>
+          <th scope="col"><span class="hidden">Sum it</span></th>
+          <th scope="col">Dose</th>
+          <th scope="col" title="In how many fractions the dose was given: needed to convert it">
+            Fractions
+          </th>
+          <th scope="col" title="The dose is multiplied by this before it is added">Weight</th>
+          <th scope="col" title="What the dose is taken to be beyond its own grid">
+            Beyond its grid
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of ctl.rows(); track row.id) {
+          <tr [class.out]="!row.include" data-sum-dose>
+            <td>
+              <input
+                type="checkbox"
+                [checked]="row.include"
+                [disabled]="row.problem !== null"
+                [attr.aria-label]="'Sum ' + row.name"
+                data-sum-include
+                (change)="onInclude(row.id, $event)"
+              />
+            </td>
+            <th scope="row">
+              <span class="name" data-sum-name>{{ row.name }}</span>
+              <span class="said" data-sum-type>
+                Dose Summation Type {{ row.summationType ?? 'not given' }}
+              </span>
+              <span class="said" data-sum-placed>{{ row.placedBy }}</span>
+              @if (row.choices; as choices) {
+                <select
+                  [attr.aria-label]="'The registration that places ' + row.name"
+                  data-sum-placement
+                  (change)="onPlacement(row.id, $event)"
+                >
+                  <option value="-1" [selected]="row.chosen === null" disabled>
+                    Choose a registration…
+                  </option>
+                  @for (choice of choices; track $index) {
+                    <option [value]="$index" [selected]="row.chosen === $index">
+                      {{ choice }}
+                    </option>
+                  }
+                </select>
+              }
+              @if (row.problem; as problem) {
+                <span class="problem" data-sum-problem>{{ problem }}</span>
+              }
+            </th>
+            <td>
+              <div class="cell">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  [value]="row.fractions ?? ''"
+                  [disabled]="row.problem !== null"
+                  placeholder="—"
+                  [attr.aria-label]="'Fractions of ' + row.name"
+                  [title]="row.fractionsFrom ?? 'Not said by the data: type it'"
+                  data-sum-fractions
+                  (change)="onFractions(row.id, row.fractions, $event)"
+                />
+                @if (row.fractionsFrom) {
+                  <span class="said" data-sum-fractions-from>by its plan</span>
+                }
+              </div>
+            </td>
+            <td>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                inputmode="decimal"
+                [value]="row.weight"
+                [disabled]="row.problem !== null"
+                [attr.aria-label]="'Weight of ' + row.name"
+                data-sum-weight
+                (change)="onWeight(row.id, row.weight, $event)"
+              />
+            </td>
+            <td>
+              <select
+                [disabled]="row.problem !== null"
+                [attr.aria-label]="'What ' + row.name + ' is beyond its grid'"
+                data-sum-beyond
+                (change)="onBeyond(row.id, $event)"
+              >
+                <option value="unknown" [selected]="row.beyond === 'unknown'">Not known</option>
+                <option value="nothing" [selected]="row.beyond === 'nothing'">No dose</option>
+              </select>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+    <p class="note">
+      Each dose is taken to be a whole course’s, given in equal fractions. Whether it is, and
+      whether the doses belong together, is yours to say: check each dose’s summation type.
+    </p>
+  }
+
+  <fieldset data-sum-kind>
+    <legend>Sum them</legend>
+    <label>
+      <input
+        type="radio"
+        name="sum-kind"
+        [checked]="ctl.kind() === 'physical'"
+        data-sum-kind-physical
+        (change)="onKind('physical')"
+      />
+      as they are (physical dose)
+    </label>
+    <label>
+      <input
+        type="radio"
+        name="sum-kind"
+        [checked]="ctl.kind() === 'eqd'"
+        data-sum-kind-eqd
+        (change)="onKind('eqd')"
+      />
+      as EQD in fractions of
+      <input
+        type="number"
+        min="0"
+        step="any"
+        inputmode="decimal"
+        [value]="ctl.fractionGy()"
+        [disabled]="ctl.kind() !== 'eqd'"
+        aria-label="The fraction size of the EQD, in gray"
+        data-sum-fraction-gy
+        (change)="onFractionGy($event)"
+      />
+      Gy
+    </label>
+    <label>
+      <input
+        type="radio"
+        name="sum-kind"
+        [checked]="ctl.kind() === 'bed'"
+        data-sum-kind-bed
+        (change)="onKind('bed')"
+      />
+      as BED
+    </label>
+  </fieldset>
+
+  @if (ctl.converts()) {
+    <fieldset data-sum-alpha-beta>
+      <legend>α/β to convert with</legend>
+      <p class="note">
+        Each dose is converted voxel by voxel by the linear-quadratic model before it is added. The
+        model has nothing for the time between courses.
+      </p>
+      <label>
+        <input
+          type="radio"
+          name="sum-alpha-beta"
+          [checked]="ctl.alphaBetaMode() === 'one'"
+          data-sum-alpha-beta-one
+          (change)="onAlphaBetaMode('one')"
+        />
+        one value everywhere
+        <input
+          type="number"
+          min="0"
+          step="any"
+          inputmode="decimal"
+          [value]="ctl.alphaBetaGy() ?? ''"
+          [disabled]="ctl.alphaBetaMode() !== 'one'"
+          placeholder="—"
+          aria-label="The α/β for every voxel, in gray"
+          data-sum-alpha-beta-gy
+          (change)="onAlphaBeta($event)"
+        />
+        Gy
+      </label>
+      <label>
+        <input
+          type="radio"
+          name="sum-alpha-beta"
+          [checked]="ctl.alphaBetaMode() === 'structures'"
+          data-sum-alpha-beta-structures
+          (change)="onAlphaBetaMode('structures')"
+        />
+        by structure, of the structures drawn on this image
+      </label>
+      @if (ctl.alphaBetaMode() === 'structures') {
+        <app-alpha-beta-editor />
+      }
+    </fieldset>
+  }
+
+  <div class="actions">
+    <button
+      type="button"
+      class="primary"
+      [disabled]="ctl.problem() !== null || ctl.busy()"
+      data-sum-make
+      (click)="ctl.sum()"
+    >
+      {{ ctl.made() ? 'Sum again' : 'Sum' }}
+    </button>
+    @if (ctl.busy()) {
+      <span role="status" data-sum-busy>Summing…</span>
+    } @else if (ctl.problem(); as problem) {
+      <span class="problem" data-sum-cannot>{{ problem }}</span>
+    }
+  </div>
+  @if (ctl.failed(); as why) {
+    <p class="problem" role="alert" data-sum-failed>{{ why }}</p>
+  }
+</div>

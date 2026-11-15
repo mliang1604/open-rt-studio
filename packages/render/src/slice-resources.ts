@@ -11,6 +11,7 @@ import {
 } from '@open-rt-studio/dicom';
 import { JACOBIAN_CHANNELS, jacobianTexels } from './field-view.js';
 import type { PaneRect } from './layout.js';
+import { UNKNOWN_TEXEL } from './slice-shader.js';
 
 /**
  * GPU resource construction for {@link SliceRenderer}: uploading a volume to a 3D
@@ -20,6 +21,22 @@ import type { PaneRect } from './layout.js';
  */
 
 const BYTES_PER_HALF = 2;
+
+/**
+ * A volume's values as they go into its texture: its own, but for the
+ * voxels it says are not known, which get {@link UNKNOWN_TEXEL} in place of
+ * the 0 they hold. So the picture, like the probe, does not show what is
+ * not known as a dose of nothing fading in from the dose beside it.
+ */
+export function texelsOf(volume: Pick<Volume, 'data' | 'known'>): Float32Array {
+  const { data, known } = volume;
+  if (!known) return data;
+  const texels = Float32Array.from(data);
+  for (let voxel = 0; voxel < texels.length; voxel++) {
+    if (!known[voxel]) texels[voxel] = UNKNOWN_TEXEL;
+  }
+  return texels;
+}
 
 /** Upload a {@link Volume} to a fresh `r16float` 3D texture, with a size guard. */
 export function createVolumeTexture(device: GPUDevice, volume: Volume, label: string): GPUTexture {
@@ -38,7 +55,7 @@ export function createVolumeTexture(device: GPUDevice, volume: Volume, label: st
   });
   device.queue.writeTexture(
     { texture },
-    floatsToHalf(volume.data),
+    floatsToHalf(texelsOf(volume)),
     { bytesPerRow: width * BYTES_PER_HALF, rowsPerImage: height },
     { width, height, depthOrArrayLayers: depth },
   );
