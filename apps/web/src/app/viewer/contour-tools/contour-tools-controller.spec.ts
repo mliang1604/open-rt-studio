@@ -186,6 +186,7 @@ describe('ContourToolsController (#106)', () => {
         'threshold',
         'cleanup',
         'margin',
+        'mirror',
         'sample',
       ]);
       tools.toggle('sample');

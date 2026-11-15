@@ -344,6 +344,18 @@ its own.
   is grown can be kept out of one structure; outside the grid is not the
   structure's, so it shrinks from the grid's edge. A margin reaching more
   than 250 000 voxels is refused. One click, one edit, like a cleanup.
+- **Mirror** (#113, labs) copies the structure the brush paints into
+  across a sagittal plane into a new structure, named after it ("…
+  mirrored"), in the set being edited (`label-mirror.ts`). The plane is
+  through the middle of the image at first, at right angles to the
+  patient's left–right axis; it can be moved along that axis and turned
+  about the superior axis, for a patient who does not lie straight. Each
+  voxel of the copy is found from the original (its middle reflected falls
+  in a voxel of the structure), so a turned plane leaves no gaps. Where
+  the copy meets the original the original keeps its voxels. Nothing of
+  the image beyond the grid is copied, and when nothing is left no
+  structure is made. Undo takes the copy's voxels away and leaves its
+  structure, empty, to delete.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes
