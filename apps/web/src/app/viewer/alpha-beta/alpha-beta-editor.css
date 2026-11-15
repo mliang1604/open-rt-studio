@@ -1,0 +1,149 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.note,
+.none,
+.problem {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.problem {
+  color: var(--text);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+caption {
+  padding-bottom: 4px;
+  color: var(--muted);
+  text-align: left;
+}
+
+th,
+td {
+  padding: 2px 6px 2px 0;
+  text-align: left;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+thead th {
+  color: var(--muted);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.name,
+.match {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.type,
+.from,
+.by,
+.unit,
+.place {
+  color: var(--muted);
+}
+
+/* A structure with no value takes no part: its line is quieter, and says so in words. */
+tr.out .name {
+  color: var(--muted);
+}
+
+.order {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.place {
+  width: 2ch;
+  text-align: right;
+}
+
+button {
+  padding: 2px 8px;
+}
+
+.back {
+  margin-left: 4px;
+  padding: 0 6px;
+}
+
+input[type='number'] {
+  width: 64px;
+  padding: 2px 5px;
+}
+
+input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 5px;
+}
+
+select {
+  background: var(--glass-bg);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+summary {
+  cursor: pointer;
+}
+
+details > * + * {
+  margin-top: 6px;
+}
+
+ul {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.by {
+  flex: none;
+  width: 38px;
+}
+
+.match {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
