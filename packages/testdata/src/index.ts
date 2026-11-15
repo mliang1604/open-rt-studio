@@ -72,6 +72,9 @@ export {
   type RegisteredPair,
 } from './registered-pair.js';
 export {
+  SYNTHETIC_PLAN_FRACTIONS,
+  SYNTHETIC_PLAN_PRESCRIPTION_GY,
+  SYNTHETIC_PLAN_TARGET_ROI,
   SYNTHETIC_RT_COURSE,
   syntheticRegistration,
   syntheticRtCourse,

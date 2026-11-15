@@ -43,6 +43,17 @@ li {
   white-space: nowrap;
 }
 
+/* A plan's fractions and dose: the name gives way to them, being in the title too. */
+.rt-more {
+  flex: 0 0 auto;
+  max-width: 75%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

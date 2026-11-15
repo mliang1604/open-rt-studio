@@ -30,6 +30,20 @@
     </section>
   }
 
+  @for (group of plans(); track $index) {
+    <section class="info-group" data-info-plan>
+      <h3>{{ group.title }}</h3>
+      <dl>
+        @for (field of group.fields; track field.label) {
+          <div class="info-row">
+            <dt>{{ field.label }}</dt>
+            <dd>{{ field.value }}</dd>
+          </div>
+        }
+      </dl>
+    </section>
+  }
+
   <section class="info-group">
     <h3>Raw tags</h3>
     <input

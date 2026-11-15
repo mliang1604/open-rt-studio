@@ -5,6 +5,8 @@
 import { createHash } from 'node:crypto';
 
 import {
+  SYNTHETIC_PLAN_FRACTIONS,
+  SYNTHETIC_PLAN_PRESCRIPTION_GY,
   SYNTHETIC_RT_COURSE as COURSE,
   SYNTHETIC_STUDY,
   syntheticCtSeries,
@@ -283,6 +285,29 @@ describe('browse', () => {
     const stored = await made.json<{ frames: number | null }>(`/instances/${COURSE.dose}`);
     expectSchema(stored, 'InstanceDetail');
     expect(stored.frames).toBe(dose.images);
+    expect(stored).toMatchObject({ plan: null });
+    // A plan says its fractions and its prescription with what it refers to (#97).
+    const plan = await made.json<{ plan: unknown; references: unknown[] }>(
+      `/instances/${COURSE.plan}`,
+    );
+    expectSchema(plan, 'InstanceDetail');
+    expect(plan.references).toEqual([
+      { relation: 'plan.structure-set', targetUid: COURSE.structureSet },
+    ]);
+    expect(plan.plan).toMatchObject({
+      label: 'Synthetic',
+      fractionGroups: [
+        {
+          number: 1,
+          fractionsPlanned: SYNTHETIC_PLAN_FRACTIONS,
+          beams: 1,
+          beamDoseGy: SYNTHETIC_PLAN_PRESCRIPTION_GY / SYNTHETIC_PLAN_FRACTIONS,
+        },
+      ],
+      doseReferences: [
+        { type: 'TARGET', roiNumber: 2, prescriptionGy: SYNTHETIC_PLAN_PRESCRIPTION_GY },
+      ],
+    });
     expect(ct).toMatchObject({ images: 3 });
 
     const instances = await made.json<PageOf<{ number: number; sopInstanceUid: string }>>(

@@ -9,6 +9,9 @@ import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 
 import {
+  SYNTHETIC_PLAN_FRACTIONS,
+  SYNTHETIC_PLAN_PRESCRIPTION_GY,
+  SYNTHETIC_PLAN_TARGET_ROI,
   SYNTHETIC_RT_COURSE as COURSE,
   SYNTHETIC_STUDY,
   syntheticCtSeries,
@@ -132,6 +135,52 @@ describe('ingest', () => {
     // An image file says nothing of frames, and is one image.
     const ct = (await index.getSeries(COURSE.ct))!;
     expect(ct).toMatchObject({ instances: COURSE.ctSlices, images: COURSE.ctSlices });
+  });
+
+  it('files with a plan what it says of its fractions and prescription, and with nothing else (#97)', async () => {
+    const { index, ingest } = await pacs();
+    for (const file of COURSE_FILES) await ingest.ingest(file.bytes);
+    expect(await index.planOf(COURSE.plan)).toMatchObject({
+      label: 'Synthetic',
+      fractionGroups: [{ number: 1, fractionsPlanned: SYNTHETIC_PLAN_FRACTIONS }],
+      doseReferences: [
+        {
+          type: 'TARGET',
+          roiNumber: SYNTHETIC_PLAN_TARGET_ROI,
+          prescriptionGy: SYNTHETIC_PLAN_PRESCRIPTION_GY,
+        },
+      ],
+    });
+    expect(await index.planOf(COURSE.dose)).toBeNull();
+    expect(await index.planOf(COURSE.structureSet)).toBeNull();
+    expect(await index.planOf('1.2.3.4.5')).toBeNull();
+  });
+
+  it('learns what a plan says, of one filed before that was kept, when the file comes again', async () => {
+    const { store, index, ingest } = await pacs();
+    const file = COURSE_FILES.find((one) => uidOf(one) === COURSE.plan)!;
+    const header = readInstanceHeader(file.bytes);
+    if (!header.ok) throw new Error('the plan has no header');
+    // As an earlier version left it: the bytes stored, the entry without the plan.
+    await store.put(uidOf(file), file.bytes);
+    const entry = indexEntry(header.header, {
+      size: file.bytes.byteLength,
+      sha256: sha256(file.bytes),
+    });
+    await index.putInstance({ ...entry, plan: null });
+    expect(await index.planOf(COURSE.plan)).toBeNull();
+
+    const put = vi.spyOn(store, 'put');
+    expect(await ingest.ingest(file.bytes)).toEqual({
+      outcome: 'unchanged',
+      sopInstanceUid: uidOf(file),
+    });
+    expect(put).not.toHaveBeenCalled(); // nothing is written to the store
+    expect(await index.planOf(COURSE.plan)).toEqual(header.header.plan);
+    // And the index is not written again for a plan it has.
+    const written = vi.spyOn(index, 'putInstance');
+    await ingest.ingest(file.bytes);
+    expect(written).not.toHaveBeenCalled();
   });
 
   it('learns the frames of an instance that was filed before they were kept, when the file comes again', async () => {

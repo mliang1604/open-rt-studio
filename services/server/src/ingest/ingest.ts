@@ -114,6 +114,7 @@ export function indexEntry(
       sha256: stored.sha256,
     },
     references: header.references,
+    plan: header.plan,
   };
 }
 
@@ -184,7 +185,11 @@ export function createIngest({ store, index, logger = SILENT_LOGGER }: IngestPar
       if (indexed?.sha256 === sha256) {
         // The same bytes, read by a newer reader: an index made before the
         // number of frames was kept learns it when the file comes again.
-        if (indexed.frames !== entry.instance.frames) await index.putInstance(entry);
+        // So does one made before a plan's fractions and prescriptions were.
+        const learnt =
+          indexed.frames !== entry.instance.frames ||
+          (!!entry.plan && (await index.planOf(uid)) === null);
+        if (learnt) await index.putInstance(entry);
         return { outcome: 'unchanged', sopInstanceUid: uid };
       }
       // The bytes are here and the index does not have them: what a crash

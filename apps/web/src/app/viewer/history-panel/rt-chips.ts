@@ -3,7 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import type { AttachedObject, LooseObject, RtObjectKind } from '@open-rt-studio/dicom';
+import {
+  planBrief,
+  planSummaryText,
+  type AttachedObject,
+  type LooseObject,
+  type RtObjectKind,
+} from '@open-rt-studio/dicom';
 
 /** A kind of object in two letters, as its files are commonly prefixed. */
 export const RT_CODE: Readonly<Record<RtObjectKind, string>> = {
@@ -42,17 +48,22 @@ export function rtWhy(object: AttachedObject | LooseObject): string {
   }
 }
 
-/** What an object is and why it is shown where it is: `Plan “Prostate”. It names …`. */
+/**
+ * What an object is and why it is shown where it is: `Plan “Prostate”. It
+ * names …`. A plan says its fractions and its prescription between the two
+ * (#97): `Plan “Prostate”. 30 fractions · 60 Gy to “PTV”. It names …`.
+ */
 export function rtTitle(object: AttachedObject | LooseObject): string {
   const name = object.description?.trim();
-  return `${RT_NAME[object.kind]}${name ? ` “${name}”` : ''}. ${rtWhy(object)}`;
+  const plan = object.plan ? ` ${planSummaryText(object.plan)}.` : '';
+  return `${RT_NAME[object.kind]}${name ? ` “${name}”` : ''}.${plan} ${rtWhy(object)}`;
 }
 
 /**
  * The radiotherapy objects that belong with something on the timeline, as a
  * row of small chips (#38): the structure sets, plans and doses of an image
  * series, or what is filed in a study and belongs to no series there. Each
- * says what it is and why it is here.
+ * says what it is and why it is here, and a plan its fractions and dose.
  */
 @Component({
   selector: 'app-rt-chips',
@@ -63,6 +74,9 @@ export function rtTitle(object: AttachedObject | LooseObject): string {
         <li [attr.data-rt-kind]="item.object.kind" [title]="item.title">
           <span class="rt-code" aria-hidden="true">{{ item.code }}</span>
           <span class="rt-text">{{ item.text }}</span>
+          @if (item.more) {
+            <span class="rt-more" aria-hidden="true">{{ item.more }}</span>
+          }
           <span class="visually-hidden">{{ item.title }}</span>
         </li>
       }
@@ -80,6 +94,8 @@ export class RtChips {
       object,
       code: RT_CODE[object.kind],
       text: object.description?.trim() || RT_NAME[object.kind],
+      // A plan's fractions and prescribed dose, where it says them.
+      more: object.plan ? planBrief(object.plan) : '',
       title: rtTitle(object),
     })),
   );

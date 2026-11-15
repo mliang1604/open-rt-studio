@@ -638,6 +638,12 @@ without asking for each.
   the viewer shows for the same file opened from disk. An instance filed
   before version 3 of the schema has no frame count and counts as one image;
   ingesting the same file again fills it in, and leaves the store alone.
+- **A plan says its fractions and prescriptions.** For an RT Plan the index
+  keeps what the file says of its fraction groups and dose references
+  (`instance.plan`, from version 5 of the schema), and `/instances/{uid}`
+  sends it as `plan` with what the instance refers to; `null` for anything
+  else. A plan filed before version 5 has none until its file is ingested
+  again.
 - The index holds patient names and IDs. That is its purpose; protect the
   file as you would the data. Its errors and log lines carry none of them.
 

@@ -5,6 +5,8 @@
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 
+import { readPlanFacts, type PlanFacts } from './rt-plan.js';
+
 /**
  * How one object refers to another; the target is a UID of the kind after
  * the dot.
@@ -77,6 +79,11 @@ export interface InstanceHeader {
   readonly frames: number | null;
   /** What the object refers to, each reference once. Empty for an image. */
   readonly references: readonly InstanceReference[];
+  /**
+   * For an RT Plan, what it says of its fractions and prescriptions (#97);
+   * null for anything else.
+   */
+  readonly plan: PlanFacts | null;
 }
 
 /**
@@ -199,9 +206,11 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
   }
 
   const references = new References();
+  let plan: PlanFacts | null = null;
   if (sopClassUid === RT_STRUCTURE_SET) {
     structureSetReferences(dataSet, references);
   } else if (RT_PLANS.has(sopClassUid)) {
+    plan = readPlanFacts(dataSet);
     for (const target of referencedInstances(dataSet, 'x300c0060')) {
       references.add('plan.structure-set', target);
     }
@@ -246,6 +255,7 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
       instanceNumber: integer(dataSet, 'x00200013'),
       frames: count(dataSet, 'x00280008'),
       references: references.list,
+      plan,
     },
   };
 }

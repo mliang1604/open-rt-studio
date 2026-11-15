@@ -4,6 +4,8 @@
 
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 
+import type { PlanFacts } from '@open-rt-studio/dicom';
+
 import { SILENT_LOGGER, type Logger } from '../logger.js';
 import { isUid } from '../uid.js';
 import { migrate } from './migrations.js';
@@ -219,6 +221,12 @@ const toPatient = (row: Row): PatientRecord => ({
   studies: Number(row['study_count']),
 });
 
+/**
+ * How long what is kept of a plan may be, as JSON. What the header reader
+ * gives of a plan is well within it; anything longer did not come from it.
+ */
+export const PLAN_CHARACTERS_AT_MOST = 65_536;
+
 /** Say what is wrong with an entry before any of it reaches the database. */
 function check(entry: InstanceEntry): void {
   const wrong = (what: string): never => {
@@ -231,6 +239,9 @@ function check(entry: InstanceEntry): void {
   const frames = entry.instance.frames;
   if (frames !== null && !(Number.isInteger(frames) && frames >= 1)) {
     wrong('number of frames is not a count');
+  }
+  if (entry.plan && JSON.stringify(entry.plan).length > PLAN_CHARACTERS_AT_MOST) {
+    wrong('plan says more than is kept of one');
   }
   if (entry.series.modality.trim() === '') wrong('modality is empty');
   if (!Number.isInteger(entry.instance.size) || entry.instance.size <= 0) {
@@ -415,11 +426,11 @@ export async function openSqliteIndex(
           series.frameOfReferenceUid,
         );
         run(
-          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, frame_count, size, sha256)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, frame_count, size, sha256, plan)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (sop_instance_uid) DO UPDATE SET sop_class_uid = excluded.sop_class_uid,
              instance_number = excluded.instance_number, frame_count = excluded.frame_count,
-             size = excluded.size, sha256 = excluded.sha256`,
+             size = excluded.size, sha256 = excluded.sha256, plan = excluded.plan`,
           instance.uid,
           series.uid,
           instance.sopClassUid,
@@ -427,6 +438,7 @@ export async function openSqliteIndex(
           instance.frames,
           instance.size,
           instance.sha256,
+          entry.plan ? JSON.stringify(entry.plan) : null,
         );
         run('DELETE FROM reference WHERE sop_instance_uid = ?', instance.uid);
         for (const reference of entry.references) {
@@ -559,6 +571,18 @@ export async function openSqliteIndex(
         relation: row['relation'] as Relation,
         targetUid: String(row['target_uid']),
       }));
+    },
+
+    async planOf(sopInstanceUid) {
+      const row = one('SELECT plan FROM instance WHERE sop_instance_uid = ?', sopInstanceUid);
+      const kept = row ? text(row['plan']) : null;
+      if (!kept) return null;
+      try {
+        return JSON.parse(kept) as PlanFacts;
+      } catch {
+        // Not what was written: nothing is said of the plan.
+        return null;
+      }
     },
 
     async referencesTo(targetUid, relation) {

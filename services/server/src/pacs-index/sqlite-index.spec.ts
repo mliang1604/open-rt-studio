@@ -17,6 +17,8 @@ import {
   type SyntheticStudy,
 } from '@open-rt-studio/testdata';
 
+import type { PlanFacts } from '@open-rt-studio/dicom';
+
 import { createLogger } from '../logger.js';
 import {
   APPLICATION_ID,
@@ -33,7 +35,13 @@ import {
   type InstanceEntry,
   type PacsIndex,
 } from './pacs-index.js';
-import { globPattern, InvalidEntryError, likePattern, openSqliteIndex } from './sqlite-index.js';
+import {
+  globPattern,
+  InvalidEntryError,
+  likePattern,
+  openSqliteIndex,
+  PLAN_CHARACTERS_AT_MOST,
+} from './sqlite-index.js';
 import { entry, RT, SERIES, SOP_CLASS, syntheticRtDataset } from './testing.js';
 
 const PLANNING = SYNTHETIC_STUDY;
@@ -49,6 +57,26 @@ afterEach(async () => {
   await Promise.all(open.splice(0).map((index) => index.close()));
   await rm(scratch, { recursive: true, force: true });
 });
+
+const PLAN: PlanFacts = {
+  label: 'Plan A',
+  planName: null,
+  date: '20260107',
+  intent: 'CURATIVE',
+  approvalStatus: null,
+  fractionGroups: [{ number: 1, fractionsPlanned: 30, beams: 2, beamDoseGy: 2 }],
+  doseReferences: [
+    {
+      number: 1,
+      structureType: 'VOLUME',
+      type: 'TARGET',
+      description: 'Primary',
+      roiNumber: 2,
+      prescriptionGy: 60,
+    },
+  ],
+};
+const isPlan = (one: InstanceEntry): boolean => one.series.modality === 'RTPLAN';
 
 async function memory(entries: readonly InstanceEntry[] = []): Promise<PacsIndex> {
   const index = await openSqliteIndex(':memory:');
@@ -175,6 +203,8 @@ describe('migrations', () => {
     expect(
       (await index.findInstances({ seriesInstanceUid: dose.seriesInstanceUid }))[0].frames,
     ).toBe(null);
+    // Nor of what a plan says, which version 5 began to keep.
+    expect(await index.planOf(syntheticRtDataset().find(isPlan)!.instance.uid)).toBeNull();
     // And what version 2 added works on it.
     const [structureSet] = syntheticRtDataset().filter((one) => one.series.modality === 'RTSTRUCT');
     expect(await index.putInstance(structureSet)).toBe('updated');
@@ -442,6 +472,13 @@ describe('putting instances', () => {
         references: [{ relation: 'dose.plan' as const, targetUid: 'plan' }],
       }),
     ],
+    [
+      'plan says more than is kept of one',
+      (e: InstanceEntry) => ({
+        ...e,
+        plan: { ...PLAN, label: 'x'.repeat(PLAN_CHARACTERS_AT_MOST) },
+      }),
+    ],
     ['number of frames is not a count', (e: InstanceEntry) => withFrames(e, 0)],
     ['number of frames is not a count', (e: InstanceEntry) => withFrames(e, 2.5)],
     [
@@ -457,6 +494,35 @@ describe('putting instances', () => {
       new InvalidEntryError(`The entry's ${what}.`),
     );
     expect(await index.counts()).toEqual({ patients: 0, studies: 0, series: 0, instances: 0 });
+  });
+});
+
+describe('what a plan says (#97)', () => {
+  const plan = (facts: PlanFacts | null = PLAN): InstanceEntry => ({
+    ...entry(PLANNING, 'RTPLAN', SERIES.RTPLAN, 1),
+    plan: facts,
+  });
+  const uid = instanceUid(PLANNING, SERIES.RTPLAN, 1);
+
+  it('is kept with the plan as it was given, and nothing is kept for anything else', async () => {
+    const index = await memory([plan(), entry(PLANNING, 'CT', SERIES.CT, 1)]);
+    expect(await index.planOf(uid)).toEqual(PLAN);
+    expect(await index.planOf(instanceUid(PLANNING, SERIES.CT, 1))).toBeNull();
+    expect(await index.planOf('1.2.3.4')).toBeNull();
+    // It is no part of an instance as the lists give it.
+    expect(await index.getInstance(uid)).not.toHaveProperty('plan');
+  });
+
+  it('follows the plan when it is put again, and goes with it', async () => {
+    const index = await memory([plan()]);
+    const fewer = { ...PLAN, fractionGroups: [{ ...PLAN.fractionGroups[0], fractionsPlanned: 5 }] };
+    await index.putInstance(plan(fewer));
+    expect(await index.planOf(uid)).toEqual(fewer);
+    await index.putInstance(plan(null));
+    expect(await index.planOf(uid)).toBeNull();
+    await index.putInstance(plan());
+    await index.removeInstance(uid);
+    expect(await index.planOf(uid)).toBeNull();
   });
 });
 

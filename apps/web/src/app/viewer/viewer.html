@@ -1541,6 +1541,7 @@
     @if (isReady() && infoPanelOpen() && status.metadata(); as meta) {
       <app-metadata-panel
         [metadata]="meta"
+        [plans]="status.plans()"
         [rawTags]="status.filteredRawTags()"
         [filter]="rawTagFilter()"
         (filterChange)="rawTagFilter.set($event)"

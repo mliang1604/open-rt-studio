@@ -75,6 +75,8 @@ export interface FakeServer {
   readonly timepoints: Map<string, unknown>;
   /** True for a server that has no timepoints to ask for: an older one. */
   noTimepoints: boolean;
+  /** Whether the server is an older one, which says nothing of a plan (#97). */
+  noPlans: boolean;
 }
 
 /** An account of a stand-in server that has them. */
@@ -153,6 +155,7 @@ export function fakeServer(
     passwordOf: (name) => people.find((one) => one.name === name)?.password,
     timepoints: new Map(),
     noTimepoints: false,
+    noPlans: false,
     pageSize: 1000,
     mostAtOnce: () => most,
     loseNetworkAfter: (count) => (lostAfter = count),
@@ -525,6 +528,7 @@ export function fakeServer(
           ...instance(found),
           sopClassUid: found.header.sopClassUid,
           references: found.header.references,
+          ...(server.noPlans ? {} : { plan: found.header.plan }),
         });
       }
       if ((match = /^\/instances\/([\d.]+)\/file$/.exec(path))) {

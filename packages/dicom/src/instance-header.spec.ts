@@ -80,6 +80,7 @@ describe('readInstanceHeader', () => {
         instanceNumber: null,
         frames: null,
         references: [],
+        plan: null,
       },
     });
   });

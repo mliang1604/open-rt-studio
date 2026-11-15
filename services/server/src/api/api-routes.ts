@@ -505,7 +505,14 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
       handle: async (request) => {
         const uid = uidOf(request, 'sopInstanceUid');
         const instance = await instanceFor(request, uid);
-        return { status: 200, body: { ...instance, references: await index.referencesFrom(uid) } };
+        return {
+          status: 200,
+          body: {
+            ...instance,
+            references: await index.referencesFrom(uid),
+            plan: await index.planOf(uid),
+          },
+        };
       },
       doc: {
         tag: 'Browse',

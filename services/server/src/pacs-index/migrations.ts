@@ -112,6 +112,18 @@ export const MIGRATIONS: readonly Migration[] = [
       ) STRICT;
     `,
   },
+  {
+    version: 5,
+    name: 'what a plan says',
+    sql: `
+      -- For an RT Plan, what it says of its fractions and prescriptions, as
+      -- JSON: read with the file's header, and what a timeline shows of a
+      -- plan without its file. NULL for anything else, and for every plan
+      -- filed before this step, of which nothing is then shown until its
+      -- file is ingested again.
+      ALTER TABLE instance ADD COLUMN plan TEXT;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

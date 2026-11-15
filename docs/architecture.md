@@ -1040,9 +1040,57 @@ come.
   point, like any layer.
 - **Not there:** a relative dose is shown as its numbers, with nothing said
   of what it is relative to; ROI statistics over a dose are of its voxels,
-  not interpolated; Tissue Heterogeneity Correction, the referenced plan's
-  fractions and the DVH sequence are not read; nothing was read from
-  another system's dose file.
+  not interpolated; Tissue Heterogeneity Correction and the DVH sequence
+  are not read; nothing was read from another system's dose file.
+
+### What is read of a plan
+
+As much of an RT Plan (or RT Ion Plan) as dose summation and conversion
+will ask for (#97), and no more: beams, machines and control points are not
+read. `packages/dicom/src/rt-plan.ts`.
+
+- **Fractions:** each item of the Fraction Group Sequence, with its Number
+  of Fractions Planned, how many beams it names, and the sum of their Beam
+  Dose where every beam gives one.
+- **Prescriptions:** each item of the Dose Reference Sequence, with its
+  type (`TARGET`, `ORGAN_AT_RISK`), its Target Prescription Dose in Gy, and
+  the ROI Number it is of.
+- **Nothing is picked.** A plan may hold several fraction groups and
+  several prescriptions. All are given as the file has them
+  (`planSummary`), and the text says each: `3 fraction groups: 25, 5
+fractions`. What a plan does not say is said to be not said ("fractions
+  not said", "no prescription said"), so that nothing is taken for it. A
+  count below one, a negative dose and a value that is no number are read
+  as not said.
+- **The structure a dose is prescribed to** is named by the structure set
+  the plan names, and by no other, though another be the only one at hand:
+  ROI numbers mean nothing outside their own set. Where that set's
+  structures are not known the structure goes by its number (`ROI 2`).
+- **Read with the header.** A plan's facts (`PlanFacts`: label, name, date,
+  intent, approval, fraction groups, dose references) are read with a
+  file's header (`InstanceHeader.plan`), so that a timeline shows them
+  without the file. At most 64 fraction groups and 64 dose references are
+  read, the first of each, and a label or description longer than the 64
+  characters the standard allows is cut: what is read is kept in an index,
+  and a file must not make that as large as it likes.
+- **On a server** they are kept in the index (`instance.plan`, JSON, schema
+  version 5) and sent with what an instance refers to
+  (`/instances/{uid}`), a request the timeline already makes and the audit
+  log already records. A plan filed before version 5 has none until its
+  file is ingested again, which leaves the store alone; of such a plan the
+  timeline says nothing rather than something wrong. The server does not
+  read structure names, so a prescription there is to a structure by its
+  number.
+- **Where it shows:** on the timeline a plan's chip says its fractions and
+  the dose prescribed to its targets in brief (`30 fx · 60 Gy`), and the
+  whole in its title; the metadata panel has a group to each plan of the
+  images on screen. A plan belongs to an image by the structure set it
+  names, as before (#38).
+- **Not there:** nothing is checked between a plan and its dose (that the
+  dose's maximum agrees with the prescription, or its Dose Summation Type
+  with the fraction groups); a plan's brachytherapy application setups are
+  not read; a dose opened by itself shows no plan, since a plan belongs to
+  images; nothing was read from another system's plan file.
 
 Status: **decided, and Michael's to overturn**.
 

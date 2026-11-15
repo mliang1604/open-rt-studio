@@ -409,6 +409,50 @@ describe('what belongs to what among opened files (#38)', () => {
     ...more,
   });
 
+  it('says with a plan its fractions and prescription, to a structure by its name once its structure set is read (#97)', () => {
+    source.add([series('1.1.1')]);
+    source.addRtObjects([
+      object('structure-set', '5.1', [['structure-set.series', '1.1.1']]),
+      object('plan', '5.2', [['plan.structure-set', '5.1']], {
+        plan: {
+          label: 'Plan A',
+          planName: null,
+          date: null,
+          intent: null,
+          approvalStatus: null,
+          fractionGroups: [{ number: 1, fractionsPlanned: 30, beams: 1, beamDoseGy: 2 }],
+          doseReferences: [
+            {
+              number: 1,
+              structureType: 'VOLUME',
+              type: 'TARGET',
+              description: null,
+              roiNumber: 2,
+              prescriptionGy: 60,
+            },
+          ],
+        },
+      }),
+    ]);
+    const plan = () => listedSeries(source)[0].attached!.find((one) => one.kind === 'plan')!.plan!;
+    expect(plan()).toMatchObject({ label: 'Plan A', fractions: [30], fractionGroups: 1 });
+    expect(plan().prescriptions).toEqual([{ gy: 60, type: 'TARGET', to: 'ROI 2' }]);
+
+    // A structure set the plan does not name says nothing of the plan's structures.
+    const set = (sopInstanceUid: string, name: string): StructureSet =>
+      ({
+        name: sopInstanceUid,
+        sopInstanceUid,
+        frameOfReferenceUid: '1.9',
+        referencedSeriesUids: [],
+        rois: [{ number: 2, name }],
+      }) as unknown as StructureSet;
+    source.addStructureSets([set('5.9', 'Bladder')]);
+    expect(plan().prescriptions[0].to).toBe('ROI 2');
+    source.addStructureSets([set('5.1', 'PTV 60')]);
+    expect(plan().prescriptions[0].to).toBe('PTV 60');
+  });
+
   it('shows with each series what belongs to it, and the registrations as links', () => {
     source.add([
       series('1.1.1'),

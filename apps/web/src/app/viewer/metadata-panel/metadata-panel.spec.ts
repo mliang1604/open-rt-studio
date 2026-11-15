@@ -38,6 +38,31 @@ describe('MetadataPanel', () => {
     expect(first.querySelector('dd')?.textContent).toBe('SYNTHETIC^PHANTOM');
   });
 
+  it('shows what the plans of the images on screen say, each as a group after the series’ own (#97)', () => {
+    const { fixture, host } = render();
+    expect(host.querySelector('[data-info-plan]')).toBeNull();
+    fixture.componentRef.setInput('plans', [
+      {
+        title: 'Plan',
+        fields: [
+          { label: 'Fractions', value: '30 fractions' },
+          { label: 'Prescription', value: '60 Gy to “PTV”' },
+        ],
+      },
+      { title: 'Plan', fields: [{ label: 'Fractions', value: 'fractions not said' }] },
+    ]);
+    fixture.detectChanges();
+    const groups = Array.from(host.querySelectorAll('.info-group h3')).map((h) => h.textContent);
+    expect(groups).toEqual(['Patient', 'Series', 'Plan', 'Plan', 'Raw tags']);
+    const plans = [...host.querySelectorAll('[data-info-plan]')];
+    expect(
+      [...plans[0].querySelectorAll('.info-row')].map(
+        (row) => `${row.querySelector('dt')!.textContent}: ${row.querySelector('dd')!.textContent}`,
+      ),
+    ).toEqual(['Fractions: 30 fractions', 'Prescription: 60 Gy to “PTV”']);
+    expect(plans[1].textContent).toContain('fractions not said');
+  });
+
   it('lists the raw tags it is given, with a dash for an unknown name or VR', () => {
     const { host } = render();
     const rows = Array.from(host.querySelectorAll('.raw-tag')).map((row) =>

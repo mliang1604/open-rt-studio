@@ -6,6 +6,7 @@ import { computed, signal } from '@angular/core';
 import {
   groupSeries,
   type InstanceReference,
+  type PlanFacts,
   type RtObjectFacts,
   type RtObjectKind,
 } from '@open-rt-studio/dicom';
@@ -126,6 +127,8 @@ interface ServerInstanceDetail {
   readonly sopInstanceUid: string;
   readonly sopClassUid: string;
   readonly references: readonly InstanceReference[];
+  /** What a plan says of itself (#97); an older server does not send it. */
+  readonly plan?: PlanFacts | null;
 }
 
 /** The modalities the timeline places by what they refer to, and what each is here. */
@@ -863,6 +866,7 @@ export class ServerSource implements DataSource {
         description: of.series.description,
         frameOfReferenceUid: of.series.frameOfReferenceUid,
         references: detail.references,
+        ...(detail.plan ? { plan: detail.plan } : {}),
       };
     });
     return facts;
