@@ -64,6 +64,24 @@ export function doseSaid(dose: DoseInfo): string {
   ].join('');
 }
 
+/**
+ * What a dose is called beside its value (#95): by its type, and that it is
+ * relative when it is. A summed or converted dose says its own type.
+ */
+export function doseLabel(dose: Pick<DoseInfo, 'type' | 'units'>): string {
+  const type =
+    dose.type === 'EFFECTIVE' ? 'Effective dose' : dose.type === 'ERROR' ? 'Dose error' : 'Dose';
+  return dose.units === 'RELATIVE' ? `${type}, relative` : type;
+}
+
+/**
+ * A dose's value as it is shown: to a hundredth of a gray, or, relative, to
+ * four figures, since nothing says how large a relative dose's numbers are.
+ */
+export function formatDose(value: number, dose: Pick<DoseInfo, 'units'>): string {
+  return dose.units === 'GY' ? `${value.toFixed(2)} Gy` : String(Number(value.toPrecision(4)));
+}
+
 export function formatProbe(
   name: string,
   probe: VoxelProbe,
@@ -73,19 +91,25 @@ export function formatProbe(
 ): string {
   const [x, y, z] = probe.voxel;
   const unit = valueUnit(volume);
-  const value = `${formatValue(probe.value)}${unit ? ` ${unit}` : ''}`;
+  // A dose is read between its voxels, so it is shown as a dose, to more
+  // figures, and without a stored value: there is none between voxels.
+  const value = volume.dose
+    ? `${doseLabel(volume.dose)} ${formatDose(probe.value, volume.dose)}`
+    : `value ${formatValue(probe.value)}${unit ? ` ${unit}` : ''}`;
   const trivialLut = volume.rescaleSlope === 1 && volume.rescaleIntercept === 0;
-  const stored = trivialLut ? '' : ` · stored ${formatValue(probe.rawValue)}`;
+  const stored = trivialLut || volume.dose ? '' : ` · stored ${formatValue(probe.rawValue)}`;
   // Append each other visible layer read at the same patient point (e.g. dose Gy).
   const overlays = others
     .map(({ layer, sample }) => {
+      const dose = layer.volume.dose;
+      if (dose) return ` · ${doseLabel(dose)} ${formatDose(sample.value, dose)}`;
       const u = valueUnit(layer.volume);
       return ` · ${layer.modality ?? 'Image'} ${formatValue(sample.value)}${u ? ` ${u}` : ''}`;
     })
     .join('');
   const position = volume.geometry ? ` · LPS (${probe.patient.map(formatMm).join(', ')}) mm` : '';
   const fieldText = field ? ` · ${formatFieldReading(field)}` : '';
-  return `${name} · voxel (${x}, ${y}, ${z})${position} · value ${value}${stored}${overlays}${fieldText}`;
+  return `${name} · voxel (${x}, ${y}, ${z})${position} · ${value}${stored}${overlays}${fieldText}`;
 }
 
 /** Join pane-local points into an SVG polyline `points` string. */

@@ -54,22 +54,29 @@ const PLANES = [0, 3, 6, 9, 12];
 const FRAME_AT_PLANE = [0, 1, 1.5, 2, 3];
 
 /**
- * The dose in Gy at the voxel of the dose's grid nearest a patient point, by
- * the file's own numbers; and which plane that is. The probe reads a layer
- * at its nearest voxel.
+ * The dose in Gy at a patient point, by the file's own numbers: the stored
+ * value rises by 4 with each column, row and frame, and between two frames
+ * it is the straight line from the one to the other. Also the dose of the
+ * voxel nearest the point, which is what the probe must not show (#95).
  */
-function doseGyNear(x: number, y: number, z: number): { gy: number; plane: number } {
-  const column = Math.round((x - ORIGIN[0]) / SPACING);
-  const row = Math.round((ORIGIN[2] - z) / SPACING);
-  const plane = Math.round((y - ORIGIN[1]) / 3);
+function doseGyAt(x: number, y: number, z: number): { gy: number; nearest: number } {
+  const column = (x - ORIGIN[0]) / SPACING;
+  const row = (ORIGIN[2] - z) / SPACING;
+  const plane = (y - ORIGIN[1]) / 3;
+  // Inside the middles of the outermost voxels, where nothing is held at an edge.
   expect(column).toBeGreaterThanOrEqual(0);
   expect(column).toBeLessThanOrEqual(COLUMNS - 1);
   expect(row).toBeGreaterThanOrEqual(0);
   expect(row).toBeLessThanOrEqual(ROWS - 1);
-  expect(PLANES[plane]).toBeDefined();
+  expect(plane).toBeGreaterThanOrEqual(0);
+  expect(plane).toBeLessThanOrEqual(PLANES.length - 1);
+  const below = Math.min(PLANES.length - 2, Math.floor(plane));
+  const frame =
+    FRAME_AT_PLANE[below] + (FRAME_AT_PLANE[below + 1] - FRAME_AT_PLANE[below]) * (plane - below);
+  const gy = (sum: number): number => sum * 4 * SYNTHETIC_DOSE_GRID_SCALING;
   return {
-    gy: (column + row + FRAME_AT_PLANE[plane]) * 4 * SYNTHETIC_DOSE_GRID_SCALING,
-    plane,
+    gy: gy(column + row + frame),
+    nearest: gy(Math.round(column) + Math.round(row) + FRAME_AT_PLANE[Math.round(plane)]),
   };
 }
 
@@ -91,41 +98,38 @@ test('a dose on a grid of its own reads, over the image, the values its file giv
     'RT Dose: in Gy, physical, summation type PLAN. Its frames are spaced unevenly: 1 plane was laid between them by interpolation.',
   );
 
-  // The probe reads the CT at its voxel and the dose at the same place, at
-  // several places: among them on the plane laid between two frames.
+  // The probe reads the CT at its voxel and the dose at the cursor's own
+  // place, between the dose's voxels (#95), at several places.
   const pane = (await page.locator('.pane-overlay .pane').first().boundingBox())!;
   const probe = page.locator('.probe');
   const read = new Set<string>();
-  const planes = new Set<number>();
+  let farFromNearest = 0;
   for (const [fx, fy] of [
     [0.45, 0.55],
     [0.3, 0.4],
     [0.62, 0.3],
     [0.5, 0.48],
+    [0.37, 0.35],
   ]) {
     await page.mouse.move(pane.x + pane.width * fx, pane.y + pane.height * fy);
     await expect(probe).toBeVisible();
-    await expect(probe).toContainText('RTDOSE');
+    await expect(probe).toContainText('Dose');
     const text = await probe.innerText();
-    const match = /LPS \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\) mm.* · RTDOSE (-?[\d.]+) Gy/.exec(
-      text,
-    );
+    const match =
+      /LPS \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\) mm.* HU · Dose (-?\d+\.\d\d) Gy$/.exec(text);
     expect(match, `unexpected probe text: ${text}`).not.toBeNull();
     const [x, y, z, shown] = match!.slice(1).map(Number);
-    // The place is printed to a tenth of a millimetre: where that leaves the
-    // nearest voxel open, the dose is that of one of the two.
-    const near = [-0.05, 0.05].flatMap((dx) =>
-      [-0.05, 0.05].map((dy) => doseGyNear(x + dx, y + dy, z)),
-    );
-    // The value is printed to a tenth of a gray.
-    const found = near.find((one) => Math.abs(shown - one.gy) < 0.051);
-    expect(found, `${text}; expected one of ${near.map((one) => one.gy).join(', ')}`).toBeDefined();
+    const expected = doseGyAt(x, y, z);
+    // The place is printed to a tenth of a millimetre and the dose rises by
+    // at most 0.2 Gy a millimetre each way across the slice: 0.02 Gy for the
+    // place, and half a hundredth for the dose as printed.
+    expect(Math.abs(shown - expected.gy), text).toBeLessThan(0.026);
+    if (Math.abs(shown - expected.nearest) > 0.05) farFromNearest += 1;
     read.add(`${x},${y},${z}`);
-    planes.add(found!.plane);
   }
-  // Four different places were read, and one of them on the plane that is in no frame.
-  expect(read.size).toBe(4);
-  expect([...planes]).toContain(2);
+  // Five different places were read, and at most of them the nearest voxel's dose is another.
+  expect(read.size).toBe(5);
+  expect(farFromNearest).toBeGreaterThanOrEqual(3);
   expectNoProblems(problems);
 });
 

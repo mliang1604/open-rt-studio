@@ -4,7 +4,7 @@
 
 import { Orientation, type Vec3, type Volume, type VolumeGeometry } from '@open-rt-studio/dicom';
 import type { PaneRect } from './layout.js';
-import { probeVoxel, sampleVolumeAtPatient } from './probe.js';
+import { interpolateVolumeAtPatient, probeVoxel, sampleVolumeAtPatient } from './probe.js';
 import { rezoomPan } from './slice-renderer.js';
 
 /** A dims[0]×dims[1]×dims[2] volume whose every voxel holds its flat index. */
@@ -260,5 +260,73 @@ describe('sampleVolumeAtPatient', () => {
     const volume = makeVolume([4, 4, 4]);
     const far: Vec3 = [100, 100, 100];
     expect(sampleVolumeAtPatient(volume, far)).toBeNull();
+  });
+});
+
+describe('interpolateVolumeAtPatient (#95)', () => {
+  // 2 mm voxels; voxel (i, j, k) has its middle at (10 + 2i, 20 + 2j, 30 + 2k)
+  // and the value i + 4j + 16k: a ramp, which a trilinear blend gives exactly.
+  const GEOMETRY: VolumeGeometry = {
+    iStep: [2, 0, 0],
+    jStep: [0, 2, 0],
+    kStep: [0, 0, 2],
+    origin: [10, 20, 30],
+  };
+  const ramp = makeVolume([4, 4, 4], 1, 0, GEOMETRY);
+  const at = (i: number, j: number, k: number): Vec3 => [10 + 2 * i, 20 + 2 * j, 30 + 2 * k];
+
+  it('is a voxel’s value at its middle', () => {
+    expect(interpolateVolumeAtPatient(ramp, at(0, 0, 0))).toBeCloseTo(0, 4);
+    expect(interpolateVolumeAtPatient(ramp, at(3, 2, 1))).toBeCloseTo(3 + 4 * 2 + 16, 4);
+    expect(interpolateVolumeAtPatient(ramp, at(3, 3, 3))).toBeCloseTo(63, 4);
+  });
+
+  it('is the blend of the voxels about a place between middles', () => {
+    expect(interpolateVolumeAtPatient(ramp, at(1.25, 0.5, 2.75))).toBeCloseTo(
+      1.25 + 4 * 0.5 + 16 * 2.75,
+      5,
+    );
+    // Where the nearest voxel's value would be 1 + 4 + 32.
+    expect(sampleVolumeAtPatient(ramp, at(1.25, 0.5, 2.75))!.value).toBe(1 + 4 + 48);
+  });
+
+  it('falls off in a straight line from one voxel to the next', () => {
+    const one = makeVolume([3, 3, 3], 1, 0, GEOMETRY);
+    one.data.fill(0);
+    one.data[(1 * 3 + 1) * 3 + 1] = 8;
+    // To the float's last digits: the place comes through a matrix of single floats.
+    expect(interpolateVolumeAtPatient(one, at(1, 1, 1))).toBeCloseTo(8, 4);
+    expect(interpolateVolumeAtPatient(one, at(1.5, 1, 1))).toBeCloseTo(4, 4);
+    expect(interpolateVolumeAtPatient(one, at(1.5, 1.5, 1))).toBeCloseTo(2, 4);
+    expect(interpolateVolumeAtPatient(one, at(1.5, 1.5, 1.5))).toBeCloseTo(1, 4);
+    expect(interpolateVolumeAtPatient(one, at(2, 1, 1))).toBeCloseTo(0, 4);
+  });
+
+  it('is the outermost voxel’s value in the half voxel beyond its middle, and nothing outside the grid', () => {
+    expect(interpolateVolumeAtPatient(ramp, at(-0.45, 0, 0))).toBe(0);
+    expect(interpolateVolumeAtPatient(ramp, at(3.45, 3, 3))).toBe(63);
+    expect(interpolateVolumeAtPatient(ramp, at(-0.55, 0, 0))).toBeNull();
+    expect(interpolateVolumeAtPatient(ramp, at(0, 3.55, 0))).toBeNull();
+    expect(interpolateVolumeAtPatient(ramp, [1000, 1000, 1000])).toBeNull();
+  });
+
+  it('reads a grid that lies askew in the patient by the grid’s own steps', () => {
+    // Columns run along +y and rows along -x, 2 mm; slices 3 mm apart.
+    const askew = makeVolume([4, 4, 4], 1, 0, {
+      iStep: [0, 2, 0],
+      jStep: [-2, 0, 0],
+      kStep: [0, 0, 3],
+      origin: [5, 5, 5],
+    });
+    // 1.5 columns, 0.5 rows and 2 slices from the first voxel's middle.
+    expect(interpolateVolumeAtPatient(askew, [5 - 2 * 0.5, 5 + 2 * 1.5, 5 + 3 * 2])).toBeCloseTo(
+      1.5 + 4 * 0.5 + 16 * 2,
+      5,
+    );
+  });
+
+  it('reads a volume of one slice', () => {
+    const flat = makeVolume([4, 4, 1], 1, 0, GEOMETRY);
+    expect(interpolateVolumeAtPatient(flat, at(1.5, 2, 0))).toBeCloseTo(1.5 + 8, 6);
   });
 });

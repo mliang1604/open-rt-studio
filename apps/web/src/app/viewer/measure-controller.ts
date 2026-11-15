@@ -5,6 +5,7 @@
 import { Injectable, computed, inject, type Signal, type WritableSignal } from '@angular/core';
 import {
   probeVoxel,
+  interpolateVolumeAtPatient,
   sampleVolumeAtPatient,
   type VoxelProbe,
   pickProjection,
@@ -111,6 +112,17 @@ export interface MeasureInit {
  * the pointer + plane-mapping glue, wired once through {@link init}. Provided at
  * the component so its lifetime tracks the viewer.
  */
+/**
+ * A reading with its value taken between voxels, for a dose (#95): a dose
+ * is a field on a coarse grid, and its value at a place is not that of the
+ * nearest sample. Anything else is read at its voxel, as it is stored.
+ */
+function betweenVoxels(volume: Volume, read: VoxelProbe | null): VoxelProbe | null {
+  if (!read || !volume.dose) return read;
+  const value = interpolateVolumeAtPatient(volume, read.patient);
+  return value === null ? read : { ...read, value };
+}
+
 @Injectable()
 export class MeasureController {
   private readonly measure = inject(MeasurementStore);
@@ -152,7 +164,7 @@ export class MeasureController {
     const readAt = (layer: Layer): VoxelProbe | null => {
       // Where a deformation field says nothing the layer is not drawn, and not read.
       const at = pointBetweenLayers(sample.patient, hovered?.placement, layer.placement);
-      return at ? sampleVolumeAtPatient(layer.volume, at) : null;
+      return at ? betweenVoxels(layer.volume, sampleVolumeAtPatient(layer.volume, at)) : null;
     };
 
     // The pane's own image comes first in the readout. In the Compare column
@@ -160,7 +172,7 @@ export class MeasureController {
     // out on the base's grid: its voxel and its position in its own frame.
     // Where it does not reach, the column shows nothing, and so does the probe.
     const shown = this.layersCtl.groupLayer(group);
-    let first = sample;
+    let first = betweenVoxels(hoveredVolume, sample)!;
     let firstVolume = hoveredVolume;
     if (shown && shown.volume !== hoveredVolume) {
       const own = readAt(shown);
