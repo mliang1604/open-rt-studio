@@ -121,6 +121,9 @@ by git) if you want files on disk to open.
 - An image resampled onto another's grid through the registration that
   places it, saved as a new DICOM series that says it is derived, from what
   and through which registration: a download, or an upload to the server
+- The structures drawn on one image propagated to another through the
+  registration that places it, rigid or deformable, saved as a new RT
+  Structure Set that says it is propagated and how each structure was taken
 - A registration report: one HTML file with the two images, the
   registration, pictures of the panes and everything that was measured, the
   not-for-clinical-use notice on every page, and the patient's identifiers

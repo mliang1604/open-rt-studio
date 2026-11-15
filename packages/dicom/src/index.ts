@@ -199,6 +199,14 @@ export {
   structureSetsOfPatient,
 } from './structure-set.js';
 export { type WriteOptions, writeStructureSet } from './structure-set-writer.js';
+export { type IsoLoop, loopArea, traceIsoLoops } from './iso-contours.js';
+export {
+  type PropagatedRoi,
+  type PropagateThrough,
+  type PropagationMethod,
+  ON_PLANE_MM,
+  propagateRois,
+} from './structure-propagation.js';
 export { tagName } from './tag-dictionary.js';
 export {
   type Contour,
@@ -208,6 +216,7 @@ export {
   type MissingSlices,
   Orientation,
   type Roi,
+  type RoiGeneration,
   type Slice,
   type StructureSet,
   type Vec3,

@@ -74,6 +74,8 @@ import { StructureCompare } from './structure-compare/structure-compare';
 import { DerivedSeries } from './derived-series/derived-series';
 import { DerivedSeriesController } from './derived-series/derived-series-controller';
 import { ManualRegistration } from './manual-registration/manual-registration';
+import { StructurePropagation } from './structure-propagation/structure-propagation';
+import { StructurePropagationController } from './structure-propagation/structure-propagation-controller';
 import { ManualRegistrationController } from './manual-registration/manual-registration-controller';
 import { LayersController } from './layers-controller';
 import { ToolbarController, LAYOUT_MODES } from './toolbar-controller';
@@ -139,6 +141,7 @@ const MAX_ZOOM = 20;
     ServerPanel,
     ManualRegistration,
     DerivedSeries,
+    StructurePropagation,
     StructureCompare,
     LandmarkMarkers,
     LandmarkPanel,
@@ -170,6 +173,7 @@ const MAX_ZOOM = 20;
     ReportController,
     ManualRegistrationController,
     DerivedSeriesController,
+    StructurePropagationController,
     ToolbarController,
     StatusController,
     CprStore,
@@ -211,6 +215,7 @@ export class Viewer {
   protected readonly brushCtl = inject(BrushController);
   protected readonly manualRegistration = inject(ManualRegistrationController);
   protected readonly derivedSeries = inject(DerivedSeriesController);
+  protected readonly propagation = inject(StructurePropagationController);
   protected readonly landmarks = inject(LandmarkController);
   protected readonly report = inject(ReportController);
   protected readonly landmarkStore = inject(LandmarkStore);
@@ -432,6 +437,14 @@ export class Viewer {
   protected readonly has3dPane = computed(() => this.panes().some((pane) => pane.kind === 'mip'));
   /** Whether the current layout includes any MPR pane (drives swap/flip enablement). */
   protected readonly hasMprPane = computed(() => this.panes().some((pane) => pane.kind === 'mpr'));
+
+  /** A series of what is on screen, the base's or an overlay's, by its UID; null when it is neither. */
+  private loadedSeries(uid: string): Series | null {
+    const state = this.load();
+    if (state.status !== 'ready') return null;
+    const { series, overlaySeries = [] } = state.result;
+    return [...series, ...overlaySeries].find((one) => one.uid === uid) ?? null;
+  }
 
   /** The series of the base image on screen, or null when there is none. */
   private baseSeries(): Series | null {
@@ -671,13 +684,17 @@ export class Viewer {
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
     });
     this.derivedSeries.init({
-      series: (uid) => {
-        const state = this.load();
-        if (state.status !== 'ready') return null;
-        const { series, overlaySeries = [] } = state.result;
-        return [...series, ...overlaySeries].find((one) => one.uid === uid) ?? null;
-      },
+      series: (uid) => this.loadedSeries(uid),
       device: () => this.render.device(),
+      notify: (message, problem) => this.loadCtl.showNotice(message, problem),
+      now: () => new Date(),
+    });
+    this.propagation.init({
+      series: (uid) => this.loadedSeries(uid),
+      structureSets: (uid) => {
+        const state = this.load();
+        return state.status === 'ready' ? (state.result.overlayStructureSets?.[uid] ?? []) : [];
+      },
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
       now: () => new Date(),
     });

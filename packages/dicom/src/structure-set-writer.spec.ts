@@ -224,4 +224,92 @@ describe('writeStructureSet', () => {
       expect(parsed!.referencedSeriesUids).toEqual(original.referencedSeriesUids);
     });
   });
+
+  describe('how a structure was made', () => {
+    const sample = sampleStructureSet();
+    const propagated: StructureSet = {
+      ...sample,
+      rois: [
+        {
+          ...sample.rois[0],
+          generation: {
+            algorithm: 'AUTOMATIC',
+            description: 'Propagated: contour points moved by the registration',
+            resampled: true,
+          },
+        },
+        sample.rois[1],
+      ],
+    };
+    const read = (buffer: ArrayBuffer) => dicomParser.parseDicom(new Uint8Array(buffer));
+    const roiItems = (buffer: ArrayBuffer) =>
+      read(buffer).elements['x30060020'].items!.map((item) => item.dataSet!);
+
+    it('is said of each structure, and read back as it was said', () => {
+      const written = writeStructureSet(propagated, { sopInstanceUid: '1.2.3.4' });
+      const [first, second] = roiItems(written);
+      expect(first.string('x30060036')).toBe('AUTOMATIC');
+      expect(first.string('x30060038')).toBe(
+        'Propagated: contour points moved by the registration',
+      );
+      const [code] = first.elements['x00089215'].items!;
+      expect([
+        code.dataSet!.string('x00080100'),
+        code.dataSet!.string('x00080102'),
+        code.dataSet!.string('x00080104'),
+      ]).toEqual(['113085', 'DCM', 'Spatial resampling']);
+      // Of the other nothing is known: the algorithm is there, as the standard wants, and empty.
+      expect(second.elements['x30060036']).toBeDefined();
+      expect(second.string('x30060036') ?? '').toBe('');
+      expect(second.elements['x30060038']).toBeUndefined();
+      expect(second.elements['x00089215']).toBeUndefined();
+
+      const parsed = parseStructureSet('rt.dcm', written)!;
+      expect(parsed.sopInstanceUid).toBe('1.2.3.4');
+      expect(parsed.rois[0].generation).toEqual(propagated.rois[0].generation);
+      // An ROI of which the file says nothing has nothing said of it.
+      expect('generation' in parsed.rois[1]).toBe(false);
+    });
+
+    it('keeps each item in ascending tag order', () => {
+      for (const item of roiItems(writeStructureSet(propagated))) {
+        const tags = Object.keys(item.elements);
+        expect(tags).toEqual([...tags].sort());
+      }
+    });
+
+    it('writes only an algorithm the standard knows, and a description in plain characters', () => {
+      const odd: StructureSet = {
+        ...sample,
+        rois: [
+          {
+            ...sample.rois[0],
+            generation: {
+              algorithm: 'by magic',
+              description: `Verformt \u2192 ${'x'.repeat(80)}`,
+              resampled: false,
+            },
+          },
+        ],
+      };
+      const [item] = roiItems(writeStructureSet(odd));
+      expect(item.string('x30060036') ?? '').toBe('');
+      expect(item.string('x30060038')).toBe(`Verformt ? ${'x'.repeat(53)}`);
+      expect(item.elements['x00089215']).toBeUndefined();
+    });
+
+    it('names the structure set this one was derived from, when there is one', () => {
+      const derived = read(writeStructureSet(sample, { predecessorSopInstanceUid: '1.2.3.99' }));
+      const [predecessor] = derived.elements['x30060018'].items!;
+      expect(predecessor.dataSet!.string('x00081150')).toBe('1.2.840.10008.5.1.4.1.1.481.3');
+      expect(predecessor.dataSet!.string('x00081155')).toBe('1.2.3.99');
+      expect(read(writeStructureSet(sample)).elements['x30060018']).toBeUndefined();
+      // Still in order with it.
+      const offsets = Object.keys(derived.elements)
+        .filter((tag) => !tag.startsWith('x0002'))
+        .sort()
+        .map((tag) => derived.elements[tag].dataOffset);
+      expect([...offsets].sort((a, b) => a - b)).toEqual(offsets);
+    });
+  });
 });
