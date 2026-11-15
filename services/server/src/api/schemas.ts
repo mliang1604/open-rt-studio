@@ -215,6 +215,16 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     'The radiotherapy objects that belong to an image series, and the series that say they are in its frame.',
   ),
   PatientPage: page('Patient'),
+  Timepoint: object({
+    id: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9-]{1,64}$',
+      description: 'Its own, and of no meaning: what it is told apart by when it is renamed.',
+    },
+    name: { type: 'string', maxLength: 64 },
+    studyUids: { type: 'array', items: uid },
+  }),
+  Timepoints: object({ timepoints: { type: 'array', items: ref('Timepoint') } }),
   StudyPage: page('Study'),
   SeriesPage: page('Series'),
   InstancePage: page('Instance'),

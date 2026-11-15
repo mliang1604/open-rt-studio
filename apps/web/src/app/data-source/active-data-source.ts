@@ -17,6 +17,7 @@ import type {
   SaveProgress,
 } from './data-source';
 import { LocalFilesSource } from './local-files-source';
+import type { Timepoint } from './timepoints';
 
 /**
  * The data source the viewer reads from, which is one of several: opened
@@ -60,5 +61,11 @@ export class ActiveDataSource implements DataSource {
 
   saveSeries(series: SavedSeries, onProgress?: SaveProgress): Promise<SaveOutcome> {
     return this.chosen().saveSeries(series, onProgress);
+  }
+
+  readonly timepoints = computed<readonly Timepoint[]>(() => this.chosen().timepoints());
+
+  saveTimepoints(timepoints: readonly Timepoint[]): Promise<void> {
+    return this.chosen().saveTimepoints(timepoints);
   }
 }

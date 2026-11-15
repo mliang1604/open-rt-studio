@@ -20,6 +20,7 @@ import type {
   SaveProgress,
   SeriesSummary,
 } from './data-source';
+import type { Timepoint } from './timepoints';
 
 /** A series as the fake lists it. */
 export function fakeSeries(uid: string, overrides: Partial<SeriesSummary> = {}): SeriesSummary {
@@ -106,6 +107,20 @@ export class FakeDataSource implements DataSource {
   save(object: SavedObject): Promise<SaveOutcome> {
     this.saved.push(object);
     return this.saveAnswer();
+  }
+
+  readonly timepoints = signal<readonly Timepoint[]>([]);
+  /** Every list of timepoints that was to be kept, in order. */
+  readonly timepointsSaved: (readonly Timepoint[])[] = [];
+  /** Why timepoints are not kept; null when they are. The grouping holds either way. */
+  timepointsRefusal: string | null = null;
+
+  saveTimepoints(timepoints: readonly Timepoint[]): Promise<void> {
+    this.timepointsSaved.push(timepoints);
+    this.timepoints.set(timepoints);
+    return this.timepointsRefusal === null
+      ? Promise.resolve()
+      : Promise.reject(new Error(this.timepointsRefusal));
   }
 
   /** Each series that was saved, whole. */

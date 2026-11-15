@@ -86,7 +86,14 @@ describe('migrations', () => {
   it('create the schema in an empty database', () => {
     const db = new DatabaseSync(':memory:');
     expect(migrate(db)).toEqual({ from: 0, to: LATEST_VERSION });
-    expect(tables(db)).toEqual(['instance', 'patient', 'reference', 'series', 'study']);
+    expect(tables(db)).toEqual([
+      'instance',
+      'patient',
+      'patient_timepoints',
+      'reference',
+      'series',
+      'study',
+    ]);
     expect(schemaVersion(db)).toBe(LATEST_VERSION);
     expect(db.prepare('PRAGMA application_id').get()).toEqual({ application_id: APPLICATION_ID });
     db.close();

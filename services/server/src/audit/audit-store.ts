@@ -18,6 +18,8 @@ export const AUDIT_ACTIONS = [
   'instance-read',
   'instance-download',
   'instance-upload',
+  'timepoints-read',
+  'timepoints-write',
   'accounts-list',
   'account-create',
   'account-change',

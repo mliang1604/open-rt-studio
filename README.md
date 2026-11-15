@@ -136,6 +136,9 @@ by git) if you want files on disk to open.
 - A patient timeline of everything imported: each structure set, plan and
   dose beside the image series it belongs to, and each registration as a
   line between the series it connects, which opens the pair
+- Timepoints: a patient's studies grouped by study date, or under names of
+  your own ("Planning", "Fraction 10"), kept in the browser for opened files
+  and on the server for a server's patients
 - A metadata panel and a raw DICOM tag inspector
 
 ## Building and testing

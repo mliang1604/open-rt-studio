@@ -1,0 +1,84 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<section class="made" aria-label="Timepoints">
+  <h3>Timepoints</h3>
+  @if (timepoints().length === 0) {
+    <p class="hint">None yet: the studies are grouped by study date.</p>
+  }
+  <ol>
+    @for (one of timepoints(); track one.id; let at = $index; let last = $last) {
+      <li [attr.data-timepoint-row]="one.id">
+        <input
+          type="text"
+          [value]="one.name"
+          [maxLength]="maxName"
+          [attr.aria-label]="'Name of timepoint ' + (at + 1)"
+          (change)="rename(one.id, $event)"
+        />
+        <button
+          type="button"
+          [disabled]="at === 0"
+          (click)="move(one.id, -1)"
+          [attr.aria-label]="'Move ' + (one.name || 'this timepoint') + ' earlier'"
+          title="Move earlier"
+        >
+          ←
+        </button>
+        <button
+          type="button"
+          [disabled]="last"
+          (click)="move(one.id, 1)"
+          [attr.aria-label]="'Move ' + (one.name || 'this timepoint') + ' later'"
+          title="Move later"
+        >
+          →
+        </button>
+        <button
+          type="button"
+          (click)="remove(one.id)"
+          [attr.aria-label]="'Delete ' + (one.name || 'this timepoint')"
+          title="Delete this timepoint. Its studies stay, and are grouped by date again"
+        >
+          Delete
+        </button>
+      </li>
+    }
+  </ol>
+  <div class="actions">
+    <button
+      type="button"
+      data-timepoints="add"
+      (click)="add()"
+      [disabled]="full()"
+      [title]="full() ? 'A patient has no more timepoints than this' : 'Make a timepoint'"
+    >
+      New timepoint
+    </button>
+    <button type="button" data-timepoints="done" (click)="closed.emit()">Done</button>
+  </div>
+  @if (problem(); as why) {
+    <p class="problem" role="alert" data-timepoints="problem">{{ why }}</p>
+  }
+</section>
+<section class="studies" aria-label="Studies and the timepoint each is in">
+  <h3>Studies</h3>
+  <ul>
+    @for (row of placed(); track row.study.studyUid) {
+      <li [attr.data-timepoint-study]="row.study.studyUid">
+        <label>
+          <span [title]="row.label">{{ row.label }}</span>
+          <select (change)="assign(row.study.studyUid, $event)">
+            <option value="" [selected]="row.in === ''">By date</option>
+            @for (one of timepoints(); track one.id) {
+              <option [value]="one.id" [selected]="row.in === one.id">
+                {{ one.name || 'Unnamed' }}
+              </option>
+            }
+          </select>
+        </label>
+      </li>
+    }
+  </ul>
+</section>

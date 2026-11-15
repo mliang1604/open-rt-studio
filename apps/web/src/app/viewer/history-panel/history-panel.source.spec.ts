@@ -69,7 +69,7 @@ describe('the history panel on a data source', () => {
     expect(text('.history-count')).toEqual(['2']);
     expect(text('.study-date')).toEqual(['2026-01-05', '2026-03-02']);
     expect(text('.study-desc')).toEqual(['Planning', 'Untitled study']);
-    expect(text('.study:first-child .modality-badge')).toEqual(['CT', 'RTDOSE']);
+    expect(text('.timepoint:first-child .study .modality-badge')).toEqual(['CT', 'RTDOSE']);
     expect(text('.study-count')).toEqual(['2 series', '1 series']);
   });
 
@@ -454,5 +454,104 @@ describe('the history panel with radiotherapy objects and registrations (#38)', 
     expect(host.querySelector('app-rt-chips')).toBeNull();
     expect(host.querySelector('app-registration-links')).toBeNull();
     expect(host.querySelector('.loose')).toBeNull();
+  });
+});
+
+describe('timepoints on the timeline (#39)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const groupsOf = (host: HTMLElement): (string | boolean | string[])[][] =>
+    [...host.querySelectorAll<HTMLElement>('.timepoint')].map((group) => [
+      group.querySelector('.timepoint-name')!.textContent.trim(),
+      group.classList.contains('automatic'),
+      [...group.querySelectorAll('.study-date, .timepoint-empty')].map((one) =>
+        one.textContent.trim(),
+      ),
+    ]);
+
+  it('groups the studies by date while nobody has grouped them', async () => {
+    const { host } = await render(withPatient());
+    expect(groupsOf(host)).toEqual([
+      ['2026-01-05', true, ['2026-01-05']],
+      ['2026-03-02', true, ['2026-03-02']],
+    ]);
+    expect(host.querySelector('.timepoint-name')!.getAttribute('title')).toBe(
+      'Studies of 2026-01-05 that are in no timepoint',
+    );
+  });
+
+  it('shows the timepoints that were made by name, in their order, with what is in none after them', async () => {
+    const source = withPatient();
+    const [first, second] = source.currentPatient()!.studies.map((study) => study.studyUid);
+    source.timepoints.set([
+      { id: 'b', name: 'Re-plan', studyUids: [second] },
+      { id: 'c', name: '', studyUids: [] },
+    ]);
+    const { host, fixture } = await render(source);
+    expect(groupsOf(host)).toEqual([
+      ['Re-plan', false, ['2026-03-02']],
+      ['Unnamed', false, ['No studies']],
+      ['2026-01-05', true, ['2026-01-05']],
+    ]);
+    expect(host.querySelector('.timepoint-name')!.getAttribute('title')).toBe(
+      'Timepoint “Re-plan”',
+    );
+    // The timeline follows the source: a study put in a timepoint moves there.
+    source.timepoints.set([{ id: 'a', name: 'Planning', studyUids: [first, second] }]);
+    await fixture.whenStable();
+    expect(groupsOf(host)).toEqual([['Planning', false, ['2026-01-05', '2026-03-02']]]);
+  });
+
+  it('opens the editor from the bar, and keeps each change through the source', async () => {
+    const source = withPatient();
+    const { host, click, fixture } = await render(source);
+    expect(host.querySelector('app-timepoint-editor')).toBeNull();
+    await click('[data-timepoints="edit"]');
+    expect(host.querySelector('[data-timepoints="edit"]')!.getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+    await click('app-timepoint-editor [data-timepoints="add"]');
+    expect(source.timepointsSaved).toHaveLength(1);
+    expect(source.timepointsSaved[0].map((one) => [one.name, one.studyUids])).toEqual([
+      ['Timepoint 1', []],
+    ]);
+    // What was made is on the timeline at once, and in the editor to go on from.
+    expect(groupsOf(host)[0]).toEqual(['Timepoint 1', false, ['No studies']]);
+    const select = host.querySelector<HTMLSelectElement>('[data-timepoint-study] select')!;
+    select.value = source.timepoints()[0].id;
+    select.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    expect(groupsOf(host)[0]).toEqual(['Timepoint 1', false, ['2026-01-05']]);
+    await click('app-timepoint-editor [data-timepoints="done"]');
+    expect(host.querySelector('app-timepoint-editor')).toBeNull();
+  });
+
+  it('says why a change was not kept, until the next change or until the editor is closed', async () => {
+    const source = withPatient();
+    source.timepointsRefusal = 'Grouped until the files are closed. It is not kept.';
+    const { host, click, fixture } = await render(source);
+    await click('[data-timepoints="edit"]');
+    await click('app-timepoint-editor [data-timepoints="add"]');
+    await fixture.whenStable();
+    expect(host.querySelector('[data-timepoints="problem"]')!.textContent).toBe(
+      'Grouped until the files are closed. It is not kept.',
+    );
+    source.timepointsRefusal = null;
+    await click('app-timepoint-editor [data-timepoints="add"]');
+    await fixture.whenStable();
+    expect(host.querySelector('[data-timepoints="problem"]')).toBeNull();
+  });
+
+  it('offers no editor with no patient, nor while the panel is folded away', async () => {
+    const empty = await render();
+    expect(empty.host.querySelector('[data-timepoints="edit"]')).toBeNull();
+    TestBed.resetTestingModule();
+    const { host, click } = await render(withPatient());
+    await click('.history-toggle');
+    expect(host.querySelector('[data-timepoints="edit"]')).toBeNull();
   });
 });

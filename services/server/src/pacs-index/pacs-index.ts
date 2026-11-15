@@ -93,6 +93,15 @@ export interface PatientRecord {
   readonly studies: number;
 }
 
+/** A named group of a patient's studies, as a user made it. */
+export interface TimepointRecord {
+  /** Its own, and of no meaning: what it is told apart by when it is renamed. */
+  readonly id: string;
+  readonly name: string;
+  /** Study Instance UIDs, each of a study of the patient when it was kept. */
+  readonly studyUids: readonly string[];
+}
+
 export interface StudyRecord {
   readonly studyInstanceUid: string;
   readonly patientKey: number;
@@ -252,6 +261,8 @@ export interface PacsIndex {
   getInstance(sopInstanceUid: string): Promise<InstanceRecord | null>;
 
   /** By name, then patient ID. */
+  /** The patient with this key, or null. */
+  getPatient(patientKey: number): Promise<PatientRecord | null>;
   findPatients(query?: PatientQuery): Promise<PatientRecord[]>;
   /** The latest first. */
   findStudies(query?: StudyQuery): Promise<StudyRecord[]>;
@@ -266,6 +277,18 @@ export interface PacsIndex {
   referencesTo(targetUid: string, relation?: Relation): Promise<InstanceRecord[]>;
   /** Null when the index does not have the series. */
   relatedToSeries(seriesInstanceUid: string): Promise<RelatedToSeries | null>;
+
+  /**
+   * A patient's timepoints, in the user's order: none for a patient that
+   * has none, and null for a patient the index does not have.
+   */
+  getTimepoints(patientKey: number): Promise<TimepointRecord[] | null>;
+  /**
+   * Replace a patient's timepoints with these. False for a patient the
+   * index does not have. The caller sees to it that they are well formed
+   * and name the patient's own studies.
+   */
+  putTimepoints(patientKey: number, timepoints: readonly TimepointRecord[]): Promise<boolean>;
 
   counts(): Promise<IndexCounts>;
   close(): Promise<void>;

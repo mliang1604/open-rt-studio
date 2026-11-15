@@ -31,6 +31,7 @@ const USER = { name: 'quillon-user', password: 'correct horse battery staple' };
 const NEW_PASSWORD = 'an entirely different passphrase';
 const WRONG_PASSWORD = 'a wrong guess at the password';
 const TYPED_AS_NAME = 'a-secret-typed-as-a-name';
+const TIMEPOINT_NAME = 'Fraction ten of Zennor';
 const FILES = syntheticRtCourse();
 const PATIENT = SYNTHETIC_STUDY.patient;
 /** Asked for and not there: it must not be logged either. */
@@ -202,6 +203,35 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   ]) {
     await call('GET', api(path), { token: user });
   }
+  // A patient's timepoints, read and replaced: a name that was typed, and lists that are refused.
+  const grouped = studies.items[0];
+  const timepoints = api(`/patients/${grouped.patientKey}/timepoints`);
+  const list = (name: string, studyUids: string[]) => ({
+    timepoints: [{ id: 'made-1', name, studyUids }],
+  });
+  await call('GET', timepoints, { token: user });
+  expect(
+    (
+      await call('PUT', timepoints, {
+        token: user,
+        body: list(TIMEPOINT_NAME, [grouped.studyInstanceUid]),
+      })
+    ).status,
+  ).toBe(200);
+  for (const refused of [
+    list(`${TIMEPOINT_NAME}\n${PATIENT.name}`, []),
+    list(TIMEPOINT_NAME, [ABSENT_UID]),
+    list(TIMEPOINT_NAME, [PATIENT.id]),
+    { [PATIENT.id]: TIMEPOINT_NAME },
+  ]) {
+    expect((await call('PUT', timepoints, { token: user, body: refused })).status).toBe(400);
+  }
+  await call('PUT', timepoints, { token: user, bytes: new TextEncoder().encode(PATIENT.name) });
+  await call('GET', api('/patients/987654321/timepoints'), { token: user });
+  await call('PUT', api(`/patients/${PATIENT.id}/timepoints`), {
+    token: user,
+    body: list(TIMEPOINT_NAME, []),
+  });
   await call('GET', `/${PATIENT.id}`);
   await call('GET', '/health');
   await call('GET', `/%E0%A4%A/${PATIENT.id}`);
@@ -290,6 +320,7 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     'a name that was locked': 'locked-out',
     'a name that is no account': 'no-such-account-here',
     'what was typed as a name': TYPED_AS_NAME,
+    'the name of a timepoint': TIMEPOINT_NAME,
     'the administrator’s password': ADMIN.password,
     'the user’s password': USER.password,
     'a new password': NEW_PASSWORD,
@@ -317,7 +348,7 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   for (const action of [
     ...['login', 'logout', 'password-change'],
     ...['patients-list', 'studies-search', 'study-read', 'series-read', 'instance-read'],
-    ...['instance-download', 'instance-upload'],
+    ...['instance-download', 'instance-upload', 'timepoints-read', 'timepoints-write'],
     ...['accounts-list', 'account-create', 'account-change', 'account-remove'],
     ...['job-start', 'job-read', 'job-cancel', 'audit-read'],
   ]) {
@@ -343,6 +374,8 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     user,
     TYPED_AS_NAME,
     'locked-out',
+    // Nor what a timepoint was called: the record says how many were kept.
+    TIMEPOINT_NAME,
   ]) {
     expect(whole.includes(secret), 'the audit log holds a secret').toBe(false);
   }
