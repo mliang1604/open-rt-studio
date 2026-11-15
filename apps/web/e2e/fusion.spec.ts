@@ -119,6 +119,9 @@ test('a same-frame dose loads as a fusion overlay; Compare shows both layers', a
   await expect(probe).toBeVisible();
   await expect(probe).toContainText('Gy');
   await expect(probe).toContainText('HU');
+  // #95: the dose is the pane's own image here, and is shown as a dose: by
+  // its type, to a hundredth of a gray, with the CT read at the same place.
+  await expect(probe).toHaveText(/ mm · Dose \d+\.\d\d Gy · CT -?\d+(\.\d)? HU$/);
 
   // #129: the Compare groups are linked by default; the toggle unlinks them so each
   // column navigates on its own. Both states must re-render the two-texture path

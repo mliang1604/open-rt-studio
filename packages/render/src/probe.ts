@@ -113,6 +113,41 @@ export function sampleVolumeAtPatient(volume: Volume, patient: Vec3): VoxelProbe
   return sampleTex(volume, tx, ty, tz, patient);
 }
 
+/**
+ * The value of `volume` at a patient-space point, between its voxels: the
+ * trilinear blend of the eight voxels whose middles lie about the point
+ * (#95). A dose is read so, since a dose grid is coarse and a dose is a
+ * field, not a picture: the value at a place is not that of the nearest
+ * sample. Null when the point lies outside the volume. Within half a voxel
+ * of the volume's faces, beyond the outermost middles, the value is that of
+ * the outermost voxels: nothing is read from outside the grid.
+ */
+export function interpolateVolumeAtPatient(volume: Volume, patient: Vec3): number | null {
+  const m = patientToTexMatrix(volume); // column-major patient → texcoord
+  const tex = [
+    m[0] * patient[0] + m[4] * patient[1] + m[8] * patient[2] + m[12],
+    m[1] * patient[0] + m[5] * patient[1] + m[9] * patient[2] + m[13],
+    m[2] * patient[0] + m[6] * patient[1] + m[10] * patient[2] + m[14],
+  ];
+  if (tex.some((t) => !(t >= 0 && t <= 1))) return null;
+  const [dimX, dimY, dimZ] = volume.dims;
+  // A voxel's middle is at (index + 0.5) / dim: the place in voxels, held within the middles.
+  const at = (t: number, dim: number): { low: number; high: number; part: number } => {
+    const place = Math.min(dim - 1, Math.max(0, t * dim - 0.5));
+    const low = Math.min(dim - 1, Math.floor(place));
+    return { low, high: Math.min(dim - 1, low + 1), part: place - low };
+  };
+  const x = at(tex[0], dimX);
+  const y = at(tex[1], dimY);
+  const z = at(tex[2], dimZ);
+  const read = (i: number, j: number, k: number): number => volume.data[(k * dimY + j) * dimX + i];
+  const along = (j: number, k: number): number =>
+    read(x.low, j, k) + (read(x.high, j, k) - read(x.low, j, k)) * x.part;
+  const across = (k: number): number =>
+    along(y.low, k) + (along(y.high, k) - along(y.low, k)) * y.part;
+  return across(z.low) + (across(z.high) - across(z.low)) * z.part;
+}
+
 /** Floor a texture coordinate into `volume`'s grid and read the value there. */
 function sampleTex(volume: Volume, tx: number, ty: number, tz: number, patient: Vec3): VoxelProbe {
   const [dimX, dimY, dimZ] = volume.dims;

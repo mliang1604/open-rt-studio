@@ -1027,11 +1027,22 @@ come.
 - **One object is one grid.** A series that holds several dose objects (a
   dose to a beam, say) is not read: stacked as one series they would be
   shown as one grid (#257).
-- **Not there:** the probe reads a dose at its nearest voxel, not between
-  voxels (#95); a relative dose is shown as its numbers, with nothing said
-  of what it is relative to; Tissue Heterogeneity Correction, the
-  referenced plan's fractions and the DVH sequence are not read; nothing
-  was read from another system's dose file.
+- **The dose under the cursor** (#95) is read between the dose's voxels:
+  the trilinear blend of the eight voxels about the cursor's place
+  (`interpolateVolumeAtPatient`), where an image is read at its voxel, as it
+  is stored. A dose grid is coarse and a dose is a field, so the nearest
+  sample is not the dose at a place. The probe names a dose by its type
+  ("Dose", "Effective dose", "Dose error", and "relative" when it is),
+  shows it to a hundredth of a gray, and shows no stored value for it,
+  there being none between voxels. Within half a voxel of the grid's faces
+  the outermost voxel's value is shown; outside the grid, nothing. A dose
+  in another frame of reference is read where its registration puts the
+  point, like any layer.
+- **Not there:** a relative dose is shown as its numbers, with nothing said
+  of what it is relative to; ROI statistics over a dose are of its voxels,
+  not interpolated; Tissue Heterogeneity Correction, the referenced plan's
+  fractions and the DVH sequence are not read; nothing was read from
+  another system's dose file.
 
 Status: **decided, and Michael's to overturn**.
 

@@ -83,7 +83,12 @@ export {
   slicePlaneCorners,
   resolveGeometry,
 } from './plane-basis.js';
-export { type VoxelProbe, probeVoxel, sampleVolumeAtPatient } from './probe.js';
+export {
+  type VoxelProbe,
+  interpolateVolumeAtPatient,
+  probeVoxel,
+  sampleVolumeAtPatient,
+} from './probe.js';
 export { ProjectionMode, defaultSlabThicknessMm, isDvr } from './projection.js';
 export {
   type ReferenceLineGeometry,

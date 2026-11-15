@@ -5,7 +5,7 @@
 import type { DoseInfo, Layer, Volume } from '@open-rt-studio/dicom';
 import type { VoxelProbe } from '@open-rt-studio/render';
 
-import { doseSaid, formatFieldReading, formatProbe } from './viewer-format';
+import { doseLabel, doseSaid, formatDose, formatFieldReading, formatProbe } from './viewer-format';
 
 function volume(overrides: Partial<Volume> = {}): Volume {
   return {
@@ -74,23 +74,57 @@ describe('formatProbe', () => {
       patient: PROBE.patient,
     };
     expect(formatProbe('Axial', PROBE, volume(), [{ layer: doseOf('GY'), sample }])).toBe(
-      'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · value -784 HU · stored 240 · RTDOSE 35.7 Gy',
+      'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · value -784 HU · stored 240 · Dose 35.72 Gy',
     );
     // A relative dose is a share of something the file does not name: it has no unit (#93).
     expect(formatProbe('Axial', PROBE, volume(), [{ layer: doseOf('RELATIVE'), sample }])).toBe(
-      'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · value -784 HU · stored 240 · RTDOSE 35.7',
+      'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · value -784 HU · stored 240 · Dose, relative 35.72',
     );
   });
 
-  it('gives a dose that is the image its own unit too', () => {
-    const dose = volume({ modality: 'RTDOSE', rescaleIntercept: 0, dose: DOSE });
-    expect(formatProbe('Axial', PROBE, dose)).toContain('value -784 Gy');
+  it('reads another image beside it by its modality, to a tenth', () => {
+    const mr = { modality: 'MR', volume: { modality: 'MR' } } as Layer;
+    const sample: VoxelProbe = {
+      voxel: [1, 2, 3],
+      value: 35.72,
+      rawValue: 0,
+      patient: PROBE.patient,
+    };
+    expect(formatProbe('Axial', PROBE, volume(), [{ layer: mr, sample }])).toMatch(/ · MR 35\.7$/);
+  });
+
+  it('shows a dose that is the image as a dose: by its type, to a hundredth of a gray, with no stored value', () => {
+    const read = { ...PROBE, value: 2.4567 };
+    // Its scaling is not 1, and yet no stored value is shown: between voxels there is none.
+    const dose = volume({ modality: 'RTDOSE', rescaleSlope: 0.1, rescaleIntercept: 0, dose: DOSE });
+    expect(formatProbe('Axial', read, dose)).toBe(
+      'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · Dose 2.46 Gy',
+    );
     const relative = volume({
       modality: 'RTDOSE',
+      rescaleSlope: 0.1,
       rescaleIntercept: 0,
-      dose: { ...DOSE, units: 'RELATIVE' },
+      dose: { ...DOSE, units: 'RELATIVE', type: 'EFFECTIVE' },
     });
-    expect(formatProbe('Axial', PROBE, relative)).toMatch(/value -784$/);
+    expect(formatProbe('Axial', read, relative)).toMatch(/ · Effective dose, relative 2\.457$/);
+  });
+});
+
+describe('a dose beside its value (#95)', () => {
+  it('is called by its type, and relative when it is', () => {
+    expect(doseLabel({ type: 'PHYSICAL', units: 'GY' })).toBe('Dose');
+    expect(doseLabel({ type: 'EFFECTIVE', units: 'GY' })).toBe('Effective dose');
+    expect(doseLabel({ type: 'ERROR', units: 'GY' })).toBe('Dose error');
+    expect(doseLabel({ type: 'PHYSICAL', units: 'RELATIVE' })).toBe('Dose, relative');
+  });
+
+  it('is shown to a hundredth of a gray, or to four figures when it is relative', () => {
+    expect(formatDose(35.7249, { units: 'GY' })).toBe('35.72 Gy');
+    expect(formatDose(0, { units: 'GY' })).toBe('0.00 Gy');
+    expect(formatDose(-0.126, { units: 'GY' })).toBe('-0.13 Gy');
+    expect(formatDose(0.456789, { units: 'RELATIVE' })).toBe('0.4568');
+    expect(formatDose(98.76543, { units: 'RELATIVE' })).toBe('98.77');
+    expect(formatDose(100, { units: 'RELATIVE' })).toBe('100');
   });
 });
 
