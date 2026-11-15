@@ -182,6 +182,13 @@ export interface SeriesSummary {
    * {@link description} has it too; a chip has no room for both in a line.
    */
   readonly doseOf?: string;
+  /**
+   * True for a series that says it was made from others (#254): an image
+   * whose Image Type begins `DERIVED` or that has a Derivation Description.
+   * It is the series' own statement, not read from what it is called. Left
+   * out for one that does not say, and where the source does not know.
+   */
+  readonly derived?: true;
   readonly modality: string | null;
   readonly frameOfReferenceUid: string | null;
   /** How many images (or other instances) it holds. */

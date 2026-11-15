@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { registrationReference } from './derived-series.js';
 import { summedDoseVolume, type DoseSum } from './dose-sum.js';
+import { readInstanceHeader } from './instance-header.js';
 import { parseFile } from './loader.js';
 import { rigidMat4, type Mat4 } from './mat4.js';
 import type { ResampleGrid } from './resample.js';
@@ -336,6 +337,9 @@ describe('writeSummedDose', () => {
     const sum = sumOn(ASKEW, PHYSICAL, ramp);
     const written = writeSummedDose(contentOf(sum), { createdAt: AT });
     const dataSet = dicomParser.parseDicom(new Uint8Array(written.bytes));
+    // Its header says it is derived, by which a timeline marks it (#254).
+    const header = readInstanceHeader(new Uint8Array(written.bytes));
+    expect(header.ok && header.header.derived).toBe(true);
     const sources = items(dataSet, 'x0008114a');
     expect(sources.map((item) => item.string('x00081155'))).toEqual([DOSE_A, DOSE_B]);
     for (const item of sources) {

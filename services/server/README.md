@@ -644,6 +644,15 @@ without asking for each.
   sends it as `plan` with what the instance refers to; `null` for anything
   else. A plan filed before version 5 has none until its file is ingested
   again.
+- **Whether an object says it is derived.** The index keeps, with each
+  instance, whether its header says it was made from others
+  (`instance.derived`, from version 7 of the schema): an image whose Image
+  Type begins `DERIVED` or that has a Derivation Description, a structure
+  set that names a predecessor or has a resampled structure. Instances and
+  series answer it as `derived`: `true`, `false`, or `null` where it is
+  not known, which is every instance filed before version 7 until its
+  file is ingested again. A series is derived when an instance of it says
+  so. Nothing is read from a description or a name.
 - **A dose says what it is the dose of.** A series may hold several RT Dose
   instances, a plan's dose beside a dose to each of its beams. For an RT
   Dose the index keeps its Dose Summation Type and the beam numbers and

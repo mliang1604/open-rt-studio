@@ -116,6 +116,7 @@ export function indexEntry(
     references: header.references,
     plan: header.plan,
     dose: header.dose,
+    derived: header.derived,
   };
 }
 
@@ -191,7 +192,9 @@ export function createIngest({ store, index, logger = SILENT_LOGGER }: IngestPar
         const learnt =
           indexed.frames !== entry.instance.frames ||
           (!!entry.plan && (await index.planOf(uid)) === null) ||
-          (!!entry.dose && (await index.doseOf(uid)) === null);
+          (!!entry.dose && (await index.doseOf(uid)) === null) ||
+          // Or before whether an object says it is derived was.
+          (indexed.derived === null && entry.derived != null);
         if (learnt) await index.putInstance(entry);
         return { outcome: 'unchanged', sopInstanceUid: uid };
       }

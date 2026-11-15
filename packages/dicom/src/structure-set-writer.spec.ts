@@ -4,6 +4,7 @@
 
 import dicomParser from 'dicom-parser';
 
+import { readInstanceHeader, saysDerived } from './instance-header.js';
 import { parseStructureSet } from './structure-set.js';
 import { writeStructureSet } from './structure-set-writer.js';
 import type { StructureSet } from './types.js';
@@ -315,6 +316,50 @@ describe('writeStructureSet', () => {
       const plain = parseStructureSet('rt.dcm', writeStructureSet(sample))!;
       expect('predecessorSopInstanceUids' in plain).toBe(false);
       expect(plain.description).toBeNull();
+    });
+
+    it('is told to be derived from its header: by a predecessor or a resampled structure, not by what it is called (#254)', () => {
+      const derived = (buffer: ArrayBuffer): boolean => saysDerived(read(buffer));
+      // A file that can be filed says it in its header.
+      const header = readInstanceHeader(
+        new Uint8Array(
+          writeStructureSet(sample, {
+            predecessorSopInstanceUid: '1.2.3.99',
+            studyInstanceUid: '1.2.3.5',
+          }),
+        ),
+      );
+      expect(header.ok && header.header.derived).toBe(true);
+      const plainHeader = readInstanceHeader(
+        new Uint8Array(writeStructureSet(sample, { studyInstanceUid: '1.2.3.5' })),
+      );
+      expect(plainHeader.ok && plainHeader.header.derived).toBe(false);
+      expect(derived(writeStructureSet(sample, { predecessorSopInstanceUid: '1.2.3.99' }))).toBe(
+        true,
+      );
+      expect(derived(writeStructureSet(propagated))).toBe(true);
+      // One that names no predecessor and has no resampled structure, whatever it is called.
+      expect(derived(writeStructureSet(sample))).toBe(false);
+      expect(
+        derived(
+          writeStructureSet(
+            { ...sample, label: 'Propagated' },
+            { description: 'Propagated: structures taken to another series' },
+          ),
+        ),
+      ).toBe(false);
+      // A structure made by an algorithm that was not resampled is not derived from another.
+      const automatic: StructureSet = {
+        ...sample,
+        rois: [
+          {
+            ...sample.rois[0],
+            generation: { algorithm: 'AUTOMATIC', description: 'Thresholded', resampled: false },
+          },
+          sample.rois[1],
+        ],
+      };
+      expect(derived(writeStructureSet(automatic))).toBe(false);
     });
 
     it('names the structure set this one was derived from, when there is one', () => {

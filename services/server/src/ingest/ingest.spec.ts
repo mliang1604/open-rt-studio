@@ -211,6 +211,35 @@ describe('ingest', () => {
     expect(written).not.toHaveBeenCalled();
   });
 
+  it('files with each object whether it says it is derived, and learns it of one filed before (#254)', async () => {
+    const { store, index, ingest } = await pacs();
+    const [first, ...rest] = COURSE_FILES;
+    const header = readInstanceHeader(first.bytes);
+    if (!header.ok) throw new Error('the file has no header');
+    // As an earlier version left it: the bytes stored, the entry without the statement.
+    await store.put(uidOf(first), first.bytes);
+    const entry = indexEntry(header.header, {
+      size: first.bytes.byteLength,
+      sha256: sha256(first.bytes),
+    });
+    await index.putInstance({ ...entry, derived: null });
+    expect((await index.getInstance(uidOf(first)))!.derived).toBeNull();
+    expect(await ingest.ingest(first.bytes)).toEqual({
+      outcome: 'unchanged',
+      sopInstanceUid: uidOf(first),
+    });
+    // Nothing of the synthetic course says it was made from another object.
+    expect((await index.getInstance(uidOf(first)))!.derived).toBe(false);
+    for (const file of rest) await ingest.ingest(file.bytes);
+    expect((await index.getSeries(COURSE.ct))!.derived).toBe(false);
+    expect((await index.getInstance(COURSE.structureSet))!.derived).toBe(false);
+    expect((await index.getInstance(COURSE.dose))!.derived).toBe(false);
+    // And the index is not written again for what it knows.
+    const written = vi.spyOn(index, 'putInstance');
+    await ingest.ingest(first.bytes);
+    expect(written).not.toHaveBeenCalled();
+  });
+
   it('learns what a plan says, of one filed before that was kept, when the file comes again', async () => {
     const { store, index, ingest } = await pacs();
     const file = COURSE_FILES.find((one) => uidOf(one) === COURSE.plan)!;
@@ -355,6 +384,11 @@ describe('ingest', () => {
     });
     // No new patient or study: it is filed where the image is.
     expect(await index.counts()).toMatchObject({ patients: 1, studies: 2, series: 8 });
+    // It says it is derived, and so does its series; the dose it was made of does not (#254).
+    const filed = (await index.getInstance(written.sopInstanceUid))!;
+    expect(filed.derived).toBe(true);
+    expect((await index.getSeries(filed.seriesInstanceUid))!.derived).toBe(true);
+    expect((await index.getInstance(COURSE.dose))!.derived).toBe(false);
     const related = (await index.relatedToSeries(COURSE.ct))!;
     expect(related.doses.map((one) => one.sopInstanceUid).sort()).toEqual(
       [COURSE.dose, written.sopInstanceUid].sort(),

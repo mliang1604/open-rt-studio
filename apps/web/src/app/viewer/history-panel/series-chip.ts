@@ -85,6 +85,10 @@ export class SeriesChip {
     event.dataTransfer.effectAllowed = 'copy';
   }
 
+  /** What the mark of a derived series says to whoever asks. */
+  protected readonly derivedTitle =
+    'Derived: the series says it was made from other objects. Not for clinical use.';
+
   /** Whether the preview is a rendered image (vs an icon fallback). */
   protected readonly isImage = computed(() => this.thumbnail().kind === 'image');
   /** Human label for the series (description, else its number). */

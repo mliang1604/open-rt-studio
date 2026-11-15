@@ -75,6 +75,22 @@
   color: var(--text);
 }
 
+/* A series that says it is derived: at the foot of the preview, where the
+   count of structure sets in its top corner leaves it room. */
+.chip-derived {
+  position: absolute;
+  bottom: 3px;
+  left: 3px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #111;
+  background: #f5c451;
+}
+
 /* How many structure sets come with the series: in a corner of the preview,
    so that the line of text below keeps its width. */
 .chip-sets {

@@ -116,6 +116,7 @@ export {
   type InstanceRelation,
   readDoseOf,
   readInstanceHeader,
+  saysDerived,
 } from './instance-header.js';
 export {
   type ConsistencySummary,

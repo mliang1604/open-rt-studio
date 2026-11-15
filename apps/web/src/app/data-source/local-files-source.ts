@@ -73,6 +73,8 @@ export class LocalFilesSource implements DataSource {
           return {
             ...series,
             structureSets: parsed ? structureSetsForSeries(sets, parsed).length : 0,
+            // What the series' first image says of being made from others (#254).
+            ...(parsed?.metadata?.derivation ? { derived: true as const } : {}),
           };
         }),
       })),

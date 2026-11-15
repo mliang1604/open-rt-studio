@@ -58,7 +58,9 @@ export function rtTitle(object: AttachedObject | LooseObject, of: string | null 
   const name = object.description?.trim();
   const plan = object.plan ? ` ${planSummaryText(object.plan)}.` : '';
   const said = of ? ` (${of})` : '';
-  return `${RT_NAME[object.kind]}${name ? ` “${name}”` : ''}${said}.${plan} ${rtWhy(object)}`;
+  // It says it was made from another object (#254): the object's own statement.
+  const derived = object.derived ? ' It says it is derived from another object.' : '';
+  return `${RT_NAME[object.kind]}${name ? ` “${name}”` : ''}${said}.${plan} ${rtWhy(object)}${derived}`;
 }
 
 /**
@@ -98,6 +100,9 @@ export function dosesTold(objects: readonly (AttachedObject | LooseObject)[]): M
           <span class="rt-text">{{ item.text }}</span>
           @if (item.more) {
             <span class="rt-more" aria-hidden="true">{{ item.more }}</span>
+          }
+          @if (item.object.derived) {
+            <span class="rt-derived" aria-hidden="true">Derived</span>
           }
           <span class="visually-hidden">{{ item.title }}</span>
         </li>

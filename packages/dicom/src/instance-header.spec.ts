@@ -82,6 +82,7 @@ describe('readInstanceHeader', () => {
         references: [],
         plan: null,
         dose: null,
+        derived: false,
       },
     });
   });
@@ -108,6 +109,24 @@ describe('readInstanceHeader', () => {
       expect(readInstanceHeader(part10(without))).toEqual({ ok: false, reason: 'incomplete' });
     },
   );
+
+  it('says an image is derived by its Image Type or its Derivation Description, and by nothing else (#254)', () => {
+    const derived = (more: [number, number, string, string][]): boolean => {
+      const read = readInstanceHeader(
+        part10([...WHOLE, ...more].sort((a, b) => a[0] - b[0] || a[1] - b[1])),
+      );
+      if (!read.ok) throw new Error(read.reason);
+      return read.header.derived;
+    };
+    expect(derived([[0x0008, 0x0008, 'CS', 'DERIVED\\SECONDARY']])).toBe(true);
+    expect(derived([[0x0008, 0x0008, 'CS', 'derived\\PRIMARY\\AXIAL']])).toBe(true);
+    expect(derived([[0x0008, 0x2111, 'ST', 'Resampled by another system']])).toBe(true);
+    // An original image, and one that is only called derived.
+    expect(derived([[0x0008, 0x0008, 'CS', 'ORIGINAL\\PRIMARY\\AXIAL']])).toBe(false);
+    expect(derived([[0x0008, 0x0008, 'CS', 'ORIGINAL\\DERIVED']])).toBe(false);
+    expect(derived([[0x0008, 0x103e, 'LO', 'Resampled: CT on MR']])).toBe(false);
+    expect(derived([])).toBe(false);
+  });
 
   it('says "incomplete" when a UID is not one', () => {
     const spoiled = WHOLE.map((element): (typeof WHOLE)[number] =>

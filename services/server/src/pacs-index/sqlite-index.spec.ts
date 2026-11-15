@@ -212,6 +212,8 @@ describe('migrations', () => {
           .sopInstanceUid,
       ),
     ).toBeNull();
+    // Nor of whether an object says it is derived, which version 7 began to keep: not known.
+    expect(dose.derived).toBeNull();
     // And what version 2 added works on it.
     const [structureSet] = syntheticRtDataset().filter((one) => one.series.modality === 'RTSTRUCT');
     expect(await index.putInstance(structureSet)).toBe('updated');
@@ -292,6 +294,8 @@ describe('putting instances', () => {
       modality: 'CT',
       number: 1,
       frames: null,
+      // The entry did not say whether it is derived: it is not known.
+      derived: null,
       size: 1001,
       sha256: '1'.padStart(64, '0'),
     });
@@ -305,6 +309,7 @@ describe('putting instances', () => {
       instances: 1,
       images: 1,
       structureSets: 0,
+      derived: null,
     });
     expect(await index.getStudy(studyUid(PLANNING))).toEqual({
       studyInstanceUid: studyUid(PLANNING),
@@ -555,6 +560,56 @@ describe('what a plan says (#97)', () => {
     await index.putInstance(plan());
     await index.removeInstance(uid);
     expect(await index.planOf(uid)).toBeNull();
+  });
+});
+
+describe('whether an object says it is derived (#254)', () => {
+  const ct = (n: number, derived?: boolean | null): InstanceEntry => ({
+    ...entry(PLANNING, 'CT', SERIES.CT, n),
+    ...(derived === undefined ? {} : { derived }),
+  });
+  const uid = (n: number): string => instanceUid(PLANNING, SERIES.CT, n);
+  const series = async (index: PacsIndex) =>
+    (await index.getSeries(seriesUid(PLANNING, SERIES.CT)))!.derived;
+
+  it('is kept with each instance as yes or no, and is not known where the entry does not say', async () => {
+    const index = await memory([ct(1, true), ct(2, false), ct(3), ct(4, null)]);
+    expect((await index.getInstance(uid(1)))!.derived).toBe(true);
+    expect((await index.getInstance(uid(2)))!.derived).toBe(false);
+    expect((await index.getInstance(uid(3)))!.derived).toBeNull();
+    expect((await index.getInstance(uid(4)))!.derived).toBeNull();
+    expect(
+      (await index.findInstances({ seriesInstanceUid: seriesUid(PLANNING, SERIES.CT) })).map(
+        (one) => one.derived,
+      ),
+    ).toEqual([true, false, null, null]);
+  });
+
+  it('is said of a series: yes when an instance says so, no when all say no, not known otherwise', async () => {
+    expect(await series(await memory([ct(1, false), ct(2, true), ct(3)]))).toBe(true);
+    expect(await series(await memory([ct(1, false), ct(2, false)]))).toBe(false);
+    expect(await series(await memory([ct(1, false), ct(2)]))).toBeNull();
+    expect(await series(await memory([ct(1), ct(2)]))).toBeNull();
+    // And in a list of series, as by itself.
+    const index = await memory([ct(1, true), entry(PLANNING, 'MR', SERIES.MR, 1)]);
+    expect(
+      Object.fromEntries((await index.findSeries({})).map((one) => [one.modality, one.derived])),
+    ).toEqual({ CT: true, MR: null });
+  });
+
+  it('follows the instance when it is put again', async () => {
+    const index = await memory([ct(1)]);
+    await index.putInstance(ct(1, true));
+    expect(await series(index)).toBe(true);
+    await index.putInstance(ct(1, false));
+    expect(await series(index)).toBe(false);
+  });
+
+  it('refuses what is neither yes nor no', async () => {
+    const index = await memory([]);
+    await expect(
+      index.putInstance({ ...ct(1), derived: 'yes' as unknown as boolean }),
+    ).rejects.toThrow("The entry's derived is neither yes nor no.");
   });
 });
 

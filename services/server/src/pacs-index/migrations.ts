@@ -138,6 +138,19 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE instance ADD COLUMN dose TEXT;
     `,
   },
+  {
+    version: 7,
+    name: 'whether an object says it is derived',
+    sql: `
+      -- Whether the object says it was made from others: 1 for an image
+      -- whose Image Type begins DERIVED or that has a Derivation
+      -- Description, and for a structure set that names a predecessor or
+      -- has a resampled structure; 0 for one that says nothing of the kind.
+      -- NULL for every instance filed before this step: of those it is not
+      -- known, until the file is ingested again.
+      ALTER TABLE instance ADD COLUMN derived INTEGER;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

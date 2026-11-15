@@ -1227,6 +1227,72 @@ describe('what belongs to what on a server (#38)', () => {
   });
 });
 
+describe('what says it is derived, on a server (#254)', () => {
+  const RESAMPLED = '1.2.826.0.1.3680043.10.1561.901';
+  const PROPAGATED = '1.2.826.0.1.3680043.10.1561.902';
+
+  /** The course, a resampled series written here, and a structure set that names a predecessor. */
+  function filesWithDerived(): { name: string; mimeType: string; bytes: Uint8Array }[] {
+    const set = FILES.find((file) => {
+      const read = readInstanceHeader(file.bytes);
+      return read.ok && read.header.series.modality === 'RTSTRUCT';
+    })!;
+    const header = readInstanceHeader(set.bytes);
+    if (!header.ok) throw new Error('the course has no structure set');
+    const propagated = writeStructureSet(
+      { ...parseStructureSet(set.name, set.bytes.slice().buffer)!, label: 'On the follow-up' },
+      {
+        sopInstanceUid: PROPAGATED,
+        predecessorSopInstanceUid: COURSE.structureSet,
+        patientId: header.header.patient.id,
+        patientName: header.header.patient.name ?? undefined,
+        studyInstanceUid: header.header.study.uid,
+      },
+    );
+    return [
+      ...FILES,
+      ...derived(RESAMPLED).objects.map((object, at) => ({
+        name: `resampled-${at}.dcm`,
+        mimeType: 'application/dicom',
+        bytes: new Uint8Array(object.bytes),
+      })),
+      { name: 'propagated.dcm', mimeType: 'application/dicom', bytes: new Uint8Array(propagated) },
+    ];
+  }
+  async function withDerived(older = false): Promise<ServerSource> {
+    const server = fakeServer(filesWithDerived());
+    server.noDerived = older;
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await source.selectPatient('1');
+    return source;
+  }
+  const listed = (source: ServerSource) =>
+    source.currentPatient()!.studies.flatMap((study) => study.series);
+
+  it('marks the series that says so, and the structure set that names a predecessor, and no other', async () => {
+    const source = await withDerived();
+    const series = listed(source);
+    expect(series.filter((one) => one.derived).map((one) => one.uid)).toEqual([RESAMPLED]);
+    expect(series.find((one) => one.uid === COURSE.ct)).not.toHaveProperty('derived');
+    const sets = series
+      .find((one) => one.uid === COURSE.ct)!
+      .attached!.filter((one) => one.kind === 'structure-set');
+    expect(
+      Object.fromEntries(sets.map((one) => [one.sopInstanceUid, one.derived ?? false])),
+    ).toEqual({ [COURSE.structureSet]: false, [PROPAGATED]: true });
+  });
+
+  it('marks nothing on a server that does not say: it is not known there', async () => {
+    const source = await withDerived(true);
+    expect(listed(source).some((one) => one.derived)).toBe(false);
+    expect(
+      listed(source)
+        .flatMap((one) => one.attached ?? [])
+        .some((one) => one.derived),
+    ).toBe(false);
+  });
+});
+
 describe('a dose series of several dose objects on a server (#257)', () => {
   const PLAN_KEY = `${BEAM_DOSES.series}@${BEAM_DOSES.planDose}`;
   const BEAM_KEYS = BEAM_DOSES.beamDoses.map((uid) => `${BEAM_DOSES.series}@${uid}`);

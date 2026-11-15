@@ -73,6 +73,9 @@ async function resampledChip(page: Page): Promise<Locator> {
   await expect(tile).toHaveAttribute('aria-expanded', 'true');
   const chip = page.locator('app-series-chip').filter({ hasText: 'Resampled:' });
   await expect(chip).toHaveCount(1);
+  // It is marked as derived by what it says of itself (#254), and it alone.
+  await expect(chip.locator('.chip-derived')).toBeVisible();
+  await expect(page.locator('app-series-chip .chip-derived')).toHaveCount(1);
   return chip;
 }
 
