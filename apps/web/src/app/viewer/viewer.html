@@ -671,7 +671,11 @@
             [disabled]="!isReady() || !hasMprPane()"
             [class.active]="brushCtl.mode() === 'erase'"
             [attr.aria-pressed]="brushCtl.mode() === 'erase'"
-            title="Erase any structure under the brush"
+            [title]="
+              contourTools.protectOthers()
+                ? 'Erase the active structure under the brush'
+                : 'Erase any structure under the brush'
+            "
           >
             🧽 Erase
           </button>
@@ -684,6 +688,8 @@
             ＋ New
           </button>
         </div>
+
+        <app-contour-tool-bar [disabled]="!isReady() || !hasMprPane()" />
 
         <div
           class="brush-set"
@@ -809,6 +815,14 @@
           />
           {{ roiCtl.fillOpacityPercent() }}%
         </label>
+
+        <app-contour-constraints
+          [disabled]="!isReady()"
+          [unit]="layersCtl.volume()?.modality === 'CT' ? 'HU' : ''"
+          [imageRange]="
+            layersCtl.volume() ? [layersCtl.volume()!.min, layersCtl.volume()!.max] : null
+          "
+        />
       </div>
     </details>
 
@@ -1468,6 +1482,9 @@
         />
       </svg>
     }
+
+    <!-- The contouring tool's preview where the pointer is: the brush's outline (#106). -->
+    <app-tool-preview [preview]="contourTools.preview()" />
 
     <!-- Interactive measurements (distance/angle/ROI), one SVG per measurement, clipped to its pane. -->
     @for (mo of measureCtl.measurementOverlays(); track mo.key) {

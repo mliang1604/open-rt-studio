@@ -220,7 +220,7 @@ export interface InteractionInit {
     event: PointerEvent,
   ) => void;
 
-  /** Whether a brush/eraser mode is selected, so a left-drag paints instead of pans. */
+  /** Whether a contouring tool is in hand (#106), so a left-drag is its stroke instead of a pan. */
   readonly brushActive: () => boolean;
   /** Select no measurement: a press on a pane that is not on one. */
   readonly deselectMeasurement: () => void;
@@ -236,6 +236,14 @@ export interface InteractionInit {
   ) => void;
   /** End the in-progress brush stroke. */
   readonly endStroke: () => void;
+  /**
+   * The pointer moved over an MPR pane with no button down, or left the
+   * panes (null): for the tool in hand to draw its preview (#106).
+   */
+  readonly hoverTool: (
+    placement: Extract<PanePlacement, { kind: 'mpr' }> | null,
+    event: PointerEvent,
+  ) => void;
 
   /** Whether a left click on an MPR pane places a landmark's point. */
   readonly landmarkPlacing: () => boolean;

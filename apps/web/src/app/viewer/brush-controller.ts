@@ -6,8 +6,8 @@ import { Injectable, computed, inject, signal, type Signal } from '@angular/core
 import { Orientation, type Series, type Volume } from '@open-rt-studio/dicom';
 import {
   cursorVoxel,
-  strokeVoxels,
-  throughPlaneAxis,
+  mmPerScreenPixel,
+  planeExtentMm,
   type BrushShape,
   type VoxelIndex,
 } from '@open-rt-studio/render';
@@ -46,19 +46,19 @@ export interface BrushInit {
 }
 
 /**
- * Owns the brush / eraser editing gesture (#268): it turns a pointer stroke over
- * an MPR pane into label-volume voxels and writes them through the
- * {@link EditableStructuresStore}. The geometry stays pure and tested in
- * `src/render/brush.ts` — this controller is the wiring that feeds it the probed
- * cursor voxel (reusing the very inverse the probe runs, so the brush agrees with
- * the displayed slice) and the active brush settings.
+ * Owns the brush's settings and the painted structures' sets (#268): the
+ * paint/erase mode, the structure painted into, the brush's shape and size, and
+ * the export. It gives the brush tool the voxel under a pointer (the very inverse
+ * the probe runs, so the brush agrees with the displayed slice) and how large a
+ * screen pixel is on a pane.
  *
  * The brush settings (radius, footprint, paint/erase mode, active ROI) live here
  * as signals rather than on the component: they're a self-contained tool the
  * structures toolbar binds to, and the controller's lifetime tracks the viewer
  * (provided at the component, like `MeasureController`). The
- * {@link InteractionController} routes left-drag here when {@link isActive} is
- * true, so painting takes over from pan only while a brush mode is selected.
+ * strokes themselves are the brush tool's (`contour-tools/brush-tool.ts`, #106),
+ * which the {@link InteractionController} hands a left-drag to through the
+ * contouring tool framework while a brush mode is selected.
  */
 @Injectable()
 export class BrushController {
@@ -89,9 +89,6 @@ export class BrushController {
 
   /** True while a save is on its way to a source that stores; the button waits for it. */
   readonly saving = signal(false);
-
-  /** The voxel the last stroke sample landed on, so a drag can interpolate from it. */
-  private lastVoxel: VoxelIndex | null = null;
 
   /**
    * Whether a brush gesture should claim the next left-drag: a mode is selected,
@@ -128,7 +125,6 @@ export class BrushController {
   /** Turn the brush off (e.g. when another tool takes over). */
   deactivate(): void {
     this.mode.set('off');
-    this.lastVoxel = null;
   }
 
   /** Create a fresh structure in the active set, select it, and switch to painting it. */
@@ -260,53 +256,37 @@ export class BrushController {
   }
 
   /**
-   * Begin a stroke at the press point: stamp the brush on the voxel under the
-   * cursor and remember it as the stroke's anchor for the drag to interpolate from.
+   * How many millimetres of the pane's plane a screen pixel is, at its zoom:
+   * what the brush's outline is drawn by, as the scale bar is. 0 without an image.
    */
-  beginStroke(placement: Extract<PanePlacement, { kind: 'mpr' }>, event: PointerEvent): void {
-    const voxel = this.voxelAt(placement, event);
-    this.lastVoxel = voxel;
-    if (voxel) this.paintStroke(placement.orientation, voxel, voxel);
+  mmPerPixel(placement: Extract<PanePlacement, { kind: 'mpr' }>): number {
+    const volume = this.deps?.volume();
+    if (!volume) return 0;
+    const [planeW, planeH] = planeExtentMm(volume, placement.orientation);
+    return mmPerScreenPixel(
+      planeW,
+      planeH,
+      placement.rect.width,
+      placement.rect.height,
+      this.deps!.zooms()[placement.orientation],
+    );
   }
 
-  /**
-   * Extend the stroke to the cursor's current voxel, painting every stamp between
-   * it and the previous sample so a fast drag leaves no gaps.
-   */
-  extendStroke(placement: Extract<PanePlacement, { kind: 'mpr' }>, event: PointerEvent): void {
-    const voxel = this.voxelAt(placement, event);
-    if (!voxel) return;
-    const from = this.lastVoxel ?? voxel;
-    this.paintStroke(placement.orientation, from, voxel);
-    this.lastVoxel = voxel;
-  }
-
-  /** End the current stroke. */
-  endStroke(): void {
-    this.lastVoxel = null;
-  }
-
-  /** Paint (or erase) every voxel the stroke from `from` to `to` covers. */
-  private paintStroke(orientation: Orientation, from: VoxelIndex, to: VoxelIndex): void {
-    const label = this.store.labelVolume();
-    if (!label) return;
-    const mode = this.mode();
-    const voxels = strokeVoxels(label.dims, label.spacing, from, to, {
-      shape: this.shape(),
-      radiusMm: this.radiusMm(),
-      axis: throughPlaneAxis(orientation),
-    });
-    if (voxels.length === 0) return;
-    if (mode === 'paint') {
-      const roiId = this.activeRoiId();
-      if (roiId !== null) this.store.paint(roiId, voxels);
-    } else if (mode === 'erase') {
-      this.store.erase(voxels);
-    }
+  /** Where a pointer event is within its pane, in pixels from the pane's corner. */
+  paneLocal(pointer: {
+    readonly placement: Extract<PanePlacement, { kind: 'mpr' }>;
+    readonly event: PointerEvent;
+  }): { readonly x: number; readonly y: number } | null {
+    if (!this.deps) return null;
+    const bounds = this.deps.canvasBounds();
+    return {
+      x: pointer.event.clientX - bounds.left - pointer.placement.rect.x,
+      y: pointer.event.clientY - bounds.top - pointer.placement.rect.y,
+    };
   }
 
   /** The voxel under a pointer event on an MPR pane, via the shared probe inverse. */
-  private voxelAt(
+  voxelAt(
     placement: Extract<PanePlacement, { kind: 'mpr' }>,
     event: PointerEvent,
   ): VoxelIndex | null {

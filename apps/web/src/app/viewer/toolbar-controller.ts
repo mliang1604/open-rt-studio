@@ -66,6 +66,9 @@ export interface ToolbarInit {
   readonly deleteSelectedMeasurement: () => boolean;
   /** Toggle the study-history panel's collapsed state (the `H` hotkey). */
   readonly toggleHistory: () => void;
+  /** Undo and redo the latest edit of the painted structures (#106). */
+  readonly undo: () => void;
+  readonly redo: () => void;
 }
 
 /**
@@ -99,6 +102,18 @@ export class ToolbarController {
     const d = this.deps!;
     if (isEditableTarget(event.target) || !d.isReady()) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    // With Ctrl or ⌘ a key is the browser's, but for undo and redo (#106).
+    if (event.ctrlKey || event.metaKey) {
+      if (key === 'z' && !event.altKey) {
+        event.preventDefault();
+        if (event.shiftKey) d.redo();
+        else d.undo();
+      } else if (key === 'y' && event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        d.redo();
+      }
+      return;
+    }
     switch (key) {
       case 'x':
         event.preventDefault();

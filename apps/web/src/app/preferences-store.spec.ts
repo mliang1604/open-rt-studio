@@ -24,6 +24,7 @@ const SAMPLE: ViewPreferences = {
   lastOpenedStudyUid: '1.2.840.113619.2.55.3.123',
   historyPatientExpanded: false,
   serverAddress: 'http://127.0.0.1:4300',
+  labsTools: true,
 };
 
 describe('serializePreferences / parsePreferences', () => {

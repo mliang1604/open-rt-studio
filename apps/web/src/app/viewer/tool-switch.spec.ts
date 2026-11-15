@@ -7,6 +7,9 @@ import { TestBed } from '@angular/core/testing';
 import { Orientation, overlayLayerUnplaced, type Volume } from '@open-rt-studio/dicom';
 
 import { BrushController } from './brush-controller';
+import { AXIAL_MID, pointer, wireBrush } from './brush-testing';
+import { ContourToolsController } from './contour-tools/contour-tools-controller';
+import { CONTOUR_TOOL_PROVIDERS } from './contour-tools/contour-tools';
 import { CprStore } from './cpr/cpr-store';
 import { EditableStructuresStore } from './editable-structures-store';
 import { LandmarkStore } from './landmarks/landmark-store';
@@ -20,6 +23,7 @@ function setup() {
     providers: [
       ToolSwitch,
       BrushController,
+      ...CONTOUR_TOOL_PROVIDERS,
       EditableStructuresStore,
       CprStore,
       MeasurementStore,
@@ -133,6 +137,71 @@ describe('ToolSwitch', () => {
     tools.toggleMeasureTool('distance');
     expect(tools.putDown()).toBe(true);
     expect(on()).toEqual({ measure: 'none', brush: 'off', cpr: false });
+  });
+});
+
+describe('ToolSwitch and the contouring tools that are listed (#106)', () => {
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    try {
+      localStorage.clear();
+    } catch {
+      // No storage here.
+    }
+  });
+
+  function withLabs() {
+    const made = setup();
+    const contour = TestBed.inject(ContourToolsController);
+    contour.setLabs(true);
+    return { ...made, contour };
+  }
+
+  it('takes one up in place of the brush and a measurement tool, and is put down by them', () => {
+    const { tools, contour, on } = withLabs();
+    tools.toggleBrush('paint');
+    tools.toggleContourTool('sample');
+    expect([contour.takenId(), on().brush]).toEqual(['sample', 'off']);
+    expect(contour.held()?.id).toBe('sample');
+
+    tools.toggleBrush('erase');
+    expect([contour.takenId(), on().brush]).toEqual([null, 'erase']);
+
+    tools.toggleContourTool('sample');
+    tools.toggleMeasureTool('distance');
+    expect([contour.takenId(), on().measure]).toEqual([null, 'distance']);
+
+    tools.toggleContourTool('sample');
+    expect(on().measure).toBe('none');
+    // Chosen again, it is put down.
+    tools.toggleContourTool('sample');
+    expect(contour.takenId()).toBeNull();
+  });
+
+  it('is put down by Escape, which says one was', () => {
+    const { tools, contour } = withLabs();
+    tools.toggleContourTool('sample');
+    expect(tools.putDown()).toBe(true);
+    expect(contour.takenId()).toBeNull();
+    expect(tools.putDown()).toBe(false);
+  });
+
+  it('cancels a brush stroke under way on Escape, putting back what it painted', () => {
+    const { tools, contour } = withLabs();
+    const { brush, store } = wireBrush();
+    tools.toggleBrush('paint');
+    brush.radiusMm.set(0);
+    const label = store.labelVolume()!;
+    contour.begin(AXIAL_MID, pointer(0, 50));
+    contour.extend(AXIAL_MID, pointer(99, 50));
+    expect(label.data.some((value) => value !== 0)).toBe(true);
+    // Escape, with the pointer still down.
+    expect(tools.putDown()).toBe(true);
+    expect(label.data.every((value) => value === 0)).toBe(true);
+    expect(contour.nextUndo()).toBeNull();
+    // The pointer coming up afterwards commits nothing.
+    contour.end();
+    expect(contour.nextUndo()).toBeNull();
   });
 });
 

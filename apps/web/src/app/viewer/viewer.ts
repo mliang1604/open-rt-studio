@@ -60,6 +60,11 @@ import {
 } from './editable-structures-store';
 import { ToolSwitch } from './tool-switch';
 import { BrushController } from './brush-controller';
+import { CONTOUR_TOOL_PROVIDERS } from './contour-tools/contour-tools';
+import { ContourToolsController } from './contour-tools/contour-tools-controller';
+import { ContourConstraints } from './contour-tools/contour-constraints';
+import { ContourToolBar } from './contour-tools/contour-tool-bar';
+import { ToolPreview } from './contour-tools/tool-preview';
 import { FieldMetricsPanel } from './field-metrics/field-metrics-panel';
 import { FieldArrowsLayer } from './field-view/field-arrows-layer';
 import { DoseController } from './dose-display/dose-controller';
@@ -165,6 +170,9 @@ const MAX_ZOOM = 20;
     DvhPanel,
     DoseSumPanel,
     IsodoseLayer,
+    ContourToolBar,
+    ContourConstraints,
+    ToolPreview,
   ],
   providers: [
     MeasurementStore,
@@ -182,6 +190,7 @@ const MAX_ZOOM = 20;
     RoiController,
     EditableStructuresStore,
     BrushController,
+    ...CONTOUR_TOOL_PROVIDERS,
     ToolSwitch,
     LayersController,
     LandmarkStore,
@@ -234,6 +243,7 @@ export class Viewer {
   protected readonly roiCtl = inject(RoiController);
   /** Owns the brush/eraser structures-editing gesture and its settings; wired in the constructor. */
   protected readonly brushCtl = inject(BrushController);
+  protected readonly contourTools = inject(ContourToolsController);
   protected readonly manualRegistration = inject(ManualRegistrationController);
   protected readonly derivedSeries = inject(DerivedSeriesController);
   protected readonly propagation = inject(StructurePropagationController);
@@ -594,11 +604,12 @@ export class Viewer {
       setFocusFromMip: (placement, event) => this.measureCtl.setFocusFromMip(placement, event),
       activeTool: () => this.activeTool(),
       placeMeasurePoint: (placement, event) => this.measureCtl.placeMeasurePoint(placement, event),
-      brushActive: () => this.brushCtl.isActive(),
+      brushActive: () => this.contourTools.isActive(),
       deselectMeasurement: () => this.measure.select(null),
-      beginStroke: (placement, event) => this.brushCtl.beginStroke(placement, event),
-      extendStroke: (placement, event) => this.brushCtl.extendStroke(placement, event),
-      endStroke: () => this.brushCtl.endStroke(),
+      beginStroke: (placement, event) => this.contourTools.begin(placement, event),
+      extendStroke: (placement, event) => this.contourTools.extend(placement, event),
+      endStroke: () => this.contourTools.end(),
+      hoverTool: (placement, event) => this.contourTools.hover(placement, event),
       landmarkPlacing: () => this.landmarks.placingActive(),
       placeLandmark: (placement, event) => this.landmarks.place(placement, event),
       registerDragActive: () => this.manualRegistration.dragActive(),
@@ -679,7 +690,7 @@ export class Viewer {
       hoveredKey: () => this.hoveredKey(),
       cursor: () => this.cursor(),
       activeTool: this.activeTool,
-      leftButtonFree: () => this.brushCtl.mode() === 'off' && !this.cpr.drawing(),
+      leftButtonFree: () => this.contourTools.held() === null && !this.cpr.drawing(),
       camera3d: () => this.camera3d(),
       projectionMode: () => this.view3d.projectionMode(),
       slabThicknessMm: () => this.slabThicknessMm(),
@@ -852,6 +863,8 @@ export class Viewer {
       putDownTools: () => this.tools.putDown(),
       deleteSelectedMeasurement: () => this.measureCtl.deleteSelected(),
       toggleHistory: () => this.historyPanel()?.toggleCollapsedFromHotkey(),
+      undo: () => this.contourTools.undo(),
+      redo: () => this.contourTools.redo(),
     });
 
     // Wire the status controller: it derives the banner text, load progress, the

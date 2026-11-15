@@ -71,6 +71,11 @@ export interface ViewPreferences {
    * there was none. Only the address: nothing is connected to by itself.
    */
   readonly serverAddress: string | null;
+  /**
+   * Whether contouring tools that are not finished are offered (#106): the
+   * labs flag. Off, they are hidden.
+   */
+  readonly labsTools: boolean;
 }
 
 /** The preferences applied when nothing valid is stored. */
@@ -87,6 +92,7 @@ export const DEFAULT_PREFERENCES: ViewPreferences = {
   lastOpenedStudyUid: null,
   historyPatientExpanded: true,
   serverAddress: null,
+  labsTools: false,
 };
 
 /**
@@ -173,6 +179,8 @@ export function parsePreferences(raw: string | null): ViewPreferences {
       typeof obj['serverAddress'] === 'string'
         ? obj['serverAddress']
         : DEFAULT_PREFERENCES.serverAddress,
+    labsTools:
+      typeof obj['labsTools'] === 'boolean' ? obj['labsTools'] : DEFAULT_PREFERENCES.labsTools,
   };
 }
 
@@ -190,7 +198,8 @@ function samePreferences(a: ViewPreferences, b: ViewPreferences): boolean {
     a.historyView === b.historyView &&
     a.lastOpenedStudyUid === b.lastOpenedStudyUid &&
     a.historyPatientExpanded === b.historyPatientExpanded &&
-    a.serverAddress === b.serverAddress
+    a.serverAddress === b.serverAddress &&
+    a.labsTools === b.labsTools
   );
 }
 
