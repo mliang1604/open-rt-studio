@@ -246,6 +246,7 @@ export {
   baseLayer,
   framesMatch,
   modalityUnit,
+  valueUnit,
   overlayImageLayer,
   overlayLayerAwaitingChoice,
   overlayLayerUnplaced,
@@ -254,3 +255,17 @@ export {
 } from './types.js';
 export { add, cross, dot, length, normalize, scale, sub } from './vec3.js';
 export { VolumeBuildError, buildVolume, patientToVoxel, voxelToPatient } from './volume.js';
+export {
+  type DoseInfo,
+  type DosePlane,
+  type DoseProblem,
+  type DoseType,
+  type DoseUnits,
+  doseFrameOffsets,
+  doseKind,
+  doseOrientation,
+  dosePlanes,
+  doseScaling,
+  doseUnit,
+  isDoseProblem,
+} from './rt-dose.js';

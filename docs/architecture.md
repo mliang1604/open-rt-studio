@@ -988,6 +988,53 @@ where the object is (#91).
 
 Status: **decided, and Michael's to overturn**.
 
+## Dose
+
+Dose is epic #8. What is here so far is how an RT Dose object is read
+(#93, `packages/dicom/src/rt-dose.ts`); isodoses, DVH and summation are to
+come.
+
+- **Nothing is assumed of a dose.** A dose is numbers that are added up and
+  compared. A file that does not say what is needed to scale a value or to
+  place a frame, or says it in a way that is not read, is refused with what
+  is wrong with it, and the import report names it. Refused: no Dose Units,
+  or units other than `GY` and `RELATIVE`; a Dose Type other than
+  `PHYSICAL`, `EFFECTIVE` and `ERROR`; no Dose Grid Scaling, or one not
+  above zero; no Image Position, Image Orientation or Pixel Spacing; an
+  orientation that is not two unit vectors at right angles; several frames
+  and no Grid Frame Offset Vector, or one of another length, or one that
+  turns back or repeats a place; compressed pixel data.
+- **What a dose says of itself** is kept with its volume (`Volume.dose`):
+  units, type, summation type, scaling, and how its frames were placed.
+  The probe and the measurements take the unit from it (`valueUnit`): `Gy`
+  for a dose in gray, none for a relative dose. The layer legend says the
+  rest on pointing at the name. A dose without a Dose Type is read as
+  `PHYSICAL`. The summation type is read as written and changes nothing of
+  how the values are read.
+- **Grid Frame Offset Vector** is read in the two ways the standard has:
+  beginning at zero, as offsets from Image Position along the frames'
+  normal; or beginning at the z of Image Position, for frames that face
+  along z, as positions along z. A vector that begins anywhere else is
+  refused. Frames may go either way along the normal.
+- **Uneven spacing.** Frames spaced unevenly are read when every frame lies
+  on an even grid whose step is their closest spacing; planes are laid
+  between frames that lie further apart, by linear interpolation, and the
+  legend says how many. No stored value is lost. Frames that lie on no such
+  grid are refused, and so is a grid of more than eight planes to a frame.
+- **Any orientation.** A dose keeps its own grid and geometry, like any
+  volume, and is sampled where the image is when it is laid over one; it
+  need not match the image's grid, spacing or orientation.
+- **One object is one grid.** A series that holds several dose objects (a
+  dose to a beam, say) is not read: stacked as one series they would be
+  shown as one grid (#257).
+- **Not there:** the probe reads a dose at its nearest voxel, not between
+  voxels (#95); a relative dose is shown as its numbers, with nothing said
+  of what it is relative to; Tissue Heterogeneity Correction, the
+  referenced plan's fractions and the DVH sequence are not read; nothing
+  was read from another system's dose file.
+
+Status: **decided, and Michael's to overturn**.
+
 ## Native tools
 
 A CMake project in `native/` builds small command-line programs on ITK and

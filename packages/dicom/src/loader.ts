@@ -18,7 +18,7 @@ import {
   ybrFullToRgb,
 } from './photometric.js';
 import { extractMetadata } from './metadata.js';
-import { add, cross, normalize, scale } from './vec3.js';
+import { add, scale } from './vec3.js';
 import type { Slice } from './types.js';
 import {
   encapsulatedFrame,
@@ -43,6 +43,16 @@ import {
   readTriple,
   type FunctionalGroups,
 } from './dicom-tags.js';
+import {
+  doseFrameOffsets,
+  doseKind,
+  doseOrientation,
+  dosePlanes,
+  doseScaling,
+  isDoseProblem,
+  type DoseInfo,
+  type DoseProblem,
+} from './rt-dose.js';
 
 /** SOP Class UID identifying an RT Dose Storage object. */
 const RTDOSE_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.2';
@@ -259,49 +269,94 @@ function assemble(ctx: FileContext, frames: number, raw: FramePixels[]): Slice[]
 
 /**
  * Assemble an RT Dose (Modality RTDOSE) instance into one {@link Slice} per
- * dose-grid plane.
+ * plane of its grid, each in the dose's own units and at its own place (#93).
  *
- * A dose grid is multi-frame, but unlike an image stack its through-plane
- * positions come from GridFrameOffsetVector (3004,000C) — per-frame offsets in mm
- * along the slice normal from ImagePositionPatient — and its samples are scaled to
- * absorbed dose in Gray by DoseGridScaling (3004,000E) rather than a modality LUT.
- * Emitting one Gy-valued Slice per plane lets {@link import('./volume').buildVolume}
- * assemble the grid and the existing reslice/probe/overlay machinery treat dose
- * like any other scalar volume; `rescaleSlope = DoseGridScaling` lets the probe
- * recover the stored integer. Frames are unsigned 8/16/32-bit and uncompressed.
+ * A dose grid is multi-frame. Its through-plane positions come from Grid
+ * Frame Offset Vector (3004,000C) and its samples are scaled by Dose Grid
+ * Scaling (3004,000E) rather than a modality LUT. Emitting one slice per
+ * plane lets {@link import('./volume').buildVolume} assemble the grid and
+ * the reslice, probe and overlay machinery treat dose like any other scalar
+ * volume, on a grid of its own; `rescaleSlope = DoseGridScaling` lets the
+ * probe recover the stored integer.
+ *
+ * Nothing is assumed of a dose (`rt-dose.ts`): a file that does not say
+ * what is needed to scale a value or to place a frame, or says it in a way
+ * that is not read, is refused with what is wrong with it. Frames spaced
+ * unevenly are read when they lie on an even grid, with planes laid between
+ * them by linear interpolation. Frames are 8, 16 or 32 bits, uncompressed.
  */
 function parseDose(ctx: FileContext, frames: number): Slice[] {
+  const unread = (problem: string): never => {
+    throw new UnsupportedDicomError(`RT Dose not read. ${problem}`, ctx.name);
+  };
+  const read = <T extends object | number>(value: T | DoseProblem): T =>
+    typeof value === 'object' && isDoseProblem(value) ? unread(value.problem) : (value as T);
   if (ctx.codec || ctx.wasmTransferSyntax) {
     throw new UnsupportedDicomError('Compressed RT Dose is not supported', ctx.name);
   }
   const { dataSet } = ctx;
-  const scaling = num(dataSet, 'x3004000e', 1); // DoseGridScaling
-  const offsets = readFloats(dataSet, 'x3004000c', frames); // GridFrameOffsetVector
-  const orientation = readFloats(dataSet, 'x00200037', 6); // ImageOrientationPatient
-  const origin = readTriple(dataSet, 'x00200032'); // ImagePositionPatient (frame 0)
-  const pixelSpacing = readPair(dataSet, 'x00280030', [1, 1]);
-  const normal =
-    orientation && origin
-      ? normalize(cross(orientation.slice(0, 3), orientation.slice(3, 6)))
-      : null;
+  if (ctx.kind !== 'mono' || num(dataSet, 'x00280002', 1) !== 1) {
+    unread('It has more than one sample to a voxel, or is not greyscale');
+  }
+  if (frames < 1) unread('It says it has no frames');
+  const kind = read(
+    doseKind(dataSet.string('x30040002'), dataSet.string('x30040004'), dataSet.string('x3004000a')),
+  );
+  const scaling = read(doseScaling(readFirstFloat(dataSet, 'x3004000e') ?? undefined));
+  const facing = read(doseOrientation(readFloats(dataSet, 'x00200037', 6)));
+  const origin =
+    readTriple(dataSet, 'x00200032') ??
+    unread('It does not say where its first frame lies (Image Position (Patient))');
+  const spacing = readFloats(dataSet, 'x00280030', 2);
+  if (!spacing || spacing.some((one) => !(one > 0))) {
+    unread('It does not say how far apart its voxels are (Pixel Spacing)');
+  }
+  const vector = dataSet.elements['x3004000c']
+    ? (dataSet.string('x3004000c') ?? '').split('\\').map((one) => Number(one.trim() || 'NaN'))
+    : null;
+  const placed = read(doseFrameOffsets(vector, frames, origin, facing.normal));
+  const grid = read(dosePlanes(placed.offsets));
+  const dose: DoseInfo = {
+    ...kind,
+    scaling,
+    sopInstanceUid: dataSet.string('x00080018')?.trim() || null,
+    frameOffsets: placed.kind,
+    interpolatedPlanes: grid.interpolated,
+  };
   const count = ctx.rows * ctx.columns;
   const metadata = extractMetadata(dataSet);
+  const orientation = [...facing.row, ...facing.column];
+  // Each frame is read once, when the first plane that needs it is made.
+  const held = new Map<number, Float32Array>();
+  const frame = (at: number): Float32Array => {
+    let pixels = held.get(at);
+    if (!pixels) {
+      pixels = readDoseFrame(ctx, at, count, scaling);
+      held.set(at, pixels);
+    }
+    return pixels;
+  };
 
-  const slices: Slice[] = [];
-  for (let f = 0; f < frames; f++) {
-    // Each frame sits offsets[f] mm along the normal from the first frame's origin.
-    // A missing GridFrameOffsetVector (malformed multi-frame dose) falls back to
-    // unit steps so the frames still stack rather than collapsing onto one plane.
-    const offset = offsets ? offsets[f] : f;
-    const position = origin && normal ? add(origin, scale(normal, offset)) : origin;
+  return grid.planes.map((plane, at): Slice => {
+    let pixels = frame(plane.frame);
+    if (plane.towardsNext > 0) {
+      // Between two frames: the straight line from the one to the other.
+      const next = frame(plane.frame + 1);
+      const blend = new Float32Array(count);
+      for (let i = 0; i < count; i++) {
+        blend[i] = pixels[i] + (next[i] - pixels[i]) * plane.towardsNext;
+      }
+      pixels = blend;
+    }
     const slice: Slice = {
-      name: frames > 1 ? `${ctx.name}#${f + 1}` : ctx.name,
+      name: grid.planes.length > 1 ? `${ctx.name}#${at + 1}` : ctx.name,
       rows: ctx.rows,
       columns: ctx.columns,
-      pixelSpacing,
-      position,
+      pixelSpacing: [spacing![0], spacing![1]],
+      // Each plane sits its offset along the normal from the first frame's origin.
+      position: add(origin, scale(facing.normal, plane.offset)),
       orientation,
-      instanceNumber: f + 1,
+      instanceNumber: at + 1,
       seriesUid: ctx.seriesUid,
       seriesNumber: ctx.seriesNumber,
       seriesDescription: ctx.seriesDescription,
@@ -312,18 +367,18 @@ function parseDose(ctx: FileContext, frames: number): Slice[] {
       studyDescription: ctx.studyDescription,
       patientId: ctx.patientId,
       patientName: ctx.patientName,
-      // Canonical modality so the unit lookup yields Gy even for a SOP-class-detected
-      // (or non-canonically-cased) dose object.
+      // Canonical modality, even for a SOP-class-detected (or non-canonically-cased)
+      // dose object.
       modality: 'RTDOSE',
       rescaleSlope: scaling,
       rescaleIntercept: 0,
       windowCenter: null,
       windowWidth: null,
-      pixels: readDoseFrame(ctx, f, count, scaling),
+      pixels,
+      dose,
     };
-    slices.push(f === 0 ? { ...slice, metadata } : slice);
-  }
-  return slices;
+    return at === 0 ? { ...slice, metadata } : slice;
+  });
 }
 
 /**

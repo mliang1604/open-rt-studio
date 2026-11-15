@@ -89,11 +89,13 @@ export {
 export {
   SYNTHETIC_DOSE_GEOMETRY,
   SYNTHETIC_DOSE_GRID_SCALING,
+  syntheticDoseCases,
   syntheticDoseGy,
   syntheticRtDose,
   writeRtDose,
   type RtDoseOptions,
   type RtDoseSpec,
+  type SyntheticDoseCase,
 } from './rtdose.js';
 export {
   syntheticRois,
