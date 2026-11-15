@@ -54,6 +54,7 @@ import {
   type PerOrientationOblique,
   type PerOrientationPan,
 } from './viewer-overlays';
+import { initialWindow } from './initial-window';
 
 const NO_PAN = { x: 0, y: 0 } as const;
 const NO_PANS: PerOrientationPan = [NO_PAN, NO_PAN, NO_PAN];
@@ -832,16 +833,17 @@ export class LoadController {
    * compare linking, and the 3D camera/TF/DVR/clip — and the remaining per-volume
    * signals are reset here. Persisted view preferences (layout, projection mode,
    * sagittal flip) are deliberately *not* reset; window/level and slab honour a
-   * stored preference when present, else the volume default.
+   * stored preference when present, else the volume default. The window does
+   * so only for an image of the modality it was set on, and never for a dose.
    */
   private resetViewForVolume(renderer: SliceRenderer, volume: Volume, result: LoadResult): void {
     const d = this.deps!;
     const prefs = this.preferencesStore.preferences();
     const fullDepthMm = Math.round(2 * volumeBounds(volume).radius);
-    this.layersCtl.windowCenter.set(prefs.windowCenter ?? Math.round(volume.windowCenter));
-    this.layersCtl.windowWidth.set(
-      prefs.windowWidth ?? Math.max(1, Math.round(volume.windowWidth)),
-    );
+    // The remembered window, where it is one for this image; a dose begins with its own (#261).
+    const window = initialWindow(volume, prefs);
+    this.layersCtl.windowCenter.set(window.center);
+    this.layersCtl.windowWidth.set(window.width);
     d.slabThicknessMm.set(
       prefs.slabThicknessMm !== null ? clamp(prefs.slabThicknessMm, 1, fullDepthMm) : fullDepthMm,
     );
