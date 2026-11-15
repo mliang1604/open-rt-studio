@@ -26,6 +26,20 @@ import type { ToolPreviewCircle } from './contour-tool';
         <circle class="outer" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
         <circle class="inner" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
       </svg>
+      <!-- Where it reaches on the other panes: dashed, a cut and not the brush itself. -->
+      @for (o of p.others ?? []; track $index) {
+        <svg
+          data-tool-preview-section
+          aria-hidden="true"
+          [style.left.px]="o.rect.x"
+          [style.top.px]="o.rect.y"
+          [attr.width]="o.rect.width"
+          [attr.height]="o.rect.height"
+        >
+          <circle class="outer" [attr.cx]="o.x" [attr.cy]="o.y" [attr.r]="o.radiusPx" />
+          <circle class="inner section" [attr.cx]="o.x" [attr.cy]="o.y" [attr.r]="o.radiusPx" />
+        </svg>
+      }
     }
   `,
   styles: `
@@ -50,6 +64,9 @@ import type { ToolPreviewCircle } from './contour-tool';
     .inner {
       stroke: rgba(255, 255, 255, 0.9);
       stroke-width: 1;
+    }
+    .section {
+      stroke-dasharray: 4 3;
     }
   `,
 })

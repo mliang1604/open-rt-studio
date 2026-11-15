@@ -12,7 +12,8 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import type { Orientation } from '@open-rt-studio/dicom';
 import { strokeVoxels, throughPlaneAxis, type VoxelIndex } from '@open-rt-studio/render';
 
-import { BrushController } from '../brush-controller';
+import { BrushController, MAX_BRUSH_MM } from '../brush-controller';
+import { sectionRadiusMm } from './sphere-section';
 import type {
   ContourTool,
   ContourToolContext,
@@ -37,6 +38,8 @@ export class BrushTool implements ContourTool {
     readonly x: number;
     readonly y: number;
     readonly mmPerPixel: number;
+    /** The sphere's cuts through the other panes: where, and how far from its centre. */
+    readonly sections: ReturnType<BrushController['sphereSections']>;
   } | null>(null);
 
   /**
@@ -46,7 +49,20 @@ export class BrushTool implements ContourTool {
   readonly preview = computed<ToolPreviewCircle | null>(() => {
     const at = this.at();
     if (!at) return null;
-    return { rect: at.rect, x: at.x, y: at.y, radiusPx: this.brush.radiusMm() / at.mmPerPixel };
+    const radiusMm = this.brush.radiusMm();
+    const others = at.sections.flatMap((section) => {
+      const cut = sectionRadiusMm(radiusMm, section.distanceMm);
+      return cut > 0
+        ? [{ rect: section.rect, x: section.x, y: section.y, radiusPx: cut / section.mmPerPixel }]
+        : [];
+    });
+    return {
+      rect: at.rect,
+      x: at.x,
+      y: at.y,
+      radiusPx: radiusMm / at.mmPerPixel,
+      ...(others.length > 0 ? { others } : {}),
+    };
   });
 
   /** The voxel the stroke was last at, which the next is drawn from. */
@@ -86,18 +102,22 @@ export class BrushTool implements ContourTool {
     this.last = null;
   }
 
-  hover(_context: ContourToolContext, pointer: ToolPointer | null): void {
+  hover(context: ContourToolContext, pointer: ToolPointer | null): void {
     if (!pointer) {
       this.at.set(null);
       return;
     }
     const mmPerPixel = this.brush.mmPerPixel(pointer.placement);
     const local = this.brush.paneLocal(pointer);
-    this.at.set(
-      mmPerPixel > 0 && local
-        ? { rect: pointer.placement.rect, x: local.x, y: local.y, mmPerPixel }
-        : null,
-    );
+    if (!(mmPerPixel > 0) || !local) {
+      this.at.set(null);
+      return;
+    }
+    // The sphere reaches the slices about this one: its cut through each other pane is shown.
+    // Cuts are found for the largest the brush can be, so that its size can change under a still pointer.
+    const voxel = this.brush.shape() === 'sphere' ? context.voxelAt(pointer) : null;
+    const sections = voxel ? this.brush.sphereSections(pointer.placement, voxel, MAX_BRUSH_MM) : [];
+    this.at.set({ rect: pointer.placement.rect, x: local.x, y: local.y, mmPerPixel, sections });
   }
 
   /** Paint or erase every voxel the brush covers from `from` to `to`. */

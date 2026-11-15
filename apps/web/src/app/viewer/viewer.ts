@@ -742,6 +742,7 @@ export class Viewer {
 
     this.brushCtl.init({
       volume: () => this.layersCtl.volume(),
+      panes: () => this.panes(),
       isReady: () => this.isReady(),
       canvasBounds: () => this.canvasRef().nativeElement.getBoundingClientRect(),
       zooms: this.zooms,

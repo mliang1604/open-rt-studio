@@ -3,15 +3,19 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject, signal, type Signal } from '@angular/core';
-import { Orientation, type Series, type Volume } from '@open-rt-studio/dicom';
+import { Orientation, voxelToPatient, type Series, type Volume } from '@open-rt-studio/dicom';
 import {
   cursorVoxel,
   mmPerScreenPixel,
   planeExtentMm,
+  planeFrame,
+  planeToPanePoint,
+  resolveGeometry,
   type BrushShape,
   type VoxelIndex,
 } from '@open-rt-studio/render';
 import { EditableStructuresStore } from './editable-structures-store';
+import { sphereSection } from './contour-tools/sphere-section';
 import { DATA_SOURCE } from '../data-source/data-source';
 import { authoredSetRtStruct } from './structure-set-export';
 import { type PanePlacement } from './pane-placement';
@@ -39,6 +43,8 @@ export interface BrushInit {
   readonly obliques: Signal<PerOrientationOblique>;
   readonly sliceIndices: Signal<PerOrientation>;
   readonly sagittalFlipped: () => boolean;
+  /** The panes on screen, for the sphere brush's cuts through the others (#108). */
+  readonly panes: () => readonly PanePlacement[];
   /** The image series on screen, which an exported structure set is tied to. */
   readonly baseSeries: () => Series | null;
   /** Say something over the viewport for a while; longer when it is a problem. */
@@ -270,6 +276,62 @@ export class BrushController {
       placement.rect.height,
       this.deps!.zooms()[placement.orientation],
     );
+  }
+
+  /**
+   * Where a ball about a voxel cuts the other MPR panes of the column the
+   * pointer is in (#108): on each whose plane it reaches, the foot of its
+   * centre in pixels from that pane's corner, how far the centre is from
+   * the plane in mm, and how large a pixel is there.
+   */
+  sphereSections(
+    over: Extract<PanePlacement, { kind: 'mpr' }>,
+    voxel: VoxelIndex,
+    radiusMm: number,
+  ): {
+    readonly rect: Extract<PanePlacement, { kind: 'mpr' }>['rect'];
+    readonly x: number;
+    readonly y: number;
+    readonly distanceMm: number;
+    readonly mmPerPixel: number;
+  }[] {
+    const d = this.deps;
+    const volume = d?.volume();
+    if (!d || !volume) return [];
+    const centre = voxelToPatient(resolveGeometry(volume), voxel);
+    const sections = [];
+    for (const pane of d.panes()) {
+      if (
+        pane.kind !== 'mpr' ||
+        pane.group !== over.group ||
+        pane.orientation === over.orientation
+      ) {
+        continue;
+      }
+      const o = pane.orientation;
+      const frame = planeFrame(volume, o, d.sliceIndices()[o], d.obliques()[o]);
+      const section = sphereSection(centre, radiusMm, frame);
+      const mmPerPixel = this.mmPerPixel(pane);
+      if (!section || !(mmPerPixel > 0)) continue;
+      const at = planeToPanePoint(
+        volume,
+        o,
+        section.u,
+        section.v,
+        d.zooms()[o],
+        pane.rect,
+        o === Orientation.Sagittal && d.sagittalFlipped(),
+        d.pans()[o],
+      );
+      sections.push({
+        rect: pane.rect,
+        x: at.x - pane.rect.x,
+        y: at.y - pane.rect.y,
+        distanceMm: section.distanceMm,
+        mmPerPixel,
+      });
+    }
+    return sections;
   }
 
   /** Where a pointer event is within its pane, in pixels from the pane's corner. */

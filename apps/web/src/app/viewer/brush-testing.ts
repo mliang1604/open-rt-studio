@@ -84,6 +84,8 @@ export interface Notice {
 export function setup(
   source?: DataSource,
   formula?: ImageFormula,
+  panes: readonly PanePlacement[] = [],
+  slices: PerOrientation = [2, 2, 2],
 ): {
   brush: BrushController;
   store: EditableStructuresStore;
@@ -99,7 +101,7 @@ export function setup(
       ...(source ? [{ provide: DATA_SOURCE, useValue: source }] : []),
     ],
   });
-  const { brush, store } = wireBrush(notices, formula);
+  const { brush, store } = wireBrush(notices, formula, panes, slices);
   return { brush, store, tools: TestBed.inject(ContourToolsController), notices };
 }
 
@@ -111,6 +113,8 @@ export function setup(
 export function wireBrush(
   notices: Notice[] = [],
   formula?: ImageFormula,
+  panes: readonly PanePlacement[] = [],
+  slices: PerOrientation = [2, 2, 2],
 ): {
   brush: BrushController;
   store: EditableStructuresStore;
@@ -122,6 +126,7 @@ export function wireBrush(
   const noObliques: PerOrientationOblique = [NO_OBLIQUE, NO_OBLIQUE, NO_OBLIQUE];
   const deps: BrushInit = {
     volume: () => store.labelVolume() && volume,
+    panes: () => panes,
     isReady: () => true,
     canvasBounds: () => ({ left: 0, top: 0 }) as DOMRect,
     zooms: signal<PerOrientation>([1, 1, 1]),
@@ -131,7 +136,7 @@ export function wireBrush(
       { x: 0, y: 0 },
     ]),
     obliques: signal(noObliques),
-    sliceIndices: signal<PerOrientation>([2, 2, 2]),
+    sliceIndices: signal<PerOrientation>(slices),
     sagittalFlipped: () => false,
     baseSeries: () => null,
     notify: (message, problem) => notices.push({ message, problem }),

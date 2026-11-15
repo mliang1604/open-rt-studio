@@ -75,6 +75,11 @@ export interface ToolPreviewCircle {
    * the pane's corner; left out for nothing to show.
    */
   readonly fill?: string;
+  /**
+   * Where the tool reaches on the other panes (the sphere brush's cuts
+   * through their planes, #108), each in pixels from its own pane's corner.
+   */
+  readonly others?: readonly ToolPreviewCircle[];
 }
 
 /** A contouring tool. */
