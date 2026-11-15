@@ -9,14 +9,15 @@
 
 import {
   CT_IMAGE_SOP_CLASS,
-  MR_IMAGE_SOP_CLASS,
-  registrationReference,
-  writeDerivedSeries,
   type DerivedSeriesContent,
   type LayerPlacement,
+  MR_IMAGE_SOP_CLASS,
   type PlacementStep,
+  registrationReference,
   type Series,
+  seriesInstanceUidOf,
   type Volume,
+  writeDerivedSeries,
 } from '@open-rt-studio/dicom';
 
 import type { SavedSeries } from '../../data-source/data-source';
@@ -51,7 +52,8 @@ export function sourceOf(series: Series): DerivedSeriesContent['source'] {
   const sopClass = attributes['(0008,0016)']?.trim() ?? '';
   return {
     studyInstanceUid: series.studyUid,
-    seriesInstanceUid: series.uid,
+    // The series' own UID, where it goes here by the key of one dose of several (#257).
+    seriesInstanceUid: seriesInstanceUidOf(series.uid),
     sopClassUid: /^[0-9]+(\.[0-9]+)*$/.test(sopClass) ? sopClass : null,
     attributes,
   };
@@ -110,7 +112,7 @@ export function derivationText(facts: DerivationFacts): string {
       ? ` The source lacks ${facts.missingSlices} slice${facts.missingSlices === 1 ? '' : 's'}, filled in by interpolation before it was resampled.`
       : '';
   return (
-    `${DERIVED_NOTICE} Series ${facts.source.uid} resampled onto the grid of series ${facts.base.uid} ` +
+    `${DERIVED_NOTICE} Series ${seriesInstanceUidOf(facts.source.uid)} resampled onto the grid of series ${seriesInstanceUidOf(facts.base.uid)} ` +
     `by linear interpolation, ${through}. ${facts.outsideCount} of ${facts.voxelCount} voxels lie ` +
     `outside the source and were given ${facts.outside}.${missing}`
   );

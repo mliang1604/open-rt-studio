@@ -8,12 +8,13 @@
 // patient, in its study and frame of reference, and references its series.
 
 import {
-  writeStructureSet,
   type LayerPlacement,
   type PropagatedRoi,
   type PropagationMethod,
   type Series,
+  seriesInstanceUidOf,
   type StructureSet,
+  writeStructureSet,
 } from '@open-rt-studio/dicom';
 
 import { timestampSlug } from '../capture';
@@ -60,8 +61,8 @@ export function propagationText(facts: PropagationFacts): string {
       ? `${results.length} of the ${set.rois.length} structures`
       : 'Structures';
   return (
-    `${DERIVED_NOTICE} ${which} of structure set "${setName(set)}"${from} on series ${source.uid} ` +
-    `taken to series ${base.uid} ${throughText(facts.placement)}. ` +
+    `${DERIVED_NOTICE} ${which} of structure set "${setName(set)}"${from} on series ${seriesInstanceUidOf(source.uid)} ` +
+    `taken to series ${seriesInstanceUidOf(base.uid)} ${throughText(facts.placement)}. ` +
     `${count(results, 'points')} by moving their points, ` +
     `${count(results, 'label-volume')} by a label volume resampled and outlined.`
   );
@@ -73,7 +74,7 @@ export function propagatedSet(facts: PropagationFacts, frameOfReferenceUid: stri
     name: 'propagated-structures.dcm',
     label: PROPAGATED_LABEL,
     frameOfReferenceUid,
-    referencedSeriesUids: [facts.base.uid],
+    referencedSeriesUids: [seriesInstanceUidOf(facts.base.uid)],
     patientId: facts.base.patientId,
     rois: facts.results.map((one) => ({
       ...one.roi,

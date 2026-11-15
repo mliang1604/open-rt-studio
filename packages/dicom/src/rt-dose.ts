@@ -27,6 +27,13 @@ export interface DoseInfo {
    * are read the same whatever it is.
    */
   readonly summationType: string | null;
+  /**
+   * The beams and the fraction group of its plan that the dose says it is
+   * of (#257): what tells a beam's dose from the plan's in a series that
+   * holds both. Left out for a dose that was not read from a file.
+   */
+  readonly beams?: readonly number[];
+  readonly fractionGroup?: number | null;
   /** Dose Grid Scaling (3004,000E): a stored value times this is the dose. */
   readonly scaling: number;
   /** SOP Instance UID of the dose object: one object is one grid. */
@@ -95,6 +102,83 @@ export function doseSumText(made: DoseSumMade): string {
   return made.model === 'physical'
     ? `Physical dose, ${of}`
     : `${doseSumName(made)}, ${of}, each converted before it was added`;
+}
+
+/**
+ * What an RT Dose object says it is the dose of: its Dose Summation Type,
+ * and the beams and the fraction group it names under the plan it refers
+ * to (Referenced RT Plan Sequence). A series may hold several dose objects,
+ * a plan's beside its beams'; this is what tells them apart.
+ */
+export interface DoseOf {
+  /** Dose Summation Type (3004,000A) as written, in upper case; null when left out. */
+  readonly summationType: string | null;
+  /** Referenced Beam Numbers (300C,0006), each once, in the order written. */
+  readonly beams: readonly number[];
+  /** Referenced Fraction Group Number (300C,0022) when one is named; null for none, or several. */
+  readonly fractionGroup: number | null;
+}
+
+/** No more beams than this are read of a dose's references. */
+export const DOSE_OF_BEAMS_AT_MOST = 64;
+
+const beamsText = (beams: readonly number[]): string =>
+  beams.length === 0
+    ? 'one or more beams'
+    : beams.length === 1
+      ? `beam ${beams[0]}`
+      : `beams ${beams.join(', ')}`;
+
+/**
+ * What a dose is the dose of, in a few words: `whole plan`, `beam 2`,
+ * `fraction group 1`. It is what the file says and no more: a term this
+ * code does not know is given as it is written. Null for a dose that does
+ * not say.
+ */
+export function doseOfText(of: DoseOf): string | null {
+  const group = of.fractionGroup === null ? null : `fraction group ${of.fractionGroup}`;
+  switch (of.summationType) {
+    case null:
+      return null;
+    case 'PLAN':
+      return 'whole plan';
+    case 'MULTI_PLAN':
+      return 'several plans';
+    case 'PLAN_OVERVIEW':
+      return 'plan overview';
+    case 'FRACTION':
+      return group ?? 'one fraction group';
+    case 'BEAM':
+      return beamsText(of.beams);
+    case 'BRACHY':
+      return 'brachy application setups';
+    case 'FRACTION_SESSION':
+      return group ? `one fraction of ${group}` : 'one fraction';
+    case 'BEAM_SESSION':
+      return `one fraction of ${beamsText(of.beams)}`;
+    case 'BRACHY_SESSION':
+      return 'one fraction of brachy application setups';
+    case 'CONTROL_POINT':
+      return `control points of ${beamsText(of.beams)}`;
+    case 'RECORD':
+      return 'treatment record';
+    default:
+      return `summation type ${of.summationType}`;
+  }
+}
+
+/**
+ * A name to each of several doses that are in one series, in their order:
+ * what each says it is of, and, where two say the same or one says
+ * nothing, which object of the series it is, so that no two go by one name.
+ */
+export function doseOfNames(doses: readonly DoseOf[]): string[] {
+  const said = doses.map((dose) => doseOfText(dose));
+  return said.map((text, index) => {
+    const alone = text !== null && said.filter((other) => other === text).length === 1;
+    const which = `dose ${index + 1} of ${doses.length}`;
+    return alone ? text : text === null ? which : `${text}, ${which}`;
+  });
 }
 
 /** The unit a dose's values are in, for a readout; null for a share of something not named. */

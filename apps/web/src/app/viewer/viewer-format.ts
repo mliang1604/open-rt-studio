@@ -4,6 +4,7 @@
 
 import {
   clamp,
+  doseOfText,
   doseSumName,
   doseSumText,
   valueUnit,
@@ -76,11 +77,35 @@ export function doseSaid(dose: DoseInfo): string {
  * what it is a sum of: a converted one by its model and its α/β (#99),
  * without which its number of gray means nothing.
  */
-export function doseLabel(dose: Pick<DoseInfo, 'type' | 'units' | 'sum'>): string {
+export function doseLabel(
+  dose: Pick<DoseInfo, 'type' | 'units' | 'sum'> & Partial<DosePartFacts>,
+): string {
   if (dose.sum) return doseSumName(dose.sum);
   const type =
     dose.type === 'EFFECTIVE' ? 'Effective dose' : dose.type === 'ERROR' ? 'Dose error' : 'Dose';
-  return dose.units === 'RELATIVE' ? `${type}, relative` : type;
+  const part = dosePart(dose);
+  const named = part ? `${type} (${part})` : type;
+  return dose.units === 'RELATIVE' ? `${named}, relative` : named;
+}
+
+/** What of a dose says which part of a plan's dose it is. */
+type DosePartFacts = Pick<DoseInfo, 'summationType' | 'beams' | 'fractionGroup'>;
+
+/**
+ * What a dose read from a file is the dose of, where that is less than a
+ * whole plan (#257): `beam 2`, `fraction group 1`. It is said wherever the
+ * dose is named, since a beam's dose beside its plan's is another dose with
+ * other numbers. Null for a whole plan's dose, for one that does not say,
+ * and for one made here.
+ */
+export function dosePart(dose: Partial<DosePartFacts> & Pick<DoseInfo, 'sum'>): string | null {
+  const summationType = dose.summationType ?? null;
+  if (dose.sum || summationType === null || summationType === 'PLAN') return null;
+  return doseOfText({
+    summationType,
+    beams: dose.beams ?? [],
+    fractionGroup: dose.fractionGroup ?? null,
+  });
 }
 
 /**

@@ -114,6 +114,7 @@ export {
   type InstanceHeaderResult,
   type InstanceReference,
   type InstanceRelation,
+  readDoseOf,
   readInstanceHeader,
 } from './instance-header.js';
 export {
@@ -224,7 +225,18 @@ export {
   startingRigidParams,
   volumeCentre,
 } from './rigid-params.js';
-export { type Series, groupSeries, largestSeries, middleSlice } from './series.js';
+export {
+  type DoseObjectOf,
+  type Series,
+  doseObjectDescription,
+  doseObjectSeriesKey,
+  groupSeries,
+  largestSeries,
+  middleSlice,
+  nameDoseObjects,
+  seriesInstanceUidOf,
+  seriesKeyParts,
+} from './series.js';
 export {
   type LayerPlacement,
   type PlacementField,
@@ -322,7 +334,11 @@ export { add, cross, dot, length, normalize, scale, sub } from './vec3.js';
 export { VolumeBuildError, buildVolume, patientToVoxel, voxelToPatient } from './volume.js';
 export {
   type DoseInfo,
+  type DoseOf,
   type DoseSumMade,
+  DOSE_OF_BEAMS_AT_MOST,
+  doseOfNames,
+  doseOfText,
   type DosePlane,
   type DoseProblem,
   type DoseType,

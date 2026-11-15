@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
+  buildVolume,
   findPlacement,
   groupSeries,
   parseStructureSet,
@@ -13,11 +14,14 @@ import {
 } from '@open-rt-studio/dicom';
 import {
   populationStudies,
+  SYNTHETIC_BEAM_DOSES as BEAM_DOSES,
   SYNTHETIC_PLAN_FRACTIONS,
   SYNTHETIC_PLAN_PRESCRIPTION_GY,
   SYNTHETIC_PLAN_TARGET_ROI,
   SYNTHETIC_RT_COURSE as COURSE,
   SYNTHETIC_STUDY,
+  syntheticBeamDoseGy,
+  syntheticBeamDoses,
   syntheticPopulation,
   syntheticRtCourse,
 } from '@open-rt-studio/testdata';
@@ -1220,6 +1224,167 @@ describe('what belongs to what on a server (#38)', () => {
     expect(history.studies.flatMap((study) => study.series).some((one) => one.attached)).toBe(
       false,
     );
+  });
+});
+
+describe('a dose series of several dose objects on a server (#257)', () => {
+  const PLAN_KEY = `${BEAM_DOSES.series}@${BEAM_DOSES.planDose}`;
+  const BEAM_KEYS = BEAM_DOSES.beamDoses.map((uid) => `${BEAM_DOSES.series}@${uid}`);
+  const SLICES = 4;
+
+  async function withBeamDoses(older = false): Promise<Made> {
+    const server = fakeServer(syntheticBeamDoses(SLICES, 16));
+    server.noDoseFacts = older;
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await source.selectPatient('1');
+    return { server, source };
+  }
+  const doses = (source: ServerSource) =>
+    source
+      .currentPatient()!
+      .studies.flatMap((study) => study.series)
+      .filter((one) => one.modality === 'RTDOSE');
+  const detailsAsked = (server: FakeServer): string[] =>
+    server.asked
+      .map((path) => path.split('?')[0])
+      .filter((path) => /^\/instances\/[\d.]+$/.test(path))
+      .map((path) => path.split('/').pop()!);
+
+  it('lists each dose object as a dose of its own, named by what it is the dose of', async () => {
+    const { source } = await withBeamDoses();
+    expect(doses(source).map((one) => [one.uid, one.description, one.imageCount])).toEqual([
+      [PLAN_KEY, 'Synthetic dose (whole plan)', SLICES],
+      [BEAM_KEYS[0], 'Synthetic dose (beam 1)', SLICES],
+      [BEAM_KEYS[1], 'Synthetic dose (beam 2)', SLICES],
+    ]);
+    expect(doses(source).map((one) => one.doseOf)).toEqual(['whole plan', 'beam 1', 'beam 2']);
+    // The series itself is not listed beside them: nothing shows the three as one.
+    expect(doses(source).some((one) => one.uid === BEAM_DOSES.series)).toBe(false);
+    // Each is on the CT's line as an object too, with what it is the dose of.
+    const ct = source
+      .currentPatient()!
+      .studies.flatMap((study) => study.series)
+      .find((one) => one.uid === BEAM_DOSES.ct)!;
+    expect(
+      Object.fromEntries(
+        ct
+          .attached!.filter((one) => one.kind === 'dose')
+          .map((one) => [one.sopInstanceUid, one.dose]),
+      ),
+    ).toEqual({
+      [BEAM_DOSES.planDose]: { summationType: 'PLAN', beams: [], fractionGroup: null },
+      [BEAM_DOSES.beamDoses[0]]: { summationType: 'BEAM', beams: [1], fractionGroup: 1 },
+      [BEAM_DOSES.beamDoses[1]]: { summationType: 'BEAM', beams: [2], fractionGroup: 1 },
+    });
+  });
+
+  it('asks about each dose object once, and for the series’ instances once', async () => {
+    const { server } = await withBeamDoses();
+    const asked = detailsAsked(server);
+    for (const uid of [BEAM_DOSES.planDose, ...BEAM_DOSES.beamDoses]) {
+      expect(asked.filter((one) => one === uid)).toHaveLength(1);
+    }
+    expect(
+      server.asked.filter(
+        (path) => path.split('?')[0] === `/series/${BEAM_DOSES.series}/instances`,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('fetches the one dose that is asked for, and no other of the series', async () => {
+    const { server, source } = await withBeamDoses();
+    const before = server.asked.length;
+    const fetched = await source.fetchSeries(BEAM_KEYS[1]);
+    const files = server.asked
+      .slice(before)
+      .map((path) => path.split('?')[0])
+      .filter((path) => path.endsWith('/file'));
+    // The structure set of its frame comes with it, as with any series; no other dose does.
+    const doseFiles = [BEAM_DOSES.planDose, ...BEAM_DOSES.beamDoses].map(
+      (uid) => `/instances/${uid}/file`,
+    );
+    expect(files.filter((path) => doseFiles.includes(path))).toEqual([
+      `/instances/${BEAM_DOSES.beamDoses[1]}/file`,
+    ]);
+    expect(fetched.structureSets).toHaveLength(1);
+    expect(fetched.series).toMatchObject({
+      uid: BEAM_KEYS[1],
+      description: 'Synthetic dose (beam 2)',
+      doseOf: 'beam 2',
+      modality: 'RTDOSE',
+      imageCount: SLICES,
+    });
+    // It is beam 2's grid, with beam 2's values.
+    const volume = buildVolume(fetched.series.slices);
+    const size = BEAM_DOSES.doseSize;
+    expect(volume.dims).toEqual([size, size, SLICES]);
+    expect(volume.dose?.sopInstanceUid).toBe(BEAM_DOSES.beamDoses[1]);
+    for (const [column, row, frame] of [
+      [0, 0, 0],
+      [3, 7, 2],
+      [11, 2, 3],
+    ]) {
+      expect(volume.data[(frame * size + row) * size + column]).toBeCloseTo(
+        syntheticBeamDoseGy(2, column, row, frame),
+        5,
+      );
+    }
+  });
+
+  it('does not show the whole series as one grid when it is asked for by its own UID', async () => {
+    const { source } = await withBeamDoses();
+    await expect(source.fetchSeries(BEAM_DOSES.series)).rejects.toThrow(
+      'The series holds 3 dose objects, which are not shown as one. Choose the patient again to have them listed one by one.',
+    );
+  });
+
+  it('says so when the dose is no longer on the server', async () => {
+    const { source } = await withBeamDoses();
+    await expect(source.fetchSeries(`${BEAM_DOSES.series}@1.2.3.4`)).rejects.toThrow(
+      'The server no longer holds that dose.',
+    );
+  });
+
+  it('tells the doses of an older server apart by which of the series each is', async () => {
+    const { source } = await withBeamDoses(true);
+    expect(doses(source).map((one) => [one.uid, one.description])).toEqual([
+      [PLAN_KEY, 'Synthetic dose (dose 1 of 3)'],
+      [BEAM_KEYS[0], 'Synthetic dose (dose 2 of 3)'],
+      [BEAM_KEYS[1], 'Synthetic dose (dose 3 of 3)'],
+    ]);
+    // And each is still fetched alone.
+    const fetched = await source.fetchSeries(BEAM_KEYS[0]);
+    expect(buildVolume(fetched.series.slices).dose?.sopInstanceUid).toBe(BEAM_DOSES.beamDoses[0]);
+  });
+
+  it('lists the doses one by one when the server will not say what each is', async () => {
+    const server = fakeServer(syntheticBeamDoses(SLICES, 16));
+    const refusing: typeof fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      return /\/instances\/[\d.]+(\?|$)/.test(url)
+        ? Promise.resolve(new Response('{}', { status: 500 }))
+        : server.fetch(input, init);
+    };
+    const source = await connectToServer(ADDRESS, { fetch: refusing, parse: parseHere });
+    await source.selectPatient('1');
+    expect(doses(source).map((one) => one.description)).toEqual([
+      'Synthetic dose (dose 1 of 3)',
+      'Synthetic dose (dose 2 of 3)',
+      'Synthetic dose (dose 3 of 3)',
+    ]);
+  });
+
+  it('leaves a series of one dose object as it always was', async () => {
+    const { source } = await withPatient();
+    const [dose] = doses(source);
+    expect(doses(source)).toHaveLength(1);
+    // It goes by its series' UID alone, and by its series' description.
+    expect(dose.uid).toMatch(/^[\d.]+$/);
+    expect(dose.description).toBe('Synthetic dose');
+    expect(dose).not.toHaveProperty('doseOf');
+    const fetched = await source.fetchSeries(dose.uid);
+    expect(fetched.series.uid).toBe(dose.uid);
+    expect(buildVolume(fetched.series.slices).dose?.sopInstanceUid).toBe(COURSE.dose);
   });
 });
 

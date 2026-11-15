@@ -22,6 +22,7 @@
 // filed in, so that nothing held goes unshown.
 
 import type { InstanceHeader, InstanceReference } from './instance-header.js';
+import type { DoseOf } from './rt-dose.js';
 import { planSummary, type PlanFacts, type PlanStructures, type PlanSummary } from './rt-plan.js';
 
 const DEFORMABLE_SPATIAL_REGISTRATION = '1.2.840.10008.5.1.4.1.1.66.3';
@@ -52,6 +53,8 @@ export interface RtObjectFacts {
   readonly references: readonly InstanceReference[];
   /** For a plan, what it says of its fractions and prescriptions, where that is known. */
   readonly plan?: PlanFacts | null;
+  /** For a dose, what it says it is the dose of, where that is known (#257). */
+  readonly dose?: DoseOf | null;
 }
 
 /** The facts of a file's header when it is one of the objects placed here; null for anything else. */
@@ -68,6 +71,7 @@ export function rtObjectFacts(header: InstanceHeader): RtObjectFacts | null {
     description: header.series.description,
     frameOfReferenceUid: header.series.frameOfReferenceUid,
     references: header.references,
+    ...(header.dose ? { dose: header.dose } : {}),
     ...(header.plan ? { plan: header.plan } : {}),
   };
 }
@@ -101,6 +105,8 @@ export interface AttachedObject {
    * UIDs, held or not. Left out for anything else.
    */
   readonly plans?: readonly string[];
+  /** For a dose, what it says it is the dose of, where that is known. */
+  readonly dose?: DoseOf;
 }
 
 /** An object that belongs to no image series held: listed with the study it is filed in. */
@@ -113,6 +119,8 @@ export interface LooseObject {
   readonly plan?: PlanSummary;
   /** For a dose that names the plans it was computed for: their SOP Instance UIDs. */
   readonly plans?: readonly string[];
+  /** For a dose, what it says it is the dose of, where that is known. */
+  readonly dose?: DoseOf;
 }
 
 /** A registration and the image series of the two frames it connects. */
@@ -167,9 +175,12 @@ export function relateRtObjects(
         }
       : {};
   /** The plans a dose names, for whoever needs the fractions it was given in (#102). */
-  const plansOf = (object: RtObjectFacts): { plans?: readonly string[] } => {
+  const plansOf = (object: RtObjectFacts): { plans?: readonly string[]; dose?: DoseOf } => {
     const plans = object.kind === 'dose' ? [...new Set(targets(object, 'dose.plan'))] : [];
-    return plans.length > 0 ? { plans } : {};
+    return {
+      ...(plans.length > 0 ? { plans } : {}),
+      ...(object.kind === 'dose' && object.dose ? { dose: object.dose } : {}),
+    };
   };
   const held = new Set(images.map((one) => one.uid));
   const inFrame = new Map<string, string[]>();

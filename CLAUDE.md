@@ -108,6 +108,12 @@ touches the server, the Dockerfile or `compose.yaml`.
   servers. What is made in the viewer is saved through it too (`save`,
   `saveSeries`). Do not inject `PatientCatalog` in new code; it is what the local
   source holds.
+- **A series goes by a key, which is not always its UID.** `Series.uid`, a
+  `SeriesSummary`'s `uid` and a layer's id are the SeriesInstanceUID, except
+  for one dose object of a series that holds several, which goes by
+  `seriesUid@sopInstanceUid` (`doseObjectSeriesKey`). Compare and look up by
+  the key; write `seriesInstanceUidOf(key)` wherever a UID goes into a DICOM
+  object, a report or a request to a server.
 - **Packages have one entry point.** Import `@open-rt-studio/dicom`, not a
   file inside the package. Add new public names to the package's
   `src/index.ts`.

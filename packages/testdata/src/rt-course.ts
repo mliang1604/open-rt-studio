@@ -54,6 +54,8 @@ export interface RtPlanOptions {
   readonly prescriptionGy?: number | null;
   /** The ROI Number the prescription is to; null for a dose reference that names none. */
   readonly targetRoi?: number | null;
+  /** How many beams the one fraction group has, numbered from 1; one when left out. */
+  readonly beams?: number;
 }
 
 /**
@@ -67,6 +69,7 @@ export function syntheticRtPlan(options: RtPlanOptions = {}): SyntheticFile {
   const prescription =
     options.prescriptionGy === undefined ? SYNTHETIC_PLAN_PRESCRIPTION_GY : options.prescriptionGy;
   const target = options.targetRoi === undefined ? SYNTHETIC_PLAN_TARGET_ROI : options.targetRoi;
+  const beams = Math.max(1, Math.floor(options.beams ?? 1));
   const bytes = part10(RTPLAN_SOP_CLASS, instanceUid(study, RTPLAN_SERIES_INDEX, 1), [
     ...identityElements(study),
     el(0x0008, 0x0060, 'CS', text('RTPLAN')), // Modality
@@ -92,15 +95,17 @@ export function syntheticRtPlan(options: RtPlanOptions = {}): SyntheticFile {
             ],
           ]),
         ]),
-    // FractionGroupSequence: one group of one beam, which gives a fraction's dose.
+    // FractionGroupSequence: one group, whose beams give a fraction's dose between them.
     sequence(0x300a, 0x0070, [
       [
         el(0x300a, 0x0071, 'IS', numbers([1])), // FractionGroupNumber
         ...(fractions === null ? [] : [el(0x300a, 0x0078, 'IS', numbers([fractions]))]), // NumberOfFractionsPlanned
-        el(0x300a, 0x0080, 'IS', numbers([1])), // NumberOfBeams
+        el(0x300a, 0x0080, 'IS', numbers([beams])), // NumberOfBeams
         el(0x300a, 0x00a0, 'IS', numbers([0])), // NumberOfBrachyApplicationSetups
-        sequence(0x300c, 0x0004, [
-          [
+        sequence(
+          0x300c,
+          0x0004,
+          Array.from({ length: beams }, (_, beam) => [
             ...(prescription === null || fractions === null
               ? []
               : [
@@ -108,12 +113,12 @@ export function syntheticRtPlan(options: RtPlanOptions = {}): SyntheticFile {
                     0x300a,
                     0x0084,
                     'DS',
-                    numbers([Number((prescription / fractions).toFixed(6))]),
+                    numbers([Number((prescription / fractions / beams).toFixed(6))]),
                   ),
                 ]), // BeamDose
-            el(0x300c, 0x0006, 'IS', numbers([1])), // ReferencedBeamNumber
-          ],
-        ]),
+            el(0x300c, 0x0006, 'IS', numbers([beam + 1])), // ReferencedBeamNumber
+          ]),
+        ),
       ],
     ]),
     // ReferencedStructureSetSequence

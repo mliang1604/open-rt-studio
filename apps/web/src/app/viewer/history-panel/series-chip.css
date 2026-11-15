@@ -54,6 +54,27 @@
   color: var(--muted);
 }
 
+/* What one dose of a series of several is the dose of: under the icon, in
+   the preview, where it may take three lines. The line of text below has
+   room for the series' description alone, which the doses share. */
+.chip-thumb:has(.chip-dose-of) {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chip-dose-of {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  color: var(--text);
+}
+
 /* How many structure sets come with the series: in a corner of the preview,
    so that the line of text below keeps its width. */
 .chip-sets {

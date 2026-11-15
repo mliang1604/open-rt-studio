@@ -4,7 +4,13 @@
 
 import { computed, signal } from '@angular/core';
 import {
+  doseObjectDescription,
+  doseObjectSeriesKey,
   groupSeries,
+  nameDoseObjects,
+  seriesInstanceUidOf,
+  seriesKeyParts,
+  type DoseOf,
   type InstanceReference,
   type PlanFacts,
   type RtObjectFacts,
@@ -121,6 +127,8 @@ interface ServerSeries {
 interface ServerInstance {
   readonly sopInstanceUid: string;
   readonly size: number;
+  /** How many images the file holds, where the server says. */
+  readonly frames?: number | null;
 }
 /** One instance as the server tells of it by itself: what it is, and what it refers to. */
 interface ServerInstanceDetail {
@@ -129,6 +137,18 @@ interface ServerInstanceDetail {
   readonly references: readonly InstanceReference[];
   /** What a plan says of itself (#97); an older server does not send it. */
   readonly plan?: PlanFacts | null;
+  /** What a dose says it is the dose of (#257); an older server does not send it. */
+  readonly dose?: DoseOf | null;
+}
+
+/**
+ * What was asked of the server while one patient's timeline was made, so
+ * that nothing is asked twice: the instances of a series, and what an
+ * instance says of itself.
+ */
+interface Asked {
+  readonly lists: Map<string, Promise<ServerInstance[]>>;
+  readonly details: Map<string, Promise<ServerInstanceDetail>>;
 }
 
 /** The modalities the timeline places by what they refer to, and what each is here. */
@@ -145,6 +165,12 @@ const RT_KINDS: Readonly<Record<string, RtObjectKind>> = {
  * with the first of them placed, and the rest not.
  */
 const RT_OBJECTS_AT_MOST = 200;
+
+/**
+ * How many dose objects of one series are listed one by one (#257). A
+ * series of more is listed whole, and says so when it is opened.
+ */
+export const DOSE_OBJECTS_LISTED = 64;
 
 /** A patient the server lists, with how many studies it holds of them. */
 export interface ServerPatientSummary extends PatientSummary {
@@ -715,6 +741,7 @@ export class ServerSource implements DataSource {
       signal,
     );
     const history: StudySummary[] = new Array<StudySummary>(studies.length);
+    const asked: Asked = { lists: new Map(), details: new Map() };
     /** The series of radiotherapy objects, each with the study it is in. */
     const rtSeries: { readonly study: string; readonly series: ServerSeries }[] = [];
     await inParallel(studies, this.parallel, async (study, index) => {
@@ -727,21 +754,25 @@ export class ServerSource implements DataSource {
           rtSeries.push({ study: study.studyInstanceUid, series: one });
         }
       }
-      const series = every
-        .filter((one) => !NO_PIXELS.has(one.modality.toUpperCase()))
-        .map((one): SeriesSummary => {
-          this.files.set(one.seriesInstanceUid, one.instances);
-          return {
-            uid: one.seriesInstanceUid,
-            seriesNumber: one.number,
-            description: one.description,
-            modality: one.modality,
-            frameOfReferenceUid: one.frameOfReferenceUid,
-            // What opened files count: the slices, of which one file may hold many.
-            imageCount: one.images,
-            structureSets: one.structureSets,
-          };
-        });
+      const shownSeries = every.filter((one) => !NO_PIXELS.has(one.modality.toUpperCase()));
+      const listedSeries: SeriesSummary[][] = new Array<SeriesSummary[]>(shownSeries.length);
+      await inParallel(shownSeries, this.parallel, async (one, at) => {
+        this.files.set(one.seriesInstanceUid, one.instances);
+        const whole: SeriesSummary = {
+          uid: one.seriesInstanceUid,
+          seriesNumber: one.number,
+          description: one.description,
+          modality: one.modality,
+          frameOfReferenceUid: one.frameOfReferenceUid,
+          // What opened files count: the slices, of which one file may hold many.
+          imageCount: one.images,
+          structureSets: one.structureSets,
+        };
+        // A dose series of several files is several doses: one to a file (#257).
+        const several = one.modality.toUpperCase() === 'RTDOSE' && one.instances > 1;
+        listedSeries[at] = several ? await this.doseObjects(one, whole, asked, signal) : [whole];
+      });
+      const series = listedSeries.flat();
       history[index] = {
         studyUid: study.studyInstanceUid,
         date: study.date,
@@ -766,7 +797,10 @@ export class ServerSource implements DataSource {
     await grouped;
     let related: PatientHistory;
     try {
-      related = withRelations(shown, await this.rtObjects(rtSeries, patient.patientId, signal));
+      related = withRelations(
+        shown,
+        await this.rtObjects(rtSeries, patient.patientId, asked, signal),
+      );
     } catch (error) {
       if (isAbortError(error)) throw error;
       // The timeline stays as it is: the series are there, without what belongs to them.
@@ -836,18 +870,101 @@ export class ServerSource implements DataSource {
     }
   }
 
+  /** The instances of a series, asked for once while a timeline is made. */
+  private instancesOf(
+    seriesUid: string,
+    asked: Asked,
+    signal?: AbortSignal,
+  ): Promise<ServerInstance[]> {
+    let list = asked.lists.get(seriesUid);
+    if (!list) {
+      list = this.all<ServerInstance>(`/series/${seriesUid}/instances`, signal);
+      asked.lists.set(seriesUid, list);
+      // What failed is asked again by whoever wants it next.
+      list.catch(() => asked.lists.delete(seriesUid));
+    }
+    return list;
+  }
+
+  /** What an instance says of itself, asked for once while a timeline is made. */
+  private detailOf(
+    sopInstanceUid: string,
+    asked: Asked,
+    signal?: AbortSignal,
+  ): Promise<ServerInstanceDetail> {
+    let detail = asked.details.get(sopInstanceUid);
+    if (!detail) {
+      detail = this.json<ServerInstanceDetail>(`/instances/${sopInstanceUid}`, signal);
+      asked.details.set(sopInstanceUid, detail);
+      detail.catch(() => asked.details.delete(sopInstanceUid));
+    }
+    return detail;
+  }
+
+  /**
+   * The dose objects of a series that holds several, each as a series of
+   * its own on the timeline: named by what it says it is the dose of,
+   * where the server says, and otherwise by which of the series it is. No
+   * two of them are ever one grid, so they are never listed as one.
+   *
+   * The series is given whole when the server will not list its instances,
+   * or lists more than {@link DOSE_OBJECTS_LISTED}; opening it then says
+   * why it is not shown.
+   */
+  private async doseObjects(
+    series: ServerSeries,
+    whole: SeriesSummary,
+    asked: Asked,
+    signal?: AbortSignal,
+  ): Promise<SeriesSummary[]> {
+    let instances: ServerInstance[];
+    try {
+      instances = await this.instancesOf(series.seriesInstanceUid, asked, signal);
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted) throw error;
+      return [whole];
+    }
+    if (instances.length < 2 || instances.length > DOSE_OBJECTS_LISTED) return [whole];
+    const objects = new Array<{ sopInstanceUid: string; of: DoseOf | null; frames: number }>(
+      instances.length,
+    );
+    await inParallel(instances, this.parallel, async (instance, index) => {
+      let of: DoseOf | null = null;
+      try {
+        of = (await this.detailOf(instance.sopInstanceUid, asked, signal)).dose ?? null;
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted) throw error;
+        // The server will not say: the dose is told from the others by which it is.
+      }
+      objects[index] = {
+        sopInstanceUid: instance.sopInstanceUid,
+        of,
+        frames: instance.frames ?? 1,
+      };
+    });
+    return nameDoseObjects(objects).map(({ object, said }): SeriesSummary => {
+      const uid = doseObjectSeriesKey(series.seriesInstanceUid, object.sopInstanceUid);
+      this.files.set(uid, 1);
+      return {
+        ...whole,
+        uid,
+        description: doseObjectDescription(series.description, said),
+        doseOf: said,
+        imageCount: object.frames,
+      };
+    });
+  }
+
   /** What each radiotherapy object of a patient refers to, asked of the server one by one. */
   private async rtObjects(
     rtSeries: readonly { readonly study: string; readonly series: ServerSeries }[],
     patientId: string,
+    known: Asked,
     signal?: AbortSignal,
   ): Promise<RtObjectFacts[]> {
     const instances: { readonly of: (typeof rtSeries)[number]; readonly uid: string }[] = [];
     await inParallel(rtSeries, this.parallel, async (of) => {
-      const listed = await this.all<ServerInstance>(
-        `/series/${of.series.seriesInstanceUid}/instances`,
-        signal,
-      );
+      const listed = await this.instancesOf(of.series.seriesInstanceUid, known, signal);
       for (const one of listed) instances.push({ of, uid: one.sopInstanceUid });
     });
     // In an order that does not depend on which answer came first.
@@ -855,7 +972,7 @@ export class ServerSource implements DataSource {
     const asked = instances.slice(0, RT_OBJECTS_AT_MOST);
     const facts: RtObjectFacts[] = new Array<RtObjectFacts>(asked.length);
     await inParallel(asked, this.parallel, async ({ of, uid }, index) => {
-      const detail = await this.json<ServerInstanceDetail>(`/instances/${uid}`, signal);
+      const detail = await this.detailOf(uid, known, signal);
       facts[index] = {
         kind: RT_KINDS[of.series.modality.toUpperCase()],
         sopInstanceUid: detail.sopInstanceUid,
@@ -867,25 +984,35 @@ export class ServerSource implements DataSource {
         frameOfReferenceUid: of.series.frameOfReferenceUid,
         references: detail.references,
         ...(detail.plan ? { plan: detail.plan } : {}),
+        ...(detail.dose ? { dose: detail.dose } : {}),
       };
     });
     return facts;
   }
 
-  async fetchSeries(seriesUid: string, options: FetchOptions = {}): Promise<FetchedSeries> {
+  async fetchSeries(key: string, options: FetchOptions = {}): Promise<FetchedSeries> {
+    // One dose object of a series that holds several is asked for by a key
+    // of the series and itself (#257); the server knows the series' UID.
+    const { seriesInstanceUid: seriesUid, doseObjectUid } = seriesKeyParts(key);
     // One failed download stops the others; so does the caller's signal.
     const stop = new AbortController();
     const abandon = (): void => stop.abort();
     options.signal?.addEventListener('abort', abandon);
     try {
       if (options.signal?.aborted) throw new DOMException('The fetch was abandoned.', 'AbortError');
-      const [instances, related] = await Promise.all([
+      const [every, related] = await Promise.all([
         this.all<ServerInstance>(`/series/${seriesUid}/instances`, stop.signal),
         this.json<{
           structureSets: readonly ServerInstance[];
           registrations: readonly ServerInstance[];
         }>(`/series/${seriesUid}/related`, stop.signal),
       ]);
+      // Of a series of several doses, the one dose that was asked for and no other.
+      const instances =
+        doseObjectUid === null
+          ? every
+          : every.filter((one) => one.sopInstanceUid === doseObjectUid);
+      if (instances.length === 0) throw new Error('The server no longer holds that dose.');
       // The structure sets that refer to the series come with it, as they
       // would lie beside it in a folder. So do the registrations that name
       // the series or its frame of reference: what may place it over a
@@ -911,13 +1038,35 @@ export class ServerSource implements DataSource {
         );
       }
       const parsed = await this.parse(files, undefined, undefined, stop.signal);
-      const series = groupSeries(parsed.slices).find((one) => one.uid === seriesUid);
-      if (!series) {
+      const found = groupSeries(parsed.slices).filter(
+        (one) => seriesInstanceUidOf(one.uid) === seriesUid,
+      );
+      if (found.length === 0) {
         const [unreadable] = parsed.skipped;
         throw new Error(
           unreadable ? `${unreadable.reason}.` : 'No DICOM image slices were found in that series.',
         );
       }
+      // The whole series was asked for and it holds several doses: which of
+      // them is meant is not for this to pick, and they are not one grid.
+      if (found.length > 1) {
+        throw new Error(
+          `The series holds ${found.length} dose objects, which are not shown as one. Choose the patient again to have them listed one by one.`,
+        );
+      }
+      // The one dose goes by the key it was asked for by, and by the name the timeline gave it.
+      const listed = (this.current()?.studies ?? [])
+        .flatMap((study) => study.series)
+        .find((one) => one.uid === key);
+      const series =
+        doseObjectUid === null
+          ? found[0]
+          : {
+              ...found[0],
+              uid: key,
+              description: listed?.description ?? found[0].description,
+              ...(listed?.doseOf ? { doseOf: listed.doseOf } : {}),
+            };
       return {
         series,
         structureSets: parsed.structureSets,

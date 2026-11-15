@@ -81,6 +81,7 @@ describe('readInstanceHeader', () => {
         frames: null,
         references: [],
         plan: null,
+        dose: null,
       },
     });
   });

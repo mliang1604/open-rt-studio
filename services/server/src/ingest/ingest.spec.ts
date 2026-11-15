@@ -12,8 +12,10 @@ import {
   SYNTHETIC_PLAN_FRACTIONS,
   SYNTHETIC_PLAN_PRESCRIPTION_GY,
   SYNTHETIC_PLAN_TARGET_ROI,
+  SYNTHETIC_BEAM_DOSES as BEAM_DOSES,
   SYNTHETIC_RT_COURSE as COURSE,
   SYNTHETIC_STUDY,
+  syntheticBeamDoses,
   syntheticCtSeries,
   syntheticRtCourse,
   syntheticRtStruct,
@@ -154,6 +156,59 @@ describe('ingest', () => {
     expect(await index.planOf(COURSE.dose)).toBeNull();
     expect(await index.planOf(COURSE.structureSet)).toBeNull();
     expect(await index.planOf('1.2.3.4.5')).toBeNull();
+  });
+
+  it('files with each dose of a series what it is the dose of, and with nothing else (#257)', async () => {
+    const { index, ingest } = await pacs();
+    for (const file of syntheticBeamDoses(4, 16)) await ingest.ingest(file.bytes);
+    // One series of three instances: the plan's dose and each beam's.
+    expect(await index.getSeries(BEAM_DOSES.series)).toMatchObject({ instances: 3, images: 12 });
+    expect(await index.doseOf(BEAM_DOSES.planDose)).toEqual({
+      summationType: 'PLAN',
+      beams: [],
+      fractionGroup: null,
+    });
+    expect(await index.doseOf(BEAM_DOSES.beamDoses[0])).toEqual({
+      summationType: 'BEAM',
+      beams: [1],
+      fractionGroup: 1,
+    });
+    expect(await index.doseOf(BEAM_DOSES.beamDoses[1])).toEqual({
+      summationType: 'BEAM',
+      beams: [2],
+      fractionGroup: 1,
+    });
+    expect(await index.doseOf(BEAM_DOSES.plan)).toBeNull();
+    expect(await index.planOf(BEAM_DOSES.planDose)).toBeNull();
+  });
+
+  it('learns what a dose is the dose of, of one filed before that was kept, when the file comes again', async () => {
+    const { store, index, ingest } = await pacs();
+    const file = syntheticBeamDoses(4, 16).find((one) => uidOf(one) === BEAM_DOSES.beamDoses[1])!;
+    const header = readInstanceHeader(file.bytes);
+    if (!header.ok) throw new Error('the dose has no header');
+    // As an earlier version left it: the bytes stored, the entry without what the dose is of.
+    await store.put(uidOf(file), file.bytes);
+    const entry = indexEntry(header.header, {
+      size: file.bytes.byteLength,
+      sha256: sha256(file.bytes),
+    });
+    await index.putInstance({ ...entry, dose: null });
+    expect(await index.doseOf(uidOf(file))).toBeNull();
+
+    expect(await ingest.ingest(file.bytes)).toEqual({
+      outcome: 'unchanged',
+      sopInstanceUid: uidOf(file),
+    });
+    expect(await index.doseOf(uidOf(file))).toEqual({
+      summationType: 'BEAM',
+      beams: [2],
+      fractionGroup: 1,
+    });
+    // And the index is not written again for a dose it has.
+    const written = vi.spyOn(index, 'putInstance');
+    await ingest.ingest(file.bytes);
+    expect(written).not.toHaveBeenCalled();
   });
 
   it('learns what a plan says, of one filed before that was kept, when the file comes again', async () => {

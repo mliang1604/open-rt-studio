@@ -285,7 +285,11 @@ describe('browse', () => {
     const stored = await made.json<{ frames: number | null }>(`/instances/${COURSE.dose}`);
     expectSchema(stored, 'InstanceDetail');
     expect(stored.frames).toBe(dose.images);
-    expect(stored).toMatchObject({ plan: null });
+    // A dose says what it is the dose of (#257), and nothing of a plan's.
+    expect(stored).toMatchObject({
+      plan: null,
+      dose: { summationType: 'PLAN', beams: [], fractionGroup: null },
+    });
     // A plan says its fractions and its prescription with what it refers to (#97).
     const plan = await made.json<{ plan: unknown; references: unknown[] }>(
       `/instances/${COURSE.plan}`,

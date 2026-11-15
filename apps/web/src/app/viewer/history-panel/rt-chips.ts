@@ -4,6 +4,7 @@
 
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import {
+  doseOfText,
   planBrief,
   planSummaryText,
   type AttachedObject,
@@ -53,10 +54,31 @@ export function rtWhy(object: AttachedObject | LooseObject): string {
  * names …`. A plan says its fractions and its prescription between the two
  * (#97): `Plan “Prostate”. 30 fractions · 60 Gy to “PTV”. It names …`.
  */
-export function rtTitle(object: AttachedObject | LooseObject): string {
+export function rtTitle(object: AttachedObject | LooseObject, of: string | null = null): string {
   const name = object.description?.trim();
   const plan = object.plan ? ` ${planSummaryText(object.plan)}.` : '';
-  return `${RT_NAME[object.kind]}${name ? ` “${name}”` : ''}.${plan} ${rtWhy(object)}`;
+  const said = of ? ` (${of})` : '';
+  return `${RT_NAME[object.kind]}${name ? ` “${name}”` : ''}${said}.${plan} ${rtWhy(object)}`;
+}
+
+/**
+ * What each dose of a list is the dose of, for those that are in a series
+ * with another dose of the list (#257): a plan's dose beside its beams' go
+ * by one series description, and this is what tells them apart. Nothing
+ * for a dose that is alone in its series, or does not say.
+ */
+export function dosesTold(objects: readonly (AttachedObject | LooseObject)[]): Map<string, string> {
+  const inSeries = new Map<string, number>();
+  for (const one of objects) {
+    if (one.kind === 'dose') inSeries.set(one.seriesUid, (inSeries.get(one.seriesUid) ?? 0) + 1);
+  }
+  const told = new Map<string, string>();
+  for (const one of objects) {
+    if (one.kind !== 'dose' || !one.dose || (inSeries.get(one.seriesUid) ?? 0) < 2) continue;
+    const of = doseOfText(one.dose);
+    if (of) told.set(one.sopInstanceUid, of);
+  }
+  return told;
 }
 
 /**
@@ -89,14 +111,19 @@ export class RtChips {
   /** What the list is of, for whoever cannot see where it is. */
   readonly label = input('Radiotherapy objects');
 
-  protected readonly items = computed(() =>
-    this.objects().map((object) => ({
-      object,
-      code: RT_CODE[object.kind],
-      text: object.description?.trim() || RT_NAME[object.kind],
-      // A plan's fractions and prescribed dose, where it says them.
-      more: object.plan ? planBrief(object.plan) : '',
-      title: rtTitle(object),
-    })),
-  );
+  protected readonly items = computed(() => {
+    const told = dosesTold(this.objects());
+    return this.objects().map((object) => {
+      const of = told.get(object.sopInstanceUid) ?? null;
+      return {
+        object,
+        code: RT_CODE[object.kind],
+        text: object.description?.trim() || RT_NAME[object.kind],
+        // A plan's fractions and prescribed dose, where it says them; of
+        // several doses of one series, what each is the dose of.
+        more: object.plan ? planBrief(object.plan) : (of ?? ''),
+        title: rtTitle(object, of),
+      };
+    });
+  });
 }

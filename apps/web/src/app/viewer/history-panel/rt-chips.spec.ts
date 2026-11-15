@@ -5,7 +5,7 @@
 import { TestBed } from '@angular/core/testing';
 import type { AttachedObject, LooseObject, PlanSummary } from '@open-rt-studio/dicom';
 
-import { RtChips, rtTitle, rtWhy } from './rt-chips';
+import { RtChips, dosesTold, rtTitle, rtWhy } from './rt-chips';
 
 const attached = (
   kind: AttachedObject['kind'],
@@ -91,6 +91,55 @@ describe('a plan on the timeline (#97)', () => {
     expect(chips[0].title).toContain('30 fractions · 60 Gy to “PTV”');
     expect(chips[0].querySelector('.visually-hidden')!.textContent).toBe(chips[0].title);
     expect(chips[2].title).toContain('fractions not said');
+  });
+});
+
+describe('several doses of one series on the timeline (#257)', () => {
+  const dose = (
+    sopInstanceUid: string,
+    seriesUid: string,
+    of: AttachedObject['dose'] | null,
+  ): AttachedObject => ({
+    kind: 'dose',
+    by: 'plan',
+    description: 'Plan A',
+    sopInstanceUid,
+    seriesUid,
+    ...(of ? { dose: of } : {}),
+  });
+  const objects = [
+    attached('plan', 'structure-set'),
+    dose('d1', 'doses', { summationType: 'PLAN', beams: [], fractionGroup: null }),
+    dose('d2', 'doses', { summationType: 'BEAM', beams: [1], fractionGroup: 1 }),
+    dose('d3', 'doses', null),
+    // Alone in its series: its series' description is enough.
+    dose('d4', 'another', { summationType: 'PLAN', beams: [], fractionGroup: null }),
+  ];
+
+  it('are told apart by what each says it is the dose of', () => {
+    expect([...dosesTold(objects)]).toEqual([
+      ['d1', 'whole plan'],
+      ['d2', 'beam 1'],
+    ]);
+    expect(rtTitle(objects[2], 'beam 1')).toBe(
+      'Dose “Plan A” (beam 1). It names a plan that belongs to this series.',
+    );
+  });
+
+  it('show it beside their name', () => {
+    const fixture = TestBed.createComponent(RtChips);
+    fixture.componentRef.setInput('objects', objects);
+    fixture.detectChanges();
+    const chips = [...(fixture.nativeElement as HTMLElement).querySelectorAll('li')];
+    expect(chips.map((chip) => chip.querySelector('.rt-more')?.textContent ?? null)).toEqual([
+      null,
+      'whole plan',
+      'beam 1',
+      null,
+      null,
+    ]);
+    expect(chips[2].getAttribute('title')).toContain('(beam 1)');
+    expect(chips[4].getAttribute('title')).not.toContain('whole plan');
   });
 });
 

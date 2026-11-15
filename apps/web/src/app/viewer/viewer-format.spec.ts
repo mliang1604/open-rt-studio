@@ -5,7 +5,14 @@
 import type { DoseInfo, Layer, Volume } from '@open-rt-studio/dicom';
 import type { VoxelProbe } from '@open-rt-studio/render';
 
-import { doseLabel, doseSaid, formatDose, formatFieldReading, formatProbe } from './viewer-format';
+import {
+  doseLabel,
+  dosePart,
+  doseSaid,
+  formatDose,
+  formatFieldReading,
+  formatProbe,
+} from './viewer-format';
 
 function volume(overrides: Partial<Volume> = {}): Volume {
   return {
@@ -116,6 +123,21 @@ describe('a dose beside its value (#95)', () => {
     expect(doseLabel({ type: 'EFFECTIVE', units: 'GY' })).toBe('Effective dose');
     expect(doseLabel({ type: 'ERROR', units: 'GY' })).toBe('Dose error');
     expect(doseLabel({ type: 'PHYSICAL', units: 'RELATIVE' })).toBe('Dose, relative');
+    // One that is less than a whole plan's says what it is the dose of (#257).
+    const beam = { type: 'PHYSICAL', units: 'GY', summationType: 'BEAM', beams: [2] } as const;
+    expect(doseLabel({ ...beam, fractionGroup: 1 })).toBe('Dose (beam 2)');
+    expect(doseLabel({ ...beam, units: 'RELATIVE' })).toBe('Dose (beam 2), relative');
+    expect(doseLabel({ type: 'EFFECTIVE', units: 'GY', summationType: 'FRACTION' })).toBe(
+      'Effective dose (one fraction group)',
+    );
+    // A whole plan's dose, and one that does not say, go by their type alone.
+    expect(doseLabel({ type: 'PHYSICAL', units: 'GY', summationType: 'PLAN' })).toBe('Dose');
+    expect(doseLabel({ type: 'PHYSICAL', units: 'GY', summationType: null })).toBe('Dose');
+    expect(dosePart({ summationType: 'BEAM', beams: [] })).toBe('one or more beams');
+    expect(dosePart({ summationType: 'PLAN' })).toBeNull();
+    expect(
+      dosePart({ summationType: 'BEAM', beams: [1], sum: { doses: 2, model: 'physical' } }),
+    ).toBeNull();
   });
 
   it('is called by what it is a sum of, when it was made by summing (#98, #99)', () => {

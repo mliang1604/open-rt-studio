@@ -20,7 +20,7 @@
  * - `registration.frame`: a registration, to a frame of reference it connects
  * - `registration.series`: a registration, to a series it connects
  */
-import type { PlanFacts } from '@open-rt-studio/dicom';
+import type { DoseOf, PlanFacts } from '@open-rt-studio/dicom';
 
 export const RELATIONS = [
   'structure-set.series',
@@ -87,6 +87,11 @@ export interface InstanceEntry {
    * out or null for anything else.
    */
   readonly plan?: PlanFacts | null;
+  /**
+   * For an RT Dose, what it says it is the dose of; left out or null for
+   * anything else.
+   */
+  readonly dose?: DoseOf | null;
 }
 
 export interface PatientRecord {
@@ -285,6 +290,12 @@ export interface PacsIndex {
    * no plan, is not in the index, or was filed before this was kept.
    */
   planOf(sopInstanceUid: string): Promise<PlanFacts | null>;
+  /**
+   * What a dose says it is the dose of: its summation type, and the beams
+   * and fraction group it names. Null for what is no dose, is not in the
+   * index, or was filed before this was kept.
+   */
+  doseOf(sopInstanceUid: string): Promise<DoseOf | null>;
   /** The instances that refer to a UID, by one relation or by any. */
   referencesTo(targetUid: string, relation?: Relation): Promise<InstanceRecord[]>;
   /** Null when the index does not have the series. */

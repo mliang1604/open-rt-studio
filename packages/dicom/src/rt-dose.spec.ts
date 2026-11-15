@@ -5,8 +5,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type DoseOf,
   doseFrameOffsets,
   doseKind,
+  doseOfNames,
+  doseOfText,
   doseOrientation,
   dosePlanes,
   doseScaling,
@@ -219,5 +222,52 @@ describe('the even grid through a dose’s frames', () => {
     expect(shape([0, 2.5, 6])).toBe(uneven);
     // 0.1 mm once, then 100 mm: an even grid of a thousand planes for three frames.
     expect(shape([0, 0.1, 100.1])).toBe(uneven);
+  });
+});
+
+describe('what a dose is the dose of, in words (#257)', () => {
+  const of = (
+    summationType: string | null,
+    beams: number[] = [],
+    fractionGroup: number | null = null,
+  ): DoseOf => ({ summationType, beams, fractionGroup });
+
+  it('says the plan, the beams or the fraction group the file names', () => {
+    expect(doseOfText(of('PLAN'))).toBe('whole plan');
+    expect(doseOfText(of('MULTI_PLAN'))).toBe('several plans');
+    expect(doseOfText(of('PLAN_OVERVIEW'))).toBe('plan overview');
+    expect(doseOfText(of('BEAM', [2], 1))).toBe('beam 2');
+    expect(doseOfText(of('BEAM', [1, 3], 1))).toBe('beams 1, 3');
+    // A beam's dose that does not say which beam.
+    expect(doseOfText(of('BEAM'))).toBe('one or more beams');
+    expect(doseOfText(of('FRACTION', [], 2))).toBe('fraction group 2');
+    expect(doseOfText(of('FRACTION'))).toBe('one fraction group');
+    expect(doseOfText(of('FRACTION_SESSION', [], 1))).toBe('one fraction of fraction group 1');
+    expect(doseOfText(of('FRACTION_SESSION'))).toBe('one fraction');
+    expect(doseOfText(of('BEAM_SESSION', [4], 1))).toBe('one fraction of beam 4');
+    expect(doseOfText(of('CONTROL_POINT', [4], 1))).toBe('control points of beam 4');
+    expect(doseOfText(of('BRACHY'))).toBe('brachy application setups');
+    expect(doseOfText(of('BRACHY_SESSION'))).toBe('one fraction of brachy application setups');
+    expect(doseOfText(of('RECORD'))).toBe('treatment record');
+  });
+
+  it('gives a term it does not know as it is written, and nothing for a dose that does not say', () => {
+    expect(doseOfText(of('SOMETHING_NEW'))).toBe('summation type SOMETHING_NEW');
+    expect(doseOfText(of(null))).toBeNull();
+  });
+
+  it('names several doses so that no two go by one name', () => {
+    expect(doseOfNames([of('PLAN'), of('BEAM', [1]), of('BEAM', [2])])).toEqual([
+      'whole plan',
+      'beam 1',
+      'beam 2',
+    ]);
+    expect(doseOfNames([of('BEAM', [1]), of('BEAM', [1]), of(null), of('PLAN')])).toEqual([
+      'beam 1, dose 1 of 4',
+      'beam 1, dose 2 of 4',
+      'dose 3 of 4',
+      'whole plan',
+    ]);
+    expect(new Set(doseOfNames([of(null), of(null)])).size).toBe(2);
   });
 });
