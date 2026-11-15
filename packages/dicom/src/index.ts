@@ -160,6 +160,14 @@ export {
   uniformMargins,
 } from './label-margin.js';
 export {
+  type MirrorPlane,
+  MIDLINE,
+  gridCentre,
+  mirrorStructure,
+  planeOf,
+  reflect,
+} from './label-mirror.js';
+export {
   type LabelChange,
   type LabelConstraints,
   type LabelEdit,

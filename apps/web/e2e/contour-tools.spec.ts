@@ -239,3 +239,31 @@ test('a margin grows a painted structure, and shrinks it back, each one undo (#1
   expect(await capturedColour(page)).toBeCloseTo(painted, 1);
   expectNoProblems(problems);
 });
+
+test('a structure is mirrored across the midline into a new one, as one undo (#113)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  // Off the middle, so that the copy does not meet the original.
+  const aside = await at(page, 0.7, 0.5);
+  await page.mouse.click(aside.x, aside.y);
+  const painted = await capturedColour(page);
+
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="mirror"]').click();
+  await page.locator('[data-mirror]').click();
+  await expect(page.locator('[data-mirror-said]')).toHaveText(
+    /^Structure 1 mirrored: \d+ voxels?\.$/,
+  );
+  await expect(page.getByLabel('Name of Structure 1 mirrored (painted)')).toHaveValue(
+    'Structure 1 mirrored',
+  );
+  expect(await capturedColour(page)).toBeGreaterThan(painted + 0.05);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(painted, 1);
+  expectNoProblems(problems);
+});

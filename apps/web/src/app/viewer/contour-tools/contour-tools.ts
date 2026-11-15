@@ -8,6 +8,7 @@ import { BrushTool } from './brush-tool';
 import { CleanupTool } from './cleanup-tool';
 import { CONTOUR_TOOLS } from './contour-tool';
 import { MarginTool } from './margin-tool';
+import { MirrorTool } from './mirror-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { SampleTool } from './sample-tool';
 import { ThresholdBrushTool } from './threshold-brush-tool';
@@ -25,6 +26,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: CleanupTool, multi: true },
   MarginTool,
   { provide: CONTOUR_TOOLS, useExisting: MarginTool, multi: true },
+  MirrorTool,
+  { provide: CONTOUR_TOOLS, useExisting: MirrorTool, multi: true },
   { provide: CONTOUR_TOOLS, useClass: SampleTool, multi: true },
   ContourToolsController,
 ];
