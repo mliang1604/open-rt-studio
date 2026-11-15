@@ -83,6 +83,10 @@ export function parseStructureSet(name: string, buffer: ArrayBuffer): StructureS
   }
 
   const references = readReferences(dataSet);
+  const predecessors = items(dataSet, 'x30060018').flatMap((item) => {
+    const uid = item.string('x00081155')?.trim();
+    return uid ? [uid] : [];
+  });
 
   return {
     name,
@@ -91,6 +95,11 @@ export function parseStructureSet(name: string, buffer: ArrayBuffer): StructureS
     referencedSeriesUids: references.referencedSeriesUids,
     patientId: dataSet.string('x00100020')?.trim() || null, // Patient ID
     sopInstanceUid: dataSet.string('x00080018')?.trim() || null, // SOP Instance UID
+    description: dataSet.string('x30060006')?.trim() || null, // Structure Set Description
+    date: dataSet.string('x30060008')?.trim() || null, // Structure Set Date
+    time: dataSet.string('x30060009')?.trim() || null, // Structure Set Time
+    // Predecessor Structure Set Sequence > Referenced SOP Instance UID
+    ...(predecessors.length > 0 ? { predecessorSopInstanceUids: predecessors } : {}),
     rois: order.map((number) => freeze(rois.get(number)!)),
   };
 }

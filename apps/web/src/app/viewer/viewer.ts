@@ -74,6 +74,8 @@ import { StructureCompare } from './structure-compare/structure-compare';
 import { DerivedSeries } from './derived-series/derived-series';
 import { DerivedSeriesController } from './derived-series/derived-series-controller';
 import { ManualRegistration } from './manual-registration/manual-registration';
+import { Provenance } from './provenance/provenance';
+import { provenanceOf } from './provenance/provenance-of';
 import { StructurePropagation } from './structure-propagation/structure-propagation';
 import { StructurePropagationController } from './structure-propagation/structure-propagation-controller';
 import { ManualRegistrationController } from './manual-registration/manual-registration-controller';
@@ -142,6 +144,7 @@ const MAX_ZOOM = 20;
     ManualRegistration,
     DerivedSeries,
     StructurePropagation,
+    Provenance,
     StructureCompare,
     LandmarkMarkers,
     LandmarkPanel,
@@ -339,6 +342,33 @@ export class Viewer {
   protected readonly openPatients = computed(() =>
     this.sources.isFiles() ? this.sources.patients() : [],
   );
+  /**
+   * What the derived objects on screen were made from (#91): the image and
+   * those laid over it, and the structure sets drawn on it. Empty when
+   * nothing on screen says it is derived.
+   */
+  protected readonly provenance = computed(() => {
+    const state = this.load();
+    if (state.status !== 'ready') return [];
+    const { result } = state;
+    const names = new Map<string, string>();
+    for (const study of this.sources.currentPatient()?.studies ?? []) {
+      for (const one of study.series) {
+        names.set(one.uid, [one.modality, one.description?.trim()].filter(Boolean).join(' '));
+      }
+    }
+    const selected = result.series.find((one) => one.uid === result.selectedUid);
+    return provenanceOf({
+      structureSets: result.structureSets,
+      images: [...(selected ? [selected] : []), ...(result.overlaySeries ?? [])],
+      knownSets: [
+        ...result.allStructureSets,
+        ...Object.values(result.overlayStructureSets ?? {}).flat(),
+      ],
+      knownRegistrations: result.registrations,
+      seriesName: (uid) => names.get(uid) || null,
+    });
+  });
   /** The modal help panel, so the toolbar controller can move focus into it on open. */
   private readonly shortcutHelp = viewChild(ShortcutHelp);
   /** The shortcuts listed in the help overlay, in display order. */

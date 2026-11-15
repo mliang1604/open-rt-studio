@@ -239,6 +239,38 @@ describe('buildRoiLegend', () => {
     });
   });
 
+  it('says of a structure that it was taken from another image, when its file says so (#91)', () => {
+    const legend = buildRoiLegend(
+      [
+        set([
+          roi({ number: 1 }),
+          roi({
+            number: 2,
+            generation: {
+              algorithm: 'AUTOMATIC',
+              description: ' Propagated: points moved by the registration ',
+              resampled: true,
+            },
+          }),
+          // Made by a program, and not from another image: no more than that is said.
+          roi({
+            number: 3,
+            generation: { algorithm: 'AUTOMATIC', description: 'Thresholded', resampled: false },
+          }),
+        ]),
+      ],
+      new Set(),
+      noOverrides,
+      noOpacities,
+      -1,
+    );
+    expect(legend.map((entry) => [entry.propagated, entry.madeBy])).toEqual([
+      [false, ''],
+      [true, 'Propagated: points moved by the registration'],
+      [false, 'Thresholded'],
+    ]);
+  });
+
   it('carries the ROI number and a promotable flag, defaulting to not promoted', () => {
     const legend = buildRoiLegend(
       [

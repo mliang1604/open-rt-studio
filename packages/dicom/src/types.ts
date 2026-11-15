@@ -170,6 +170,18 @@ export interface StructureSet {
    * for a set that was made in the viewer and has not been through a file.
    */
   readonly sopInstanceUid?: string | null;
+  /** Structure Set Description (3006,0006), whole; null or left out when absent. */
+  readonly description?: string | null;
+  /** Structure Set Date (3006,0008) as DICOM writes it, `YYYYMMDD`; null or left out when absent. */
+  readonly date?: string | null;
+  /** Structure Set Time (3006,0009), `HHMMSS` with or without a fraction. */
+  readonly time?: string | null;
+  /**
+   * The structure sets this one says it was made from: the SOP Instance UIDs
+   * of its Predecessor Structure Set Sequence (3006,0018). Left out when it
+   * names none.
+   */
+  readonly predecessorSopInstanceUids?: readonly string[];
   /** The regions of interest, joined across the three RTSTRUCT sequences. */
   readonly rois: readonly Roi[];
 }

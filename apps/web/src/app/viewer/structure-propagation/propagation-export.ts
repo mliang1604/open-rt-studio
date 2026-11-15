@@ -54,8 +54,13 @@ export function propagatedDescription(set: StructureSet, base: Series): string {
 export function propagationText(facts: PropagationFacts): string {
   const { set, source, base, results } = facts;
   const from = set.sopInstanceUid ? ` (${set.sopInstanceUid})` : '';
+  // Some of the set's structures, when not all were taken.
+  const which =
+    results.length < set.rois.length
+      ? `${results.length} of the ${set.rois.length} structures`
+      : 'Structures';
   return (
-    `${DERIVED_NOTICE} Structures of structure set "${setName(set)}"${from} on series ${source.uid} ` +
+    `${DERIVED_NOTICE} ${which} of structure set "${setName(set)}"${from} on series ${source.uid} ` +
     `taken to series ${base.uid} ${throughText(facts.placement)}. ` +
     `${count(results, 'points')} by moving their points, ` +
     `${count(results, 'label-volume')} by a label volume resampled and outlined.`
@@ -120,8 +125,9 @@ const plural = (n: number, one: string, many: string): string => `${n} ${n === 1
 
 /** What was made, in words, for whoever is about to save it. */
 export function propagationSummary(set: StructureSet, results: readonly PropagatedRoi[]): string {
+  const some = results.length < set.rois.length ? ` of the ${set.rois.length}` : '';
   const parts = [
-    `Propagated, not saved: ${plural(results.length, 'structure', 'structures')} of “${setName(set)}” onto the base image’s slices.`,
+    `Propagated, not saved: ${plural(results.length, 'structure', 'structures')}${some} of “${setName(set)}” onto the base image’s slices.`,
   ];
   const [points, volume] = [count(results, 'points'), count(results, 'label-volume')];
   const ways = [

@@ -90,6 +90,12 @@ describe('how a structure set was propagated, in words', () => {
     );
   });
 
+  it('says how many of the set’s structures were taken, when not all were', () => {
+    const some = propagationText({ ...FACTS, results: [FACTS.results[0]] });
+    expect(some).toContain('1 of the 2 structures of structure set "Plan A" (1.2.3.80)');
+    expect(some).toContain('1 by moving their points, 0 by a label volume');
+  });
+
   it('says so when no registration was needed, and names no object for a set that is in none', () => {
     const text = propagationText({
       ...FACTS,
@@ -172,7 +178,7 @@ describe('what was made, in words', () => {
       'Propagated, not saved: 2 structures of “Plan A” onto the base image’s slices. 2 by moving their points.',
     );
     expect(propagationSummary(SET, [result(SET.rois[1], 'label-volume')])).toBe(
-      'Propagated, not saved: 1 structure of “Plan A” onto the base image’s slices. 1 by a label volume.',
+      'Propagated, not saved: 1 structure of the 2 of “Plan A” onto the base image’s slices. 1 by a label volume.',
     );
   });
 

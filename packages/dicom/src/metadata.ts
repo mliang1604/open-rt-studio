@@ -41,6 +41,28 @@ export interface RawTag {
 export interface DicomMetadata {
   readonly curated: readonly CuratedGroup[];
   readonly rawTags: readonly RawTag[];
+  /**
+   * What the image says of being made from others; null (or left out) for an
+   * image that says nothing of the kind.
+   */
+  readonly derivation?: ImageDerivation | null;
+}
+
+/**
+ * What a derived image says of how it was made: for an image whose Image
+ * Type (0008,0008) begins `DERIVED`, or that has a Derivation Description.
+ */
+export interface ImageDerivation {
+  /** Derivation Description (0008,2111), whole; null when absent. */
+  readonly description: string | null;
+  /** Content Date (0008,0023) as DICOM writes it, `YYYYMMDD`; null when absent. */
+  readonly date: string | null;
+  /** Content Time (0008,0033), `HHMMSS` with or without a fraction; null when absent. */
+  readonly time: string | null;
+  /** The series it names as related: Related Series Sequence (0008,1250), Series Instance UIDs. */
+  readonly relatedSeriesUids: readonly string[];
+  /** The instances it names as sources: Source Instance Sequence (0042,0013), SOP Instance UIDs. */
+  readonly sourceInstanceUids: readonly string[];
 }
 
 /** Longest display value kept verbatim; longer ones are truncated with an ellipsis. */
@@ -68,7 +90,31 @@ const NUMERIC_VRS: Readonly<
  * per file and carries the result on the series' first slice.
  */
 export function extractMetadata(dataSet: DataSet): DicomMetadata {
-  return { curated: curatedGroups(dataSet), rawTags: rawTags(dataSet) };
+  return {
+    curated: curatedGroups(dataSet),
+    rawTags: rawTags(dataSet),
+    derivation: imageDerivation(dataSet),
+  };
+}
+
+/** What an image says of being made from others; null when it says nothing of it. */
+export function imageDerivation(dataSet: DataSet): ImageDerivation | null {
+  const text = (tag: string): string | null => dataSet.string(tag)?.trim() || null;
+  const derived = (text('x00080008') ?? '').split('\\')[0].trim().toUpperCase() === 'DERIVED';
+  const description = text('x00082111');
+  if (!derived && !description) return null;
+  const uids = (sequence: string, tag: string): string[] =>
+    (dataSet.elements[sequence]?.items ?? []).flatMap((item) => {
+      const uid = item.dataSet?.string(tag)?.trim();
+      return uid ? [uid] : [];
+    });
+  return {
+    description,
+    date: text('x00080023'),
+    time: text('x00080033'),
+    relatedSeriesUids: uids('x00081250', 'x0020000e'),
+    sourceInstanceUids: uids('x00420013', 'x00081155'),
+  };
 }
 
 /** A curated field's value, read and formatted from the data set, or null if absent. */

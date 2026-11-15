@@ -41,3 +41,25 @@ select {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+.structures summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.structures ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 140px;
+  margin: 4px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.structures label span {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
