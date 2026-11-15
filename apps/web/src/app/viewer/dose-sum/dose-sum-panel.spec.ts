@@ -90,6 +90,10 @@ function setup(rows: DoseRow[] = [row(), SECOND]) {
     failed: signal<string | null>(null),
     problem: signal<string | null>(null),
     made: signal<SumMade | null>(null),
+    saving: signal(false),
+    saved: signal<string | null>(null),
+    cannotSave: signal<string | null>(null),
+    save: note('save'),
     imageName: signal('Planning CT'),
     close: note('close'),
     setIncluded: note('setIncluded'),
@@ -305,6 +309,41 @@ describe('DoseSumPanel', () => {
     expect(body.scrollTop).toBe(0);
     one<HTMLButtonElement>('[data-sum-discard]')!.click();
     expect(asked).toEqual([['discard']]);
+  });
+
+  it('saves the sum on screen as an RT Dose, and says what became of it', () => {
+    const { controller, render, one, text, asked } = setup();
+    controller.made.set(MADE);
+    render();
+    expect(text('[data-sum-save-note]')).toContain('a new RT Dose of the image’s patient');
+    const save = one<HTMLButtonElement>('[data-sum-save]')!;
+    expect(save.textContent.trim()).toBe('Save as RT Dose');
+    expect(one('[data-sum-saved]')).toBeNull();
+    save.click();
+    expect(asked).toEqual([['save']]);
+
+    controller.saving.set(true);
+    render();
+    expect(save.disabled).toBe(true);
+    expect(save.textContent.trim()).toBe('Saving…');
+
+    controller.saving.set(false);
+    controller.saved.set('Saved as summed-dose.dcm. Not for clinical use.');
+    render();
+    expect(save.disabled).toBe(false);
+    const saved = one('[data-sum-saved]')!;
+    expect(saved.textContent.trim()).toBe('Saved as summed-dose.dcm. Not for clinical use.');
+    expect(saved.getAttribute('role')).toBe('status');
+
+    // What stands in the way of saving is said, and the button is not to be pressed.
+    controller.cannotSave.set(
+      'The image names no study or no frame of reference to file a dose in.',
+    );
+    render();
+    expect(text('[data-sum-cannot-save]')).toBe(
+      'The image names no study or no frame of reference to file a dose in.',
+    );
+    expect(save.disabled).toBe(true);
   });
 
   it('is a dialog that Escape and its button close', () => {

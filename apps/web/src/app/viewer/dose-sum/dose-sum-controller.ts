@@ -5,6 +5,7 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import {
   AlphaBetaError,
+  DoseWriteError,
   EQD_FRACTION_GY,
   alphaBetaMap,
   doseSumProblem,
@@ -25,9 +26,11 @@ import { LayersController } from '../layers-controller';
 import { LayersStore, madeStill } from '../layers-store';
 import { RoiController } from '../roi-controller';
 import { buildRoiLegend } from '../roi-legend';
+import { summedDoseFile, writtenNotes, type SummedDoseFile } from './dose-export';
 import {
   SUM_LAYER_ID,
   doseRow,
+  plansNamed,
   sumCandidates,
   sumMade,
   type AlphaBetaMode,
@@ -46,6 +49,8 @@ export interface DoseSumInit {
   readonly notify: (message: string, problem: boolean) => void;
   /** Sums the doses; `sumDosesWith` when left out. A spec may give another. */
   readonly sum?: typeof sumDosesWith;
+  /** The time a file is made at; the clock's when left out. */
+  readonly now?: () => Date;
 }
 
 const seriesUidOf = (layerId: string): string => layerId.replace(/#\d+$/, '');
@@ -85,6 +90,10 @@ export class DoseSumController {
   readonly busy = signal(false);
   /** Why the last sum that was asked for was not made; null when it was, or none was. */
   readonly failed = signal<string | null>(null);
+  /** Whether the sum on screen is being saved. */
+  readonly saving = signal(false);
+  /** What became of the sum on screen when it was last saved, in words; null while it has not been. */
+  readonly saved = signal<string | null>(null);
 
   /** What the user said of each dose, by its layer's id. */
   private readonly choices = signal<ReadonlyMap<string, Partial<DoseChoice>>>(new Map());
@@ -292,6 +301,7 @@ export class DoseSumController {
   private letGo(): void {
     this.layerStore.setMade(null);
     this.said.set(null);
+    this.saved.set(null);
     if (this.hiddenBefore) this.layerStore.setHidden(this.hiddenBefore);
     this.hiddenBefore = null;
   }
@@ -371,6 +381,7 @@ export class DoseSumController {
         ),
       );
       this.layerStore.setMade(made);
+      this.saved.set(null);
       const before = this.layerStore.showOnly(SUM_LAYER_ID, [...this.layersCtl.layers(), layer]);
       // A sum made over a sum: what was hidden before the first is what is put back.
       this.hiddenBefore ??= before;
@@ -380,6 +391,80 @@ export class DoseSumController {
       d.notify(`The doses were not summed: ${messageOf(error)}`, true);
     } finally {
       if (asked === this.asked) this.busy.set(false);
+    }
+  }
+
+  /**
+   * Why the sum on screen cannot be saved as it is; null when it can, or
+   * there is none.
+   */
+  readonly cannotSave = computed<string | null>(() => {
+    if (!this.made()) return null;
+    const base = this.deps?.baseSeries() ?? null;
+    if (!base?.frameOfReferenceUid?.trim() || !base.studyUid?.trim()) {
+      return 'The image names no study or no frame of reference to file a dose in.';
+    }
+    return null;
+  });
+
+  /**
+   * Save the sum on screen as a new RT Dose (#101): a download for opened
+   * files, an upload for a server. It is of the image's patient, in the
+   * image's study and frame of reference. Nothing is replaced, and the sum
+   * stays on screen.
+   */
+  async save(): Promise<void> {
+    const d = this.deps;
+    const made = this.layerStore.made();
+    const said = this.made();
+    const base = d?.baseSeries() ?? null;
+    if (!d || !made || !said || !base || this.saving() || this.cannotSave() !== null) return;
+    const history = this.source.currentPatient();
+    let file: SummedDoseFile;
+    try {
+      file = summedDoseFile(
+        made.layer.volume,
+        said,
+        made.of.map((one) => ({
+          volume: one.volume,
+          placement: one.placement,
+          planUids: plansNamed(seriesUidOf(one.id), history),
+        })),
+        base,
+        {
+          frameOfReferenceUid: base.frameOfReferenceUid!.trim(),
+          studyInstanceUid: base.studyUid!.trim(),
+        },
+        (d.now ?? (() => new Date()))(),
+      );
+    } catch (error) {
+      // A sum an RT Dose cannot hold says why; anything else is a fault and is said as one.
+      const why = error instanceof DoseWriteError ? error.message : messageOf(error);
+      d.notify(`The sum was not saved. ${why}`, true);
+      return;
+    }
+    this.saving.set(true);
+    try {
+      const outcome = await this.source.save(file.object);
+      const { written } = file;
+      const [nx, ny, nz] = written.dims;
+      const where =
+        outcome.kind === 'stored'
+          ? `Saved as a new RT Dose (${outcome.where}), “${written.seriesDescription}”, in the image’s study. It is listed there the next time the patient is opened.`
+          : `Saved as ${file.object.filename}, “${written.seriesDescription}”. Open it with the image to see it.`;
+      const told = [
+        where,
+        `${nx} × ${ny} × ${nz} voxels, each to within ${written.scaling / 2} Gy of the sum’s.`,
+        ...writtenNotes(written),
+        'Not for clinical use.',
+      ].join(' ');
+      // Said beside the sum it is of: not beside another that was made meanwhile.
+      if (this.layerStore.made() === made) this.saved.set(told);
+      d.notify(where, false);
+    } catch (error) {
+      d.notify(`The sum was not saved. ${messageOf(error)}`, true);
+    } finally {
+      this.saving.set(false);
     }
   }
 }

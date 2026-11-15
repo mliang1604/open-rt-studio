@@ -117,6 +117,29 @@ export function placedByText(layer: Layer): string {
   return 'In the image’s own frame of reference: no registration is needed';
 }
 
+/** Every radiotherapy object of a patient that the timeline knows of. */
+function objectsOf(history: PatientHistory): (AttachedObject | LooseObject)[] {
+  return [
+    ...history.studies.flatMap((study) => [
+      ...study.series.flatMap((series) => series.attached ?? []),
+      ...(study.loose ?? []),
+    ]),
+    ...(history.loose ?? []),
+  ];
+}
+
+/** The plans the dose of a series names, by SOP Instance UID: each once, held or not. */
+export function plansNamed(doseSeriesUid: string, history: PatientHistory | null): string[] {
+  if (!history) return [];
+  return [
+    ...new Set(
+      objectsOf(history)
+        .filter((one) => one.kind === 'dose' && one.seriesUid === doseSeriesUid)
+        .flatMap((one) => one.plans ?? []),
+    ),
+  ];
+}
+
 /**
  * The fractions the plan a dose names says it is given in: when the dose
  * names plans, exactly one of them is held, and it gives one number of
@@ -128,18 +151,8 @@ export function planFractions(
   history: PatientHistory | null,
 ): PlanFractions | null {
   if (!history) return null;
-  const objects: (AttachedObject | LooseObject)[] = [
-    ...history.studies.flatMap((study) => [
-      ...study.series.flatMap((series) => series.attached ?? []),
-      ...(study.loose ?? []),
-    ]),
-    ...(history.loose ?? []),
-  ];
-  const named = new Set(
-    objects
-      .filter((one) => one.kind === 'dose' && one.seriesUid === doseSeriesUid)
-      .flatMap((one) => one.plans ?? []),
-  );
+  const objects = objectsOf(history);
+  const named = new Set(plansNamed(doseSeriesUid, history));
   if (named.size === 0) return null;
   const plans = new Map<string, AttachedObject | LooseObject>();
   for (const one of objects) {

@@ -306,3 +306,46 @@ describe('voxelToPatient', () => {
     expect(back[2]).toBeCloseTo(point[2], 9);
   });
 });
+
+describe('where a volume is known, from slices that say where they are', () => {
+  const known = (z: number, value: number, mask: number[] | null): Slice => ({
+    ...axialSlice(z, value, z + 1),
+    ...(mask ? { known: Uint8Array.from(mask) } : {}),
+  });
+
+  it('is left out when no slice says, and when every slice is known throughout', () => {
+    expect(buildVolume([known(0, 1, null), known(1, 2, null)]).known).toBeUndefined();
+    expect(
+      buildVolume([known(0, 1, [1, 1, 1, 1]), known(1, 2, [1, 1, 1, 1])]).known,
+    ).toBeUndefined();
+  });
+
+  it('is each slice’s own, in the order the slices are laid, and a slice that does not say is known', () => {
+    // Given out of order: the volume is laid by where the slices are.
+    const volume = buildVolume([known(1, 7, [0, 1, 1, 0]), known(0, 5, null)]);
+    expect([...volume.known!]).toEqual([1, 1, 1, 1, 0, 1, 1, 0]);
+    // What is not known is no part of what the values span.
+    expect([volume.min, volume.max]).toEqual([5, 7]);
+  });
+
+  it('is known between two slices only where both are', () => {
+    // Slices at 0, 2, 4 and 8 mm: the layer at 6 mm is laid between the last two.
+    const volume = buildVolume([
+      known(0, 0, null),
+      known(2, 2, [1, 1, 1, 1]),
+      known(4, 4, [1, 1, 0, 0]),
+      known(8, 8, [1, 0, 1, 0]),
+    ]);
+    expect(volume.dims).toEqual([2, 2, 5]);
+    const layer = (k: number): number[] => [...volume.known!.subarray(k * 4, k * 4 + 4)];
+    expect(layer(1)).toEqual([1, 1, 1, 1]);
+    expect(layer(2)).toEqual([1, 1, 0, 0]);
+    expect(layer(3)).toEqual([1, 0, 0, 0]);
+    expect(layer(4)).toEqual([1, 0, 1, 0]);
+  });
+
+  it('spans nothing when nothing is known', () => {
+    const volume = buildVolume([known(0, 5, [0, 0, 0, 0]), known(1, 7, [0, 0, 0, 0])]);
+    expect([volume.min, volume.max]).toEqual([0, 0]);
+  });
+});

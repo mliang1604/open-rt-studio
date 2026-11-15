@@ -289,3 +289,89 @@ export function dosePlanes(
   planes.push({ offset: offsets[last], frame: last, towardsNext: 0 });
   return { planes, interpolated: planes.length - offsets.length };
 }
+
+// What a summed dose that was written here says of itself beyond what an
+// RT Dose can (#101): a private block, which this reader finds by its
+// creator and another program passes over.
+//
+// **Why it is there.** An RT Dose is a box of numbers: it has no way to say
+// that a number is not known. A sum is not known wherever one of its doses
+// was not, and is written as 0 there. The block says which voxels those
+// are, so that a sum that is read again is not known where it was not
+// known, and says what the sum is (`EQD2 (α/β 3 Gy)`), so that it is called
+// by that again. It holds nothing of the patient.
+
+/** Private Creator of the block. The number is the block's version. */
+export const SUM_RECORD_CREATOR = 'OPEN RT STUDIO DOSE 01';
+/** The group the block is in: the one after an RT Dose's own. */
+export const SUM_RECORD_GROUP = 0x3005;
+/** Within the block: where the sum is known, a bit to a voxel (OB). */
+export const SUM_RECORD_KNOWN = 0x01;
+/** Within the block: what the sum is, as JSON (LT). */
+export const SUM_RECORD_MADE = 0x02;
+
+/**
+ * Where a dose is known, a bit to a voxel in the voxels' order, the first
+ * voxel of each eight in the lowest bit: 1 for known.
+ */
+export function packKnown(known: Uint8Array): Uint8Array {
+  const bits = new Uint8Array(Math.ceil(known.length / 8));
+  for (let voxel = 0; voxel < known.length; voxel++) {
+    if (known[voxel]) bits[voxel >> 3] |= 1 << (voxel & 7);
+  }
+  return bits;
+}
+
+/**
+ * {@link packKnown} read back for a dose of `voxels` voxels. Bits that are
+ * not of its size are not read as if they were: a byte that pads the value
+ * to an even length is allowed, and nothing else.
+ */
+export function unpackKnown(bits: Uint8Array, voxels: number): Uint8Array | DoseProblem {
+  const needed = Math.ceil(voxels / 8);
+  if (bits.length !== needed && bits.length !== needed + (needed % 2)) {
+    return { problem: 'Its record of where the sum is known is not of the size of its grid' };
+  }
+  const known = new Uint8Array(voxels);
+  for (let voxel = 0; voxel < voxels; voxel++) {
+    known[voxel] = (bits[voxel >> 3] >> (voxel & 7)) & 1;
+  }
+  return known;
+}
+
+/** What a sum is, as the text that is kept in the block. */
+export function serializeDoseSumMade(made: DoseSumMade): string {
+  return JSON.stringify({
+    doses: made.doses,
+    model: made.model,
+    ...(made.model === 'eqd' ? { fractionGy: made.fractionGy } : {}),
+    ...(made.model === 'physical' ? {} : { alphaBetaGy: made.alphaBetaGy ?? null }),
+  });
+}
+
+const moreThanNothing = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+/**
+ * {@link serializeDoseSumMade} read back. Text that does not say all a sum
+ * of its kind must is a problem and not a guess: a converted dose is never
+ * called by less than its model and its α/β.
+ */
+export function parseDoseSumMade(text: string): DoseSumMade | DoseProblem {
+  const unread = { problem: 'Its record of what sum it is cannot be read' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return unread;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return unread;
+  const { doses, model, fractionGy, alphaBetaGy } = parsed as Record<string, unknown>;
+  if (typeof doses !== 'number' || !Number.isInteger(doses) || doses < 1) return unread;
+  if (model === 'physical') return { doses, model };
+  if (model !== 'bed' && model !== 'eqd') return unread;
+  if (alphaBetaGy !== null && !moreThanNothing(alphaBetaGy)) return unread;
+  if (model === 'bed') return { doses, model, alphaBetaGy };
+  if (!moreThanNothing(fractionGy)) return unread;
+  return { doses, model, fractionGy, alphaBetaGy };
+}

@@ -22,6 +22,7 @@ import {
   percentOf,
   placedByText,
   planFractions,
+  plansNamed,
   suggestedFractions,
   sumCandidates,
   sumMade,
@@ -119,6 +120,13 @@ describe('the fractions a dose’s plan gives', () => {
   it('are those of the one plan the dose names, attached to a series or listed with a study', () => {
     expect(planFractions('dose-1', history())).toEqual({ fractions: 30, plan: 'First plan' });
     expect(planFractions('dose-2', history())).toEqual({ fractions: 5, plan: 'Second plan' });
+  });
+
+  it('come of the plans the dose names, which are listed whether they are held or not', () => {
+    expect(plansNamed('dose-1', history())).toEqual(['plan-1']);
+    expect(plansNamed('dose-2', history())).toEqual(['plan-2']);
+    expect(plansNamed('dose-9', history())).toEqual([]);
+    expect(plansNamed('dose-1', null)).toEqual([]);
   });
 
   it('are none when nothing says which is meant', () => {

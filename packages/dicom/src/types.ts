@@ -72,6 +72,12 @@ export interface Slice {
    */
   readonly dose?: DoseInfo;
   /**
+   * For a plane of a dose that says where it is known (a sum that was
+   * written here, #101): 1 for each voxel of the plane that is known, 0 for
+   * one that is not. Left out for a plane that is known throughout.
+   */
+  readonly known?: Uint8Array;
+  /**
    * Captured study/series/patient metadata and the raw-tag list for the info
    * panel. Present only on a file's first frame (the series-representative image);
    * null on the others to avoid carrying the tag list on every slice.
