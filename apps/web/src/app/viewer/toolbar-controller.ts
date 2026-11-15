@@ -15,6 +15,7 @@ import { View3dController } from './view3d-controller';
 import { isEditableTarget, releaseSelectFocus } from './viewer-dom';
 import { paneKeyOf, type PanePlacement } from './pane-placement';
 import { type PerOrientation, type PerOrientationPan } from './viewer-overlays';
+import { ownWindow, windowToRemember } from './initial-window';
 
 const NO_PAN = { x: 0, y: 0 } as const;
 const NO_PANS: PerOrientationPan = [NO_PAN, NO_PAN, NO_PAN];
@@ -204,8 +205,11 @@ export class ToolbarController {
       layoutMode: d.layoutMode(),
       projectionMode: this.view3d.projectionMode(),
       sagittalFlipped: d.sagittalFlipped(),
-      windowCenter: this.layersCtl.windowCenter(),
-      windowWidth: this.layersCtl.windowWidth(),
+      // Not while a dose is the image: the window remembered for images stays (#261).
+      ...windowToRemember(this.layersCtl.volume(), {
+        center: this.layersCtl.windowCenter(),
+        width: this.layersCtl.windowWidth(),
+      }),
       slabThicknessMm: d.slabThicknessMm(),
     });
   }
@@ -342,8 +346,9 @@ export class ToolbarController {
     this.view3d.resetOblique();
     const volume = this.layersCtl.volume();
     if (!volume) return;
-    this.layersCtl.windowCenter.set(Math.round(volume.windowCenter));
-    this.layersCtl.windowWidth.set(Math.max(1, Math.round(volume.windowWidth)));
+    const window = ownWindow(volume);
+    this.layersCtl.windowCenter.set(window.center);
+    this.layersCtl.windowWidth.set(window.width);
     this.render.markMipSettling();
   }
 

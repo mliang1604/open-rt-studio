@@ -15,7 +15,7 @@ import {
 import { expect, test, type Page } from '@playwright/test';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
-import { fuseSeriesByDrag, importAndLoad } from './fixtures/load';
+import { fuseSeriesByDrag, importAndLoad, pickSeries } from './fixtures/load';
 
 // Isodose lines and the dose's legend (#94). The synthetic dose is a ramp:
 // syntheticDoseGy(column, row, frame), on 2 mm voxels in 1 mm frames, so
@@ -264,5 +264,48 @@ test('percent can be of a plan’s prescription, which the user chooses', async 
   expect(await legendDoses(page)).toEqual(
     PERCENT.map((percent) => ((percent / 100) * 20).toFixed(2)),
   );
+  expectNoProblems(problems);
+});
+
+test('a dose opened by itself begins with its own window, and the image’s is remembered for images (#261)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, [...syntheticCtSeries(SIZE, 32), syntheticRtDose(SIZE, SIZE)]);
+  const centre = page.getByLabel('Window level (centre)');
+  const width = page.getByLabel('Window width');
+  // A window for the CT that is no dose's: it is remembered.
+  await centre.fill('300');
+  await width.fill('800');
+  await expect(centre).toHaveValue('300');
+
+  // The dose by itself: over its own range, from nothing to its most, and
+  // not through the CT's window, in which every dose here is black.
+  await pickSeries(page, 'RTDOSE');
+  const panel = page.locator('app-dose-panel');
+  await expect(panel.locator('[data-dose-range="high"]')).toHaveValue(
+    String(Number(MAX.toFixed(2))),
+    {
+      timeout: 30_000,
+    },
+  );
+  await expect(panel.locator('[data-dose-range="low"]')).toHaveValue('0');
+  await expect(centre).toHaveValue(String(Number((MAX / 2 + 0.5).toFixed(4))));
+  await expect(width).toHaveValue(String(Number((MAX + 1).toFixed(4))));
+  // Its lines have each a colour of their own, as its legend has.
+  const colours = await panel
+    .locator('[data-dose-legend] li[data-dose-level] .swatch')
+    .evaluateAll((swatches) => swatches.map((swatch) => getComputedStyle(swatch).backgroundColor));
+  expect(new Set(colours).size).toBe(PERCENT.length);
+
+  // The CT again: with the window it was given, which the dose did not take the place of.
+  await pickSeries(page, 'CT');
+  await expect(centre).toHaveValue('300', { timeout: 30_000 });
+  await expect(width).toHaveValue('800');
+  await expect(panel).toHaveCount(0);
   expectNoProblems(problems);
 });

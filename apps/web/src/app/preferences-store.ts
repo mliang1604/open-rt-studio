@@ -43,6 +43,13 @@ export interface ViewPreferences {
   readonly windowCenter: number | null;
   /** Last window width (≥ 1), or null to use the loaded volume's default. */
   readonly windowWidth: number | null;
+  /**
+   * The modality of the image the window was last set on (`''` for an image
+   * that names none): the window is given only to another of it (#261).
+   * Null for a window remembered before this was kept, which is given to
+   * any image.
+   */
+  readonly windowModality: string | null;
   /** Last 3D slab thickness in mm (≥ 1), or null to use the full-depth default. */
   readonly slabThicknessMm: number | null;
   /** Whether the longitudinal history panel is collapsed to its header bar. */
@@ -73,6 +80,7 @@ export const DEFAULT_PREFERENCES: ViewPreferences = {
   sagittalFlipped: false,
   windowCenter: null,
   windowWidth: null,
+  windowModality: null,
   slabThicknessMm: null,
   historyCollapsed: false,
   historyView: 'timeline',
@@ -138,6 +146,11 @@ export function parsePreferences(raw: string | null): ViewPreferences {
         : DEFAULT_PREFERENCES.sagittalFlipped,
     windowCenter: finiteOrNull(obj['windowCenter']),
     windowWidth: positiveIntOrNull(obj['windowWidth']),
+    // Added after the others, like the fields below: absent, it is null.
+    windowModality:
+      typeof obj['windowModality'] === 'string'
+        ? obj['windowModality']
+        : DEFAULT_PREFERENCES.windowModality,
     slabThicknessMm: positiveIntOrNull(obj['slabThicknessMm']),
     historyCollapsed:
       typeof obj['historyCollapsed'] === 'boolean'
@@ -171,6 +184,7 @@ function samePreferences(a: ViewPreferences, b: ViewPreferences): boolean {
     a.sagittalFlipped === b.sagittalFlipped &&
     a.windowCenter === b.windowCenter &&
     a.windowWidth === b.windowWidth &&
+    a.windowModality === b.windowModality &&
     a.slabThicknessMm === b.slabThicknessMm &&
     a.historyCollapsed === b.historyCollapsed &&
     a.historyView === b.historyView &&

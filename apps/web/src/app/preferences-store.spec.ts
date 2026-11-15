@@ -17,6 +17,7 @@ const SAMPLE: ViewPreferences = {
   sagittalFlipped: true,
   windowCenter: 40,
   windowWidth: 400,
+  windowModality: 'CT',
   slabThicknessMm: 50,
   historyCollapsed: true,
   historyView: 'tree',
@@ -109,6 +110,7 @@ describe('parsePreferences fallbacks', () => {
       sagittalFlipped: 'yes', // wrong type
       windowCenter: 'wide', // wrong type → null
       windowWidth: 0, // below the ≥1 floor → null
+      windowModality: 7, // wrong type → null
       slabThicknessMm: -5, // negative → null
       historyView: 'mosaic', // not a real HistoryView → default
     });
@@ -127,6 +129,18 @@ describe('parsePreferences fallbacks', () => {
       layoutMode: LayoutMode.Volume3d,
       sagittalFlipped: true,
     });
+  });
+
+  it('reads a window remembered before its modality was kept as one of no modality (#261)', () => {
+    const raw = JSON.stringify({ version: 3, windowCenter: 40, windowWidth: 400 });
+    expect(parsePreferences(raw)).toMatchObject({
+      windowCenter: 40,
+      windowWidth: 400,
+      windowModality: null,
+    });
+    // An image that names no modality is remembered as such, which is not the same.
+    const none = JSON.stringify({ version: 3, windowCenter: 40, windowModality: '' });
+    expect(parsePreferences(none).windowModality).toBe('');
   });
 
   it('rounds a fractional slab thickness and rejects sub-1 widths', () => {

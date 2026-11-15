@@ -1084,8 +1084,14 @@ Isodose lines and a colour wash, with levels the user sets and a legend
   what says which line is which.
 - **Not there:** a legend over the image, so a capture has the lines and
   not what they stand for; a level's own colour; lines in the 3D view;
-  bands of colour between levels. A dose opened by itself is windowed like
-  any image, with the window remembered from the last one (#261).
+  bands of colour between levels.
+- **A dose opened by itself begins with its own window** (#261), from
+  nothing to its most. The window last used is remembered and given to the
+  next image, which suits one CT after another; it is remembered with the
+  modality it was set on, given only to an image of that modality, and
+  never to a dose. While a dose is the image nothing is remembered, so the
+  window kept for images stays. A window remembered before its modality
+  was kept is given to any image but a dose, as it was.
 
 ### What is read of a plan
 
