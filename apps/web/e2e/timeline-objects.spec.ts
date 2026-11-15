@@ -89,17 +89,24 @@ test('the timeline shows structure sets, plans and doses with their series, and 
   const line = page.locator('.link-lines path');
   await expect(line).toHaveCount(1);
   await expect(line).not.toHaveClass(/deformable/);
+  // The path as it is drawn, without its stroke. Playwright's own box of a
+  // stroked path is wider than the path by half the stroke times the miter
+  // limit, 3 px here, which is more than the line may be out by.
   const [drawn, from, to] = await Promise.all([
-    line.boundingBox(),
+    line.evaluate((path) => {
+      const { x, y, width, height } = path.getBoundingClientRect();
+      return { x, y, width, height };
+    }),
     chipOf(page, COURSE.ct).boundingBox(),
     tileOf(page, COURSE.followUpStudy).boundingBox(),
   ]);
   const middle = (box: { x: number; width: number }): number => box.x + box.width / 2;
-  expect(Math.abs(drawn!.x - middle(from!))).toBeLessThan(3);
-  expect(Math.abs(drawn!.x + drawn!.width - middle(to!))).toBeLessThan(3);
+  // To the tenth of a pixel the path is written to, and no more.
+  expect(Math.abs(drawn.x - middle(from!))).toBeLessThan(0.2);
+  expect(Math.abs(drawn.x + drawn.width - middle(to!))).toBeLessThan(0.2);
   // It runs under both: its lowest part is below the chip and the tile.
-  expect(drawn!.y + drawn!.height).toBeGreaterThan(from!.y + from!.height);
-  expect(drawn!.y + drawn!.height).toBeGreaterThan(to!.y + to!.height);
+  expect(drawn.y + drawn.height).toBeGreaterThan(from!.y + from!.height);
+  expect(drawn.y + drawn.height).toBeGreaterThan(to!.y + to!.height);
 
   // Pointing at the link picks out its two ends, and its line.
   await link(page).hover();
