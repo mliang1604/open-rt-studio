@@ -61,6 +61,14 @@ export interface PropagationChoice {
   readonly structures: number;
 }
 
+/** A structure of the set that is taken, as the card lists it. */
+export interface PropagationStructure {
+  /** Its ROI Number: what it is told apart by within its set. */
+  readonly number: number;
+  readonly name: string;
+  readonly chosen: boolean;
+}
+
 /** What a layer's card shows of taking its structures to the base image. */
 export interface PropagationCard {
   readonly state: 'idle' | 'making' | 'ready' | 'saving';
@@ -68,6 +76,8 @@ export interface PropagationCard {
   readonly sets: readonly PropagationChoice[];
   /** Which of them is taken. */
   readonly chosen: number;
+  /** The structures of the set that is taken, each with whether it is to be propagated. */
+  readonly structures: readonly PropagationStructure[];
   /** Why it cannot be done now; null when it can. */
   readonly unavailable: string | null;
   /** Whether another layer's structures are being taken or saved, so that this one must wait. */
@@ -86,6 +96,8 @@ type Inputs =
       readonly source: Series;
       readonly baseSeries: Series;
       readonly set: StructureSet;
+      /** The structures of the set that are to be taken: at least one. */
+      readonly rois: StructureSet['rois'];
       readonly frameOfReferenceUid: string;
       readonly studyInstanceUid: string;
     }
@@ -111,6 +123,8 @@ export class StructurePropagationController {
   private readonly state = signal<State>({ kind: 'idle' });
   /** Which structure set is taken for each layer that has several: by layer id. */
   private readonly chosen = signal<ReadonlyMap<string, number>>(new Map());
+  /** The structures of the set taken that are left out, by their ROI Numbers: by layer id. */
+  private readonly leftOut = signal<ReadonlyMap<string, ReadonlySet<number>>>(new Map());
 
   constructor() {
     // What was made is of the images as they were placed then: once they are
@@ -184,6 +198,11 @@ export class StructurePropagationController {
       state: mine ? state.kind : 'idle',
       sets: sets.map((set) => ({ name: setName(set), structures: set.rois.length })),
       chosen: this.chosenOf(id, sets),
+      structures: sets[this.chosenOf(id, sets)].rois.map((roi) => ({
+        number: roi.number,
+        name: roi.name || `ROI ${roi.number}`,
+        chosen: !this.leftOut().get(id)?.has(roi.number),
+      })),
       unavailable: inputs.ok ? null : inputs.why,
       waiting: !mine && (state.kind === 'making' || state.kind === 'saving'),
       progress: mine && state.kind === 'making' ? `${state.done} of ${state.of} structures` : null,
@@ -200,6 +219,26 @@ export class StructurePropagationController {
       this.state.set({ kind: 'idle' });
     }
     this.chosen.update((now) => new Map(now).set(id, index));
+    // Another set has other structures: all of them, until some are left out.
+    this.leftOut.update((now) => {
+      const next = new Map(now);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  /** Take a structure of the set, or leave it out. What was made before is let go of. */
+  toggleStructure(id: string, number: number): void {
+    const state = this.state();
+    if (state.kind !== 'idle' && state.id === id) {
+      if (state.kind !== 'ready') return;
+      this.state.set({ kind: 'idle' });
+    }
+    this.leftOut.update((now) => {
+      const mine = new Set(now.get(id));
+      if (!mine.delete(number)) mine.add(number);
+      return new Map(now).set(id, mine);
+    });
   }
 
   private inputs(id: string): Inputs {
@@ -217,6 +256,8 @@ export class StructurePropagationController {
     const sets = this.setsOf(id);
     const set = sets[this.chosenOf(id, sets)];
     if (!set) return no('This image has no structures.');
+    const rois = set.rois.filter((roi) => !this.leftOut().get(id)?.has(roi.number));
+    if (rois.length === 0) return no('Choose at least one structure to propagate.');
     const source = this.deps?.series(seriesUidOf(layer.id)) ?? null;
     const baseSeries = this.deps?.series(seriesUidOf(base.id)) ?? null;
     if (!source || !baseSeries) return no('The series of these images are not known.');
@@ -240,6 +281,7 @@ export class StructurePropagationController {
       source,
       baseSeries,
       set,
+      rois,
       frameOfReferenceUid,
       studyInstanceUid,
     };
@@ -255,14 +297,14 @@ export class StructurePropagationController {
       deps.notify(inputs.why, true);
       return;
     }
-    const { layer, base, set } = inputs;
+    const { layer, base, set, rois } = inputs;
     const placement = layer.placement;
     const pause = deps.pause ?? (() => new Promise<void>((resolve) => setTimeout(resolve)));
-    let mine: State = { kind: 'making', id, done: 0, of: set.rois.length };
+    let mine: State = { kind: 'making', id, done: 0, of: rois.length };
     this.state.set(mine);
     try {
       const results: PropagatedRoi[] = [];
-      for (const roi of set.rois) {
+      for (const roi of rois) {
         // The page answers between one structure and the next.
         await pause();
         if (this.state() !== mine) return; // cancelled meanwhile

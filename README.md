@@ -127,6 +127,8 @@ by git) if you want files on disk to open.
 - The structures drawn on one image propagated to another through the
   registration that places it, rigid or deformable, saved as a new RT
   Structure Set that says it is propagated and how each structure was taken
+- What a derived object on screen was made from: when, from which image or
+  structure set, through which registration, and in its own words
 - A registration report: one HTML file with the two images, the
   registration, pictures of the panes and everything that was measured, the
   not-for-clinical-use notice on every page, and the patient's identifiers

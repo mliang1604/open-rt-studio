@@ -33,6 +33,13 @@ export interface RoiLegendEntry {
   readonly opacityPercent: number;
   /** Whether the ROI's contours are currently drawn. */
   readonly visible: boolean;
+  /**
+   * Whether the structure says it was taken from another image (#91): its
+   * file names spatial resampling as how it was derived.
+   */
+  readonly propagated: boolean;
+  /** How the structure says it was made, in its file's words; '' when it does not say. */
+  readonly madeBy: string;
 }
 
 /** The ROIs of one structure set, grouped under its label in the structures panel. */
@@ -82,6 +89,8 @@ export function buildRoiLegend(
         colorHex: roiColorHex(roi.color, override),
         opacityPercent: Math.round((opacities.get(key) ?? 1) * 100),
         visible: !hidden.has(key),
+        propagated: roi.generation?.resampled === true,
+        madeBy: roi.generation?.description?.trim() ?? '',
       });
     }
   });

@@ -28,6 +28,12 @@ export class StructurePropagation {
   readonly image = input('image');
 
   readonly chosenChange = output<number>();
+  /** A structure was taken or left out: its ROI Number. */
+  readonly structureToggled = output<number>();
+
+  protected chosenCount(): number {
+    return this.card().structures.filter((one) => one.chosen).length;
+  }
   readonly makeAsked = output<void>();
   readonly saveAsked = output<void>();
   readonly discardAsked = output<void>();

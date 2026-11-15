@@ -370,6 +370,7 @@
                   [card]="card"
                   [image]="layer.label"
                   (chosenChange)="propagation.choose(layer.id, $event)"
+                  (structureToggled)="propagation.toggleStructure(layer.id, $event)"
                   (makeAsked)="propagation.make(layer.id)"
                   (saveAsked)="propagation.save(layer.id)"
                   (discardAsked)="propagation.discard(layer.id)"
@@ -864,6 +865,14 @@
                         roi.type
                       }}</span>
                     }
+                    @if (roi.propagated) {
+                      <span
+                        class="roi-type"
+                        data-roi-propagated
+                        [title]="'Taken from another image' + (roi.madeBy ? ': ' + roi.madeBy : '')"
+                        >PROPAGATED</span
+                      >
+                    }
                     <input
                       type="range"
                       class="roi-opacity"
@@ -917,6 +926,21 @@
               (reported)="report.setComparison($event)"
             />
           }
+        </div>
+      </details>
+    }
+
+    @if (provenance().length > 0) {
+      <details
+        class="tool-group"
+        role="group"
+        aria-label="Provenance"
+        title="What the derived objects on screen were made from, as each says it"
+        open
+      >
+        <summary class="tool-group-label">Provenance</summary>
+        <div class="tool-group-body">
+          <app-provenance [items]="provenance()" />
         </div>
       </details>
     }

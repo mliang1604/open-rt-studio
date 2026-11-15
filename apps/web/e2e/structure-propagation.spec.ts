@@ -126,6 +126,10 @@ test('structures on a fused image are taken to the base through its registration
 
   await fuseChipByDrag(page, await chipOf(page, 'MR'));
   await expect(page.locator('.blend-bar')).toBeVisible({ timeout: 30_000 });
+  // Both of the set's structures are taken unless one is left out.
+  await expect(card(page).locator('[data-propagation="structures"] summary')).toHaveText(
+    'Structures: 2 of 2',
+  );
   await card(page).locator('[data-propagation="make"]').click();
   await expect(card(page).locator('[data-propagation="summary"]')).toHaveText(SUMMARY, {
     timeout: 60_000,
@@ -211,6 +215,38 @@ test('structures on a fused image are taken to the base through its registration
   await expect(page.locator('.contours polygon, .contours polyline').first()).toBeVisible({
     timeout: 15_000,
   });
+
+  // The list says of each structure that it was taken from another image (#91).
+  const tags = page.locator('[data-roi-propagated]');
+  await expect(tags).toHaveCount(2);
+  await expect(tags.first()).toHaveAttribute(
+    'title',
+    'Taken from another image: Propagated: points moved by the registration',
+  );
+  // What the set was made from: when, from which set on which image, through which registration.
+  const provenance = page.locator('app-provenance section');
+  await expect(provenance).toHaveCount(1);
+  await expect(provenance.locator('h4')).toHaveText('Structure set “PROPAGATED”');
+  await expect(provenance.locator('dt')).toHaveText([
+    'Made',
+    'From',
+    'Registration',
+    '1 structure',
+    '1 structure',
+  ]);
+  const said = await provenance.locator('dd').allInnerTexts();
+  expect(said[0]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  expect(said[1]).toBe('Structure set “On the MR” on MR Synthetic MR blob');
+  expect(said[2]).toMatch(/^through registration "REGISTRATION" \([\d.]+, inverted\)$/);
+  expect(said.slice(3)).toEqual([
+    'Propagated: points moved by the registration',
+    'Propagated: label volume resampled and outlined',
+  ]);
+  // On the timeline it is beside the CT, under the name that says it is propagated.
+  await page.locator('.study-tile').first().click();
+  await expect(
+    page.locator(`.series-strip li[data-series-uid="${ctSlice.seriesUid}"] app-rt-chips .rt-text`),
+  ).toHaveText([DESCRIPTION]);
   expectNoProblems(problems);
 });
 

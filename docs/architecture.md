@@ -749,7 +749,7 @@ The engine is built (#88), and an image resampled with it is saved as a
 derived DICOM series (#89, below). Structures are propagated the same way
 (#90, below). What both are held to on shapes that are formulas, and what
 they measured, is in [resampling-validation.md](resampling-validation.md)
-(#92). The view of what was derived from what (#91) is to come.
+(#92). What a derived object on screen was made from is shown beside it (#91, below).
 
 - **Which way.** Each voxel of the reference grid is given a value: its
   centre is taken to the source image by the registration, and the source is
@@ -915,6 +915,45 @@ application.
   outside plain ASCII are written a byte to a character, as before (#249);
   very large structures were not timed, and the work is on the page's own
   thread, a structure at a time.
+
+Status: **decided, and Michael's to overturn**.
+
+### What was derived from what
+
+A derived object says what it was made from, and the viewer shows that
+where the object is (#91).
+
+- **Where it is said.** In the structure list a structure whose file names
+  spatial resampling as its derivation carries the mark `PROPAGATED`, with
+  how it was made in its title. On the timeline a propagated structure set
+  and a resampled series are named by the description they were given,
+  which begins `Propagated:` or `Resampled:`. Under Provenance in the side
+  panel each derived object on screen is listed: a derived image (Image
+  Type `DERIVED`, or a Derivation Description) and a structure set that
+  names a predecessor or has a resampled structure.
+- **What is shown of each.** When it was made (Content Date and Time, or
+  Structure Set Date and Time); what from (an image's Related Series
+  Sequence, a structure set's Predecessor Structure Set Sequence); through
+  which registration; for a structure set, how each structure was taken;
+  and under that the object's own words, whole.
+- **Names and UIDs.** What an object names by UID is shown by what it is
+  called when that is open here too, and by the UID, said to be not open
+  here, when it is not.
+- **The registration.** An image names the registration objects it was made
+  through in its Source Instance Sequence. An RT Structure Set has no such
+  place, so for one the registration is read from the words this
+  application writes into its description, and left out for a description
+  in other words. A registration made by hand is in no object: for an
+  image it is read from the words too.
+- **Choosing structures.** The propagation card lists the structures of the
+  set and takes those that are ticked, all of them at first. A set made of
+  some of another says how many of how many, in its description and in
+  what is said before it is saved.
+- **Not there:** an object another system derived is shown as far as it
+  fills the same elements, and its registration only when it is an image
+  that names one; the timeline has no mark of its own for a derived
+  object, only its name; nothing is shown for a derived object that is not
+  on screen; the provenance is not in the registration report.
 
 Status: **decided, and Michael's to overturn**.
 

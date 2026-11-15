@@ -298,6 +298,25 @@ describe('writeStructureSet', () => {
       expect(item.elements['x00089215']).toBeUndefined();
     });
 
+    it('reads back what the set says of itself: its description, when it was made, and what from', () => {
+      const written = writeStructureSet(sample, {
+        description: 'Structures of structure set "Plan A" taken to series 1.2.3.',
+        predecessorSopInstanceUid: '1.2.3.99',
+        createdAt: new Date(2026, 10, 14, 9, 5, 7),
+      });
+      const parsed = parseStructureSet('rt.dcm', written)!;
+      expect(parsed.description).toBe(
+        'Structures of structure set "Plan A" taken to series 1.2.3.',
+      );
+      expect(parsed.date).toBe('20261114');
+      expect(parsed.time).toBe('090507');
+      expect(parsed.predecessorSopInstanceUids).toEqual(['1.2.3.99']);
+      // A set that names no predecessor has none said of it, and no description is none.
+      const plain = parseStructureSet('rt.dcm', writeStructureSet(sample))!;
+      expect('predecessorSopInstanceUids' in plain).toBe(false);
+      expect(plain.description).toBeNull();
+    });
+
     it('names the structure set this one was derived from, when there is one', () => {
       const derived = read(writeStructureSet(sample, { predecessorSopInstanceUid: '1.2.3.99' }));
       const [predecessor] = derived.elements['x30060018'].items!;

@@ -16,6 +16,7 @@ import {
   type DerivedSeriesContent,
 } from './derived-series.js';
 import { parseFile } from './loader.js';
+import { imageDerivation } from './metadata.js';
 import { rigidMat4, type Mat4 } from './mat4.js';
 import { resampleVolume, resampledVolume, type ResampleGrid } from './resample.js';
 import type { Vec3, Volume } from './types.js';
@@ -170,6 +171,22 @@ describe('a resampled image written as a derived series', () => {
     expect(sources[0].dataSet!.string('x00081155')).toBe('1.2.3.70');
     expect(first.string('x0008103e')).toBe('T2 resampled onto Planning CT');
     expect(first.string('x00080070')).toBe('Open RT Studio');
+  });
+
+  it('reads back as a derived image: what it says of how it was made, from what, and when', () => {
+    // As the viewer reads a file: the first slice carries the series' metadata.
+    const slices = written.instances.flatMap((one, at) => parseFile(`slice-${at}.dcm`, one.bytes));
+    const derivation = slices.find((slice) => slice.metadata)!.metadata!.derivation!;
+    expect(derivation.description).toBe('Resampled through a registration. Not for clinical use.');
+    expect(derivation.relatedSeriesUids).toEqual(['1.2.3.20']);
+    expect(derivation.sourceInstanceUids).toEqual(['1.2.3.70']);
+    expect(derivation.date).toMatch(/^\d{8}$/);
+    expect(derivation.time).toMatch(/^\d{6}/);
+    // An image that says nothing of the kind has nothing said of it.
+    const plain = dicomParser.parseDicom(new Uint8Array(written.instances[0].bytes));
+    delete plain.elements['x00080008'];
+    delete plain.elements['x00082111'];
+    expect(imageDerivation(plain)).toBeNull();
   });
 
   it('is in the frame of reference of its grid, in the study and of the patient it was given', () => {

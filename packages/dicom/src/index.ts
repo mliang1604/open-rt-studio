@@ -92,7 +92,14 @@ export {
   transformVector,
 } from './mat4.js';
 export { clamp, clamp01, clampIndex } from './math.js';
-export { type DicomMetadata, type RawTag, extractMetadata, formatDicomDate } from './metadata.js';
+export {
+  type DicomMetadata,
+  type ImageDerivation,
+  type RawTag,
+  extractMetadata,
+  formatDicomDate,
+  formatDicomTime,
+} from './metadata.js';
 export {
   type DeformableTransform,
   type DeformationGrid,

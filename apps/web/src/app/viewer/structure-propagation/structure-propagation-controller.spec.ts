@@ -142,6 +142,10 @@ describe('StructurePropagationController', () => {
           { name: 'Review', structures: 1 },
         ],
         chosen: 0,
+        structures: [
+          { number: 1, name: 'On slices', chosen: true },
+          { number: 2, name: 'Between slices', chosen: true },
+        ],
         unavailable: null,
         waiting: false,
         progress: null,
@@ -218,6 +222,43 @@ describe('StructurePropagationController', () => {
       });
       expect(source.saved).toEqual([]);
       expect(notices).toEqual([]);
+    });
+
+    it('takes only the structures that are chosen, and says how many of the set they are', async () => {
+      const { controller, source, pauses } = setup();
+      controller.toggleStructure('mr', 1);
+      expect(controller.card('mr')!.structures.map((one) => one.chosen)).toEqual([false, true]);
+      await controller.make('mr');
+      expect(pauses()).toBe(1);
+      expect(controller.card('mr')!.summary).toBe(
+        'Propagated, not saved: 1 structure of the 2 of “Plan A” onto the base image’s slices. 1 by a label volume.',
+      );
+      controller.save('mr');
+      const read = parseStructureSet('x.dcm', source.saved[0].bytes)!;
+      expect(read.rois.map((roi) => roi.name)).toEqual(['Between slices']);
+      expect(read.description).toContain('1 of the 2 structures of structure set "Plan A"');
+    });
+
+    it('lets go of what was made when a structure is taken or left out, and refuses with none', async () => {
+      const { controller, notices } = setup();
+      await controller.make('mr');
+      controller.toggleStructure('mr', 2);
+      expect(controller.card('mr')).toMatchObject({ state: 'idle', summary: null });
+      controller.toggleStructure('mr', 1);
+      expect(controller.card('mr')!.unavailable).toBe(
+        'Choose at least one structure to propagate.',
+      );
+      await controller.make('mr');
+      expect(controller.card('mr')!.state).toBe('idle');
+      expect(notices.at(-1)).toEqual({
+        message: 'Choose at least one structure to propagate.',
+        problem: true,
+      });
+      // Taken again, it is taken; another set starts with all of its own.
+      controller.toggleStructure('mr', 1);
+      expect(controller.card('mr')!.unavailable).toBeNull();
+      controller.choose('mr', 0);
+      expect(controller.card('mr')!.structures.every((one) => one.chosen)).toBe(true);
     });
 
     it('says how far it has got, and makes nothing when it is cancelled meanwhile', async () => {

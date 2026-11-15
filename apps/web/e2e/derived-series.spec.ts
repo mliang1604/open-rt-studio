@@ -179,6 +179,20 @@ test('a resampled image is saved as a derived series, which opens again as the i
   const [x, y, z, value] = match!.slice(1).map(Number);
   expect(registeredMrValueAtCtVoxel(x, y, z)).not.toBeNull();
   expect(value).toBe(registeredMrValueAtCtVoxel(x, y, z));
+
+  // What it was made from (#91): the MR it names, the registration it names, and when.
+  const provenance = page.locator('app-provenance section');
+  await expect(provenance).toHaveCount(1);
+  await expect(provenance.locator('h4')).toHaveText(`Image “${DESCRIPTION}”`);
+  await expect(provenance.locator('dt')).toHaveText(['Made', 'From', 'Registration']);
+  const [made, from, through] = await provenance.locator('dd').allInnerTexts();
+  expect(made).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  expect(from).toBe('MR Synthetic MR blob');
+  expect(through).toBe('Registration “REGISTRATION”');
+  await provenance.locator('summary').click();
+  await expect(provenance.locator('details p')).toContainText(
+    'Made with Open RT Studio, which is not a medical device. Not for clinical use.',
+  );
   expectNoProblems(problems);
 });
 
