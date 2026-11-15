@@ -305,6 +305,17 @@ its own.
   there moves the voxel to the structure painted), and keep to a range of
   the image's values, ends included. All are off at first, which is how
   the brush always painted and erased. They are not kept between visits.
+- **The threshold brush** (#107, labs) is the brush painting only the
+  voxels under it whose image value is within a range: the value where the
+  stroke begins, give or take a tolerance (50 at first, in the image's
+  units), or two typed ends. It paints into the brush's structure with the
+  brush's shape and size, and the shared constraints apply on top of its
+  own range. Its preview fills, under the outline, what a stroke begun at
+  the pointer would paint: pane pixels are taken through the same probe the
+  brush paints with and kept when their voxel's value is in range, in at
+  most 80 cells across, so it holds for any orientation or tilt. It is of
+  the slice only: on the sphere shape the voxels above and below are
+  painted as their own values allow, and are not previewed.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

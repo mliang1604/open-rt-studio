@@ -104,6 +104,8 @@ export class ContourToolsController {
       return label ? { dims: label.dims, spacing: label.spacing } : null;
     },
     activeRoiId: () => this.brush.activeRoiId(),
+    image: () => this.store.imageData(),
+    voxelAtCanvas: (placement, x, y) => this.brush.voxelAtCanvas(placement, x, y),
     change: (change) => this.store.applyChange(change, this.constraints()),
   };
 
@@ -120,7 +122,9 @@ export class ContourToolsController {
       return;
     }
     this.cancel();
-    this.taken.set(this.listed().some((tool) => tool.id === id) ? id : null);
+    const tool = this.listed().find((one) => one.id === id) ?? null;
+    this.taken.set(tool?.id ?? null);
+    tool?.activate?.();
   }
 
   /** The listed tool in hand, by id; null for none (the brush is not listed). */

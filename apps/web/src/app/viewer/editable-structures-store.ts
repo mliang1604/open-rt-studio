@@ -435,6 +435,11 @@ export class EditableStructuresStore {
     if (edit?.cancel()) this.bump();
   }
 
+  /** The image the label grid is aligned to, voxel for voxel; null before a load. */
+  imageData(): Float32Array | null {
+    return this.image;
+  }
+
   /** Whether an edit is open: a tool is in the middle of one. */
   get editing(): boolean {
     return this.openEdit !== null;

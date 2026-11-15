@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { syntheticCtSeries } from '@open-rt-studio/testdata';
+import { syntheticCtSeries, syntheticThoraxPatient } from '@open-rt-studio/testdata';
 import { expect, test, type Page } from '@playwright/test';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
@@ -123,5 +123,47 @@ test('a tool that is not finished is offered only with the labs flag, which is r
   await expect(sample).toBeVisible();
   await page.locator('[data-labs]').uncheck();
   await expect(sample).toHaveCount(0);
+  expectNoProblems(problems);
+});
+
+test('the threshold brush previews what it would paint, paints, and is one undo (#107)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="threshold"]').click();
+  await expect(page.locator('[data-threshold-said]')).toHaveText(
+    'The range is taken where each stroke begins.',
+  );
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  // 15 mm: enough of the picture to measure.
+  const size = page.getByLabel('Brush radius (mm)');
+  for (let step = 0; step < 20; step++) await size.press('ArrowRight');
+  await expect(page.locator('.brush-size-readout')).toHaveText('15 mm');
+  const before = await capturedColour(page);
+
+  // Over a lung, the preview fills what a stroke would paint. Which side of an
+  // edge is painted is held to by the unit tests on a synthetic edge.
+  const edge = await at(page, 0.365, 0.47);
+  await page.mouse.move(edge.x, edge.y);
+  await expect(page.locator('[data-tool-preview-fill]')).toHaveCount(1);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 20, edge.y + 10, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator('[data-threshold-said]')).toHaveText(/^The last stroke began at -?\d/);
+  // Some of the picture is now the structure's colour.
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.02);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Threshold (Ctrl/⌘+Z)',
+  );
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
   expectNoProblems(problems);
 });
