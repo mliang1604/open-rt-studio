@@ -55,6 +55,11 @@ export interface RtObjectFacts {
   readonly plan?: PlanFacts | null;
   /** For a dose, what it says it is the dose of, where that is known (#257). */
   readonly dose?: DoseOf | null;
+  /**
+   * True for an object that says it was made from others (#254). Left out
+   * for one that does not say, and where it is not known.
+   */
+  readonly derived?: boolean;
 }
 
 /** The facts of a file's header when it is one of the objects placed here; null for anything else. */
@@ -72,6 +77,7 @@ export function rtObjectFacts(header: InstanceHeader): RtObjectFacts | null {
     frameOfReferenceUid: header.series.frameOfReferenceUid,
     references: header.references,
     ...(header.dose ? { dose: header.dose } : {}),
+    ...(header.derived ? { derived: true } : {}),
     ...(header.plan ? { plan: header.plan } : {}),
   };
 }
@@ -107,6 +113,8 @@ export interface AttachedObject {
   readonly plans?: readonly string[];
   /** For a dose, what it says it is the dose of, where that is known. */
   readonly dose?: DoseOf;
+  /** True for an object that says it was made from others (#254); left out otherwise. */
+  readonly derived?: true;
 }
 
 /** An object that belongs to no image series held: listed with the study it is filed in. */
@@ -121,6 +129,8 @@ export interface LooseObject {
   readonly plans?: readonly string[];
   /** For a dose, what it says it is the dose of, where that is known. */
   readonly dose?: DoseOf;
+  /** True for an object that says it was made from others (#254); left out otherwise. */
+  readonly derived?: true;
 }
 
 /** A registration and the image series of the two frames it connects. */
@@ -175,11 +185,15 @@ export function relateRtObjects(
         }
       : {};
   /** The plans a dose names, for whoever needs the fractions it was given in (#102). */
-  const plansOf = (object: RtObjectFacts): { plans?: readonly string[]; dose?: DoseOf } => {
+  const plansOf = (
+    object: RtObjectFacts,
+  ): { plans?: readonly string[]; dose?: DoseOf; derived?: true } => {
     const plans = object.kind === 'dose' ? [...new Set(targets(object, 'dose.plan'))] : [];
     return {
       ...(plans.length > 0 ? { plans } : {}),
       ...(object.kind === 'dose' && object.dose ? { dose: object.dose } : {}),
+      // And whether the object says it was made from others (#254).
+      ...(object.derived ? { derived: true as const } : {}),
     };
   };
   const held = new Set(images.map((one) => one.uid));

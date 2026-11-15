@@ -123,6 +123,8 @@ interface ServerSeries {
   /** Images in those files: a file of several frames holds several. */
   readonly images: number;
   readonly structureSets: number;
+  /** Whether the series says it is derived (#254); an older server does not send it. */
+  readonly derived?: boolean | null;
 }
 interface ServerInstance {
   readonly sopInstanceUid: string;
@@ -139,6 +141,8 @@ interface ServerInstanceDetail {
   readonly plan?: PlanFacts | null;
   /** What a dose says it is the dose of (#257); an older server does not send it. */
   readonly dose?: DoseOf | null;
+  /** Whether the object says it is derived (#254); an older server does not send it. */
+  readonly derived?: boolean | null;
 }
 
 /**
@@ -767,6 +771,7 @@ export class ServerSource implements DataSource {
           // What opened files count: the slices, of which one file may hold many.
           imageCount: one.images,
           structureSets: one.structureSets,
+          ...(one.derived === true ? { derived: true as const } : {}),
         };
         // A dose series of several files is several doses: one to a file (#257).
         const several = one.modality.toUpperCase() === 'RTDOSE' && one.instances > 1;
@@ -985,6 +990,7 @@ export class ServerSource implements DataSource {
         references: detail.references,
         ...(detail.plan ? { plan: detail.plan } : {}),
         ...(detail.dose ? { dose: detail.dose } : {}),
+        ...(detail.derived === true ? { derived: true } : {}),
       };
     });
     return facts;

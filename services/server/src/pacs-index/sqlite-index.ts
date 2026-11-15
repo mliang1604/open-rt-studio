@@ -140,12 +140,17 @@ const SERIES = `
     (SELECT count(DISTINCT r.sop_instance_uid) FROM reference r
       WHERE (r.target_uid = s.series_uid AND r.relation = 'structure-set.series')
          OR (r.target_uid = s.frame_of_reference_uid AND r.relation = 'structure-set.frame')
-    ) AS structure_set_count
+    ) AS structure_set_count,
+    -- Derived when an instance says so; not, when every instance says it is
+    -- not; unknown (NULL) otherwise.
+    (SELECT CASE WHEN max(i.derived) = 1 THEN 1
+                 WHEN count(*) = count(i.derived) THEN 0 END
+      FROM instance i WHERE i.series_uid = s.series_uid) AS derived
   FROM series s`;
 
 const INSTANCE = `
   SELECT i.sop_instance_uid, i.sop_class_uid, i.series_uid, s.study_uid, s.modality,
-    i.instance_number, i.frame_count, i.size, i.sha256
+    i.instance_number, i.frame_count, i.derived, i.size, i.sha256
   FROM instance i JOIN series s ON s.series_uid = i.series_uid`;
 
 const PATIENT = `
@@ -197,6 +202,7 @@ const toSeries = (row: Row): SeriesRecord => ({
   instances: Number(row['instance_count']),
   images: Number(row['image_count']),
   structureSets: Number(row['structure_set_count']),
+  derived: flag(row['derived']),
 });
 
 const toInstance = (row: Row): InstanceRecord => ({
@@ -207,6 +213,7 @@ const toInstance = (row: Row): InstanceRecord => ({
   modality: String(row['modality']),
   number: number(row['instance_number']),
   frames: number(row['frame_count']),
+  derived: flag(row['derived']),
   size: Number(row['size']),
   sha256: String(row['sha256']),
 });
@@ -226,6 +233,10 @@ const toPatient = (row: Row): PatientRecord => ({
  * gives of a plan is well within it; anything longer did not come from it.
  */
 export const PLAN_CHARACTERS_AT_MOST = 65_536;
+
+/** A yes or no kept as 1 or 0; null where nothing is kept. */
+const flag = (value: unknown): boolean | null =>
+  value === null || value === undefined ? null : Number(value) === 1;
 
 /** A Dose Summation Type is a code string: short, and of capitals, digits, spaces and underscores. */
 const CODE_STRING = /^[A-Z0-9_ ]{1,16}$/;
@@ -263,6 +274,9 @@ function check(entry: InstanceEntry): void {
     wrong('plan says more than is kept of one');
   }
   if (entry.dose && !isDoseOf(entry.dose)) wrong('dose does not say what it is the dose of');
+  if (entry.derived != null && typeof entry.derived !== 'boolean') {
+    wrong('derived is neither yes nor no');
+  }
   if (entry.series.modality.trim() === '') wrong('modality is empty');
   if (!Number.isInteger(entry.instance.size) || entry.instance.size <= 0) {
     wrong('size is not a whole number above 0');
@@ -446,11 +460,12 @@ export async function openSqliteIndex(
           series.frameOfReferenceUid,
         );
         run(
-          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, frame_count, size, sha256, plan, dose)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, frame_count, size, sha256, plan, dose, derived)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (sop_instance_uid) DO UPDATE SET sop_class_uid = excluded.sop_class_uid,
              instance_number = excluded.instance_number, frame_count = excluded.frame_count,
-             size = excluded.size, sha256 = excluded.sha256, plan = excluded.plan, dose = excluded.dose`,
+             size = excluded.size, sha256 = excluded.sha256, plan = excluded.plan, dose = excluded.dose,
+             derived = excluded.derived`,
           instance.uid,
           series.uid,
           instance.sopClassUid,
@@ -466,6 +481,7 @@ export async function openSqliteIndex(
                 fractionGroup: entry.dose.fractionGroup,
               })
             : null,
+          entry.derived == null ? null : entry.derived ? 1 : 0,
         );
         run('DELETE FROM reference WHERE sop_instance_uid = ?', instance.uid);
         for (const reference of entry.references) {

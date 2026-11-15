@@ -103,6 +103,23 @@ function drawnOnMr(
   };
 }
 
+/**
+ * That one structure set on the timeline carries the mark of a derived
+ * object, and says so to whoever asks: the propagated one. The set it was
+ * made from has none.
+ */
+async function expectOneDerivedSet(page: Page): Promise<void> {
+  // The set is on the CT, in the planning study; one study's series are listed at a time.
+  const tile = page.locator('.study-tile').filter({ hasText: 'Synthetic planning study' });
+  await expect(tile).toHaveCount(1, { timeout: 30_000 });
+  if ((await tile.getAttribute('aria-expanded')) !== 'true') await tile.click();
+  await expect(tile).toHaveAttribute('aria-expanded', 'true');
+  const sets = page.locator('app-rt-chips li[data-rt-kind="structure-set"]');
+  const marked = sets.filter({ has: page.locator('.rt-derived') });
+  await expect(marked).toHaveCount(1, { timeout: 30_000 });
+  await expect(marked).toHaveAttribute('title', /It says it is derived from another object\.$/);
+}
+
 test('structures on a fused image are taken to the base through its registration, and saved as a new structure set', async ({
   page,
 }, testInfo) => {
@@ -247,6 +264,8 @@ test('structures on a fused image are taken to the base through its registration
   await expect(
     page.locator(`.series-strip li[data-series-uid="${ctSlice.seriesUid}"] app-rt-chips .rt-text`),
   ).toHaveText([DESCRIPTION]);
+  // And it is marked as derived there, by what it says and not by its name (#254).
+  await expectOneDerivedSet(page);
   expectNoProblems(problems);
 });
 
@@ -288,6 +307,9 @@ test('propagated structures are saved to a server, and come with the base series
     // The CT shown again comes with them.
     await showCt(page);
     await expect(names).toHaveText(['On slices', 'Between slices'], { timeout: 30_000 });
+
+    // The timeline marks the set the server now holds as derived (#254).
+    await expectOneDerivedSet(page);
 
     // What the server holds, asked of it directly: one propagated set, on the CT.
     const studies = (await (

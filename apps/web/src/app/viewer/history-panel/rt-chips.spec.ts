@@ -143,6 +143,36 @@ describe('several doses of one series on the timeline (#257)', () => {
   });
 });
 
+describe('an object that says it is derived (#254)', () => {
+  const propagated: AttachedObject = {
+    ...attached('structure-set', 'series', 'Structures on the follow-up'),
+    derived: true,
+  };
+  const called: AttachedObject = attached('structure-set', 'frame', 'Propagated: only called so');
+
+  it('says so after why it is here, and one that is only called derived does not', () => {
+    expect(rtTitle(propagated)).toBe(
+      'Structure set “Structures on the follow-up”. It names this series. It says it is derived from another object.',
+    );
+    expect(rtTitle(called)).not.toContain('derived from');
+  });
+
+  it('carries a mark on its chip', () => {
+    const fixture = TestBed.createComponent(RtChips);
+    fixture.componentRef.setInput('objects', [propagated, called]);
+    fixture.detectChanges();
+    const chips = [...(fixture.nativeElement as HTMLElement).querySelectorAll('li')];
+    expect(chips.map((chip) => chip.querySelector('.rt-derived')?.textContent ?? null)).toEqual([
+      'Derived',
+      null,
+    ]);
+    // Whoever cannot see the mark is told by the chip's hidden text.
+    expect(chips[0].querySelector('.visually-hidden')!.textContent).toContain(
+      'It says it is derived from another object.',
+    );
+  });
+});
+
 describe('RtChips', () => {
   it('lists each object with its two letters, its name, and why it is here', () => {
     const fixture = TestBed.createComponent(RtChips);

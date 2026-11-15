@@ -16,6 +16,24 @@ function chip(series: SeriesSummary): HTMLElement {
   return fixture.nativeElement as HTMLElement;
 }
 
+describe('SeriesChip, for a series that says it is derived (#254)', () => {
+  it('carries a mark that says what it means, and no other series does', () => {
+    const host = chip(fakeSeries('1.2.3', { description: 'CT on MR', derived: true }));
+    const mark = host.querySelector('.chip-derived')!;
+    expect(mark.querySelector('[aria-hidden]')!.textContent).toBe('Derived');
+    expect(mark.getAttribute('title')).toBe(
+      'Derived: the series says it was made from other objects. Not for clinical use.',
+    );
+    expect(mark.querySelector('.visually-hidden')!.textContent).toContain('Derived');
+    // One that is only called so has none.
+    expect(
+      chip(fakeSeries('1.2.4', { description: 'Resampled: CT on MR' })).querySelector(
+        '.chip-derived',
+      ),
+    ).toBeNull();
+  });
+});
+
 describe('SeriesChip, for one dose of a series that holds several (#257)', () => {
   const KEY = '1.2.3@1.2.3.9';
   const beam = fakeSeries(KEY, {

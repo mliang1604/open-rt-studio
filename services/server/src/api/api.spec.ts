@@ -282,11 +282,14 @@ describe('browse', () => {
     const [dose] = doses.items;
     expect(dose.instances).toBe(1);
     expect(dose.images).toBeGreaterThan(1);
+    // The synthetic dose does not say it was made from another object (#254).
+    expect(dose).toMatchObject({ derived: false });
     const stored = await made.json<{ frames: number | null }>(`/instances/${COURSE.dose}`);
     expectSchema(stored, 'InstanceDetail');
     expect(stored.frames).toBe(dose.images);
     // A dose says what it is the dose of (#257), and nothing of a plan's.
     expect(stored).toMatchObject({
+      derived: false,
       plan: null,
       dose: { summationType: 'PLAN', beams: [], fractionGroup: null },
     });

@@ -495,6 +495,49 @@ describe('what belongs to what among opened files (#38)', () => {
     expect(history.studies[0].loose!.map((one) => one.sopInstanceUid)).toEqual(['5.5']);
   });
 
+  it('marks a series and an object that say they are derived, and no other, whatever they are called (#254)', () => {
+    const derivation = {
+      description: 'Resampled by another system',
+      date: null,
+      time: null,
+      relatedSeriesUids: [],
+      sourceInstanceUids: [],
+    };
+    source.add([
+      series('1.1.1', { description: 'Resampled: only called so' }),
+      series('1.1.3', {
+        description: 'CT on MR',
+        metadata: { curated: [], rawTags: [], derivation },
+      }),
+      // An image that says nothing of the kind has no derivation.
+      series('1.1.4', { metadata: { curated: [], rawTags: [], derivation: null } }),
+    ]);
+    source.addRtObjects([
+      object('structure-set', '5.1', [['structure-set.series', '1.1.1']], {
+        description: 'Propagated: only called so',
+      }),
+      object('structure-set', '5.2', [['structure-set.series', '1.1.1']], { derived: true }),
+      object('dose', '5.3', [], { studyUid: '1.1', derived: true }),
+    ]);
+    const listed = listedSeries(source);
+    const of = (uid: string) => listed.find((one) => one.uid === uid)!;
+    expect(of('1.1.3').derived).toBe(true);
+    expect(of('1.1.1')).not.toHaveProperty('derived');
+    expect(of('1.1.4')).not.toHaveProperty('derived');
+    expect(of('1.1.1').attached!.map((one) => [one.sopInstanceUid, one.derived])).toEqual([
+      ['5.1', undefined],
+      ['5.2', true],
+    ]);
+    // One that belongs to no series says so too, where it is listed.
+    const everything = JSON.stringify(source.currentPatient());
+    expect(everything).toContain('"sopInstanceUid":"5.3"');
+    const loose = [
+      ...source.currentPatient()!.studies.flatMap((study) => study.loose ?? []),
+      ...listed.flatMap((one) => one.attached ?? []),
+    ].find((one) => one.sopInstanceUid === '5.3')!;
+    expect(loose.derived).toBe(true);
+  });
+
   it('takes an object once, shows only the patient’s own, and lets go of them with the patient', () => {
     source.add([series('1.1.1')]);
     const set = object('structure-set', '5.1', [['structure-set.series', '1.1.1']]);

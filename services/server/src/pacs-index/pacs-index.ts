@@ -92,6 +92,11 @@ export interface InstanceEntry {
    * anything else.
    */
   readonly dose?: DoseOf | null;
+  /**
+   * Whether the object says it was made from others, as its header has it;
+   * left out or null where that is not known.
+   */
+  readonly derived?: boolean | null;
 }
 
 export interface PatientRecord {
@@ -153,6 +158,12 @@ export interface SeriesRecord {
    * series can say it without a question per series.
    */
   readonly structureSets: number;
+  /**
+   * Whether the series says it is derived: true when an instance of it
+   * does, false when every instance says it is not, and null when none
+   * does and some were filed before this was kept.
+   */
+  readonly derived: boolean | null;
 }
 
 export interface InstanceRecord {
@@ -164,6 +175,8 @@ export interface InstanceRecord {
   readonly number: number | null;
   /** Number of Frames; null when the file does not say, or was filed before it was kept. */
   readonly frames: number | null;
+  /** Whether the object says it was made from others; null for one filed before that was kept. */
+  readonly derived: boolean | null;
   readonly size: number;
   readonly sha256: string;
 }

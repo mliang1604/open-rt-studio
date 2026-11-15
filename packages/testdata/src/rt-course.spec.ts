@@ -295,6 +295,8 @@ describe('readInstanceHeader on the synthetic generators', () => {
       references: [],
       plan: null,
       dose: null,
+      // A slice straight from a scanner says nothing of being made from another (#254).
+      derived: false,
     });
   });
 

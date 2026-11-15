@@ -958,10 +958,31 @@ where the object is (#91).
   spatial resampling as its derivation carries the mark `PROPAGATED`, with
   how it was made in its title. On the timeline a propagated structure set
   and a resampled series are named by the description they were given,
-  which begins `Propagated:` or `Resampled:`. Under Provenance in the side
-  panel each derived object on screen is listed: a derived image (Image
-  Type `DERIVED`, or a Derivation Description) and a structure set that
-  names a predecessor or has a resampled structure.
+  which begins `Propagated:` or `Resampled:`, and carry a mark of their
+  own (below). Under Provenance in the side panel each derived object on
+  screen is listed: a derived image (Image Type `DERIVED`, or a Derivation
+  Description) and a structure set that names a predecessor or has a
+  resampled structure.
+- **The mark on the timeline is read from the object** (#254), not from
+  what it is called: `Derived` on the chip of a series whose image says so
+  (Image Type beginning `DERIVED`, or a Derivation Description), and on
+  the chip of a structure set, a dose or any other radiotherapy object
+  whose header says so; for a structure set that is a Predecessor Structure
+  Set Sequence, or a structure whose derivation is spatial resampling
+  (`saysDerived`, read with the file's header as `InstanceHeader.derived`).
+  So an object another system derived is marked, and one that is only
+  called `Resampled:` is not. Both views of the timeline have it, and it
+  is said in words to whoever cannot see it.
+- **Both sources say it, or the mark would lie by its absence.** For
+  opened files it is read from the files. A server keeps it with each
+  instance (`instance.derived`, schema version 7) and answers it with an
+  instance and with a series: yes when an instance of the series says so,
+  no when every instance says it is not, and not known (`null`) when none
+  does and some were filed before version 7. Not known is shown as no
+  mark: an instance filed before version 7 has none until its file is
+  ingested again, which leaves the store alone, and an older server has
+  none at all. No mark therefore means "does not say, or not known here",
+  never "checked and original".
 - **What is shown of each.** When it was made (Content Date and Time, or
   Structure Set Date and Time); what from (an image's Related Series
   Sequence, a structure set's Predecessor Structure Set Sequence); through
@@ -982,9 +1003,10 @@ where the object is (#91).
   what is said before it is saved.
 - **Not there:** an object another system derived is shown as far as it
   fills the same elements, and its registration only when it is an image
-  that names one; the timeline has no mark of its own for a derived
-  object, only its name; nothing is shown for a derived object that is not
-  on screen; the provenance is not in the registration report.
+  that names one; the timeline's mark says that an object is derived and
+  not what from, which is shown only for an object on screen; a series is
+  marked by its first image, where files are opened; the provenance is not
+  in the registration report.
 
 Status: **decided, and Michael's to overturn**.
 

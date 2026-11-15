@@ -79,6 +79,8 @@ export interface FakeServer {
   noPlans: boolean;
   /** Whether the server is an older one, which does not say what a dose is the dose of (#257). */
   noDoseFacts: boolean;
+  /** Whether the server is an older one, which does not say whether an object is derived (#254). */
+  noDerived: boolean;
 }
 
 /** An account of a stand-in server that has them. */
@@ -140,6 +142,7 @@ export function fakeServer(
     sopInstanceUid: header.sopInstanceUid,
     number: header.instanceNumber,
     frames: header.frames,
+    ...(server.noDerived ? {} : { derived: header.derived }),
     size: bytes.byteLength,
   });
   const json = (body: unknown, status = 200): Response =>
@@ -160,6 +163,7 @@ export function fakeServer(
     noTimepoints: false,
     noPlans: false,
     noDoseFacts: false,
+    noDerived: false,
     pageSize: 1000,
     mostAtOnce: () => most,
     loseNetworkAfter: (count) => (lostAfter = count),
@@ -511,6 +515,9 @@ export function fakeServer(
             instances: seriesOf(one.uid).length,
             images: seriesOf(one.uid).reduce((sum, file) => sum + (file.header.frames ?? 1), 0),
             structureSets: structureSetsOf(one.uid).length,
+            ...(server.noDerived
+              ? {}
+              : { derived: seriesOf(one.uid).some((file) => file.header.derived) }),
           })),
         );
       }

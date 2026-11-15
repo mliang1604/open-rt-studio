@@ -54,6 +54,15 @@ li {
   font-variant-numeric: tabular-nums;
 }
 
+/* An object that says it is derived: the same amber as the mark on a series' chip. */
+.rt-derived {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #f5c451;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

@@ -51,6 +51,11 @@ const instance = {
     ...nullableInteger,
     description: 'Number of Frames: the images in the one file. Null when the file does not say.',
   },
+  derived: {
+    type: ['boolean', 'null'],
+    description:
+      'Whether the object says it was made from others: an image whose Image Type begins DERIVED or that has a Derivation Description, a structure set that names a predecessor or has a resampled structure. It is the object’s own statement, not read from its name. Null for one filed before this was kept.',
+  },
   size: { ...count, description: 'Bytes of the stored file.' },
   sha256: { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'Of the stored file.' },
 };
@@ -197,6 +202,11 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
       ...count,
       description:
         'How many structure sets belong to the series: those that name it or its frame of reference. They are listed by /series/{uid}/related.',
+    },
+    derived: {
+      type: ['boolean', 'null'],
+      description:
+        'Whether the series says it is derived: true when an instance of it does, false when every instance says it is not, null when none does and some were filed before this was kept.',
     },
   }),
   Instance: object(instance),

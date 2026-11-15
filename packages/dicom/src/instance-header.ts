@@ -5,6 +5,7 @@
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 
+import { imageDerivation } from './metadata.js';
 import { DOSE_OF_BEAMS_AT_MOST, type DoseOf } from './rt-dose.js';
 import { readPlanFacts, type PlanFacts } from './rt-plan.js';
 
@@ -90,6 +91,12 @@ export interface InstanceHeader {
    * else.
    */
   readonly dose: DoseOf | null;
+  /**
+   * Whether the object says it was made from others (#254); see
+   * {@link saysDerived}. It is the object's own statement: false for one
+   * that does not say, whatever it is called.
+   */
+  readonly derived: boolean;
 }
 
 /**
@@ -185,6 +192,33 @@ function registrationReferences(dataSet: DataSet, references: References): void 
     ...items(dataSet, 'x00081200').flatMap((study) => items(study, 'x00081115')),
   ];
   for (const one of series) references.add('registration.series', uid(one, 'x0020000e'));
+}
+
+/** Spatial resampling, of the DICOM code set: what a structure taken to another image is derived by. */
+const RESAMPLING_CODE = '113085';
+
+/**
+ * Whether a parsed object says it was made from others:
+ *
+ * - an image, a dose or anything else with pixels: its Image Type
+ *   (0008,0008) begins `DERIVED`, or it has a Derivation Description
+ *   (0008,2111), which is when `imageDerivation` has something to say;
+ * - a structure set: it names a predecessor (Predecessor Structure Set
+ *   Sequence, 3006,0018), or one of its structures says it was resampled
+ *   (Derivation Code Sequence, 0008,9215, of its item of the Structure Set
+ *   ROI Sequence).
+ *
+ * Nothing is read from a description or a name: an object another system
+ * derived is told the same way as one made here.
+ */
+export function saysDerived(dataSet: DataSet): boolean {
+  if (imageDerivation(dataSet) !== null) return true;
+  if (items(dataSet, 'x30060018').some((item) => text(item, 'x00081155') !== null)) return true;
+  return items(dataSet, 'x30060020').some((roi) =>
+    items(roi, 'x00089215').some(
+      (code) => text(code, 'x00080100') === RESAMPLING_CODE && text(code, 'x00080102') === 'DCM',
+    ),
+  );
 }
 
 /**
@@ -291,6 +325,7 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
       references: references.list,
       plan,
       dose,
+      derived: saysDerived(dataSet),
     },
   };
 }

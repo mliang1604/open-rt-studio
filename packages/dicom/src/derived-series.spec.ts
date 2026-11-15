@@ -15,6 +15,7 @@ import {
   writeDerivedSeries,
   type DerivedSeriesContent,
 } from './derived-series.js';
+import { readInstanceHeader, saysDerived } from './instance-header.js';
 import { parseFile } from './loader.js';
 import { imageDerivation } from './metadata.js';
 import { rigidMat4, type Mat4 } from './mat4.js';
@@ -187,6 +188,12 @@ describe('a resampled image written as a derived series', () => {
     delete plain.elements['x00080008'];
     delete plain.elements['x00082111'];
     expect(imageDerivation(plain)).toBeNull();
+    // Its header says it too (#254): every slice, and not the image with neither element.
+    for (const one of written.instances) {
+      const header = readInstanceHeader(new Uint8Array(one.bytes));
+      expect(header.ok && header.header.derived).toBe(true);
+    }
+    expect(saysDerived(plain)).toBe(false);
   });
 
   it('is in the frame of reference of its grid, in the study and of the patient it was given', () => {

@@ -165,6 +165,21 @@ describe('which image series a patient’s radiotherapy objects belong to', () =
       description: 'The dose',
     });
   });
+
+  it('says of an object that it says it is derived, with a series or with a study, and of no other (#254)', () => {
+    const propagated = object('structure-set', 'set-2', [['structure-set.series', 'ct']], {
+      derived: true,
+    });
+    const original = object('structure-set', 'set-1', [['structure-set.series', 'ct']]);
+    const summed = object('dose', 'sum', [], { studyUid: 'study-2', derived: true });
+    const { bySeries, byStudy } = relateRtObjects(IMAGES, [original, propagated, summed]);
+    expect(bySeries.get('ct')!.map((one) => [one.sopInstanceUid, one.derived])).toEqual([
+      ['set-1', undefined],
+      ['set-2', true],
+    ]);
+    expect(bySeries.get('ct')![0]).not.toHaveProperty('derived');
+    expect(byStudy.get('study-2')![0]).toMatchObject({ sopInstanceUid: 'sum', derived: true });
+  });
 });
 
 describe('which series a registration connects', () => {
@@ -228,6 +243,7 @@ describe('the facts of a file’s header', () => {
     references: [{ relation: 'structure-set.series', targetUid: '1.2.8' }],
     plan: null,
     dose: null,
+    derived: false,
   });
 
   it('are taken for a structure set, a plan, a dose and a registration, and nothing else', () => {
@@ -248,6 +264,9 @@ describe('the facts of a file’s header', () => {
     const of = { summationType: 'BEAM', beams: [2], fractionGroup: 1 };
     expect(rtObjectFacts({ ...header('RTDOSE'), dose: of })?.dose).toEqual(of);
     expect(rtObjectFacts(header('RTDOSE'))).not.toHaveProperty('dose');
+    // And that it says it was made from others, when it does (#254).
+    expect(rtObjectFacts({ ...header('RTSTRUCT'), derived: true })?.derived).toBe(true);
+    expect(rtObjectFacts(header('RTSTRUCT'))).not.toHaveProperty('derived');
     expect(rtObjectFacts(header('REG'))?.kind).toBe('registration');
     expect(rtObjectFacts(header('CT'))).toBeNull();
     expect(rtObjectFacts(header('SEG'))).toBeNull();

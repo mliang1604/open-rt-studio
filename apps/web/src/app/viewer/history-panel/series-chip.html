@@ -12,6 +12,13 @@
     <!-- One dose of a series of several: what it is the dose of, where there is room for it. -->
     <span class="chip-dose-of">{{ of }}</span>
   }
+  @if (series().derived) {
+    <!-- The series says it was made from others (#254): not read from its name. -->
+    <span class="chip-derived" [title]="derivedTitle">
+      <span aria-hidden="true">Derived</span>
+      <span class="visually-hidden">{{ derivedTitle }}</span>
+    </span>
+  }
   @if (structureSets() > 0) {
     <!-- "RS", as RT Structure Set files are commonly prefixed. -->
     <span class="chip-sets" [title]="structureSetsLabel()">
