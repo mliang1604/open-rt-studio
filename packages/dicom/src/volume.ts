@@ -298,6 +298,13 @@ function defaultWindow(s: Slice, min: number, max: number): { center: number; wi
   if (s.windowCenter !== null && s.windowWidth !== null && s.windowWidth > 0) {
     return { center: s.windowCenter, width: s.windowWidth };
   }
+  // A dose: from nothing (or its least, when that is below nothing) to its
+  // most, exactly, by the linear windowing the shader does (#94). The colour
+  // of a dose is read against a legend, so its ends are doses that are said.
+  if (s.dose && max > Math.min(0, min)) {
+    const low = Math.min(0, min);
+    return { center: (low + max) / 2 + 0.5, width: max - low + 1 };
+  }
   const width = Math.max(1, max - min);
   return { center: min + width / 2, width };
 }

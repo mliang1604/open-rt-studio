@@ -454,6 +454,21 @@
       </details>
     }
 
+    @if (doseCtl.layer()) {
+      <details
+        class="tool-group"
+        role="group"
+        aria-label="Dose"
+        title="How the dose is shown: its isodose levels, and the range of its colour wash"
+        open
+      >
+        <summary class="tool-group-label">Dose</summary>
+        <div class="tool-group-body">
+          <app-dose-panel />
+        </div>
+      </details>
+    }
+
     @if (layersCtl.selectedOverlay()?.placement?.field; as field) {
       <details
         class="tool-group"
@@ -1268,6 +1283,11 @@
           }
         }
       </svg>
+    }
+
+    <!-- A dose's isodose lines, in every plane. -->
+    @if (doseCtl.panes().length > 0) {
+      <app-isodose-layer [panes]="doseCtl.panes()" />
     }
 
     <!-- The deformation field as arrows, in the panes laid out on the base image. -->

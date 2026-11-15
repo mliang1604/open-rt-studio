@@ -1043,6 +1043,50 @@ come.
   not interpolated; Tissue Heterogeneity Correction and the DVH sequence
   are not read; nothing was read from another system's dose file.
 
+### How a dose is shown
+
+Isodose lines and a colour wash, with levels the user sets and a legend
+(#94). `apps/web/src/app/viewer/dose-display/`, and `isodose.ts` in
+`packages/render`.
+
+- **The lines are traced on the CPU,** not drawn by the shader. In each
+  plane the dose is sampled on an even grid, two samples to its smallest
+  voxel, read between its voxels as the probe reads it (#95) and through the
+  registrations that place the dose and the pane's image. The lines are
+  traced through the samples by marching squares (`traceIsoLoops`), each
+  crossing put where the dose, linear between two samples, is at the level.
+  They are SVG paths over the pane, so a test can state where they must lie,
+  and a capture has them. A plane is sampled again only when its slice, its
+  tilt or the dose's placement is another; panning and zooming move the
+  paths.
+- **A line is drawn only where the dose is known on both sides of it.**
+  Where the plane or the dose's grid ends above a level the line ends there.
+  Nothing is drawn along the edge, which would say that the dose falls
+  there.
+- **Levels** are doses, or percent of a dose. Nothing is taken for the user
+  that the data does not give: percent is of the dose's own maximum until
+  they say of what else, which is a prescription to a target of a plan of
+  the images on screen (#97), chosen from a list, or a dose they type. A
+  dose is first shown with lines at 95, 90, 80, 70, 50, 30 and 10 % of its
+  maximum. Changing between doses and percent keeps the lines where they
+  are. At most 12 levels; presets give a list at once.
+- **The wash** is the layer's colour map, as before. Its range is the
+  layer's window, which the panel sets as two doses. A dose's default
+  window now runs from nothing (or from its least, when that is below
+  nothing) to its most, exactly: it ran to one below its most, by the
+  windowing formula for whole numbers.
+- **The legend is the list of levels:** each with the colour its line is
+  drawn in, its value, and the same in the other unit. A line has the
+  colour the wash has at its dose, so the two cannot disagree; a line is
+  drawn over a dark edge, so that it reads over the wash and over bright
+  anatomy. The colour maps are the app's own (`jet`, `hot`), which are not
+  safe for every kind of colour vision: the value beside each swatch is
+  what says which line is which.
+- **Not there:** a legend over the image, so a capture has the lines and
+  not what they stand for; a level's own colour; lines in the 3D view;
+  bands of colour between levels. A dose opened by itself is windowed like
+  any image, with the window remembered from the last one (#261).
+
 ### What is read of a plan
 
 As much of an RT Plan (or RT Ion Plan) as dose summation and conversion

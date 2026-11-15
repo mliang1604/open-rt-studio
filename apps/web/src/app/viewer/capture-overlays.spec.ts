@@ -111,6 +111,20 @@ describe('overlaysSvg', () => {
     expect(svg).not.toContain('Patient');
   });
 
+  it('draws a dose’s isodose lines, each over its dark edge (#94)', () => {
+    const { viewport, canvas } = viewportWith(`
+      <app-isodose-layer>
+        <svg class="isodose" data-box="100,50,400,300">
+          <path class="under" d="M1 2L30 40" style="fill: none; stroke: rgba(0, 0, 0, 0.75); stroke-width: 3px"></path>
+          <path class="line" d="M1 2L30 40" style="fill: none; stroke: rgb(255, 0, 0); stroke-width: 1.5px"></path>
+        </svg>
+      </app-isodose-layer>`);
+    const doc = parse(overlaysSvg(viewport, canvas));
+    const paths = Array.from(doc.querySelectorAll('path'));
+    expect(paths.map((path) => path.getAttribute('d'))).toEqual(['M1 2L30 40', 'M1 2L30 40']);
+    expect(paths[1].getAttribute('style')).toContain('stroke:rgb(255, 0, 0)');
+  });
+
   it('draws a pane tag as its pill and text, and not the pane box that holds it', () => {
     const { viewport, canvas } = viewportWith(`
       <div class="pane-overlay" data-box="100,50,400,300">
