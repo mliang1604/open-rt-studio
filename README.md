@@ -47,6 +47,9 @@ It is not a treatment planning system and does not replace one.
 - [Architecture and decisions](docs/architecture.md)
 - [Parity audit against dicom-workspace](docs/parity-audit.md): what was
   checked, what differs on purpose, and what is still missing
+- [Resampling validation](docs/resampling-validation.md): what resampled
+  images and propagated structures are held to on analytic shapes, and what
+  they measured
 - [Contributing](CONTRIBUTING.md), including the required CI check
 - [Test data policy](docs/test-data.md): synthetic or clearly shareable data only
 - [License headers](docs/license-headers.md)

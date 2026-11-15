@@ -709,8 +709,10 @@ frame of reference, which some systems may write.
 
 Putting one image on another image's grid, through a registration (epic #7).
 The engine is built (#88), and an image resampled with it is saved as a
-derived DICOM series (#89, below). Structures (#90) and the view of what was
-derived from what (#91) are to come.
+derived DICOM series (#89, below). Structures are propagated the same way
+(#90, below). What both are held to on shapes that are formulas, and what
+they measured, is in [resampling-validation.md](resampling-validation.md)
+(#92). The view of what was derived from what (#91) is to come.
 
 - **Which way.** Each voxel of the reference grid is given a value: its
   centre is taken to the source image by the registration, and the source is
