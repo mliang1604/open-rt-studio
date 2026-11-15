@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import type { Layer, Volume } from '@open-rt-studio/dicom';
+import type { DoseInfo, Layer, Volume } from '@open-rt-studio/dicom';
 import type { VoxelProbe } from '@open-rt-studio/render';
 
-import { formatFieldReading, formatProbe } from './viewer-format';
+import { doseSaid, formatFieldReading, formatProbe } from './viewer-format';
 
 function volume(overrides: Partial<Volume> = {}): Volume {
   return {
@@ -29,6 +29,16 @@ const PROBE: VoxelProbe = {
   value: -784,
   rawValue: 240,
   patient: [-91.52, 17.96, -0.04],
+};
+
+const DOSE: DoseInfo = {
+  units: 'GY',
+  type: 'PHYSICAL',
+  summationType: 'PLAN',
+  scaling: 0.1,
+  sopInstanceUid: '1.2.3',
+  frameOffsets: 'relative',
+  interpolatedPlanes: 0,
 };
 
 describe('formatProbe', () => {
@@ -55,15 +65,49 @@ describe('formatProbe', () => {
   });
 
   it('adds the other layers read at the same point, after the value', () => {
-    const dose = { modality: 'RTDOSE' } as Layer;
+    const doseOf = (units: DoseInfo['units']): Layer =>
+      ({ modality: 'RTDOSE', volume: { modality: 'RTDOSE', dose: { ...DOSE, units } } }) as Layer;
     const sample: VoxelProbe = {
       voxel: [1, 2, 3],
       value: 35.72,
       rawValue: 0,
       patient: PROBE.patient,
     };
-    expect(formatProbe('Axial', PROBE, volume(), [{ layer: dose, sample }])).toBe(
+    expect(formatProbe('Axial', PROBE, volume(), [{ layer: doseOf('GY'), sample }])).toBe(
       'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · value -784 HU · stored 240 · RTDOSE 35.7 Gy',
+    );
+    // A relative dose is a share of something the file does not name: it has no unit (#93).
+    expect(formatProbe('Axial', PROBE, volume(), [{ layer: doseOf('RELATIVE'), sample }])).toBe(
+      'Axial · voxel (33, 58, 32) · LPS (-91.5, 18.0, 0.0) mm · value -784 HU · stored 240 · RTDOSE 35.7',
+    );
+  });
+
+  it('gives a dose that is the image its own unit too', () => {
+    const dose = volume({ modality: 'RTDOSE', rescaleIntercept: 0, dose: DOSE });
+    expect(formatProbe('Axial', PROBE, dose)).toContain('value -784 Gy');
+    const relative = volume({
+      modality: 'RTDOSE',
+      rescaleIntercept: 0,
+      dose: { ...DOSE, units: 'RELATIVE' },
+    });
+    expect(formatProbe('Axial', PROBE, relative)).toMatch(/value -784$/);
+  });
+});
+
+describe('what a dose says of itself, in a line (#93)', () => {
+  it('names its units, its type and what it is summed over', () => {
+    expect(doseSaid(DOSE)).toBe('RT Dose: in Gy, physical, summation type PLAN');
+    expect(doseSaid({ ...DOSE, units: 'RELATIVE', type: 'EFFECTIVE', summationType: null })).toBe(
+      'RT Dose: relative, with no unit, effective, of no summation type',
+    );
+  });
+
+  it('says so when planes were laid between its frames', () => {
+    expect(doseSaid({ ...DOSE, interpolatedPlanes: 1 })).toBe(
+      'RT Dose: in Gy, physical, summation type PLAN. Its frames are spaced unevenly: 1 plane was laid between them by interpolation.',
+    );
+    expect(doseSaid({ ...DOSE, interpolatedPlanes: 3 })).toContain(
+      '3 planes were laid between them',
     );
   });
 });

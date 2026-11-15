@@ -78,6 +78,29 @@ describe('layerLegend', () => {
     expect(rows[0].label).toBe('RTDOSE');
     expect(rows[0].displayValue).toBe('jet');
   });
+
+  it('says of a dose what it says of itself, and of anything else its name (#93)', () => {
+    const dose = {
+      ...makeVolume('RTDOSE'),
+      dose: {
+        units: 'RELATIVE' as const,
+        type: 'PHYSICAL' as const,
+        summationType: 'BEAM',
+        scaling: 0.1,
+        sopInstanceUid: '1.2.3',
+        frameOffsets: 'relative' as const,
+        interpolatedPlanes: 0,
+      },
+    };
+    const rows = layerLegend([
+      overlayImageLayer('dose', dose),
+      overlayImageLayer('mr', makeVolume('MR')),
+    ]);
+    expect(rows.map((row) => row.said)).toEqual([
+      'RT Dose: relative, with no unit, physical, summation type BEAM',
+      'MR',
+    ]);
+  });
 });
 
 describe('a placement in words', () => {

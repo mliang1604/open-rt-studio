@@ -4,7 +4,8 @@
 
 import {
   clamp,
-  modalityUnit,
+  valueUnit,
+  type DoseInfo,
   type Layer,
   type MissingSlices,
   type Volume,
@@ -48,6 +49,21 @@ export function formatFieldReading(reading: FieldReading): string {
   return reading.determinant <= 0 ? `${value} (the field folds here)` : value;
 }
 
+/**
+ * What a dose says of itself, in a line (#93): its units, its type, what it
+ * is summed over, and whether planes were laid between its frames.
+ */
+export function doseSaid(dose: DoseInfo): string {
+  const laid = dose.interpolatedPlanes;
+  return [
+    `RT Dose: ${dose.units === 'GY' ? 'in Gy' : 'relative, with no unit'}, ${dose.type.toLowerCase()}`,
+    dose.summationType ? `, summation type ${dose.summationType}` : ', of no summation type',
+    laid > 0
+      ? `. Its frames are spaced unevenly: ${laid} plane${laid === 1 ? ' was' : 's were'} laid between them by interpolation.`
+      : '',
+  ].join('');
+}
+
 export function formatProbe(
   name: string,
   probe: VoxelProbe,
@@ -56,14 +72,14 @@ export function formatProbe(
   field: FieldReading | null = null,
 ): string {
   const [x, y, z] = probe.voxel;
-  const unit = modalityUnit(volume.modality);
+  const unit = valueUnit(volume);
   const value = `${formatValue(probe.value)}${unit ? ` ${unit}` : ''}`;
   const trivialLut = volume.rescaleSlope === 1 && volume.rescaleIntercept === 0;
   const stored = trivialLut ? '' : ` · stored ${formatValue(probe.rawValue)}`;
   // Append each other visible layer read at the same patient point (e.g. dose Gy).
   const overlays = others
     .map(({ layer, sample }) => {
-      const u = modalityUnit(layer.modality);
+      const u = valueUnit(layer.volume);
       return ` · ${layer.modality ?? 'Image'} ${formatValue(sample.value)}${u ? ` ${u}` : ''}`;
     })
     .join('');

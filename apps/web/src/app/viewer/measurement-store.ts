@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, signal } from '@angular/core';
-import { clamp, modalityUnit, Orientation, type Volume } from '@open-rt-studio/dicom';
+import { clamp, Orientation, valueUnit, type Volume } from '@open-rt-studio/dicom';
 import { type PlanePoint, roiLines, roiStats, type ObliqueRotation } from '@open-rt-studio/render';
 
 /** An interactive measurement tool (the default pan/orbit gesture is handled elsewhere). */
@@ -256,7 +256,7 @@ export class MeasurementStore {
   ): ReadonlyMap<number, readonly string[]> {
     const stats = new Map<number, readonly string[]>();
     if (!volume) return stats;
-    const unit = modalityUnit(volume.modality);
+    const unit = valueUnit(volume);
     for (const m of this._measurements()) {
       if ((m.tool !== 'ellipse' && m.tool !== 'rectangle') || m.points.length < 2) continue;
       const res = roiStats(

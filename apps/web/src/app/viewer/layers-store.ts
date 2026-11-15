@@ -32,6 +32,8 @@ import {
   type WindowLevel,
 } from '@open-rt-studio/render';
 
+import { doseSaid } from './viewer-format';
+
 /** Checkerboard density bounds (cells across the image), shared by the slider. */
 const CHECKER_CELLS_MIN = 2;
 const CHECKER_CELLS_MAX = 30;
@@ -55,6 +57,8 @@ export interface LayerLegendEntry {
   readonly id: string;
   /** Human label: the modality, or a fallback when the layer has none. */
   readonly label: string;
+  /** What more there is to say of it on pointing at its name: for a dose, what it says of itself. */
+  readonly said: string;
   /** Role badge text: 'BASE' or 'OVERLAY'. */
   readonly roleBadge: string;
   /** Whether this is the base underlay (shown without overlay-only controls). */
@@ -202,6 +206,7 @@ export function layerLegend(
     return {
       id: layer.id,
       label: layer.modality ?? 'Image',
+      said: layer.volume.dose ? doseSaid(layer.volume.dose) : (layer.modality ?? 'Image'),
       roleBadge: layer.role === 'base' ? 'BASE' : 'OVERLAY',
       isBase: layer.role === 'base',
       visible: layer.visible,

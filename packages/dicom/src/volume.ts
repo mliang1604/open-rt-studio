@@ -77,6 +77,16 @@ export function buildVolume(slices: Slice[]): Volume {
     }
   }
 
+  // One dose object is one grid. Several in a series (one to a beam, say)
+  // would be stacked as if they were one, which they are not.
+  const doses = new Set(slices.flatMap((slice) => (slice.dose ? [slice.dose] : [])));
+  if (doses.size > 1) {
+    throw new VolumeBuildError(
+      `The series holds ${doses.size} dose grids, one to an object (a beam, a fraction or a plan each, perhaps). ` +
+        `A series of several is not read: they would be shown as one.`,
+    );
+  }
+
   const ordered = orderSlicesThroughPlane(slices);
   const sliceVoxels = rows * columns;
   const [sx, sy] = inPlaneSpacing(ordered[0]);
@@ -106,6 +116,7 @@ export function buildVolume(slices: Slice[]): Volume {
     modality: ordered[0].modality,
     geometry: frame.geometry,
     missingSlices: frame.missingSlices,
+    ...(ordered[0].dose ? { dose: ordered[0].dose } : {}),
   };
 }
 

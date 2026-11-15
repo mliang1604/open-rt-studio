@@ -4,6 +4,7 @@
 
 import { parseFile, parseFileAsync, UnsupportedDicomError } from './loader.js';
 import { buildVolume } from './volume.js';
+import { valueUnit, type Slice } from './types.js';
 
 // --- Minimal Explicit-VR-Little-Endian DICOM P10 writer --------------------
 //
@@ -686,9 +687,23 @@ function rtDose(
     gridOffsets?: number[] | null;
     signed?: boolean;
     frames?: number[][];
+    /** Dose Units, Dose Type, Dose Summation Type; null leaves the element out. */
+    units?: string | null;
+    type?: string | null;
+    summation?: string | null;
+    scaling?: number | null;
+    position?: number[] | null;
+    orientation?: number[] | null;
+    pixelSpacing?: number[] | null;
+    sopInstanceUid?: string;
   } = {},
 ): ArrayBuffer {
   const { bits = 16, modality = 'RTDOSE', gridOffsets = [0, 5], signed = false } = opts;
+  const { units = 'GY', type = null, summation = null, scaling = 0.25 } = opts;
+  const { position = [10, 20, 30], orientation = [1, 0, 0, 0, 1, 0] } = opts;
+  const { pixelSpacing = [2, 3] } = opts;
+  const maybe = (value: unknown, made: () => Uint8Array): Uint8Array[] =>
+    value === null ? [] : [made()];
   // DataView.setUint16/32 wrap negatives to two's complement, so the unsigned
   // writers below faithfully encode signed frame values for the signed case.
   const frames = opts.frames ?? [
@@ -698,23 +713,26 @@ function rtDose(
   const body = concat([
     element(0x0008, 0x0060, 'CS', text(modality)), // Modality
     element(0x0008, 0x0016, 'UI', uid('1.2.840.10008.5.1.4.1.1.481.2')), // SOPClassUID (RT Dose)
+    element(0x0008, 0x0018, 'UI', uid(opts.sopInstanceUid ?? '1.2.dose.1')), // SOPInstanceUID
     element(0x0010, 0x0020, 'LO', text('PID-99')), // PatientID
     element(0x0020, 0x000d, 'UI', uid('1.2.dose.study')), // StudyInstanceUID
     element(0x0020, 0x000e, 'UI', uid('1.2.dose')), // SeriesInstanceUID
     element(0x0020, 0x0052, 'UI', uid('1.2.frame')), // FrameOfReferenceUID
-    element(0x0020, 0x0032, 'DS', numbers([10, 20, 30])), // ImagePositionPatient
-    element(0x0020, 0x0037, 'DS', numbers([1, 0, 0, 0, 1, 0])), // ImageOrientationPatient
+    ...maybe(position, () => element(0x0020, 0x0032, 'DS', numbers(position!))), // ImagePositionPatient
+    ...maybe(orientation, () => element(0x0020, 0x0037, 'DS', numbers(orientation!))), // ImageOrientationPatient
     element(0x0028, 0x0002, 'US', u16le(1)), // SamplesPerPixel
-    element(0x0028, 0x0008, 'IS', numbers([2])), // NumberOfFrames
+    element(0x0028, 0x0008, 'IS', numbers([frames.length])), // NumberOfFrames
     element(0x0028, 0x0010, 'US', u16le(2)), // Rows
     element(0x0028, 0x0011, 'US', u16le(2)), // Columns
-    element(0x0028, 0x0030, 'DS', numbers([2, 3])), // PixelSpacing [row, col]
+    ...maybe(pixelSpacing, () => element(0x0028, 0x0030, 'DS', numbers(pixelSpacing!))), // PixelSpacing [row, col]
     element(0x0028, 0x0100, 'US', u16le(bits)), // BitsAllocated
     element(0x0028, 0x0101, 'US', u16le(bits)), // BitsStored
     element(0x0028, 0x0103, 'US', u16le(signed ? 1 : 0)), // PixelRepresentation
-    element(0x3004, 0x0002, 'CS', text('GY')), // DoseUnits
+    ...maybe(units, () => element(0x3004, 0x0002, 'CS', text(units!))), // DoseUnits
+    ...maybe(type, () => element(0x3004, 0x0004, 'CS', text(type!))), // DoseType
+    ...maybe(summation, () => element(0x3004, 0x000a, 'CS', text(summation!))), // DoseSummationType
     ...(gridOffsets ? [element(0x3004, 0x000c, 'DS', numbers(gridOffsets))] : []), // GridFrameOffsetVector
-    element(0x3004, 0x000e, 'DS', numbers([0.25])), // DoseGridScaling
+    ...maybe(scaling, () => element(0x3004, 0x000e, 'DS', numbers([scaling!]))), // DoseGridScaling
     bits === 32 ? pixelData32(frames) : pixelData(frames),
   ]);
   return dicomFile(body);
@@ -776,16 +794,6 @@ describe('parseFile — RT Dose', () => {
     expect(Array.from(slices[0].pixels)).toEqual([0, 1, 2, 3]);
   });
 
-  it('stacks frames when GridFrameOffsetVector is absent instead of collapsing', () => {
-    const slices = parseFile('dose.dcm', rtDose({ gridOffsets: null }));
-
-    expect(slices).toHaveLength(2);
-    // Unit fallback keeps the frames at distinct positions so the grid survives.
-    expect(slices[0].position).toEqual([10, 20, 30]);
-    expect(slices[1].position).toEqual([10, 20, 31]);
-    expect(buildVolume(slices).dims).toEqual([2, 2, 2]);
-  });
-
   it('assembles into a dose Volume with through-plane geometry from the offset vector', () => {
     const volume = buildVolume(parseFile('dose.dcm', rtDose()));
 
@@ -796,5 +804,176 @@ describe('parseFile — RT Dose', () => {
     expect(volume.geometry?.kStep).toEqual([0, 0, 5]);
     expect(volume.min).toBe(0);
     expect(volume.max).toBe(7);
+  });
+});
+
+describe('parseFile — RT Dose, as each file says it (#93)', () => {
+  const THREE = [
+    [0, 4, 8, 12],
+    [16, 20, 24, 28],
+    [40, 44, 48, 52],
+  ];
+  const z = (slices: Slice[]): number[] => slices.map((slice) => slice.position![2]);
+
+  it('says what the dose is on every plane and on the volume: units, type, summation type, scaling', () => {
+    const slices = parseFile('dose.dcm', rtDose());
+    const said = {
+      units: 'GY',
+      // No Dose Type in the file: read as what nearly all are.
+      type: 'PHYSICAL',
+      summationType: null,
+      scaling: 0.25,
+      sopInstanceUid: '1.2.dose.1',
+      frameOffsets: 'relative',
+      interpolatedPlanes: 0,
+    };
+    expect(slices.map((slice) => slice.dose)).toEqual([said, said]);
+    const volume = buildVolume(slices);
+    expect(volume.dose).toEqual(said);
+    expect(valueUnit(volume)).toBe('Gy');
+
+    const beam = buildVolume(
+      parseFile('dose.dcm', rtDose({ units: 'RELATIVE', type: 'EFFECTIVE', summation: 'BEAM' })),
+    );
+    expect(beam.dose).toMatchObject({
+      units: 'RELATIVE',
+      type: 'EFFECTIVE',
+      summationType: 'BEAM',
+    });
+    // A share of something the file does not name has no unit; the values are scaled all the same.
+    expect(valueUnit(beam)).toBeNull();
+    expect(beam.max).toBe(7);
+    // What is no dose says nothing of one, and has its modality's unit.
+    expect(valueUnit({ modality: 'CT' })).toBe('HU');
+  });
+
+  it('places frames that go down the normal, and builds the grid from the lowest', () => {
+    const slices = parseFile('dose.dcm', rtDose({ gridOffsets: [0, -5] }));
+    expect(z(slices)).toEqual([30, 25]);
+    const volume = buildVolume(slices);
+    expect(volume.geometry?.origin).toEqual([10, 20, 25]);
+    expect(volume.geometry?.kStep).toEqual([0, 0, 5]);
+    // The second frame is the lower plane.
+    expect(Array.from(volume.data)).toEqual([4, 5, 6, 7, 0, 1, 2, 3]);
+  });
+
+  it('places frames given as positions along z, facing up or down', () => {
+    const up = parseFile('dose.dcm', rtDose({ gridOffsets: [30, 35] }));
+    expect(z(up)).toEqual([30, 35]);
+    expect(up[0].dose?.frameOffsets).toBe('absolute');
+    // Rows along x, columns along -y: the normal points down, and z still rises.
+    const down = parseFile(
+      'dose.dcm',
+      rtDose({ gridOffsets: [30, 35], orientation: [1, 0, 0, 0, -1, 0] }),
+    );
+    expect(z(down)).toEqual([30, 35]);
+  });
+
+  it('places frames of any orientation along their own normal', () => {
+    // Coronal: rows along x, columns down z; the frames step along y.
+    const slices = parseFile(
+      'dose.dcm',
+      rtDose({ gridOffsets: [0, 2], orientation: [1, 0, 0, 0, 0, -1] }),
+    );
+    expect(slices.map((slice) => slice.position)).toEqual([
+      [10, 20, 30],
+      [10, 22, 30],
+    ]);
+    const volume = buildVolume(slices);
+    // Adding zero makes a negative zero a plain one, which is all the same here.
+    const steps = [volume.geometry!.iStep, volume.geometry!.jStep, volume.geometry!.kStep];
+    expect(steps.map((step) => step.map((part) => part + 0))).toEqual([
+      [3, 0, 0],
+      [0, 0, -2],
+      [0, 2, 0],
+    ]);
+  });
+
+  it('lays planes between frames that are spaced unevenly on an even grid, and says how many', () => {
+    // 5 mm, then 10 mm: a plane is laid halfway between the second and third frames.
+    const slices = parseFile('dose.dcm', rtDose({ frames: THREE, gridOffsets: [0, 5, 15] }));
+    expect(z(slices)).toEqual([30, 35, 40, 45]);
+    expect(slices.map((slice) => Array.from(slice.pixels))).toEqual([
+      [0, 1, 2, 3],
+      [4, 5, 6, 7],
+      [7, 8, 9, 10],
+      [10, 11, 12, 13],
+    ]);
+    expect(slices[0].dose?.interpolatedPlanes).toBe(1);
+    const volume = buildVolume(slices);
+    expect(volume.dims).toEqual([2, 2, 4]);
+    expect(volume.spacing).toEqual([3, 2, 5]);
+    // The grid is even as it was read: nothing more was filled in to build it.
+    expect(volume.missingSlices).toBeUndefined();
+    expect(volume.max).toBe(13);
+  });
+
+  it('reads a dose of one frame, which needs no offsets', () => {
+    const slices = parseFile('dose.dcm', rtDose({ frames: [[0, 4, 8, 12]], gridOffsets: null }));
+    expect(slices).toHaveLength(1);
+    expect(slices[0].name).toBe('dose.dcm');
+    expect(slices[0].dose?.frameOffsets).toBe('single');
+    expect(buildVolume(slices).dims).toEqual([2, 2, 1]);
+  });
+
+  it('refuses, with what is wrong, a dose that does not say how to scale a value or place a frame', () => {
+    const refusals: [Parameters<typeof rtDose>[0], string][] = [
+      [{ units: null }, 'It does not say what units its dose is in (Dose Units)'],
+      [{ units: 'CGY' }, 'Its Dose Units are "CGY", which is neither GY nor RELATIVE'],
+      [
+        { type: 'BIOLOGICAL' },
+        'Its Dose Type is "BIOLOGICAL", which is not PHYSICAL, EFFECTIVE or ERROR',
+      ],
+      [{ scaling: null }, 'It has no Dose Grid Scaling, so its stored values cannot be made doses'],
+      [{ scaling: 0 }, 'Its Dose Grid Scaling is not above zero'],
+      [
+        { gridOffsets: null },
+        'It has 2 frames and no Grid Frame Offset Vector to say where they lie',
+      ],
+      [{ gridOffsets: [0, 5, 10] }, 'Its Grid Frame Offset Vector places 3 frames, and it has 2'],
+      [
+        { gridOffsets: [100, 105] },
+        'Its Grid Frame Offset Vector begins neither at zero nor at the z of Image Position (Patient), so its frames cannot be placed',
+      ],
+      [
+        { frames: THREE, gridOffsets: [0, 5, 5] },
+        'Its Grid Frame Offset Vector does not go one way throughout: two frames lie at one place, or the frames turn back',
+      ],
+      [
+        { frames: THREE, gridOffsets: [0, 2, 5] },
+        'Its frames are spaced unevenly, and not by multiples of their closest spacing, so they lie on no even grid',
+      ],
+      [
+        { orientation: null },
+        'It does not say how its frames are oriented (Image Orientation (Patient))',
+      ],
+      [
+        { orientation: [1, 0, 0, 1, 0, 0] },
+        'Its Image Orientation (Patient) is not two unit vectors at right angles',
+      ],
+      [{ position: null }, 'It does not say where its first frame lies (Image Position (Patient))'],
+      [{ pixelSpacing: null }, 'It does not say how far apart its voxels are (Pixel Spacing)'],
+      [{ pixelSpacing: [2, 0] }, 'It does not say how far apart its voxels are (Pixel Spacing)'],
+    ];
+    for (const [options, problem] of refusals) {
+      let thrown: unknown = null;
+      try {
+        parseFile('dose.dcm', rtDose(options));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, problem).toBeInstanceOf(UnsupportedDicomError);
+      expect((thrown as UnsupportedDicomError).reason).toBe(`RT Dose not read. ${problem}`);
+    }
+  });
+
+  it('does not stack two dose objects of one series as if they were one grid', () => {
+    const one = parseFile('beam-1.dcm', rtDose({ sopInstanceUid: '1.2.dose.1' }));
+    const other = parseFile('beam-2.dcm', rtDose({ sopInstanceUid: '1.2.dose.2' }));
+    expect(() => buildVolume([...one, ...other])).toThrow(
+      'The series holds 2 dose grids, one to an object (a beam, a fraction or a plan each, perhaps). A series of several is not read: they would be shown as one.',
+    );
+    // The planes of one object are one grid, however often they are asked for.
+    expect(buildVolume([...one]).dims).toEqual([2, 2, 2]);
   });
 });

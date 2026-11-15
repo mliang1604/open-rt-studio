@@ -93,6 +93,9 @@ by git) if you want files on disk to open.
   cut-away, structure surfaces
 - Fusion of a second series or a dose grid over the image, with colour maps
   and a checkerboard; a side-by-side Compare layout
+- RT Dose read on its own grid, in gray or relative, in any orientation and
+  with unevenly spaced frames; a dose that does not say how to scale or
+  place its values is refused, with the reason
 - Fusion and Compare of a series from another frame of reference through a
   rigid DICOM Spatial Registration, opened from files beside it or kept on
   the server, with a choice when several registrations connect the two

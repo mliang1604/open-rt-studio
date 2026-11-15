@@ -4,6 +4,7 @@
 
 import { withoutField, type LayerPlacement } from './layer-placement.js';
 import type { DicomMetadata } from './metadata.js';
+import { doseUnit, type DoseInfo } from './rt-dose.js';
 
 /** A single parsed DICOM slice, with the bits we need to build a volume. */
 export interface Slice {
@@ -65,6 +66,11 @@ export interface Slice {
   readonly windowWidth: number | null;
   /** Rescaled pixel values for this slice (rows * columns), row-major. */
   readonly pixels: Float32Array;
+  /**
+   * For a plane of an RT Dose grid: what the dose says of itself (#93). The
+   * planes of one dose object share it.
+   */
+  readonly dose?: DoseInfo;
   /**
    * Captured study/series/patient metadata and the raw-tag list for the info
    * panel. Present only on a file's first frame (the series-representative image);
@@ -258,6 +264,11 @@ export interface Volume {
    * the value's unit in readouts. Null when the series has no modality tag.
    */
   readonly modality: string | null;
+  /**
+   * For a dose grid: what the dose says of itself, its units among it (#93).
+   * Left out for anything that is not a dose.
+   */
+  readonly dose?: DoseInfo;
   /**
    * Index→patient (LPS) placement, used to reslice anatomical planes. Optional:
    * when absent (e.g. a series with no spatial metadata, or a hand-built test
@@ -497,6 +508,15 @@ export function framesMatch(a: string | null, b: string | null): boolean {
 }
 
 /**
+ * The unit of a volume's values: what a dose says its units are, and
+ * otherwise what its modality has. Null for values without a unit, among
+ * them a relative dose.
+ */
+export function valueUnit(volume: Pick<Volume, 'modality' | 'dose'>): string | null {
+  return volume.dose ? doseUnit(volume.dose) : modalityUnit(volume.modality);
+}
+
+/**
  * The unit of a volume's rescaled voxel values, given its DICOM modality.
  *
  * CT values rescaled through the modality LUT are Hounsfield Units (HU); an
@@ -505,6 +525,7 @@ export function framesMatch(a: string | null, b: string | null): boolean {
  * return null and should be shown unitless.
  */
 export function modalityUnit(modality: string | null): string | null {
+  // A dose says its own units: use `valueUnit` where there is a volume.
   switch (modality) {
     case 'CT':
       return 'HU';
