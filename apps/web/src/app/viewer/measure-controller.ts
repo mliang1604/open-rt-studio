@@ -116,11 +116,15 @@ export interface MeasureInit {
  * A reading with its value taken between voxels, for a dose (#95): a dose
  * is a field on a coarse grid, and its value at a place is not that of the
  * nearest sample. Anything else is read at its voxel, as it is stored.
+ *
+ * A dose that says where it is known (a sum, #98) has no value where it is
+ * not: the reading's value is then no number, and is said to be not known.
  */
 function betweenVoxels(volume: Volume, read: VoxelProbe | null): VoxelProbe | null {
   if (!read || !volume.dose) return read;
   const value = interpolateVolumeAtPatient(volume, read.patient);
-  return value === null ? read : { ...read, value };
+  if (value !== null) return { ...read, value };
+  return volume.known ? { ...read, value: Number.NaN } : read;
 }
 
 @Injectable()

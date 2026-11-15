@@ -22,8 +22,11 @@ import {
   LayersStore,
   fittingFieldScaleMm,
   layerLegend,
+  madeStill,
   placementChoiceText,
   placementText,
+  samePlacement,
+  type MadeLayer,
 } from './layers-store';
 
 function makeVolume(modality: string, windowCenter = 40, windowWidth = 400): Volume {
@@ -386,6 +389,149 @@ describe('LayersStore.apply', () => {
     expect(store.apply(registry())[1].display).toEqual({ kind: 'colormap', name: 'viridis' });
     // The legend over the composed layers reflects it.
     expect(layerLegend(store.apply(registry()))[1].displayValue).toBe('viridis');
+  });
+});
+
+describe('a layer that was made of the layers on screen (#102)', () => {
+  const placementOf = (id: string): LayerPlacement => {
+    const found = findPlacement('planning', 'follow-up', [
+      registrationObject(id, 'follow-up', 'planning'),
+    ]);
+    if (found.kind !== 'placed') throw new Error(found.kind);
+    return found.placement;
+  };
+  const sumVolume: Volume = {
+    ...makeVolume('RTDOSE'),
+    dose: {
+      units: 'GY',
+      type: 'EFFECTIVE',
+      sum: { doses: 2, model: 'eqd', fractionGy: 2, alphaBetaGy: 3 },
+      summationType: null,
+      scaling: 1,
+      sopInstanceUid: null,
+      frameOffsets: 'relative',
+      interpolatedPlanes: 0,
+    },
+  };
+  const placement = placementOf('reg');
+  const loaded = (): Layer[] => [
+    baseImageLayer('base', makeVolume('CT')),
+    overlayImageLayer('one', makeVolume('RTDOSE')),
+    overlayImageLayer('two', makeVolume('RTDOSE'), placement),
+  ];
+  const madeOf = (layers: readonly Layer[]): MadeLayer => ({
+    layer: overlayImageLayer('sum', sumVolume),
+    base: layers[0].volume,
+    of: layers.slice(1).map(({ id, volume, placement: by }) => ({ id, volume, placement: by })),
+  });
+
+  it('is the last of the layers, while what it was made of is on screen', () => {
+    const store = new LayersStore();
+    const layers = loaded();
+    expect(store.apply(layers).map((layer) => layer.id)).toEqual(['base', 'one', 'two']);
+    store.setMade(madeOf(layers));
+    expect(store.apply(layers).map((layer) => layer.id)).toEqual(['base', 'one', 'two', 'sum']);
+    expect(store.made()!.layer.id).toBe('sum');
+    store.setMade(null);
+    expect(store.apply(layers).map((layer) => layer.id)).toEqual(['base', 'one', 'two']);
+  });
+
+  it('takes the overrides a loaded layer does', () => {
+    const store = new LayersStore();
+    const layers = loaded();
+    store.setMade(madeOf(layers));
+    store.setOpacity('sum', 80);
+    store.setDisplay('sum', { kind: 'colormap', name: 'hot' });
+    expect(store.apply(layers)[3]).toMatchObject({
+      opacity: 0.8,
+      display: { kind: 'colormap', name: 'hot' },
+      visible: true,
+    });
+    store.toggleVisible('sum');
+    expect(store.apply(layers)[3].visible).toBe(false);
+  });
+
+  it('is not a layer once the image is another, or a layer it was made of is gone or another', () => {
+    const store = new LayersStore();
+    const layers = loaded();
+    store.setMade(madeOf(layers));
+    const ids = (now: readonly Layer[]) => store.apply(now).map((layer) => layer.id);
+    expect(ids([baseImageLayer('base', makeVolume('CT')), ...layers.slice(1)])).not.toContain(
+      'sum',
+    );
+    expect(ids(layers.slice(0, 2))).not.toContain('sum');
+    expect(
+      ids([layers[0], layers[1], { ...layers[2], volume: makeVolume('RTDOSE') }]),
+    ).not.toContain('sum');
+    // Another layer beside them changes nothing.
+    expect(ids([...layers, overlayImageLayer('mr', makeVolume('MR'))])).toEqual([
+      'base',
+      'one',
+      'two',
+      'mr',
+      'sum',
+    ]);
+  });
+
+  it('is not a layer once a layer it was made of is placed otherwise', () => {
+    const store = new LayersStore();
+    const layers = loaded();
+    store.setMade(madeOf(layers));
+    const moved = {
+      ...placement,
+      baseToLayer: shiftMatrix(1, 2, 3),
+      layerToBase: shiftMatrix(-1, -2, -3),
+    };
+    expect(store.apply([layers[0], layers[1], { ...layers[2], placement: moved }])).toHaveLength(3);
+    // Placed the same by another object: the same place.
+    expect(
+      store.apply([layers[0], layers[1], { ...layers[2], placement: { ...placement } }]),
+    ).toHaveLength(4);
+    // Hidden, a layer it was made of is still what it was made of.
+    store.toggleVisible('two');
+    expect(store.apply(layers)).toHaveLength(4);
+  });
+
+  it('tells two placements apart by their matrix and their field', () => {
+    expect(samePlacement(undefined, undefined)).toBe(true);
+    expect(samePlacement(placement, placement)).toBe(true);
+    expect(
+      samePlacement(placement, { ...placement, baseToLayer: [...placement.baseToLayer] as never }),
+    ).toBe(true);
+    expect(samePlacement(placement, undefined)).toBe(false);
+    expect(samePlacement(undefined, placement)).toBe(false);
+    expect(samePlacement(placement, { ...placement, baseToLayer: shiftMatrix(9, 0, 0) })).toBe(
+      false,
+    );
+    const field = { grid: {} } as LayerPlacement['field'];
+    expect(samePlacement(placement, { ...placement, field })).toBe(false);
+    expect(samePlacement({ ...placement, field }, { ...placement, field })).toBe(true);
+    expect(madeStill(madeOf(loaded()), loaded())).toBe(false);
+  });
+
+  it('shows one overlay in place of the others, and puts back what was hidden before', () => {
+    const store = new LayersStore();
+    const layers = loaded();
+    store.setMade(madeOf(layers));
+    store.toggleVisible('one');
+    const before = store.showOnly('sum', store.apply(layers));
+    expect(store.apply(layers).map((layer) => layer.visible)).toEqual([true, false, false, true]);
+    expect([...before]).toEqual(['one']);
+    store.setHidden(before);
+    expect(store.apply(layers).map((layer) => layer.visible)).toEqual([true, false, true, true]);
+  });
+
+  it('goes by what it is in the layers panel, and is let go of with the load', () => {
+    const store = new LayersStore();
+    const layers = loaded();
+    store.setMade(madeOf(layers));
+    const legend = layerLegend(store.apply(layers));
+    expect(legend[3].label).toBe('EQD2 (α/β 3 Gy)');
+    expect(legend[3].said).toContain('Dose made here by summing, not read from a file');
+    expect(legend[1].label).toBe('RTDOSE');
+    store.reset();
+    expect(store.made()).toBeNull();
+    expect(store.apply(layers)).toHaveLength(3);
   });
 });
 

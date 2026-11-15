@@ -1180,8 +1180,9 @@ The doses of several timepoints on one grid, each taken there through the
 registration that places it, each times a weight (#98), as they are or
 converted first to BED or EQDx (#99).
 `dose-sum.ts` in `packages/dicom` is the reference; `dose-sum.ts` in
-`packages/render` does the same with the GPU's help. There is no screen for
-it yet (#102): the result is a dose in memory.
+`packages/render` does the same with the GPU's help. The screen that
+chooses the doses and shows the sum is described after it
+("The summation screen").
 
 - **Each dose is resampled onto the grid, then they are added.** A voxel's
   centre is taken to a dose by its registration and the dose is read there,
@@ -1243,7 +1244,8 @@ it yet (#102): the result is a dose in memory.
   registration is good, and whether a dose is a whole plan's or one
   fraction's or one beam's. A file says its Dose Summation Type and the
   weight is where a fraction is made a course; both are for the screen
-  that chooses the doses (#102) to show and to ask.
+  that chooses the doses (#102) to show and to ask. That screen refuses a
+  dose of another patient than the image.
 - **The sum as a dose** (`summedDoseVolume`) is in gray, physical, on the
   grid it was made on, with a window from nothing to its most and no
   summation type: nothing was written, so nothing is said of how a file
@@ -1262,13 +1264,82 @@ it yet (#102): the result is a dose in memory.
   that are formulas. No dose from a planning system was summed, and
   nothing was compared with another program.
 
+### The summation screen
+
+One card over the viewport (`viewer/dose-sum/`, #102), opened from the Dose
+tools: `DoseSumController` holds what is chosen and makes the sum,
+`app-dose-sum-panel` shows it, and what the card says is worked out apart
+from it in `dose-sum-model.ts`.
+
+- **It sums what is on screen.** The image on screen is the reference: its
+  grid is the sum's. The doses are the dose layers over it, added from the
+  timeline as any overlay is; each is placed by the registration the layer
+  already has. So there is one way of placing a layer, and the sum reads a
+  dose exactly where the viewer draws it.
+- **The registration of each dose is shown before and after.** Each dose's
+  line says how it is placed: in the image's own frame, by a named
+  registration (and which way it was written), by hand, or not at all.
+  Where several registrations lead to a dose, the card offers the same
+  choice the layers panel does, and none is picked for the user. A dose
+  that nothing places cannot be summed and says why. The result lists each
+  dose with the registration that placed it.
+- **A dose is refused with the reason** when it is relative, effective, a
+  dose error, of another patient than the image (by Patient ID, when both
+  give one), or not placed.
+- **Fractions come from the plan only when the data says so.** A dose that
+  names one plan that is held, with one number of fractions, and whose
+  Dose Summation Type is `PLAN`, begins with that number, and the card
+  says it is by its plan (`AttachedObject.plans` is what says which plan a
+  dose names). Any other dose begins with none, and the user types it.
+  Each dose's summation type is shown: whether a dose is a whole course's
+  is the user's to say.
+- **No α/β is taken for the user.** The single value begins empty. By
+  structure, the editor of #100 is shown, over the structures drawn on the
+  image that bound an area and were not made editable.
+- **The sum is a dose layer of its own** (`LayersStore.setMade`, id
+  `dose-sum`), shown in place of the other layers over the image, and
+  called by what it is in the layers panel, beside the probe's value and on
+  the histograms' dose axis. It is reviewed as any dose is: isodose lines,
+  wash, probe, histograms. With several doses over an image, the dose
+  those go by is the first that is drawn.
+- **A sum is of the doses as they were placed when it was made.** It is a
+  layer only while that holds (`madeStill`): the same image, and each dose
+  it was made of still there and placed by the same matrix and field. The
+  layers are checked each time they are composed, so a stale sum is never
+  drawn, not for a frame; the controller then lets go of its values. There
+  is one sum at a time, and it is not saved (#101).
+- **Where the sum is not known it is not shown as zero.** The volume says
+  where it is known (`Volume.known`), and each reader goes by that:
+  - the probe says "not known here" where any voxel its reading blends is
+    not known (`volumeInterpolator`);
+  - isodose lines are not drawn there, by the same reading;
+  - a histogram leaves those points out and says what share of the
+    structure it is of (`knownAtIndex`);
+  - the texture holds a marker far below any image's values at those
+    voxels (`UNKNOWN_TEXEL`), and the shader draws nothing where a sample
+    is below `UNKNOWN_TEXEL_BELOW`; a colour wash draws nothing for any
+    sample with a share of the marker, since it is far below the window.
+    The card says what share of the image's voxels the sum is known at, how
+    much each dose was not known at, and how much had no α/β.
+- **How it is known to be right:** the controller's spec sums two doses
+  that are formulas, one through a shift, and compares every voxel of the
+  physical, EQD and BED sums, by one α/β and by structure, with the
+  formulas. `dose-sum.spec.ts` (end to end, on a hardware adapter and
+  Chromium's software one) does it in the application on the synthetic
+  patient treated twice (`syntheticRetreatment`): the probe reads the two
+  formulas added where both doses are known, to 0.06 Gy, their EQD2 to
+  0.08 Gy, and "not known" beyond either dose's grid. No dose from a
+  planning system was summed, nothing was compared with another program,
+  and a sum through a deformation field was not looked at in the
+  application.
+
 ### How a voxel's α/β is chosen
 
 The α/β a dose is converted with where tissues differ (#100): a ratio to
 each voxel of the grid the doses are summed on, from structures.
 `alpha-beta.ts` in `packages/dicom` makes it; `AlphaBetaStore` and
 `app-alpha-beta-editor` (`viewer/alpha-beta/`) hold and edit what it is made
-from. Nothing shows the editor yet: the summation screen will (#102).
+from. The summation screen shows the editor (#102).
 
 - **The values are the user's.** An α/β is a judgement about a tissue and
   an endpoint. The values structures start with are two generic ones, by RT

@@ -271,7 +271,7 @@ export class DvhController {
     const running = new AbortController();
     this.running = running;
     this.busy.set(true);
-    const { dims, spacing, geometry, data } = context.dose;
+    const { dims, spacing, geometry, data, known } = context.dose;
     const placement = context.placement;
     const over = (): boolean => running.signal.aborted;
     this.runner(
@@ -281,7 +281,7 @@ export class DvhController {
           spacing: context.base.spacing,
           geometry: context.base.geometry,
         },
-        dose: { dims, spacing, geometry, data },
+        dose: { dims, spacing, geometry, data, ...(known ? { known } : {}) },
         // The two members a histogram reads, and not the registrations they came of.
         through: placement ? { baseToLayer: placement.baseToLayer, field: placement.field } : null,
         rois: pending.map((one) => one.roi),

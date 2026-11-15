@@ -135,6 +135,21 @@ describe('which image series a patient’s radiotherapy objects belong to', () =
     expect(byStudy.size).toBe(0);
   });
 
+  it('says which plans a dose names, held or not, and of nothing else', () => {
+    const { bySeries } = relateRtObjects(IMAGES, [SET, PLAN, DOSE]);
+    const attached = bySeries.get('ct')!;
+    expect(attached.find((one) => one.kind === 'dose')!.plans).toEqual(['plan']);
+    expect(attached.find((one) => one.kind === 'plan')!.plans).toBeUndefined();
+    expect(attached.find((one) => one.kind === 'structure-set')!.plans).toBeUndefined();
+    // A plan that is not held is named all the same; a dose that names none says nothing.
+    const alone = object('dose', 'dose', [['dose.plan', 'not-held']], {
+      frameOfReferenceUid: 'frame-2',
+    });
+    expect(relateRtObjects(IMAGES, [alone]).bySeries.get('ct-2')![0].plans).toEqual(['not-held']);
+    const loose = object('dose', 'dose', [['dose.plan', 'plan']], { studyUid: 'study-2' });
+    expect(relateRtObjects([], [loose]).byStudy.get('study-2')![0].plans).toEqual(['plan']);
+  });
+
   it('lists what belongs to no image series held with the study it is filed in', () => {
     const elsewhere = object('structure-set', 'set', [['structure-set.series', 'not-held']]);
     const orphan = object('plan', 'plan', [['plan.structure-set', 'set']]);

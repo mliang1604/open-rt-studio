@@ -475,6 +475,16 @@
           >
             Histograms…
           </button>
+          <button
+            type="button"
+            [class.active]="doseSum.open()"
+            [attr.aria-expanded]="doseSum.open()"
+            data-dose-sum-open
+            title="Sum the doses over this image, as they are or converted to EQD or BED"
+            (click)="doseSum.toggle()"
+          >
+            Sum doses…
+          </button>
         </div>
       </details>
     }
@@ -1588,6 +1598,11 @@
     <!-- Dose-volume histograms (#96): a card over the viewport, read by pointing at its plot. -->
     @if (isReady() && dvhCtl.open()) {
       <app-dvh-panel />
+    }
+
+    <!-- Summing the doses over the image (#102): a card over the viewport. -->
+    @if (isReady() && doseSum.open()) {
+      <app-dose-sum-panel />
     }
 
     <!-- Keyboard & mouse shortcut help. A centred modal overlay; click outside or ✕/Esc to close. -->

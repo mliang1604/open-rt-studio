@@ -270,6 +270,15 @@ export interface Volume {
    */
   readonly dose?: DoseInfo;
   /**
+   * For a volume that was made here and is not known everywhere (a summed
+   * dose, #98): 1 for each voxel whose value is known, x fastest, and 0 for
+   * one whose value is not, where {@link data} holds 0. Left out for a
+   * volume that is known at every voxel. Whoever reads such a volume
+   * between its voxels has no value where any voxel the read blends is not
+   * known (`knownAtIndex`): a voxel that is not known is not one that is 0.
+   */
+  readonly known?: Uint8Array;
+  /**
    * Index→patient (LPS) placement, used to reslice anatomical planes. Optional:
    * when absent (e.g. a series with no spatial metadata, or a hand-built test
    * volume), reslicing treats the acquisition axes as the patient axes.

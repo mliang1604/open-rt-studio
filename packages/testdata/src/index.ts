@@ -83,6 +83,13 @@ export {
   type RtPlanOptions,
 } from './rt-course.js';
 export {
+  SYNTHETIC_RETREATMENT,
+  retreatmentFirstDoseAt,
+  retreatmentSecondDoseAt,
+  syntheticRetreatment,
+  syntheticSecondDoseGy,
+} from './retreatment.js';
+export {
   JPEG_EXTENDED_SYNTAX,
   JPEG_LOSSLESS_SYNTAX,
   SYNTHETIC_UNREADABLE,

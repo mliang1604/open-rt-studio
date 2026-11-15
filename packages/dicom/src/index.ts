@@ -103,6 +103,7 @@ export {
   type Resampled,
   type SliceRange,
   affineOf,
+  knownAtIndex,
   resampleMaps,
   resampleVolume,
   resampledVolume,

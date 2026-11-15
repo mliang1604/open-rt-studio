@@ -270,6 +270,40 @@ describe('sampleVolumeAtPatient', () => {
   });
 });
 
+describe('a volume that says where it is known (#98)', () => {
+  const GEOMETRY: VolumeGeometry = {
+    iStep: [2, 0, 0],
+    jStep: [0, 2, 0],
+    kStep: [0, 0, 2],
+    origin: [10, 20, 30],
+  };
+  const at = (i: number, j: number, k: number): Vec3 => [10 + 2 * i, 20 + 2 * j, 30 + 2 * k];
+  // The ramp i + 4j + 16k, known everywhere but at the voxel (2, 1, 0), which holds 0.
+  const whole = makeVolume([4, 4, 4], 1, 0, GEOMETRY);
+  const data = Float32Array.from(whole.data);
+  const known = new Uint8Array(64).fill(1);
+  const hole = (0 * 4 + 1) * 4 + 2;
+  data[hole] = 0;
+  known[hole] = 0;
+  const masked: Volume = { ...whole, data, known };
+
+  it('has no value where a voxel of the blend is not known, and is read elsewhere', () => {
+    const read = volumeInterpolator(masked);
+    expect(read(at(2, 1, 0))).toBeNull();
+    expect(read(at(1.5, 1, 0))).toBeNull();
+    expect(read(at(2.25, 0.5, 0.5))).toBeNull();
+    // Beside it, level with the middles of known voxels: read, and the ramp's value.
+    expect(read(at(1, 1, 0))).toBeCloseTo(5, 5);
+    expect(read(at(2, 2, 0))).toBeCloseTo(10, 5);
+    expect(read(at(2, 1, 1))).toBeCloseTo(22, 5);
+    expect(read(at(0.5, 2.5, 2.5))).toBeCloseTo(0.5 + 10 + 40, 5);
+  });
+
+  it('is read as 0 there without the mask, which is what the mask is for', () => {
+    expect(volumeInterpolator({ ...masked, known: undefined })(at(2, 1, 0))).toBe(0);
+  });
+});
+
 describe('interpolateVolumeAtPatient (#95)', () => {
   // 2 mm voxels; voxel (i, j, k) has its middle at (10 + 2i, 20 + 2j, 30 + 2k)
   // and the value i + 4j + 16k: a ramp, which a trilinear blend gives exactly.

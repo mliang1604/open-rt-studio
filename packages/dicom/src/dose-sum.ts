@@ -60,8 +60,10 @@
 // **What may be summed.** Doses in gray, of Dose Type PHYSICAL. A relative
 // dose is a share of something it does not name; an effective dose has been
 // converted already, by a model and numbers this code does not know; an
-// error dose is not a dose. To be converted, each dose must say in how many
-// fractions it was given: a whole number of 1 or more. Whether the doses are of
+// error dose is not a dose. A sum that was made here is not summed again:
+// where it is not known it holds 0, and its doses can be summed themselves.
+// To be converted, each dose must say in how many fractions it was given: a
+// whole number of 1 or more. Whether the doses are of
 // one patient, and whether a dose is a whole plan's or one fraction's, is
 // for whoever chooses them: a file says its Dose Summation Type, and the
 // weight is where a fraction is made a course.
@@ -175,7 +177,7 @@ export interface DoseSum {
 
 /** A dose as it is checked before it is summed: what it says of itself, and its weight. */
 export interface DoseSumCandidate {
-  readonly dose: Pick<DoseInfo, 'units' | 'type'> | undefined;
+  readonly dose: Pick<DoseInfo, 'units' | 'type' | 'sum'> | undefined;
   readonly weight: number;
   /** In how many fractions it was given, when that is known. */
   readonly fractions?: number;
@@ -223,6 +225,9 @@ export function doseSumProblem(
   for (const [index, { dose, weight }] of candidates.entries()) {
     const which = `Dose ${index + 1}`;
     if (!dose) return `${which} is not a dose.`;
+    if (dose.sum) {
+      return `${which} is itself a sum that was made here: sum the doses it was made of.`;
+    }
     if (dose.units !== 'GY') {
       return `${which} is relative: a share of something it does not name cannot be summed.`;
     }
@@ -459,9 +464,10 @@ export function sumDoses(
  * or, when its doses were converted, effective, with no file behind it and
  * with what it is a sum of (`dose.sum`), which names it wherever it is
  * shown. Its window runs from nothing to its most, as a
- * dose's does. Where the sum is not known its value is 0, and it is
- * {@link DoseSum.known} that says so: whoever shows or measures this dose
- * must go by that, and not take such a voxel for one that got no dose.
+ * dose's does. Where the sum is not known its value is 0, and the volume
+ * says where that is (`known`): the probe, the isodose lines and the
+ * histograms go by it, and do not take such a voxel for one that got no
+ * dose.
  */
 export function summedDoseVolume(sum: DoseSum, grid: ResampleGrid): Volume {
   let [min, max] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
@@ -479,6 +485,8 @@ export function summedDoseVolume(sum: DoseSum, grid: ResampleGrid): Volume {
     spacing: grid.spacing,
     geometry: resolveGeometry(grid),
     data: sum.data,
+    // Said only when there is something to say: a sum known everywhere is a dose like any other.
+    ...(sum.knownCount < sum.data.length ? { known: sum.known } : {}),
     min,
     max,
     // By the linear windowing the shader does, as a dose that is read has it (#94).

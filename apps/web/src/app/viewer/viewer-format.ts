@@ -88,6 +88,8 @@ export function doseLabel(dose: Pick<DoseInfo, 'type' | 'units' | 'sum'>): strin
  * four figures, since nothing says how large a relative dose's numbers are.
  */
 export function formatDose(value: number, dose: Pick<DoseInfo, 'units'>): string {
+  // A dose that was made here and is not known at the place (a sum, #98).
+  if (Number.isNaN(value)) return 'not known here';
   return dose.units === 'GY' ? `${value.toFixed(2)} Gy` : String(Number(value.toPrecision(4)));
 }
 

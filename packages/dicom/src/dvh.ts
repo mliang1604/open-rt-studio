@@ -46,7 +46,9 @@
 //
 // **Where the dose is not known.** A point outside the dose's grid (past
 // the outer halves of its outermost voxels), or where a deformation field
-// has no vector, has no dose. It is counted and is in no statistic: the
+// has no vector, has no dose; nor has one where a dose that was made here
+// says it is not known (`Volume.known`: a summed dose, #98), at any of the
+// voxels a read blends. It is counted and is in no statistic: the
 // histogram and every statistic are of the part of the structure where the
 // dose is known, and `samples` against `doses.length` says how much that
 // is. Nothing is taken to be zero.
@@ -60,6 +62,7 @@ import { fillLoops, roiLoopsBySlice, type VoxelLoop } from './contour-raster.js'
 import { resolveGeometry } from './label-volume.js';
 import { sampleDeformation } from './registration.js';
 import {
+  knownAtIndex,
   resampleMaps,
   sampleAtIndex,
   type ResampleGrid,
@@ -114,7 +117,7 @@ export interface DoseVolumeHistogram {
 }
 
 /** What is read of a dose: its values and where they are. */
-export type DvhDose = Pick<Volume, 'data' | 'dims' | 'spacing' | 'geometry'>;
+export type DvhDose = Pick<Volume, 'data' | 'dims' | 'spacing' | 'geometry' | 'known'>;
 
 export interface DvhOptions {
   /** How many points to sample the structure at, or somewhat more; {@link DVH_SAMPLES} when left out. */
@@ -236,14 +239,12 @@ export function doseVolumeHistogram(
           if (!moved) continue;
           [x, y, z] = [at[0] + moved[0], at[1] + moved[1], at[2] + moved[2]];
         }
-        const value = sampleAtIndex(
-          dose.data,
-          dose.dims,
-          s[0] * x + s[1] * y + s[2] * z + s[3],
-          s[4] * x + s[5] * y + s[6] * z + s[7],
-          s[8] * x + s[9] * y + s[10] * z + s[11],
-          'linear',
-        );
+        const dx = s[0] * x + s[1] * y + s[2] * z + s[3];
+        const dy = s[4] * x + s[5] * y + s[6] * z + s[7];
+        const dz = s[8] * x + s[9] * y + s[10] * z + s[11];
+        // A dose that says where it is known is read only there.
+        if (dose.known && !knownAtIndex(dose.known, dose.dims, dx, dy, dz)) continue;
+        const value = sampleAtIndex(dose.data, dose.dims, dx, dy, dz, 'linear');
         if (Number.isNaN(value)) continue;
         if (known === doses.length) {
           const larger = new Float32Array(doses.length * 2);
