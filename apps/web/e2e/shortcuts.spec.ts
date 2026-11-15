@@ -164,6 +164,14 @@ test('each key does what the help says', async ({ page }) => {
   await page.keyboard.press('p');
   await expect.poll(() => axialSlice(page), { timeout: 5_000 }).not.toBe(before);
   await page.keyboard.press('p');
+  // The app is zoneless: a tick just before the key is drawn at the next
+  // frame. Wait for two, so that what is read is where cine stopped (#275).
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
   const stopped = await axialSlice(page);
   await page.waitForTimeout(500);
   expect(await axialSlice(page)).toBe(stopped);
