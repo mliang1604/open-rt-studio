@@ -316,6 +316,21 @@ its own.
   most 80 cells across, so it holds for any orientation or tilt. It is of
   the slice only: on the sphere shape the voxels above and below are
   painted as their own values allow, and are not previewed.
+- **Cleanup** (#110, labs) works on the structure the brush paints into,
+  in each slice or in the volume (`label-cleanup.ts`): fill holes, remove
+  islands smaller than an area (mm², 2D) or a volume (mm³, 3D), keep the
+  largest piece (of each slice in 2D), smooth. Sizes and the smoothing
+  radius are in millimetres by the grid's spacing. A hole is what is not
+  the structure's and is closed in by it; another structure's voxels in a
+  hole are part of it, and "protect other structures" is what keeps them.
+  Smoothing is one vote: a voxel is the structure's when more than half of
+  the voxels within the radius (a ball, or a disc in the slice) are; a
+  radius of no voxel, or of more than 4096 voxels, is refused. Each is one
+  click and one edit, through the shared constraints, that can be undone
+  (`ContourToolsController.apply`); it says how many voxels changed and how
+  many the constraints kept. The tool takes no stroke: with it in hand the
+  panes pan as usual. The work is done on the page's own thread, over the
+  box about the structure.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

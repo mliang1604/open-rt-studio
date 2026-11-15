@@ -167,3 +167,45 @@ test('the threshold brush previews what it would paint, paints, and is one undo 
   expect(await capturedColour(page)).toBeCloseTo(before, 1);
   expectNoProblems(problems);
 });
+
+test('a cleanup fills the hole of a painted ring in its slice, as one undo (#110)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  // A ring, dragged round in one stroke.
+  const centre = await at(page, 0.5, 0.6);
+  const radius = 35;
+  const round = (step: number) => ({
+    x: centre.x + radius * Math.cos((step / 48) * 2 * Math.PI),
+    y: centre.y + radius * Math.sin((step / 48) * 2 * Math.PI),
+  });
+  await page.mouse.move(round(0).x, round(0).y);
+  await page.mouse.down();
+  for (let step = 1; step <= 48; step++) await page.mouse.move(round(step).x, round(step).y);
+  await page.mouse.up();
+  const ring = await capturedColour(page);
+
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="cleanup"]').click();
+  await page.locator('[data-cleanup-dimension="2d"]').check();
+  await page.locator('[data-cleanup="fill"]').click();
+  await expect(page.locator('[data-cleanup-said]')).toHaveText(
+    /^Fill holes: \d+ voxels changed\.$/,
+  );
+  expect(await capturedColour(page)).toBeGreaterThan(ring + 0.05);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Fill holes (Ctrl/⌘+Z)',
+  );
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(ring, 1);
+  expectNoProblems(problems);
+});

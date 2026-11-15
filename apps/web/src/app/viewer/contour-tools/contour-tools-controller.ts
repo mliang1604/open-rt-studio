@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject, signal } from '@angular/core';
-import type { LabelConstraints } from '@open-rt-studio/dicom';
+import type { LabelChange, LabelConstraints } from '@open-rt-studio/dicom';
 
 import { PreferencesStore } from '../../preferences-store';
 import { BrushController } from '../brush-controller';
@@ -176,6 +176,21 @@ export class ContourToolsController {
     for (const tool of this.tools) {
       if (tool === this.held() || !pointer) tool.hover?.(this.context, pointer);
     }
+  }
+
+  /**
+   * Make changes at once, as one edit called `name` that can be undone,
+   * through the constraints: for a tool that is a click and not a stroke
+   * (a cleanup, #110). Nothing is done while a stroke is under way.
+   * Returns how many voxels changed.
+   */
+  apply(name: string, changes: readonly LabelChange[]): number {
+    if (this.stroking) return 0;
+    this.store.beginEdit(name);
+    let changed = 0;
+    for (const change of changes) changed += this.store.applyChange(change, this.constraints());
+    this.store.commitEdit();
+    return changed;
   }
 
   /** Undo the latest edit; not while a stroke is under way. Returns what was undone. */
