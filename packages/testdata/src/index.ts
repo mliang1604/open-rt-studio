@@ -40,6 +40,32 @@ export {
 } from './deformable-registration.js';
 export { SYNTHETIC_PATIENT_STUDIES, syntheticPatient } from './patient.js';
 export {
+  PHANTOM_BALL_MM3,
+  PHANTOM_IN_PLANE,
+  PHANTOM_RAMP_SLOPE,
+  PHANTOM_RIGID,
+  PHANTOM_STRETCH,
+  PHANTOM_SWELL,
+  PHANTOM_SWELL_THEN_RIGID,
+  PHANTOM_WAVES_SLOPE,
+  RESAMPLING_PHANTOM,
+  phantomBallDistance,
+  phantomFieldGrid,
+  phantomGrid,
+  phantomInBall,
+  phantomInverse,
+  phantomRamp,
+  phantomSwellGridBound,
+  phantomVoxelPoint,
+  phantomWaves,
+  phantomWavesInterpolationBound,
+  phantomWithin,
+  type PhantomFieldGrid,
+  type PhantomGrid,
+  type PhantomMatrix,
+  type PhantomTransform,
+} from './resampling-phantom.js';
+export {
   SYNTHETIC_REGISTERED_PAIR,
   registeredMrValueAtCtVoxel,
   syntheticRegisteredPair,

@@ -36,6 +36,11 @@ and `syntheticRtDose` write their references only when asked
 (`referencedSeriesUid`, `referencedPlanUid`, `referencedStructureSetUid`), so
 the files other tests use are byte for byte what they were.
 
+`resampling-phantom.ts` is not DICOM at all: images, a ball and transforms
+that are formulas, each transform with its inverse, for the resampling
+validation suite (`resampling-validation.spec.ts`,
+[what it holds the code to](../../docs/resampling-validation.md)).
+
 The package has no runtime dependencies and uses no Node-only or DOM-only
 APIs, so the same generators run in Vitest, in Playwright and in a browser.
 

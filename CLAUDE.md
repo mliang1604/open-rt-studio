@@ -48,8 +48,10 @@ application. Never commit patient data or real DICOM files
   `src/log-identifiers.spec.ts`, which searches the application log for
   identifiers.
 - `apps/desktop`, `native/`: placeholders until M2 and M3.
-- `docs/`: architecture, license headers, test data policy, and the parity
-  audit against dicom-workspace.
+- `docs/`: architecture, license headers, test data policy, the parity
+  audit against dicom-workspace, and the resampling validation
+  ([docs/resampling-validation.md](docs/resampling-validation.md)): its
+  tolerances are the suite's, and a test fails when the two differ.
 - `scripts/`: repository checks run by CI.
 
 The backlog is in GitHub issues. Each issue has scope, a "done when" list and
