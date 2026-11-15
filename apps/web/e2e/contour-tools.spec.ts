@@ -111,7 +111,8 @@ test('a tool that is not finished is offered only with the labs flag, which is r
     'aria-pressed',
     'false',
   );
-  const middle = await at(page, 0.5, 0.5);
+  // Off the oblique knob at the crosshair's centre, which takes a press there (#283).
+  const middle = await at(page, 0.45, 0.45);
   await page.mouse.click(middle.x, middle.y);
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
 
@@ -218,7 +219,8 @@ test('a margin grows a painted structure, and shrinks it back, each one undo (#1
   await page.getByRole('button', { name: /^Overlays/ }).click();
   await page.getByTitle('Create a new structure and paint it').click();
   await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
-  const middle = await at(page, 0.5, 0.5);
+  // Off the oblique knob at the crosshair's centre, which takes a press there (#283).
+  const middle = await at(page, 0.45, 0.45);
   await page.mouse.click(middle.x, middle.y);
   const painted = await capturedColour(page);
 
@@ -278,7 +280,8 @@ test('a boolean of a painted and an imported structure is previewed, made into a
   await requireWebGpu(page);
   await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
   await page.getByTitle('Create a new structure and paint it').click();
-  const middle = await at(page, 0.5, 0.5);
+  // Off the oblique knob at the crosshair's centre, which takes a press there (#283).
+  const middle = await at(page, 0.45, 0.45);
   await page.mouse.click(middle.x, middle.y);
 
   await page.locator('[data-labs]').check();
