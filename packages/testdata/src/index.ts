@@ -13,9 +13,13 @@ export {
   studyUid,
   SYNTHETIC_FOLLOW_UP_STUDY,
   SYNTHETIC_FRAME_OF_REFERENCE,
+  encodedText,
+  SYNTHETIC_LATIN1_PATIENT,
   SYNTHETIC_PATIENT,
   SYNTHETIC_STUDY,
   SYNTHETIC_UID_ROOT,
+  SYNTHETIC_UTF8_PATIENT,
+  type SyntheticCharacterSet,
   type SyntheticFile,
   type SyntheticPatientIdentity,
   type SyntheticStudy,
@@ -91,6 +95,7 @@ export {
   type RegistrationOptions,
   type RtPlanOptions,
 } from './rt-course.js';
+export { characterSetStudy, syntheticCharacterSetPatient } from './character-sets.js';
 export {
   SYNTHETIC_BEAM_DOSES,
   syntheticBeamDoseGy,

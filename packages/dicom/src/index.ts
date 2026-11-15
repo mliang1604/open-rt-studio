@@ -110,6 +110,14 @@ export {
   sampleAtIndex,
 } from './resample.js';
 export {
+  type CharacterSetUse,
+  UTF8_CHARACTER_SET,
+  characterSetValues,
+  decoderFor,
+  readTextByCharacterSet,
+  writableText,
+} from './character-set.js';
+export {
   type InstanceHeader,
   type InstanceHeaderResult,
   type InstanceReference,

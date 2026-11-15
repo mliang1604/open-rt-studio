@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
+  readInstanceHeader,
   parseStructureSet,
   type PropagatedRoi,
   type Roi,
@@ -156,14 +157,16 @@ describe('a propagated structure set as a file', () => {
     expect(read.rois.every((one) => one.generation?.resampled)).toBe(true);
   });
 
-  it('writes its own words in plain characters, however the set was labelled', () => {
+  it('writes its own words as they are, in UTF-8, however the set was labelled (#249)', () => {
     const odd = propagatedFile({ ...FACTS, set: { ...SET, label: 'Pläne → A' } }, filed, NOW);
-    // Told as it is; written without what a file may not hold undeclared.
     expect(odd.description).toBe('Propagated: Pläne → A onto Planning CT');
-    expect(parseStructureSet('x.dcm', odd.bytes)).not.toBeNull();
-    const text = new TextDecoder('latin1').decode(odd.bytes);
-    expect(text).toContain('Propagated: Pl?ne ? A onto Planning CT');
-    expect(text).toContain('Structures of structure set "Pl?ne ? A"');
+    // Read back as a file is read here: by the character set it says, UTF-8.
+    const header = readInstanceHeader(new Uint8Array(odd.bytes));
+    expect(header.ok && header.header.series.description).toBe(
+      'Propagated: Pläne → A onto Planning CT',
+    );
+    const read = parseStructureSet('x.dcm', odd.bytes)!;
+    expect(read.description).toContain('Structures of structure set "Pläne → A"');
   });
 });
 

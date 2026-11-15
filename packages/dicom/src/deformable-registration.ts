@@ -36,6 +36,7 @@ import {
   type FrameUid,
   type Transform,
 } from './registration.js';
+import { readTextByCharacterSet } from './character-set.js';
 import { matrixDecimal } from './spatial-registration.js';
 import type { Vec3 } from './types.js';
 
@@ -310,6 +311,8 @@ export function parseDeformableRegistration(
   let dataSet: DataSet;
   try {
     dataSet = dicomParser.parseDicom(new Uint8Array(buffer));
+    // Its text by the character set it says it is in (#249).
+    readTextByCharacterSet(dataSet);
   } catch {
     return null;
   }

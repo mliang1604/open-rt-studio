@@ -4,6 +4,7 @@
 
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
+import { readTextByCharacterSet } from './character-set.js';
 import type { Series } from './series.js';
 import {
   framesMatch,
@@ -33,6 +34,8 @@ export function parseStructureSet(name: string, buffer: ArrayBuffer): StructureS
   let dataSet: DataSet;
   try {
     dataSet = dicomParser.parseDicom(new Uint8Array(buffer));
+    // Its text by the character set it says it is in (#249).
+    readTextByCharacterSet(dataSet);
   } catch {
     return null; // Not a parseable DICOM file.
   }

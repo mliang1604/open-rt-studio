@@ -644,6 +644,11 @@ without asking for each.
   sends it as `plan` with what the instance refers to; `null` for anything
   else. A plan filed before version 5 has none until its file is ingested
   again.
+- **Names are read by the file's character set** (#249), as the viewer
+  reads them: a name in UTF-8 or Latin-1 is kept, listed and searched for
+  as it was written. A search compares letters A to Z without regard to
+  case, and every other character as it is. A file with ISO 2022 escapes
+  (several character sets) is kept a byte to a character, as before.
 - **Whether an object says it is derived.** The index keeps, with each
   instance, whether its header says it was made from others
   (`instance.derived`, from version 7 of the schema): an image whose Image

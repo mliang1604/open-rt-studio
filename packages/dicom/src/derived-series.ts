@@ -26,12 +26,11 @@
 // value between two of them is rounded to the nearer. A value the 16 bits
 // cannot hold is held to the nearest they can, and counted.
 //
-// **Text.** The patient's name and ID and the study's description are
-// written as the bytes they were read as, with the character set the image
-// they are from declares, so that they mean what they meant. What is said
-// here of the new series (its description, how it was derived) is written
-// in plain ASCII, which every character set a DICOM file may declare agrees
-// on; a character outside it becomes `?`.
+// **Text.** Everything is written in UTF-8 and the series says so
+// (ISO_IR 192, #249): the patient's name and ID and the study's description
+// as they were read, and what is said here of the new series (its
+// description, how it was derived) as it was given. A character that prints
+// nothing becomes `?`.
 
 import { DEFORMABLE_SPATIAL_REGISTRATION_SOP_CLASS } from './deformable-registration.js';
 import {
@@ -45,13 +44,13 @@ import {
   generateUid,
   integers,
   p10File,
-  plain,
   precise,
   preciseDs,
   sequence,
   text,
   uid,
   us,
+  writableText,
 } from './p10-encode.js';
 import { SPATIAL_REGISTRATION_SOP_CLASS } from './spatial-registration.js';
 import type { Vec3, Volume } from './types.js';
@@ -92,11 +91,6 @@ export interface DerivedSeriesContent {
   readonly frameOfReferenceUid: string;
   readonly patientName: string | null;
   readonly patientId: string | null;
-  /**
-   * Specific Character Set (0008,0005) of the image the patient's name and
-   * ID and the study's description were read from; null when it has none.
-   */
-  readonly specificCharacterSet?: string | null;
   /** The study the new series is filed in. */
   readonly studyInstanceUid: string;
   readonly studyDate: string | null;
@@ -322,9 +316,6 @@ export function writeDerivedSeries(
         ? 'DERIVED\\SECONDARY\\OTHER'
         : 'DERIVED\\SECONDARY';
 
-  const declared = content.specificCharacterSet?.trim() ?? '';
-  const characterSet = VALID['CS'].test(declared) ? declared : '';
-
   const orEmpty = (group: number, el: number, vr: string, value: string | null | undefined) =>
     element(group, el, vr, text(value ?? ''));
   const optional = (group: number, el: number, vr: string, value: string | null | undefined) =>
@@ -358,7 +349,6 @@ export function writeDerivedSeries(
     }
     // Elements are in ascending tag order, as the standard requires.
     const dataSet = concat([
-      ...(characterSet ? [element(0x0008, 0x0005, 'CS', text(characterSet))] : []), // SpecificCharacterSet
       element(0x0008, 0x0008, 'CS', text(imageType)), // ImageType
       element(0x0008, 0x0016, 'UI', uid(sopClassUid)), // SOPClassUID
       element(0x0008, 0x0018, 'UI', uid(sopInstanceUid)), // SOPInstanceUID
@@ -375,7 +365,7 @@ export function writeDerivedSeries(
       element(0x0008, 0x0070, 'LO', text(MANUFACTURER)), // Manufacturer
       orEmpty(0x0008, 0x0090, 'PN', null), // ReferringPhysicianName
       ...optional(0x0008, 0x1030, 'LO', content.studyDescription), // StudyDescription
-      element(0x0008, 0x103e, 'LO', text(plain(content.seriesDescription).slice(0, 64))), // SeriesDescription
+      element(0x0008, 0x103e, 'LO', text(writableText(content.seriesDescription, 64))), // SeriesDescription
       // RelatedSeriesSequence: the series the values were read from.
       ...(source.studyInstanceUid
         ? [
@@ -388,7 +378,7 @@ export function writeDerivedSeries(
             ]),
           ]
         : []),
-      element(0x0008, 0x2111, 'ST', text(plain(content.derivationDescription).slice(0, 1024))), // DerivationDescription
+      element(0x0008, 0x2111, 'ST', text(writableText(content.derivationDescription, 1024))), // DerivationDescription
       // DerivationCodeSequence
       sequence(0x0008, 0x9215, [code('113085', 'DCM', 'Spatial resampling')]),
       orEmpty(0x0010, 0x0010, 'PN', content.patientName), // PatientName

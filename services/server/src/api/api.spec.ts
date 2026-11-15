@@ -8,7 +8,11 @@ import {
   SYNTHETIC_PLAN_FRACTIONS,
   SYNTHETIC_PLAN_PRESCRIPTION_GY,
   SYNTHETIC_RT_COURSE as COURSE,
+  SYNTHETIC_LATIN1_PATIENT,
   SYNTHETIC_STUDY,
+  SYNTHETIC_UTF8_PATIENT,
+  characterSetStudy,
+  syntheticCharacterSetPatient,
   syntheticCtSeries,
   syntheticRtCourse,
   syntheticRtStruct,
@@ -191,6 +195,34 @@ describe('upload', () => {
     const response = await upload(slice.bytes, '?onDifferent=maybe');
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: 'invalid-parameter' });
+  });
+});
+
+describe('names outside ASCII (#249)', () => {
+  it('lists and finds a patient by the name their files say, in UTF-8 or in Latin-1', async () => {
+    const made = await api({}, [
+      ...syntheticCharacterSetPatient(SYNTHETIC_UTF8_PATIENT, 2, 8),
+      ...syntheticCharacterSetPatient(SYNTHETIC_LATIN1_PATIENT, 2, 8),
+    ]);
+    const page = await made.json<PageOf<{ patientId: string; name: string }>>('/patients');
+    expect(Object.fromEntries(page.items.map((one) => [one.patientId, one.name]))).toEqual({
+      [SYNTHETIC_UTF8_PATIENT.id]: SYNTHETIC_UTF8_PATIENT.name,
+      [SYNTHETIC_LATIN1_PATIENT.id]: SYNTHETIC_LATIN1_PATIENT.name,
+    });
+    const found = async (name: string): Promise<string[]> =>
+      (
+        await made.json<PageOf<{ patientId: string }>>(`/patients?name=${encodeURIComponent(name)}`)
+      ).items.map((one) => one.patientId);
+    expect(await found('*山田*')).toEqual([SYNTHETIC_UTF8_PATIENT.id]);
+    expect(await found('Łukasiewicz*')).toEqual([SYNTHETIC_UTF8_PATIENT.id]);
+    expect(await found('Ødegård^José')).toEqual([SYNTHETIC_LATIN1_PATIENT.id]);
+    // The study's description too.
+    const studies = await made.json<PageOf<{ description: string | null }>>(
+      `/studies?patientId=${SYNTHETIC_UTF8_PATIENT.id}`,
+    );
+    expect(studies.items.map((one) => one.description)).toEqual([
+      characterSetStudy(SYNTHETIC_UTF8_PATIENT).description,
+    ]);
   });
 });
 

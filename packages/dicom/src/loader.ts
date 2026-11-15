@@ -4,6 +4,7 @@
 
 import dicomParser from 'dicom-parser';
 import type { DataSet, Element as DicomElement } from 'dicom-parser';
+import { readTextByCharacterSet } from './character-set.js';
 import { jpegFrameHeader } from './jpeg-header.js';
 import { describeTransferSyntax, isDctJpegSyntax } from './transfer-syntax.js';
 import { decodeWasmFrame, isWasmTransferSyntax, type DecodedFrame } from './wasm-codecs.js';
@@ -190,6 +191,8 @@ function setupFile(name: string, buffer: ArrayBuffer): FileSetup | null {
   let dataSet: DataSet;
   try {
     dataSet = dicomParser.parseDicom(bytes);
+    // Its text by the character set it says it is in (#249).
+    readTextByCharacterSet(dataSet);
   } catch {
     return null; // Not a parseable DICOM file.
   }

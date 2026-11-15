@@ -4,6 +4,7 @@
 
 import dicomParser from 'dicom-parser';
 
+import { readInstanceHeader } from './instance-header.js';
 import { IDENTITY_MAT4, multiplyMat4, rigidMat4, type Mat4 } from './mat4.js';
 import { concat, element, p10File, sequence, text, uid } from './p10-encode.js';
 import { invertTransform, mapPoint, matrixTransform } from './registration.js';
@@ -223,6 +224,20 @@ describe('writing a Spatial Registration object', () => {
     const matrix = matrixItem.elements['x0070030a'].items![0].dataSet!;
     expect(matrix.string('x0070030c')?.trim()).toBe('RIGID');
     expect(matrix.string('x300600c6')!.split('\\')).toHaveLength(16);
+  });
+
+  it('keeps a name outside ASCII, written in UTF-8 and saying so (#249)', () => {
+    const name = 'Łukasiewicz-Müller^Zoë 山田';
+    const bytes = writeSpatialRegistration(
+      { registeredFrame: PLANNING, transforms: [followUpToPlanning] },
+      { patientName: name, patientId: 'SYN-0192', description: 'Folge → Planung' },
+    );
+    const header = readInstanceHeader(new Uint8Array(bytes));
+    if (!header.ok) throw new Error(header.reason);
+    expect(header.header.patient.name).toBe(name);
+    // Its Content Description, as the registration reader reads it.
+    expect(parseSpatialRegistration(bytes)!.description).toBe('Folge → Planung');
+    expect(dicomParser.parseDicom(new Uint8Array(bytes)).string('x00080005')).toBe('ISO_IR 192');
   });
 
   it('writes a new UID each time unless it is given one', () => {

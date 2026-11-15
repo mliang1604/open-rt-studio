@@ -5,6 +5,7 @@
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 
+import { readTextByCharacterSet } from './character-set.js';
 import { IDENTITY_MAT4, matrixProblem, type MatrixKind } from './mat4.js';
 import {
   MANUFACTURER,
@@ -128,6 +129,8 @@ export function parseSpatialRegistration(buffer: ArrayBuffer): SpatialRegistrati
   let dataSet: DataSet;
   try {
     dataSet = dicomParser.parseDicom(new Uint8Array(buffer));
+    // Its text by the character set it says it is in (#249).
+    readTextByCharacterSet(dataSet);
   } catch {
     return null;
   }

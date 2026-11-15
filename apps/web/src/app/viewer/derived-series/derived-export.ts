@@ -59,12 +59,6 @@ export function sourceOf(series: Series): DerivedSeriesContent['source'] {
   };
 }
 
-/** Specific Character Set of a series' first image, or null. */
-export function characterSetOf(series: Series): string | null {
-  const tag = series.metadata?.rawTags.find((one) => one.tag.toLowerCase() === '(0008,0005)');
-  return tag?.value.trim() || null;
-}
-
 /** A matrix as numbers in a row, to six places. */
 const matrixText = (matrix: readonly number[]): string =>
   matrix.map((value) => String(Math.round(value * 1e6) / 1e6)).join(' ');
@@ -154,7 +148,6 @@ export function derivedFiles(
       frameOfReferenceUid: filed.frameOfReferenceUid,
       patientName: base.patientName,
       patientId: base.patientId,
-      specificCharacterSet: characterSetOf(base),
       studyInstanceUid: filed.studyInstanceUid,
       studyDate: base.studyDate,
       studyTime: base.studyTime,

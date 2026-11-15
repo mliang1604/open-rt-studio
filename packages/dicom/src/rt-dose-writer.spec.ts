@@ -275,16 +275,18 @@ describe('writeSummedDose', () => {
 
   it('says what an RT Dose must, as a dose of 32 unsigned bits in gray', () => {
     const sum = sumOn(ASKEW, PHYSICAL, ramp);
-    const written = writeSummedDose(
-      contentOf(sum, { specificCharacterSet: 'ISO_IR 100', seriesNumber: 7 }),
-      { createdAt: AT, sopInstanceUid: '2.25.1', seriesInstanceUid: '2.25.2' },
-    );
+    const written = writeSummedDose(contentOf(sum, { seriesNumber: 7 }), {
+      createdAt: AT,
+      sopInstanceUid: '2.25.1',
+      seriesInstanceUid: '2.25.2',
+    });
     expect(written).toMatchObject({ sopInstanceUid: '2.25.1', seriesInstanceUid: '2.25.2' });
     const dataSet = dicomParser.parseDicom(new Uint8Array(written.bytes));
     const said = (tag: string): string | undefined => dataSet.string(tag);
     expect(said('x00020002')).toBe(RT_DOSE_SOP_CLASS);
     expect(said('x00020010')).toBe('1.2.840.10008.1.2.1');
-    expect(said('x00080005')).toBe('ISO_IR 100');
+    // Written in UTF-8, and it says so (#249).
+    expect(said('x00080005')).toBe('ISO_IR 192');
     expect(said('x00080008')).toBe('DERIVED\\SECONDARY');
     expect(said('x00080016')).toBe(RT_DOSE_SOP_CLASS);
     expect(said('x00080018')).toBe('2.25.1');
@@ -503,13 +505,15 @@ describe('writeSummedDose', () => {
     ).toBeUndefined();
   });
 
-  it('writes what is said in words as plain ASCII, no longer than its element may be', () => {
+  it('writes what is said in words as it was given, in UTF-8, no longer than its element may be (#249)', () => {
     const sum = sumOn(ASKEW, PHYSICAL, ramp);
     const long = `α/β “quoted” ${'x'.repeat(1100)}`;
     const written = writeSummedDose(contentOf(sum, { derivationDescription: long }));
-    const said = dicomParser.parseDicom(new Uint8Array(written.bytes)).string('x00082111')!;
-    expect(said).toHaveLength(1024);
-    expect(said.startsWith('?/? ?quoted? xxx')).toBe(true);
+    // Read as a file is read here: by the character set it says.
+    const [plane] = parseFile('sum.dcm', written.bytes);
+    const said = plane.metadata!.derivation!.description!;
+    expect(Array.from(said)).toHaveLength(1024);
+    expect(said.startsWith('α/β “quoted” xxx')).toBe(true);
   });
 
   it('refuses what an RT Dose cannot hold, and says why', () => {
