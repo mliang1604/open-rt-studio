@@ -16,6 +16,7 @@ import type {
   HarnessGrid,
   HarnessResult,
   ResampleHarness,
+  SumCase,
 } from './fixtures/resample-harness';
 
 // The resampling engine (#88) on a real GPU. It has no screen of its own
@@ -189,5 +190,76 @@ test('an image the GPU cannot hold is resampled by the reference, and the result
     `Source image ${found.limit + 1}×2×2 exceeds this GPU's 3D texture limit of ${found.limit}.`,
   );
   expect(found.same).toBe(true);
+  expectNoProblems(problems);
+});
+
+test('doses are summed with the GPU as the reference sums them, and as the formula says (#98)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await openHarness(page);
+  const sum = (spec: SumCase) =>
+    page.evaluate(
+      (given) => (globalThis as unknown as HarnessPage).resampleHarness.runSum(given),
+      spec,
+    );
+  // The first dose holds the whole of the grid the sum is on. The second,
+  // the source of the cases above, holds part of where its matrix takes it.
+  const first: HarnessGrid = { dims: [24, 22, 24], spacing: [2, 2, 2], origin: [-3, -3, -3] };
+  const weights = [0.5, 2] as const;
+
+  // Through a matrix: known where the second dose is, and the formula there.
+  const rigid = await sum({ reference, first, second: source, matrix, weights });
+  expect(rigid.by).toEqual(['gpu', 'gpu']);
+  expect(rigid.disagreeKnown).toBe(0);
+  expect(rigid.knownGpu).toBe(rigid.knownCpu);
+  expect(rigid.sameCounts).toBe(true);
+  expect(rigid.knownCpu).toBeGreaterThan(rigid.voxels / 5);
+  expect(rigid.knownCpu).toBeLessThan((rigid.voxels * 4) / 5);
+  expect(rigid.maxDifference).toBeLessThanOrEqual(TOLERANCE * rigid.range);
+  expect(rigid.againstFormula).toBeGreaterThan(rigid.knownCpu * 0.95);
+  expect(rigid.maxFromFormulaCpu).toBeLessThan(2e-3);
+  expect(rigid.maxFromFormulaGpu).toBeLessThan(2e-3);
+  expect(rigid.nothing).toBe(0);
+
+  // The second dose said to be nothing beyond its grid: known everywhere,
+  // and where the dose is not, the sum is the first dose alone.
+  const beyond = await sum({
+    reference,
+    first,
+    second: source,
+    matrix,
+    weights,
+    secondIsNothingBeyond: true,
+  });
+  expect(beyond.disagreeKnown).toBe(0);
+  expect(beyond.knownCpu).toBe(beyond.voxels);
+  expect(beyond.nothing).toBe(beyond.voxels - rigid.knownCpu);
+  expect(beyond.sameCounts).toBe(true);
+  expect(beyond.maxDifference).toBeLessThanOrEqual(TOLERANCE * beyond.range);
+  expect(beyond.maxFromFormulaCpu).toBeLessThan(2e-3);
+  expect(beyond.maxFromFormulaGpu).toBeLessThan(2e-3);
+
+  // Through a deformation field with undefined vectors, the dose said to be
+  // nothing beyond its grid: not known where the field has no vector, by
+  // either way, at the very same voxels.
+  const field = await sum({
+    reference,
+    first,
+    second: source,
+    matrix,
+    field: { grid: fieldGrid, kind: 'even', holes: true },
+    weights,
+    secondIsNothingBeyond: true,
+  });
+  expect(field.by).toEqual(['gpu', 'gpu']);
+  expect(field.disagreeKnown).toBe(0);
+  expect(field.sameCounts).toBe(true);
+  expect(field.knownCpu).toBeLessThan(field.voxels - 1000);
+  expect(field.knownCpu).toBeGreaterThan(1000);
+  expect(field.nothing).toBeGreaterThan(1000);
+  expect(field.maxDifference).toBeLessThanOrEqual(TOLERANCE * field.range);
+  expect(field.maxFromFormulaCpu).toBeLessThan(2e-3);
+  expect(field.maxFromFormulaGpu).toBeLessThan(2e-3);
   expectNoProblems(problems);
 });

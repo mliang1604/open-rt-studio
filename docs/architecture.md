@@ -1174,6 +1174,65 @@ this says what it does.
   on the dose axis; anything laid between or beyond a structure's
   contours.
 
+### How doses are summed
+
+The physical doses of several timepoints on one grid, each taken there
+through the registration that places it, each times a weight (#98).
+`dose-sum.ts` in `packages/dicom` is the reference; `dose-sum.ts` in
+`packages/render` does the same with the GPU's help. There is no screen for
+it yet (#102): the result is a dose in memory.
+
+- **Each dose is resampled onto the grid, then they are added.** A voxel's
+  centre is taken to a dose by its registration and the dose is read there,
+  between its voxels, by linear interpolation: the resampling of #88, on
+  the GPU when there is one and it can and by the reference otherwise. A
+  deformation field is used as it is written; none is turned round. What
+  is done where a dose is not known, and the adding, are one piece of code
+  that both ways share, so they differ only by what the two ways of
+  resampling differ by: single against double precision.
+- **A dose is carried as it is.** It is a value at a place: gray in the
+  tissue there. It is not made more or less by how a field squeezes or
+  stretches the tissue, as an amount of something would be.
+- **Where a dose is not known, the sum is not known.** A dose says nothing
+  outside its own grid, and nothing can be read where a field has no
+  vector. A voxel where any dose with a weight is not known has no sum: it
+  is marked (`known`), counted, and holds 0 only because a value must be
+  something. Whoever shows or measures a sum must go by the mark, and not
+  take such a voxel for one that got no dose.
+- **Nothing is taken to be zero unless the caller says so of a dose**
+  (`beyondGrid: 'nothing'`). A planning system's dose grid is often laid to
+  hold all of the dose, and then a dose is nothing beyond it; that is for
+  whoever chose the doses to say, and the result counts the voxels it was
+  said of. It is never said of a place where a field has no vector: there
+  it is the place in the dose that is not known.
+- **A weight** multiplies a dose before it is added. A dose with a weight
+  of 0 is left out altogether: it is not read, and where it is not known
+  takes nothing from the sum.
+- **What may be summed:** up to 16 doses in gray of Dose Type PHYSICAL,
+  each with a weight of 0 or more. A relative dose is a share of something
+  it does not name; an effective dose has been converted already (#99
+  converts and sums); a dose error is not a dose. Each is refused with the
+  reason, by its place among the doses.
+- **What is not checked here:** that the doses are of one patient, that a
+  registration is good, and whether a dose is a whole plan's or one
+  fraction's or one beam's. A file says its Dose Summation Type and the
+  weight is where a fraction is made a course; both are for the screen
+  that chooses the doses (#102) to show and to ask.
+- **The sum as a dose** (`summedDoseVolume`) is in gray, physical, on the
+  grid it was made on, with a window from nothing to its most and no
+  summation type: nothing was written, so nothing is said of how a file
+  would call it (#101).
+- **How close.** For doses that rise evenly, through a turn and a shift and
+  through a field that goes evenly with the place, the suite holds the sum
+  to the analytic sum within 0.0001 Gy at every voxel where it is known,
+  for doses of some tens of gray, and holds where it is known to the
+  formula's answer voxel for voxel. On a real GPU (`resample-gpu.spec.ts`,
+  a hardware adapter and Chromium's software one) the two ways agree on
+  where the sum is known at every voxel, and differ by no more than one
+  part in 100 000 of the largest sum. These say how the code does on doses
+  that are formulas. No dose from a planning system was summed, and
+  nothing was compared with another program.
+
 ### What is read of a plan
 
 As much of an RT Plan (or RT Ion Plan) as dose summation and conversion

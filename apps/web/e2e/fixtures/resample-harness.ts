@@ -16,14 +16,16 @@ import {
   pointToLayer,
   resampleVolume,
   rigidMat4,
+  sumDoses,
   type DeformationGrid,
+  type DoseSumTerm,
   type Interpolation,
   type LayerPlacement,
   type Mat4,
   type ResampleGrid,
   type Vec3,
 } from '@open-rt-studio/dicom';
-import { resample, resampleOnGpu } from '@open-rt-studio/render';
+import { resample, resampleOnGpu, sumDosesWith } from '@open-rt-studio/render';
 
 type Dims = [number, number, number];
 
@@ -302,6 +304,138 @@ async function runPastTheGpu(): Promise<{
   };
 }
 
-const harness = { run, runPastTheGpu };
+/** Two doses to sum on a grid, as the test describes them (#98). */
+export interface SumCase {
+  /** The grid the doses are summed on. */
+  readonly reference: HarnessGrid;
+  /** A dose in the reference's own frame. Both doses go evenly with the voxel (`ramp`). */
+  readonly first: HarnessGrid;
+  /** A dose in a frame of its own, placed by the matrix, and by the field before it. */
+  readonly second: HarnessGrid;
+  readonly matrix: NonNullable<HarnessCase['matrix']>;
+  readonly field?: NonNullable<HarnessCase['field']>;
+  readonly weights: readonly [number, number];
+  /** Whether the second dose is said to be nothing beyond its grid. */
+  readonly secondIsNothingBeyond?: boolean;
+}
+
+export interface SumResult {
+  readonly voxels: number;
+  /** Voxels where the sum is known, each way; and voxels where only one way knows it. */
+  readonly knownCpu: number;
+  readonly knownGpu: number;
+  readonly disagreeKnown: number;
+  /** The most the two sums differ by where both are known. */
+  readonly maxDifference: number;
+  /** The most each is from the formula, away from the very edge of a dose's grid. */
+  readonly maxFromFormulaCpu: number;
+  readonly maxFromFormulaGpu: number;
+  /** How many voxels were held against the formula. */
+  readonly againstFormula: number;
+  /** The largest sum, to judge a difference against. */
+  readonly range: number;
+  /** Which way each dose was resampled, and whether the counts of each term are the same. */
+  readonly by: readonly (string | null)[];
+  readonly sameCounts: boolean;
+  /** Voxels where the second dose was taken to be nothing, by the reference. */
+  readonly nothing: number;
+}
+
+/**
+ * Sum two doses by the reference (`sumDoses`) and with the GPU
+ * (`sumDosesWith`), and say how far apart the sums are and how far each is
+ * from the formula: the first dose's ramp at the voxel, and the second's at
+ * the place the placement takes the voxel to, each times its weight.
+ */
+async function runSum(spec: SumCase): Promise<SumResult> {
+  const reference = gridOf(spec.reference);
+  const [firstGrid, secondGrid] = [gridOf(spec.first), gridOf(spec.second)];
+  const matrix: Mat4 = rigidMat4(spec.matrix.axis, spec.matrix.degrees, spec.matrix.shift);
+  const placement = {
+    baseFrame: 'reference',
+    layerFrame: 'second',
+    steps: [],
+    baseToLayer: matrix,
+    layerToBase: invertMat4(matrix),
+    ...(spec.field
+      ? { field: { pre: IDENTITY_MAT4, grid: fieldOf(spec.field), post: matrix } }
+      : {}),
+  } as LayerPlacement;
+  const terms: DoseSumTerm[] = [
+    {
+      dose: { ...firstGrid, data: valuesOf('ramp', spec.first.dims) },
+      through: null,
+      weight: spec.weights[0],
+    },
+    {
+      dose: { ...secondGrid, data: valuesOf('ramp', spec.second.dims) },
+      through: placement,
+      weight: spec.weights[1],
+      ...(spec.secondIsNothingBeyond ? { beyondGrid: 'nothing' as const } : {}),
+    },
+  ];
+  const cpu = sumDoses(reference, terms);
+  const gpu = await sumDosesWith(await gpuDevice(), reference, terms);
+
+  /** A dose's ramp at a place: null outside its grid, or within a hair of its edge. */
+  const rampIn = (grid: HarnessGrid, place: Vec3): number | 'beyond' | 'edge' => {
+    const index = patientToVoxel(gridOf(grid).geometry, place)!;
+    const margin = Math.min(
+      ...index.map((value, axis) => Math.min(value + 0.5, grid.dims[axis] - 0.5 - value)),
+    );
+    if (Math.abs(margin) < 1e-3) return 'edge';
+    if (margin < 0) return 'beyond';
+    const held = index.map((value, axis) => Math.min(Math.max(value, 0), grid.dims[axis] - 1));
+    return rampAt(held as unknown as Vec3);
+  };
+  let [disagreeKnown, maxDifference, fromCpu, fromGpu, againstFormula, range] = [0, 0, 0, 0, 0, 0];
+  const [nx, ny, nz] = spec.reference.dims;
+  const { iStep, jStep, kStep, origin } = reference.geometry;
+  let at = 0;
+  for (let k = 0; k < nz; k++) {
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++, at++) {
+        if (cpu.known[at] !== gpu.known[at]) {
+          disagreeKnown++;
+          continue;
+        }
+        if (!cpu.known[at]) continue;
+        const [a, b] = [cpu.data[at], gpu.data[at]];
+        maxDifference = Math.max(maxDifference, Math.abs(a - b));
+        range = Math.max(range, Math.abs(a));
+        const point: Vec3 = [
+          origin[0] + i * iStep[0] + j * jStep[0] + k * kStep[0],
+          origin[1] + i * iStep[1] + j * jStep[1] + k * kStep[1],
+          origin[2] + i * iStep[2] + j * jStep[2] + k * kStep[2],
+        ];
+        const one = rampIn(spec.first, point);
+        const placed = pointToLayer(placement, point);
+        const two = placed ? rampIn(spec.second, placed) : 'edge';
+        if (typeof one !== 'number' || two === 'edge') continue;
+        // Known, and beyond the second dose's grid: it was said to be nothing there.
+        const formula = spec.weights[0] * one + spec.weights[1] * (two === 'beyond' ? 0 : two);
+        againstFormula++;
+        fromCpu = Math.max(fromCpu, Math.abs(a - formula));
+        fromGpu = Math.max(fromGpu, Math.abs(b - formula));
+      }
+    }
+  }
+  return {
+    voxels: nx * ny * nz,
+    knownCpu: cpu.knownCount,
+    knownGpu: gpu.knownCount,
+    disagreeKnown,
+    maxDifference,
+    maxFromFormulaCpu: fromCpu,
+    maxFromFormulaGpu: fromGpu,
+    againstFormula,
+    range,
+    by: gpu.by,
+    sameCounts: JSON.stringify(gpu.terms) === JSON.stringify(cpu.terms),
+    nothing: cpu.terms[1].nothing,
+  };
+}
+
+const harness = { run, runPastTheGpu, runSum };
 export type ResampleHarness = typeof harness;
 (globalThis as unknown as { resampleHarness: ResampleHarness }).resampleHarness = harness;
