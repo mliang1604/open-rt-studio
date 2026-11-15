@@ -191,3 +191,4 @@ export {
   resampleOnGpu,
   resampleParams,
 } from './resample-gpu.js';
+export { type DoseResampler, type DoseSumRun, sumDosesWith } from './dose-sum.js';

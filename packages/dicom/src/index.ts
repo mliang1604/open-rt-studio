@@ -24,6 +24,23 @@ export {
   roiLoopsBySlice,
 } from './contour-raster.js';
 export {
+  type DoseSum,
+  type DoseSumCandidate,
+  type DoseSumRunning,
+  type DoseSumSource,
+  type DoseSumTerm,
+  type DoseSumTermCount,
+  DOSE_SUM_OUTSIDE,
+  DOSE_SUM_TERMS_AT_MOST,
+  addDoseTerm,
+  beginDoseSum,
+  doseSumProblem,
+  fieldReaches,
+  finishDoseSum,
+  summedDoseVolume,
+  sumDoses,
+} from './dose-sum.js';
+export {
   type DoseVolumeHistogram,
   type DvhDose,
   type DvhOptions,
