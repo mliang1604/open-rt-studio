@@ -269,6 +269,53 @@ also builds on its own to `dist/` for consumers outside the workspace.
     them yet. Two people changing one patient's timepoints at once: the
     last list sent is the one kept.
 
+### Contouring tools
+
+Every tool that changes the painted structures is a contouring tool on one
+framework (#106), so that each tool to come (#107–#118) is a small piece on
+its own.
+
+- **One interface** (`viewer/contour-tools/contour-tool.ts`): a tool
+  begins, extends and ends a stroke on an MPR pane, may draw a preview
+  over the pane the pointer is over, may have options of its own (a
+  component shown under the tools while it is in hand), and says whether
+  it is of the labs. A tool is added in one file and one line of
+  `contour-tools.ts`; the sample tool, which does nothing, shows how.
+- **The brush is the first tool.** Its settings and the painted
+  structures' sets stay in `BrushController`, which the Paint and Erase
+  buttons and the brush's controls bind to; its strokes are the brush
+  tool's (`brush-tool.ts`). It draws its outline, at its size in the
+  pane's plane, where the pointer is.
+- **A stroke is one edit.** The `ContourToolsController` opens an edit
+  when the pointer goes down and commits it when it comes up; whatever the
+  tool changes in between is undone and redone whole (Undo and Redo in the
+  rail, Ctrl/⌘+Z and Ctrl/⌘+Shift+Z). Escape, or another tool taken up,
+  cancels a stroke under way and puts back what it changed. An edit keeps
+  the voxels it changed with what each held before and after
+  (`label-edits.ts`), eight bytes a voxel, and the history keeps at most
+  eight million of them, letting go of the oldest edits first.
+- **History is of the label volume as it is.** Whatever changes the
+  voxels outside it lets go of it: a structure or set deleted, a structure
+  made editable from an RTSTRUCT, another image loaded. So what is deleted
+  still cannot be brought back, as the viewer says when it asks.
+- **Constraints apply to every tool's changes**, not in each tool
+  (`allowedVoxels`): protect other structures (painting does not take
+  another structure's voxels; erasing clears only the structure edited),
+  keep inside a structure (as one voxel holds one structure, painting
+  there moves the voxel to the structure painted), and keep to a range of
+  the image's values, ends included. All are off at first, which is how
+  the brush always painted and erased. They are not kept between visits.
+- **Labs.** A tool that is not finished is offered only when "Show
+  unfinished tools (labs)" is ticked; the flag is kept with the view
+  preferences. A tool of the labs in hand is put down when the flag goes
+  off.
+- **Not there:** an edit that changes nothing is not kept; undo of making
+  a structure editable, or of deleting one; a preview for anything but the
+  brush; the brush's options moved into the tool's own options component
+  (they stay in the rail, where their labels are).
+
+Status: **decided, and Michael's to overturn**.
+
 ## Desktop
 
 Electron with secure defaults (context isolation, sandbox, no Node integration

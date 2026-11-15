@@ -5,6 +5,7 @@
 import { Injectable, type WritableSignal, inject } from '@angular/core';
 
 import { BrushController, type BrushMode } from './brush-controller';
+import { ContourToolsController } from './contour-tools/contour-tools-controller';
 import { CprStore } from './cpr/cpr-store';
 import { LandmarkStore } from './landmarks/landmark-store';
 import { LayersStore, type ByHandDrag } from './layers-store';
@@ -21,6 +22,7 @@ import { MeasurementStore, type MeasureTool } from './measurement-store';
 @Injectable()
 export class ToolSwitch {
   private readonly brush = inject(BrushController);
+  private readonly contour = inject(ContourToolsController);
   private readonly cpr = inject(CprStore);
   private readonly layers = inject(LayersStore);
   private readonly landmarks = inject(LandmarkStore);
@@ -39,6 +41,7 @@ export class ToolSwitch {
     this.measurements.cancelPending(); // a half-placed measurement belongs to the old tool
     active.set(next);
     if (next !== 'none') {
+      this.contour.putDown();
       this.brush.deactivate();
       this.cpr.drawing.set(false);
       this.layers.stopByHandDrag();
@@ -48,8 +51,17 @@ export class ToolSwitch {
 
   /** Switch Paint or Erase on, or off when it is already on. */
   toggleBrush(mode: Exclude<BrushMode, 'off'>): void {
+    // A listed contouring tool is put down: one contouring tool at a time.
+    this.contour.putDown();
     this.brush.toggleMode(mode);
     if (this.brush.mode() !== 'off') this.putDownAllBut('brush');
+  }
+
+  /** Take up a listed contouring tool (#106), or put it down when it is in hand. */
+  toggleContourTool(id: string): void {
+    this.brush.deactivate();
+    this.contour.toggle(id);
+    if (this.contour.takenId() !== null) this.putDownAllBut('brush');
   }
 
   /** Create a structure, which also starts painting it. */
@@ -90,6 +102,7 @@ export class ToolSwitch {
     const wasOn =
       this.activeTool!() !== 'none' ||
       this.brush.mode() !== 'off' ||
+      this.contour.takenId() !== null ||
       this.cpr.drawing() ||
       this.layers.byHandDrag() !== null ||
       this.landmarks.placing();
@@ -100,7 +113,11 @@ export class ToolSwitch {
   private putDownAllBut(keep: 'brush' | 'cpr' | 'register' | 'landmark' | null): void {
     this.measurements.cancelPending();
     this.activeTool!.set('none');
-    if (keep !== 'brush') this.brush.deactivate();
+    if (keep !== 'brush') {
+      // A stroke under way is put back as it was: Escape cancels it.
+      this.contour.putDown();
+      this.brush.deactivate();
+    }
     if (keep !== 'cpr') this.cpr.drawing.set(false);
     if (keep !== 'register') this.layers.stopByHandDrag();
     if (keep !== 'landmark') this.landmarks.placing.set(false);

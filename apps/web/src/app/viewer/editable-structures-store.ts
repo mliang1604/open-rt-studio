@@ -5,10 +5,14 @@
 import { Injectable, computed, signal } from '@angular/core';
 import type { MaskColor } from '@open-rt-studio/render';
 import {
+  allowedVoxels,
   clearLabelId,
   createLabelVolume,
-  eraseLabels,
-  paintLabels,
+  LabelEditHistory,
+  LabelEditRecorder,
+  NO_CONSTRAINTS,
+  type LabelChange,
+  type LabelConstraints,
   type LabelVolume,
   rasterizeRoiContours,
   type RasterizeResult,
@@ -128,6 +132,26 @@ export class EditableStructuresStore {
   private nextSetId = 1;
 
   /**
+   * The image the label grid is aligned to, voxel for voxel: what an
+   * intensity range is read from (#106). Null before a load.
+   */
+  private image: Float32Array | null = null;
+
+  /** What was edited and can be undone, and what was undone and can be redone (#106). */
+  private readonly history = new LabelEditHistory();
+  /** The edit being made: from a tool's beginning to its commit. */
+  private openEdit: LabelEditRecorder | null = null;
+  private readonly _historyNext = signal<{
+    readonly undo: string | null;
+    readonly redo: string | null;
+  }>({ undo: null, redo: null });
+
+  /** What Undo would undo (`Paint`, `Erase`, a tool's name); null for nothing. */
+  readonly nextUndo = computed(() => this._historyNext().undo);
+  /** What Redo would redo; null for nothing. */
+  readonly nextRedo = computed(() => this._historyNext().redo);
+
+  /**
    * Whether the loaded series ships imported structure sets, so the first
    * auto-created authored set is labelled to read as new. Set per load.
    */
@@ -236,6 +260,8 @@ export class EditableStructuresStore {
     }
     const remaining = this._sets().filter((s) => s.id !== id);
     this._sets.set(remaining);
+    // Its voxels went outside the history, which no longer holds.
+    this.forgetHistory();
     if (this._activeSetId() === id) {
       this._activeSetId.set(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
     }
@@ -309,7 +335,11 @@ export class EditableStructuresStore {
       roi.interpretedType ?? undefined,
     );
     const result = rasterizeRoiContours(label, roi, created.id);
-    if (result.filled > 0) this.bump();
+    // Written outside the history, which no longer holds.
+    if (result.filled > 0) {
+      this.forgetHistory();
+      this.bump();
+    }
     return { roi: created, result };
   }
 
@@ -338,6 +368,7 @@ export class EditableStructuresStore {
       sets.map((s) => ({ ...s, rois: s.rois.filter((r) => r.id !== id) })),
     );
     this.forgetDisplay(id);
+    this.forgetHistory();
     const label = this._labelVolume();
     if (label && clearLabelId(label, id) > 0) this.bump();
   }
@@ -348,18 +379,87 @@ export class EditableStructuresStore {
    * {@link version}. The brush (#268) supplies the indices; this only writes them.
    */
   paint(roiId: number, voxels: Iterable<number>): void {
-    const label = this._labelVolume();
-    if (!label) return;
-    paintLabels(label, roiId, voxels);
-    this.bump();
+    this.change({ kind: 'paint', roiId, voxels }, NO_CONSTRAINTS, 'Paint');
   }
 
-  /** Erase the given voxels back to background and bump {@link version}. */
+  /** Erase the given voxels back to background, as one edit that can be undone. */
   erase(voxels: Iterable<number>): void {
+    this.change({ kind: 'erase', roiId: null, voxels }, NO_CONSTRAINTS, 'Erase');
+  }
+
+  /** One change made and committed at once, as one edit. */
+  private change(change: LabelChange, constraints: LabelConstraints, name: string): void {
+    this.beginEdit(name);
+    this.applyChange(change, constraints);
+    this.commitEdit();
+  }
+
+  /**
+   * Begin an edit (#106): what is changed until {@link commitEdit} is one
+   * undo. An edit that is open is committed first.
+   */
+  beginEdit(name: string): void {
+    this.commitEdit();
     const label = this._labelVolume();
-    if (!label) return;
-    eraseLabels(label, voxels);
+    if (label) this.openEdit = new LabelEditRecorder(label, name);
+  }
+
+  /**
+   * Change voxels within the open edit, through the constraints, and bump
+   * {@link version} when any changed. Returns how many did. Nothing is
+   * changed without an open edit.
+   */
+  applyChange(change: LabelChange, constraints: LabelConstraints): number {
+    const label = this._labelVolume();
+    const edit = this.openEdit;
+    if (!label || !edit) return 0;
+    const allowed = allowedVoxels(label, change, constraints, this.image);
+    const changed = edit.write(allowed, change.kind === 'paint' ? change.roiId : 0);
+    if (changed > 0) this.bump();
+    return changed;
+  }
+
+  /** Commit the open edit, which then can be undone. One that changed nothing is let go of. */
+  commitEdit(): void {
+    const edit = this.openEdit?.finish() ?? null;
+    this.openEdit = null;
+    if (!edit) return;
+    this.history.push(edit);
+    this.syncHistory();
+  }
+
+  /** Put back what the open edit changed, and let go of it. */
+  cancelEdit(): void {
+    const edit = this.openEdit;
+    this.openEdit = null;
+    if (edit?.cancel()) this.bump();
+  }
+
+  /** Whether an edit is open: a tool is in the middle of one. */
+  get editing(): boolean {
+    return this.openEdit !== null;
+  }
+
+  /** Undo the latest edit. Returns what it was, or null when there was none. */
+  undo(): string | null {
+    this.commitEdit();
+    const label = this._labelVolume();
+    const edit = label ? this.history.undo(label) : null;
+    if (!edit) return null;
     this.bump();
+    this.syncHistory();
+    return edit.name;
+  }
+
+  /** Redo the latest edit that was undone. Returns what it was, or null. */
+  redo(): string | null {
+    this.commitEdit();
+    const label = this._labelVolume();
+    const edit = label ? this.history.redo(label) : null;
+    if (!edit) return null;
+    this.bump();
+    this.syncHistory();
+    return edit.name;
   }
 
   /**
@@ -371,6 +471,9 @@ export class EditableStructuresStore {
    */
   resetForLoad(volume: Volume | null, hasImportedSets = false): void {
     this._labelVolume.set(volume ? createLabelVolume(volume) : null);
+    this.image = volume?.data ?? null;
+    this.openEdit = null;
+    this.forgetHistory();
     this._sets.set([]);
     this._activeSetId.set(null);
     this._version.set(0);
@@ -401,6 +504,17 @@ export class EditableStructuresStore {
   private forgetDisplay(id: number): void {
     if (this._hidden().has(id)) this.setRoiVisible(id, true);
     if (this._opacities().has(id)) this.setRoiOpacity(id, 1);
+  }
+
+  /** Let go of the history: the label volume was changed outside it, or is another. */
+  private forgetHistory(): void {
+    this.commitEdit();
+    this.history.clear();
+    this.syncHistory();
+  }
+
+  private syncHistory(): void {
+    this._historyNext.set({ undo: this.history.nextUndo, redo: this.history.nextRedo });
   }
 
   /** Bump the label-voxel mutation counter so the display re-uploads. */

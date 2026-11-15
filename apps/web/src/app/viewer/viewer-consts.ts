@@ -19,6 +19,8 @@ export const SHORTCUTS = [
   { keys: 'H', label: 'Collapse / expand the study history panel' },
   { keys: '?', label: 'Toggle this shortcuts help' },
   { keys: 'Esc', label: 'Close overlays, cancel a measurement, put down the active tool' },
+  { keys: 'Ctrl/⌘+Z', label: 'Undo the latest edit of the painted structures' },
+  { keys: 'Ctrl/⌘+Shift+Z', label: 'Redo it (Ctrl+Y too)' },
   { keys: 'Click', label: 'On a measurement: select it; drag to move it' },
   { keys: 'Del', label: 'Delete the selected measurement' },
   { keys: 'Drag', label: 'Pan an MPR pane · orbit the 3D pane' },

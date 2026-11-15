@@ -142,6 +142,16 @@ export {
 } from './field-metrics.js';
 export { f32ToF16, floatsToHalf } from './half.js';
 export {
+  type LabelChange,
+  type LabelConstraints,
+  type LabelEdit,
+  HISTORY_VOXELS_AT_MOST,
+  LabelEditHistory,
+  LabelEditRecorder,
+  NO_CONSTRAINTS,
+  allowedVoxels,
+} from './label-edits.js';
+export {
   type DirtyBox,
   type LabelVolume,
   clearDirty,

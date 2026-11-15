@@ -97,6 +97,7 @@ function setup(overrides: Partial<InteractionInit> = {}): Harness {
     beginStroke: vi.fn(),
     extendStroke: vi.fn(),
     endStroke: vi.fn(),
+    hoverTool: vi.fn(),
     moveRegisterDrag: vi.fn(),
     endRegisterDrag: vi.fn(),
     placeLandmark: vi.fn(),

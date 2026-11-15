@@ -301,6 +301,8 @@ export class InteractionController {
     // Remember the last MPR column hovered so the toolbar window/level controls
     // keep targeting it once the pointer moves off the panes onto the toolbar.
     if (hovered?.kind === 'mpr') d.setActiveCompareGroup(hovered.group);
+    // The tool in hand draws its preview where the pointer is; a stroke does its own.
+    if (!drag) d.hoverTool(hovered?.kind === 'mpr' ? hovered : null, event);
   }
 
   onPointerUp(event: PointerEvent): void {
@@ -318,6 +320,7 @@ export class InteractionController {
   onPointerLeave(event: PointerEvent): void {
     const d = this.deps;
     if (!d) return;
+    d.hoverTool(null, event);
     // Moving the cursor onto an in-pane overlay handle (the oblique tilt knob, a
     // measurement handle) makes the canvas fire pointerleave even though the
     // pointer hasn't really left the panes. Clearing the hovered pane here would
