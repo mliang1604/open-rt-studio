@@ -356,6 +356,17 @@ its own.
   the image beyond the grid is copied, and when nothing is left no
   structure is made. Undo takes the copy's voxels away and leaves its
   structure, empty, to delete.
+- **Booleans** (#111, labs): union, intersection, subtraction or
+  exclusive-or of two structures, painted or imported with the image, into
+  a new painted structure (named for it, "PTV − Rectum") or in place of
+  what a painted one holds, so that "A = A − B" works (`label-boolean.ts`).
+  An imported structure is filled on the grid the way making it editable
+  fills it. Before it is made the result is said: its size in voxels and
+  cm³; an empty result makes no new structure. **Two painted structures
+  never overlap** (a voxel holds one), so between two of them the
+  intersection is always empty; the operations say something with
+  imported structures, which overlap as drawn. One click, one edit, under
+  the shared constraints.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

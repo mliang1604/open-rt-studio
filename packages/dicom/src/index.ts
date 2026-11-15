@@ -168,6 +168,14 @@ export {
   reflect,
 } from './label-mirror.js';
 export {
+  type BooleanOperation,
+  combineMasks,
+  contourMask,
+  maskChanges,
+  maskCount,
+  paintedMask,
+} from './label-boolean.js';
+export {
   type LabelChange,
   type LabelConstraints,
   type LabelEdit,

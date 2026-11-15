@@ -45,6 +45,7 @@ describe('MirrorTool (#113)', () => {
       'cleanup',
       'margin',
       'mirror',
+      'boolean',
       'sample',
     ]);
     expect(tools.isActive()).toBe(false);
