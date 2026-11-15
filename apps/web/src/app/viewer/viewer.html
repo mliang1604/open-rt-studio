@@ -365,6 +365,17 @@
                   [attr.data-derived-series]="layer.id"
                 />
               }
+              @if (propagation.card(layer.id); as card) {
+                <app-structure-propagation
+                  [card]="card"
+                  [image]="layer.label"
+                  (chosenChange)="propagation.choose(layer.id, $event)"
+                  (makeAsked)="propagation.make(layer.id)"
+                  (saveAsked)="propagation.save(layer.id)"
+                  (discardAsked)="propagation.discard(layer.id)"
+                  [attr.data-structure-propagation]="layer.id"
+                />
+              }
             }
           </div>
         </div>

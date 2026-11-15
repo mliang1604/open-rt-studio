@@ -809,6 +809,76 @@ over it, and saved as a new DICOM series (#89): `writeDerivedSeries` in
 
 Status: **decided, and Michael's to overturn**.
 
+### Structures propagated to another image
+
+The structures drawn on an overlay image are taken to the base image, as the
+overlay is placed over it, and saved as a new RT Structure Set (#90):
+`propagateRois` in `packages/dicom`, `viewer/structure-propagation` in the
+application.
+
+- **Two ways, and the result says which.** A structure whose every contour,
+  moved by the registration's matrix, lands flat on a slice of the base
+  image (within 0.01 mm) goes **by its points**: each point is moved and
+  nothing else is done to it. That is so for a shift, for a turn about the
+  slices' own axis, and for two images of one frame whose slices coincide.
+  Any other structure, and every structure through a deformation field,
+  goes **by a label volume**: its contours are filled in on the source
+  image's voxels, each slice is turned into the distance of every voxel from
+  the outline in it, that is read through the registration at the base
+  image's voxels with linear interpolation, and where it is zero on each of
+  the base's slices is the new outline. Between two slices of the source
+  the outline is therefore between the two shapes, not a staircase. A
+  structure goes one way whole, never some contours by each.
+- **How near that is.** By points, as exact as the numbers are. By a label
+  volume, as near as the source's voxels: a sphere of 12 mm drawn on voxels
+  of 1 × 1 × 2 mm comes out within 0.75 mm of where it belongs everywhere,
+  0.2 mm on average, and within 3 % of its volume, through turns, a shift
+  of half a slice, and onto finer and coarser voxels (the package's tests
+  hold it to that). A structure ends within half a slice of its last
+  contour, rounded off. An outline smaller than one voxel's face beside a
+  larger one on the same slice is left out.
+- **It says that it is propagated.** The Structure Set Label is
+  `PROPAGATED`; the Series Description begins `Propagated:`; the Structure
+  Set Description says which structure set on which series was taken to
+  which series through which registrations, how many structures went each
+  way, and that the software is not a medical device and the result not for
+  clinical use. Each structure says it of itself: ROI Generation Algorithm
+  `AUTOMATIC`, an ROI Generation Description that names the way, and the
+  Derivation Code 113085 (DCM), spatial resampling. The structure set it is
+  from is in the Predecessor Structure Set Sequence. The reader reads back how each structure was made (`Roi.generation`) and a set's own UID (`StructureSet.sopInstanceUid`).
+- **Whose it is.** The set is drawn on the base image: it is in the base's
+  frame of reference, references its series, and is filed in its study, of
+  its patient. Structures of another patient than the base's are not
+  propagated. Names, colours, numbers and interpreted types go with the
+  structures.
+- **What is left out is said.** Open contours and points enclose nothing to
+  fill in, and contours moved by their points may land beyond the base's
+  slices: how many were left out, and which structure has no contour on the
+  base image at all, is in what is said before anything is saved.
+- **Two steps, each asked for**, as for a resampled series: the structures
+  are taken, one after another with the page answering in between, and what
+  was made is said; then it is saved through the data source (`save`: a
+  download for opened files, an upload to a server, which the audit log
+  records like any other) or let go. What was made is let go of when the
+  images or the placement change.
+- **Which structure sets are offered.** Those that came with the overlay's
+  series when it was laid over the base (`LoadResult.overlayStructureSets`),
+  less any that says it is drawn on the base's series and not the
+  overlay's. They are not drawn on screen: they are another image's.
+- **A deformable registration with its field switched off** is not
+  propagated through, as it is not resampled through.
+- **Not there:** written sets were not checked with a DICOM validator and
+  were not opened in another system; nothing was compared with another
+  program's propagation; the propagated structures are not drawn until the
+  saved set is opened (or, on a server, the base series loaded again); only
+  the base image can be propagated onto, and a whole set at a time;
+  contours name no image instance (the writer never has); structure names
+  outside plain ASCII are written a byte to a character, as before (#249);
+  very large structures were not timed, and the work is on the page's own
+  thread, a structure at a time.
+
+Status: **decided, and Michael's to overturn**.
+
 ## Native tools
 
 A CMake project in `native/` builds small command-line programs on ITK and

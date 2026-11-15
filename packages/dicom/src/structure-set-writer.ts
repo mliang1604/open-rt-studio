@@ -63,6 +63,17 @@ export function writeStructureSet(ss: StructureSet, opts: WriteOptions = {}): Ar
     element(0x3006, 0x0008, 'DA', text(dicomDate(created))), // StructureSetDate
     element(0x3006, 0x0009, 'TM', text(dicomTime(created))), // StructureSetTime
     ...referencedFrameOfReference(ss),
+    // Predecessor Structure Set Sequence: the structure set this one was derived from.
+    ...(opts.predecessorSopInstanceUid
+      ? [
+          sequence(0x3006, 0x0018, [
+            concat([
+              element(0x0008, 0x1150, 'UI', uid(RTSTRUCT_SOP_CLASS)), // Referenced SOP Class UID
+              element(0x0008, 0x1155, 'UI', uid(opts.predecessorSopInstanceUid)), // Referenced SOP Instance UID
+            ]),
+          ]),
+        ]
+      : []),
     structureSetRoiSequence(ss.rois, ss.frameOfReferenceUid),
     roiContourSequence(ss.rois),
     rtRoiObservationsSequence(ss.rois),
@@ -94,6 +105,12 @@ export interface WriteOptions {
   readonly description?: string | null;
   /** When the object was made, for Structure Set Date and Time. Defaults to now. */
   readonly createdAt?: Date;
+  /**
+   * SOP Instance UID of the structure set this one was derived from, for the
+   * Predecessor Structure Set Sequence (3006,0018). Left out of the file when
+   * not given.
+   */
+  readonly predecessorSopInstanceUid?: string | null;
 }
 
 /** SOP Class UID identifying an RT Structure Set Storage object. */
@@ -133,15 +150,48 @@ function structureSetRoiSequence(
     0x0020,
     rois.map((roi) =>
       concat([
+        // Derivation Code Sequence: spatial resampling, for an ROI taken from another image.
+        ...(roi.generation?.resampled
+          ? [
+              sequence(0x0008, 0x9215, [
+                concat([
+                  element(0x0008, 0x0100, 'SH', text('113085')), // Code Value
+                  element(0x0008, 0x0102, 'SH', text('DCM')), // Coding Scheme Designator
+                  element(0x0008, 0x0104, 'LO', text('Spatial resampling')), // Code Meaning
+                ]),
+              ]),
+            ]
+          : []),
         element(0x3006, 0x0022, 'IS', integers([roi.number])), // ROI Number
         // Referenced Frame of Reference UID — the parser's fallback when the
         // top-level 3006,0010 sequence is absent or frame-less.
         ...(frameOfReferenceUid ? [element(0x3006, 0x0024, 'UI', uid(frameOfReferenceUid))] : []),
         element(0x3006, 0x0026, 'LO', text(roi.name)), // ROI Name
+        // ROI Generation Algorithm: the standard wants it there, empty when nothing is known.
+        element(0x3006, 0x0036, 'CS', text(generationAlgorithm(roi))),
+        ...(roi.generation?.description
+          ? [
+              element(
+                0x3006,
+                0x0038,
+                'LO',
+                text(asciiOnly(roi.generation.description).slice(0, 64)),
+              ),
+            ] // ROI Generation Description
+          : []),
       ]),
     ),
   );
 }
+
+/** An ROI's generation algorithm when it is one of the standard's terms, and nothing otherwise. */
+function generationAlgorithm(roi: Roi): string {
+  const algorithm = roi.generation?.algorithm?.trim().toUpperCase() ?? '';
+  return ['AUTOMATIC', 'SEMIAUTOMATIC', 'MANUAL'].includes(algorithm) ? algorithm : '';
+}
+
+/** Text as plain ASCII: a character outside it becomes `?`. */
+const asciiOnly = (value: string): string => value.replace(/[^\x20-\x7e]/g, '?');
 
 /** ROI Contour Sequence (3006,0039): per ROI, its colour and contour stack. */
 function roiContourSequence(rois: readonly Roi[]): Uint8Array {

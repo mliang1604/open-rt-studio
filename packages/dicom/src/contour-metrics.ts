@@ -203,7 +203,7 @@ function sizeOf(box: Box): [number, number, number] {
  * each finding the lower envelope of the parabolas the pass before left
  * (Felzenszwalb and Huttenlocher's distance transform of sampled functions).
  */
-function squaredDistanceTo(sources: Int32Array, box: Box, spacing: Vec3): Float64Array {
+export function squaredDistanceTo(sources: Int32Array, box: Box, spacing: Vec3): Float64Array {
   const [bx, by, bz] = sizeOf(box);
   const field = new Float64Array(bx * by * bz).fill(Infinity);
   for (const index of sources) field[index] = 0;

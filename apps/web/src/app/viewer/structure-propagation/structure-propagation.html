@@ -1,0 +1,71 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+@let now = card();
+@switch (now.state) {
+  @case ('idle') {
+    @if (now.sets.length > 1) {
+      <label>
+        <span>Structure set</span>
+        <!-- Each option says whether it is the one chosen: a select's own
+             value is applied before its options are there. -->
+        <select
+          (change)="choose($event)"
+          [disabled]="now.waiting"
+          data-propagation="set"
+          title="Which of this image’s structure sets to take"
+        >
+          @for (set of now.sets; track $index) {
+            <option [value]="$index" [selected]="$index === now.chosen">
+              {{ set.name }} ({{ set.structures }})
+            </option>
+          }
+        </select>
+      </label>
+    }
+    <div class="actions">
+      <button
+        type="button"
+        (click)="makeAsked.emit()"
+        [disabled]="now.unavailable !== null || now.waiting"
+        data-propagation="make"
+        title="Take this image’s structures to the base image, as this image is placed over it now, to save as a new RT Structure Set that says it is propagated"
+      >
+        Propagate structures…
+      </button>
+    </div>
+    @if (now.unavailable; as why) {
+      <p class="state" data-propagation="unavailable">{{ why }}</p>
+    }
+  }
+  @case ('making') {
+    <p class="state" role="status" data-propagation="making">Propagating: {{ now.progress }}…</p>
+    <div class="actions">
+      <button type="button" (click)="discardAsked.emit()" data-propagation="cancel">Cancel</button>
+    </div>
+  }
+  @case ('ready') {
+    <p class="state" role="status" data-propagation="summary">{{ now.summary }}</p>
+    <div class="actions">
+      <button
+        type="button"
+        (click)="saveAsked.emit()"
+        data-propagation="save"
+        title="Save the propagated structures as a new RT Structure Set on the base image: a download for opened files, an upload to a server"
+      >
+        Save structure set
+      </button>
+      <button
+        type="button"
+        (click)="discardAsked.emit()"
+        data-propagation="discard"
+        title="Let go of the propagated structures without saving them"
+      >
+        Discard
+      </button>
+    </div>
+  }
+  @case ('saving') {
+    <p class="state" role="status" data-propagation="saving">Saving…</p>
+  }
+}

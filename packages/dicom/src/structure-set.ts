@@ -5,7 +5,14 @@
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 import type { Series } from './series.js';
-import { framesMatch, type Contour, type Roi, type StructureSet, type Vec3 } from './types.js';
+import {
+  framesMatch,
+  type Contour,
+  type Roi,
+  type RoiGeneration,
+  type StructureSet,
+  type Vec3,
+} from './types.js';
 
 /** SOP Class UID identifying an RT Structure Set Storage object. */
 const RTSTRUCT_SOP_CLASS = '1.2.840.10008.5.1.4.1.1.481.3';
@@ -49,6 +56,7 @@ export function parseStructureSet(name: string, buffer: ArrayBuffer): StructureS
       color: null,
       interpretedType: null,
       contours: [],
+      generation: readGeneration(item),
     });
     order.push(number);
   }
@@ -82,6 +90,7 @@ export function parseStructureSet(name: string, buffer: ArrayBuffer): StructureS
     frameOfReferenceUid: references.frameOfReferenceUid ?? roiFrameOfReference,
     referencedSeriesUids: references.referencedSeriesUids,
     patientId: dataSet.string('x00100020')?.trim() || null, // Patient ID
+    sopInstanceUid: dataSet.string('x00080018')?.trim() || null, // SOP Instance UID
     rois: order.map((number) => freeze(rois.get(number)!)),
   };
 }
@@ -173,6 +182,7 @@ interface MutableRoi {
   color: readonly [number, number, number] | null;
   interpretedType: string | null;
   contours: readonly Contour[];
+  generation: RoiGeneration | null;
 }
 
 function freeze(roi: MutableRoi): Roi {
@@ -182,7 +192,25 @@ function freeze(roi: MutableRoi): Roi {
     color: roi.color,
     interpretedType: roi.interpretedType,
     contours: roi.contours,
+    // Said only of an ROI whose file says something of how it was made.
+    ...(roi.generation ? { generation: roi.generation } : {}),
   };
+}
+
+/**
+ * How an ROI was made, from its item of the Structure Set ROI Sequence: ROI
+ * Generation Algorithm (3006,0036), ROI Generation Description (3006,0038),
+ * and whether its Derivation Code Sequence (0008,9215) names spatial
+ * resampling (113085, DCM). Null when the item says none of it.
+ */
+function readGeneration(item: DataSet): RoiGeneration | null {
+  const algorithm = item.string('x30060036')?.trim() || null;
+  const description = item.string('x30060038')?.trim() || null;
+  const resampled = items(item, 'x00089215').some(
+    (code) =>
+      code.string('x00080100')?.trim() === '113085' && code.string('x00080102')?.trim() === 'DCM',
+  );
+  return algorithm || description || resampled ? { algorithm, description, resampled } : null;
 }
 
 /**

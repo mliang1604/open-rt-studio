@@ -109,6 +109,27 @@ export interface Roi {
   readonly interpretedType: string | null;
   /** The ROI's planar contours, in Contour Sequence order. */
   readonly contours: readonly Contour[];
+  /**
+   * How the ROI was made, as its structure set says it. Left out for an ROI
+   * that has not been through a file and of which nothing is said.
+   */
+  readonly generation?: RoiGeneration | null;
+}
+
+/** How an ROI was made, from its item of the Structure Set ROI Sequence. */
+export interface RoiGeneration {
+  /**
+   * ROI Generation Algorithm (3006,0036): `AUTOMATIC`, `SEMIAUTOMATIC` or
+   * `MANUAL`; null when the file has it empty or not at all.
+   */
+  readonly algorithm: string | null;
+  /** ROI Generation Description (3006,0038), in words; null when absent. */
+  readonly description: string | null;
+  /**
+   * Whether the ROI's Derivation Code Sequence (0008,9215) says it was made
+   * by spatial resampling (113085, DCM): taken from another image.
+   */
+  readonly resampled: boolean;
 }
 
 /**
@@ -144,6 +165,11 @@ export interface StructureSet {
    * a series that names another, whatever their UIDs say.
    */
   readonly patientId?: string | null;
+  /**
+   * SOP Instance UID (0008,0018) of the file the set was read from; left out
+   * for a set that was made in the viewer and has not been through a file.
+   */
+  readonly sopInstanceUid?: string | null;
   /** The regions of interest, joined across the three RTSTRUCT sequences. */
   readonly rois: readonly Roi[];
 }

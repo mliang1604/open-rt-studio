@@ -28,7 +28,7 @@ export const DERIVED_NOTICE =
   'Made with Open RT Studio, which is not a medical device. Not for clinical use.';
 
 /** What a series is called where a few words must do. */
-const nameOf = (series: Series): string =>
+export const nameOf = (series: Series): string =>
   series.description?.trim() || series.modality?.trim() || 'image';
 
 /**
@@ -78,6 +78,17 @@ function stepText(step: PlacementStep, placement: LayerPlacement): string {
   return `registration "${registrationName(step)}" (${step.sopInstanceUid}, ${how})`;
 }
 
+/**
+ * The registrations something was taken through, in words: each by name and
+ * UID and the way it was taken, or that none was needed. Null for two images
+ * that share a frame of reference.
+ */
+export function throughText(placement: LayerPlacement | null): string {
+  return placement
+    ? `through ${placement.steps.map((step) => stepText(step, placement)).join(', then ')}`
+    : 'with no registration: the two series share a frame of reference';
+}
+
 export interface DerivationFacts {
   readonly source: Series;
   readonly base: Series;
@@ -93,10 +104,7 @@ export interface DerivationFacts {
 
 /** How a resampled image was derived, in words: what its Derivation Description says. */
 export function derivationText(facts: DerivationFacts): string {
-  const { placement } = facts;
-  const through = placement
-    ? `through ${placement.steps.map((step) => stepText(step, placement)).join(', then ')}`
-    : 'with no registration: the two series share a frame of reference';
+  const through = throughText(facts.placement);
   const missing =
     facts.missingSlices > 0
       ? ` The source lacks ${facts.missingSlices} slice${facts.missingSlices === 1 ? '' : 's'}, filled in by interpolation before it was resampled.`

@@ -190,6 +190,27 @@ describe('mergeLoad', () => {
     expect(again.overlaySeries!.map((one) => one.uid)).toEqual(['pet', 'mr']);
   });
 
+  it('keeps the structure sets that came with the overlay’s series, by that series (#90)', () => {
+    const set = {
+      name: 'rt.dcm',
+      label: 'On the MR',
+      frameOfReferenceUid: 'frame-1',
+      referencedSeriesUids: ['mr'],
+      rois: [],
+    } as LoadResult['structureSets'][number];
+    const current = fakeLoad('ct', 'frame-1');
+    const mr = { ...fakeLoad('mr', 'frame-1', 'MR'), structureSets: [set] };
+
+    const { result } = mergeLoad(current, mr);
+    expect(result.overlayStructureSets).toEqual({ mr: [set] });
+    // They are the overlay's: the base's own are as they were.
+    expect(result.structureSets).toBe(current.structureSets);
+
+    // A second overlay has its own, and none is none.
+    const both = mergeLoad(result, fakeLoad('pet', 'frame-1', 'PT')).result;
+    expect(both.overlayStructureSets).toEqual({ mr: [set], pet: [] });
+  });
+
   it('adds a series of another frame with no registration as a layer that is not drawn (#78)', () => {
     const current = fakeLoad('ct', 'frame-1');
     const incoming = fakeLoad('ct2', 'frame-2');

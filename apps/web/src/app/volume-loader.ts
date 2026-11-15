@@ -60,6 +60,13 @@ export interface LoadResult {
    */
   readonly overlaySeries?: readonly Series[];
   /**
+   * The structure sets that annotate each overlay's series, by the series'
+   * UID: what came with the series when it was laid over the base. They are
+   * drawn on that series, not on the base, and are not shown; they are what
+   * can be taken to the base through the overlay's placement (#90).
+   */
+  readonly overlayStructureSets?: Readonly<Record<string, readonly StructureSet[]>>;
+  /**
    * The loaded volumes as an ordered layer registry, keyed by {@link Layer.id}.
    * A single-series load holds exactly one entry, role `'base'`, wrapping the
    * volume assembled from the selected series; fusion (CT + dose) and compare
@@ -344,8 +351,18 @@ export function mergeLoad(
     ...(current.overlaySeries ?? []).filter((one) => one.uid !== incoming.selectedUid),
     ...(source ? [{ ...source, slices: [] }] : []),
   ];
+  const overlayStructureSets = {
+    ...current.overlayStructureSets,
+    [incoming.selectedUid]: incoming.structureSets,
+  };
   return {
-    result: { ...current, layers: [...layers, overlay], registrations: known, overlaySeries },
+    result: {
+      ...current,
+      layers: [...layers, overlay],
+      registrations: known,
+      overlaySeries,
+      overlayStructureSets,
+    },
     added: true,
     ...(found.kind === 'several' ? { choices: found.placements.length } : {}),
     ...(found.kind === 'none' ? { unplaced: true as const } : {}),
