@@ -152,6 +152,14 @@ export {
   smooth,
 } from './label-cleanup.js';
 export {
+  type Margins,
+  MARGIN_VOXELS_AT_MOST,
+  MarginError,
+  growStructure,
+  shrinkStructure,
+  uniformMargins,
+} from './label-margin.js';
+export {
   type LabelChange,
   type LabelConstraints,
   type LabelEdit,

@@ -182,7 +182,12 @@ describe('ContourToolsController (#106)', () => {
       const { tools } = setup();
       expect(tools.listed().map((tool) => tool.id)).toEqual([]);
       tools.setLabs(true);
-      expect(tools.listed().map((tool) => tool.id)).toEqual(['threshold', 'cleanup', 'sample']);
+      expect(tools.listed().map((tool) => tool.id)).toEqual([
+        'threshold',
+        'cleanup',
+        'margin',
+        'sample',
+      ]);
       tools.toggle('sample');
       expect(tools.held()?.id).toBe('sample');
       tools.setLabs(false);

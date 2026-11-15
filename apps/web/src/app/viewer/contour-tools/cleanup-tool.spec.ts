@@ -45,7 +45,12 @@ describe('CleanupTool (#110)', () => {
 
   it('is offered with the labs flag, makes ready a structure, and leaves the panes to the pointer', () => {
     const { tools, brush, host } = holding();
-    expect(tools.listed().map((tool) => tool.id)).toEqual(['threshold', 'cleanup', 'sample']);
+    expect(tools.listed().map((tool) => tool.id)).toEqual([
+      'threshold',
+      'cleanup',
+      'margin',
+      'sample',
+    ]);
     expect(tools.held()?.id).toBe('cleanup');
     expect(brush.activeRoiId()).not.toBeNull();
     // A press on a pane is not the tool's: it pans.

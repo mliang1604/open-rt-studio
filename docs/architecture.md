@@ -331,6 +331,19 @@ its own.
   many the constraints kept. The tool takes no stroke: with it in hand the
   panes pan as usual. The work is done on the page's own thread, over the
   box about the structure.
+- **Margins** (#112, labs) grow or shrink the structure the brush paints
+  into by a margin in millimetres, the same all round or one to each of
+  the patient's six directions (`label-margin.ts`). A voxel is added when
+  a voxel of the structure lies within the margin of it, and taken away
+  when one that is not the structure's does, "within" being an ellipsoid
+  whose half-axes are the margins of the sides it is measured to; so a
+  sphere grown by 5 mm all round is 5 mm larger, and one grown 5 mm to the
+  left only is wider on that side alone. The directions are DICOM's
+  (LPS), each grid axis taken along the patient axis it most lies along; a
+  grid tilted more than 25° from them is refused rather than guessed. What
+  is grown can be kept out of one structure; outside the grid is not the
+  structure's, so it shrinks from the grid's edge. A margin reaching more
+  than 250 000 voxels is refused. One click, one edit, like a cleanup.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes
