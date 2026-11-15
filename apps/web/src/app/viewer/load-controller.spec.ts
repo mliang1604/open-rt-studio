@@ -4,11 +4,18 @@
 
 import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { baseImageLayer, Orientation, type Series, type Volume } from '@open-rt-studio/dicom';
+import {
+  baseImageLayer,
+  Orientation,
+  type RtObjectFacts,
+  type Series,
+  type Volume,
+} from '@open-rt-studio/dicom';
 import { NO_OBLIQUE, type SliceRenderer } from '@open-rt-studio/render';
 
 import { ActiveDataSource } from '../data-source/active-data-source';
 import { LocalFilesSource } from '../data-source/local-files-source';
+import { PatientCatalog } from '../patient-catalog';
 import { DATA_SOURCE } from '../data-source/data-source';
 import { FakeDataSource, fakePatient } from '../data-source/testing';
 import { mergeLoad, VolumeLoader, type FileImport, type LoadResult } from '../volume-loader';
@@ -267,7 +274,7 @@ describe('picking a series from a data source', () => {
     await picking;
 
     // The import read nothing; the view goes back to the series from before the fetch.
-    imports[0]({ kind: 'nothing', skipped: [] });
+    imports[0]({ kind: 'nothing', objects: [], skipped: [] });
     await importing;
     expect(shown()).toBe('1.1.1');
   });
@@ -278,7 +285,7 @@ describe('picking a series from a data source', () => {
     await controller.loadSeriesFromPanel('1.1.1');
     expect(source.fetches).toEqual([]);
     expect(notice()).toBe('Files are still being read. Wait for the import, or cancel it.');
-    imports[0]({ kind: 'nothing', skipped: [] });
+    imports[0]({ kind: 'nothing', objects: [], skipped: [] });
     await importing;
   });
 
@@ -412,7 +419,7 @@ describe('changing the data source', () => {
     // is "loading", and the server's series must not be what is looked at.
     expect(load().status).toBe('loading');
     expect(canvas.at(-1)).toBe('empty');
-    imports[0]({ kind: 'nothing', skipped: [] });
+    imports[0]({ kind: 'nothing', objects: [], skipped: [] });
     await importing;
     // What was on screen came from the server; it is not put back.
     expect(shown()).toBeNull();
@@ -577,7 +584,7 @@ describe('changing the data source', () => {
         const importing = controller.loadFiles([new File([], 'a.dcm')], null);
         expect(load().status).toBe('loading');
         expect(controller.closePatient(confirm(true))).toBe(true);
-        imports[0]({ kind: 'nothing', skipped: [] });
+        imports[0]({ kind: 'nothing', objects: [], skipped: [] });
         await importing;
         expect(load()).toEqual({ status: 'idle' });
         expect(files.currentPatient()?.key).toBe('P2');
@@ -600,5 +607,77 @@ describe('changing the data source', () => {
         expect(files.patients()).toHaveLength(2);
       });
     });
+  });
+});
+
+describe('radiotherapy objects and pairs of series (#38)', () => {
+  beforeEach(() => localStorage.clear());
+
+  const PLAN: RtObjectFacts = {
+    kind: 'plan',
+    sopInstanceUid: '5.2',
+    sopClassUid: '1.2.840.10008.5.1.4.1.1.481.5',
+    seriesUid: '5.2.1',
+    studyUid: '1.1',
+    patientId: 'SYN-0001',
+    description: 'Plan',
+    frameOfReferenceUid: null,
+    references: [],
+  };
+
+  it('keeps what a batch of plans refers to, and says where they are shown', async () => {
+    const { controller, notice, imports, shown } = setup();
+    const catalog = TestBed.inject(PatientCatalog);
+    catalog.clear();
+    const importing = controller.loadFiles([new File([], 'rp.dcm')], null);
+    imports[0]({ kind: 'objects', objects: [PLAN], skipped: [] });
+    await importing;
+    expect(notice()).toBe('Imported 1 plan. The timeline shows it with what it belongs to.');
+    expect(catalog.rtObjects()).toEqual([PLAN]);
+    expect(shown()).toBeNull();
+    catalog.clear();
+  });
+
+  it('keeps what came with structure sets and registrations too, and nothing of a batch that could not be read', async () => {
+    const { controller, imports } = setup();
+    const catalog = TestBed.inject(PatientCatalog);
+    catalog.clear();
+    const first = controller.loadFiles([new File([], 'reg.dcm')], null);
+    imports[0]({ kind: 'registrations', registrations: [], objects: [PLAN], skipped: [] });
+    await first;
+    expect(catalog.rtObjects()).toEqual([PLAN]);
+    const second = controller.loadFiles([new File([], 'x.dcm')], null);
+    imports[1]({ kind: 'nothing', objects: [{ ...PLAN, sopInstanceUid: '5.9' }], skipped: [] });
+    await second;
+    expect(catalog.rtObjects()).toEqual([PLAN]);
+    catalog.clear();
+  });
+
+  it('opens a pair one after the other: the first as the image, then the second over it', async () => {
+    const { controller, source, shown } = setup();
+    source.holdFetches = true;
+    const opening = controller.openPair('1.1.1', '1.2.1');
+    await settle();
+    // The second is not asked for until the first is there.
+    expect(source.fetches.map((fetch) => fetch.seriesUid)).toEqual(['1.1.1']);
+    source.fetches[0].answer();
+    await settle();
+    expect(source.fetches.map((fetch) => fetch.seriesUid)).toEqual(['1.1.1', '1.2.1']);
+    expect(shown()).toBe('1.1.1');
+    source.fetches[1].answer();
+    await opening;
+    // Whatever becomes of the second, the first stays the image.
+    expect(shown()).toBe('1.1.1');
+  });
+
+  it('asks for nothing more when the first of a pair did not come', async () => {
+    const { controller, source, shown } = setup();
+    source.holdFetches = true;
+    const opening = controller.openPair('1.1.1', '1.2.1');
+    await settle();
+    source.fetches[0].fail(new Error('That series is gone.'));
+    await opening;
+    expect(source.fetches).toHaveLength(1);
+    expect(shown()).toBeNull();
   });
 });

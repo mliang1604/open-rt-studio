@@ -3,7 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { isAbortError, parseFilesInWorkers, type WorkerFactory } from './parse-pool';
-import type { Slice, SpatialRegistration, StructureSet } from '@open-rt-studio/dicom';
+import type {
+  RtObjectFacts,
+  Slice,
+  SpatialRegistration,
+  StructureSet,
+} from '@open-rt-studio/dicom';
 import type { ParseRequest, ParseResponse } from './parse.worker';
 
 type Listener = (event: unknown) => void;
@@ -77,6 +82,8 @@ function successResponse(req: ParseRequest): ParseResponse {
     // A registration object for every third file.
     registrations:
       req.id % 3 === 2 ? [{ sopInstanceUid: req.name } as unknown as SpatialRegistration] : [],
+    // What the file refers to, for every fourth.
+    objects: req.id % 4 === 3 ? [{ sopInstanceUid: req.name } as unknown as RtObjectFacts] : [],
   };
 }
 
@@ -132,6 +139,7 @@ describe('parseFilesInWorkers', () => {
     ]);
     expect(result.structureSets.map((s) => s.name)).toEqual(['f1.dcm', 'f3.dcm']);
     expect(result.registrations.map((one) => one.sopInstanceUid)).toEqual(['f2.dcm']);
+    expect(result.objects.map((one) => one.sopInstanceUid)).toEqual(['f3.dcm']);
   });
 
   it('fires progress once per file, from 0 up to the total', async () => {
@@ -242,7 +250,13 @@ describe('parseFilesInWorkers', () => {
     const pool = new FakeWorkerPool();
     const result = await parseFilesInWorkers([], undefined, pool.create);
 
-    expect(result).toEqual({ slices: [], structureSets: [], registrations: [], skipped: [] });
+    expect(result).toEqual({
+      slices: [],
+      structureSets: [],
+      registrations: [],
+      objects: [],
+      skipped: [],
+    });
     expect(pool.workers).toHaveLength(0);
   });
 

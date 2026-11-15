@@ -1622,6 +1622,7 @@
   [server]="serverLabel()"
   [patients]="openPatients()"
   (loadSeries)="loadCtl.loadSeriesFromPanel($event.uid)"
+  (openPair)="loadCtl.openPair($event.baseUid, $event.overlayUid)"
   (openServer)="serverPanelOpen.set(true)"
   (choosePatient)="loadCtl.switchPatient($event)"
   (closePatient)="loadCtl.closePatient()"

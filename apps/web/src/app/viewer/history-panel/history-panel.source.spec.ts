@@ -300,3 +300,159 @@ describe('the history panel on a data source', () => {
     });
   });
 });
+
+describe('the history panel with radiotherapy objects and registrations (#38)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  /** The fake patient, with a structure set, a plan and a dose on the CT, and two registrations. */
+  function withObjects(): FakeDataSource {
+    const source = new FakeDataSource();
+    const patient = fakePatient();
+    const [planning, later] = patient.studies;
+    source.currentPatient.set({
+      ...patient,
+      studies: [
+        {
+          ...planning,
+          series: [
+            {
+              ...planning.series[0],
+              attached: [
+                {
+                  kind: 'structure-set',
+                  sopInstanceUid: '9.1',
+                  seriesUid: '1.1.5',
+                  description: 'Structures',
+                  by: 'series',
+                },
+                {
+                  kind: 'plan',
+                  sopInstanceUid: '9.2',
+                  seriesUid: '1.1.6',
+                  description: null,
+                  by: 'structure-set',
+                },
+              ],
+            },
+            planning.series[1],
+          ],
+          loose: [{ kind: 'plan', sopInstanceUid: '9.3', seriesUid: '1.1.7', description: 'Old' }],
+        },
+        later,
+      ],
+      links: [
+        {
+          sopInstanceUid: '9.8',
+          description: 'REG',
+          deformable: false,
+          ends: [['1.1.1'], ['1.2.1']],
+        },
+        {
+          sopInstanceUid: '9.9',
+          description: null,
+          deformable: true,
+          ends: [['1.1.1'], ['1.2.1']],
+        },
+        // One end is not on the timeline: there is nothing to connect.
+        { sopInstanceUid: '9.7', description: null, deformable: false, ends: [['1.1.1'], ['7.7']] },
+      ],
+      loose: [{ kind: 'plan', sopInstanceUid: '9.4', seriesUid: '3.1', description: 'Elsewhere' }],
+    });
+    return source;
+  }
+
+  it('shows a series’ structure sets, plans and doses beside it, each said why', async () => {
+    const { host, click } = await render(withObjects());
+    await click('.study-tile');
+    const [ct, dose] = host.querySelectorAll('.series-strip li[data-series-uid]');
+    expect(ct.getAttribute('data-series-uid')).toBe('1.1.1');
+    const chips = [...ct.querySelectorAll('app-rt-chips li')];
+    expect(chips.map((chip) => chip.querySelector('.rt-code')!.textContent)).toEqual(['RS', 'RP']);
+    expect(chips.map((chip) => chip.querySelector('.rt-text')!.textContent)).toEqual([
+      'Structures',
+      'Plan',
+    ]);
+    expect(chips[0].getAttribute('title')).toBe(
+      'Structure set “Structures”. It names this series.',
+    );
+    // Nothing belongs to the dose, and nothing is said to.
+    expect(dose.querySelector('app-rt-chips')).toBeNull();
+  });
+
+  it('shows what belongs to no series with its study, and what is in no study shown apart', async () => {
+    const { host, click, text } = await render(withObjects());
+    await click('.study-tile');
+    const loose = host.querySelector('.series-strip li.loose')!;
+    expect(loose.querySelector('.loose-title')!.textContent).toBe('Belongs to no series here');
+    expect(loose.querySelector('.rt-text')!.textContent).toBe('Old');
+    expect(text('.loose-patient .loose-title')).toEqual(['In studies with no image here']);
+    expect(text('.loose-patient .rt-text')).toEqual(['Elsewhere']);
+  });
+
+  it('lists the registrations with the series they connect, named by what and when', async () => {
+    const { host, text } = await render(withObjects());
+    // Without opening a study: the registrations are the patient's.
+    expect(text('app-registration-links .link-kind')).toEqual(['matrix', 'deformable']);
+    const [first] = host.querySelectorAll('app-registration-links .link');
+    expect([...first.querySelectorAll('.link-end')].map((end) => end.textContent)).toEqual([
+      'CT Planning CT (2026-01-05)',
+      'MR T1 (2026-03-02)',
+    ]);
+    expect(first.getAttribute('data-link')).toBe('9.8');
+  });
+
+  it('picks out the two ends of the registration that is pointed at', async () => {
+    const { host, click, fixture } = await render(withObjects());
+    const linked = (): string[] =>
+      [...host.querySelectorAll('.linked')].map(
+        (element) =>
+          element.getAttribute('data-series-uid') ?? element.getAttribute('data-study-uid') ?? '',
+      );
+    expect(linked()).toEqual([]);
+    host.querySelector('app-registration-links .link')!.dispatchEvent(new Event('mouseenter'));
+    await fixture.whenStable();
+    // Both studies are closed: each stands for its series.
+    expect(linked()).toEqual(['1.1', '1.2']);
+    await click('.study-tile');
+    host.querySelector('app-registration-links .link')!.dispatchEvent(new Event('mouseenter'));
+    await fixture.whenStable();
+    expect(linked()).toEqual(['1.1.1', '1.2']);
+    host.querySelector('app-registration-links .link')!.dispatchEvent(new Event('mouseleave'));
+    await fixture.whenStable();
+    expect(linked()).toEqual([]);
+  });
+
+  it('asks for the pair to be opened when the offer is taken', async () => {
+    const { host, click, fixture } = await render(withObjects());
+    const pairs: unknown[] = [];
+    fixture.componentInstance.openPair.subscribe((pair) => pairs.push(pair));
+    await click('app-registration-links .link', 1);
+    await click('app-registration-links .offer button', 0);
+    expect(pairs).toEqual([{ baseUid: '1.1.1', overlayUid: '1.2.1' }]);
+    expect(host.querySelector('.offer')).toBeNull();
+  });
+
+  it('keeps the same in the tree view', async () => {
+    const { host, click, text } = await render(withObjects());
+    await click('.history-view', 1);
+    await click('.tree-row-study');
+    expect(text('.tree-series app-rt-chips .rt-code')).toEqual(['RS', 'RP', 'RP']);
+    expect(text('app-registration-links .link-kind')).toEqual(['matrix', 'deformable']);
+    // The lines are the timeline's.
+    expect(host.querySelector('.link-lines')).toBeNull();
+  });
+
+  it('shows none of it for a patient with nothing of the kind', async () => {
+    const source = new FakeDataSource();
+    source.currentPatient.set(fakePatient());
+    const { host, click } = await render(source);
+    await click('.study-tile');
+    expect(host.querySelector('app-rt-chips')).toBeNull();
+    expect(host.querySelector('app-registration-links')).toBeNull();
+    expect(host.querySelector('.loose')).toBeNull();
+  });
+});

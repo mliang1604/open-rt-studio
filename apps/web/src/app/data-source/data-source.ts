@@ -3,7 +3,14 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { InjectionToken, inject, type Signal } from '@angular/core';
-import type { Series, RegistrationObject, StructureSet } from '@open-rt-studio/dicom';
+import type {
+  AttachedObject,
+  LooseObject,
+  RegistrationLink,
+  RegistrationObject,
+  Series,
+  StructureSet,
+} from '@open-rt-studio/dicom';
 
 import type { LoadProgress } from '../parse-pool';
 import type { SeriesThumbnail } from '../viewer/series-thumbnail';
@@ -113,6 +120,16 @@ export interface PatientSummary {
 export interface PatientHistory extends PatientSummary {
   /** Oldest first; undated studies last. */
   readonly studies: readonly StudySummary[];
+  /**
+   * The registrations that connect image series of the patient: each with
+   * the series at its two ends. Left out by a source that cannot say.
+   */
+  readonly links?: readonly RegistrationLink[];
+  /**
+   * Radiotherapy objects that belong to no image series held and are filed
+   * in a study that is not among {@link studies}. Left out when there are none.
+   */
+  readonly loose?: readonly LooseObject[];
 }
 
 /** A study as the timeline shows it. */
@@ -124,6 +141,12 @@ export interface StudySummary {
   /** The modalities of its series, each once. */
   readonly modalities: readonly string[];
   readonly series: readonly SeriesSummary[];
+  /**
+   * Structure sets, plans, doses and registrations filed in the study that
+   * belong to no image series held: shown with the study, so that nothing
+   * held goes unshown. Left out when there are none.
+   */
+  readonly loose?: readonly LooseObject[];
 }
 
 /** A series as its chip shows it: what it is, without its pixels. */
@@ -141,6 +164,12 @@ export interface SeriesSummary {
    * series when it is fetched.
    */
   readonly structureSets: number;
+  /**
+   * The structure sets, plans and doses that belong to the series, each with
+   * why (`relateRtObjects`): shown with it on the timeline. Left out for a
+   * series nothing belongs to, and by a source that cannot say.
+   */
+  readonly attached?: readonly AttachedObject[];
 }
 
 export interface FetchOptions {

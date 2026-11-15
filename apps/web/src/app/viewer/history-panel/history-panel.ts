@@ -3,13 +3,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
+  afterRenderEffect,
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
+  type ElementRef,
   inject,
   input,
   output,
   signal,
+  viewChild,
   type WritableSignal,
 } from '@angular/core';
 import { formatDicomDate } from '@open-rt-studio/dicom';
@@ -21,7 +25,28 @@ import {
 } from '../../data-source/data-source';
 import { PreferencesStore, type HistoryView } from '../../preferences-store';
 import type { SeriesThumbnail } from '../series-thumbnail';
+import { bracketPath, lanesHeight, laneY, type Anchor } from './link-lines';
+import {
+  RegistrationLinks,
+  type LinkEnd,
+  type LinkView,
+  type PairChoice,
+} from './registration-links';
+import { RtChips } from './rt-chips';
 import { SeriesChip } from './series-chip';
+
+/** A registration's line under the timeline, as it is drawn. */
+interface LinkLine {
+  readonly uid: string;
+  readonly d: string;
+  readonly deformable: boolean;
+}
+
+const sameLines = (a: readonly LinkLine[], b: readonly LinkLine[]): boolean =>
+  a.length === b.length && a.every((line, at) => line.uid === b[at].uid && line.d === b[at].d);
+
+/** The room between the study tiles and the bottom of the timeline, in pixels. */
+const TIMELINE_FOOT_PX = 12;
 
 /**
  * The longitudinal history panel docked below the viewport: the focused
@@ -50,7 +75,7 @@ import { SeriesChip } from './series-chip';
 @Component({
   selector: 'app-history-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SeriesChip],
+  imports: [SeriesChip, RtChips, RegistrationLinks],
   templateUrl: './history-panel.html',
   styleUrl: './history-panel.css',
   host: {
@@ -112,6 +137,130 @@ export class HistoryPanel {
 
   /** Whether there's anything to show; the panel hides entirely otherwise. */
   protected readonly hasCatalog = computed(() => this.studies().length > 0);
+
+  /** Two series to open together: asked for from a registration that connects them. */
+  readonly openPair = output<PairChoice>();
+
+  /**
+   * The registrations that connect series of the patient, each with its two
+   * ends as the series shown here. One with an end that is not shown is left out.
+   */
+  protected readonly linkViews = computed<readonly LinkView[]>(() => {
+    const labels = new Map<string, string>();
+    for (const study of this.studies()) {
+      for (const series of study.series) labels.set(series.uid, linkSeriesLabel(series, study));
+    }
+    const end = (uids: readonly string[]): LinkEnd[] =>
+      uids.flatMap((uid) => (labels.has(uid) ? [{ uid, label: labels.get(uid)! }] : []));
+    return (this.source.currentPatient()?.links ?? []).flatMap((link): LinkView[] => {
+      const ends = [end(link.ends[0]), end(link.ends[1])] as const;
+      if (ends[0].length === 0 || ends[1].length === 0) return [];
+      return [
+        { uid: link.sopInstanceUid, name: link.description, deformable: link.deformable, ends },
+      ];
+    });
+  });
+
+  /** What is filed in studies that are not on the timeline; null when there is nothing. */
+  protected readonly looseElsewhere = computed(() => {
+    const loose = this.source.currentPatient()?.loose ?? [];
+    return loose.length > 0 ? loose : null;
+  });
+
+  /** The registration that is pointed at or open below: its line and its ends are picked out. */
+  protected readonly activeLink = signal<string | null>(null);
+  private readonly activeSeries = computed(() => {
+    const link = this.linkViews().find((one) => one.uid === this.activeLink());
+    return new Set(link ? [...link.ends[0], ...link.ends[1]].map((end) => end.uid) : []);
+  });
+  protected isLinked(series: SeriesSummary): boolean {
+    return this.activeSeries().has(series.uid);
+  }
+  /** A study that is closed stands for its series: picked out when one of them is an end. */
+  protected isLinkedStudy(study: StudySummary): boolean {
+    return !this.isOpen(study) && study.series.some((series) => this.isLinked(series));
+  }
+
+  private readonly scroll = viewChild<ElementRef<HTMLElement>>('scroll');
+  /** Counts the times the timeline changed its size, so that the lines are laid again. */
+  private readonly resized = signal(0);
+  protected readonly lines = signal<readonly LinkLine[]>([], { equal: sameLines });
+  /** The room under the study tiles: a foot, and a lane for each registration's line. */
+  protected readonly lanesRoom = computed(
+    () => TIMELINE_FOOT_PX + lanesHeight(this.linkViews().length),
+  );
+
+  constructor() {
+    // The lines join what is on screen, so they are laid after it is: when
+    // the registrations, the open study or the size of the timeline change.
+    afterRenderEffect(() => {
+      this.resized();
+      this.openStudyUid();
+      this.lines.set(this.layLines(this.linkViews(), this.scroll()?.nativeElement ?? null));
+    });
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => this.resized.update((count) => count + 1));
+      let watched: Element | null = null;
+      afterRenderEffect(() => {
+        const element = this.scroll()?.nativeElement ?? null;
+        if (element === watched) return;
+        if (watched) observer.unobserve(watched);
+        if (element) observer.observe(element);
+        watched = element;
+      });
+      inject(DestroyRef).onDestroy(() => observer.disconnect());
+    }
+  }
+
+  /**
+   * Each registration's line: from the chip of a series at one end, or the
+   * tile of its study while that is closed, to the same at the other end.
+   */
+  private layLines(links: readonly LinkView[], host: HTMLElement | null): LinkLine[] {
+    if (!host || links.length === 0) return [];
+    const box = host.getBoundingClientRect();
+    const at = (element: Element): Anchor => {
+      const rect = element.getBoundingClientRect();
+      return {
+        x: rect.left - box.left + host.scrollLeft + rect.width / 2,
+        y: rect.bottom - box.top + host.scrollTop,
+      };
+    };
+    const chips = new Map<string, Element>();
+    for (const chip of host.querySelectorAll<HTMLElement>('[data-series-uid]')) {
+      chips.set(chip.dataset['seriesUid'] ?? '', chip);
+    }
+    const tiles = new Map<string, Element>();
+    for (const tile of host.querySelectorAll<HTMLElement>('[data-study-uid]')) {
+      tiles.set(tile.dataset['studyUid'] ?? '', tile);
+    }
+    const studyOf = new Map<string, string>();
+    for (const study of this.studies()) {
+      for (const series of study.series) studyOf.set(series.uid, study.studyUid);
+    }
+    const anchor = (end: readonly LinkEnd[]): Anchor | null => {
+      for (const { uid } of end) {
+        const element = chips.get(uid) ?? tiles.get(studyOf.get(uid) ?? '');
+        if (element) return at(element);
+      }
+      return null;
+    };
+    const list = host.querySelector('ol');
+    const below = list ? list.getBoundingClientRect().bottom - box.top + host.scrollTop : 0;
+    return links.flatMap((link, lane): LinkLine[] => {
+      const [a, b] = [anchor(link.ends[0]), anchor(link.ends[1])];
+      if (!a || !b) return [];
+      // Both ends in one closed study: a short bracket under its tile.
+      const apart = Math.abs(a.x - b.x) < 1 ? 8 : 0;
+      return [
+        {
+          uid: link.uid,
+          deformable: link.deformable,
+          d: bracketPath({ ...a, x: a.x - apart }, { ...b, x: b.x + apart }, laneY(below, lane)),
+        },
+      ];
+    });
+  }
 
   /** Loaded-series UIDs as a set, for the per-chip highlight membership test. */
   private readonly loadedSet = computed(() => new Set(this.loadedSeriesUids()));
@@ -260,6 +409,12 @@ export class HistoryPanel {
  * other (returns the clicked UID), and clicking the already-open tile closes it
  * (returns null). Pure, for unit-testing the toggle behaviour.
  */
+/** A series as a registration's end names it: what it is, and when its study was. */
+export function linkSeriesLabel(series: SeriesSummary, study: StudySummary): string {
+  const what = [series.modality, series.description?.trim()].filter(Boolean).join(' ') || 'Series';
+  return `${what} (${formatStudyDate(study.date)})`;
+}
+
 export function nextOpenStudy(current: string | null, clicked: string): string | null {
   return current === clicked ? null : clicked;
 }

@@ -7,6 +7,7 @@ import {
   registrationsOfPatient,
   structureSetsForSeries,
   structureSetsOfPatient,
+  type RtObjectFacts,
   type Series,
   type RegistrationObject,
   type StructureSet,
@@ -15,6 +16,7 @@ import {
 import { PatientCatalog } from '../patient-catalog';
 import { SeriesThumbnailCache, type SeriesThumbnail } from '../viewer/series-thumbnail';
 import { downloadBlob } from '../viewer/viewer-dom';
+import { withRelations } from './rt-timeline';
 import { zipStored } from './zip';
 import type {
   DataSource,
@@ -58,7 +60,7 @@ export class LocalFilesSource implements DataSource {
     const patient = this.catalog.currentPatient();
     if (!patient) return null;
     const sets = this.catalog.structureSets();
-    return {
+    const history: PatientHistory = {
       key: patient.patientId,
       ...patient,
       studies: patient.studies.map((study) => ({
@@ -73,6 +75,11 @@ export class LocalFilesSource implements DataSource {
         }),
       })),
     };
+    // With what the patient's radiotherapy objects say they belong to.
+    const objects = this.catalog
+      .rtObjects()
+      .filter((one) => one.patientId.trim() === patient.patientId);
+    return withRelations(history, objects);
   });
 
   /** Patient ID of the patient imported last; null when nothing was imported. */
@@ -158,6 +165,11 @@ export class LocalFilesSource implements DataSource {
   /** Take in structure sets parsed from files, for the series they belong to. */
   addStructureSets(sets: readonly StructureSet[]): void {
     this.catalog.addStructureSets(sets);
+  }
+
+  /** Take in what the radiotherapy objects among parsed files refer to, for the timeline. */
+  addRtObjects(objects: readonly RtObjectFacts[]): void {
+    this.catalog.addRtObjects(objects);
   }
 
   /** Take in Spatial Registration objects parsed from files. */

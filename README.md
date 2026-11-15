@@ -131,8 +131,10 @@ by git) if you want files on disk to open.
   registration, pictures of the panes and everything that was measured, the
   not-for-clinical-use notice on every page, and the patient's identifiers
   left out unless asked for
-- A patient timeline of everything imported, a metadata panel and a raw DICOM
-  tag inspector
+- A patient timeline of everything imported: each structure set, plan and
+  dose beside the image series it belongs to, and each registration as a
+  line between the series it connects, which opens the pair
+- A metadata panel and a raw DICOM tag inspector
 
 ## Building and testing
 

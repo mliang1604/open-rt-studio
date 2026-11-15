@@ -204,10 +204,9 @@
   align-items: stretch;
   gap: 10px;
   margin: 0;
-  padding: 0 12px 12px;
+  padding: 0 12px;
   list-style: none;
-  overflow-x: auto;
-  overflow-y: hidden;
+  width: max-content;
   min-height: 0;
 }
 
@@ -311,8 +310,12 @@
   border-bottom-right-radius: var(--radius-sm);
 }
 
+/* A series, and beside it what belongs to it. */
 .series-strip li {
   flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 /* Tree view: Patient ▸ Study ▸ Series stacked vertically and scrolling, for
@@ -410,4 +413,65 @@
   :host {
     background: var(--panel);
   }
+}
+
+/* The timeline and the lines of the registrations under it scroll together. */
+.timeline-scroll {
+  position: relative;
+  flex: 0 1 auto;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* A registration's line: from one end down to its lane, along, and up to the
+   other. Solid for a matrix, dashed for a deformation field. */
+.link-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.link-lines path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.link-lines path.deformable {
+  stroke-dasharray: 5 3;
+}
+
+.link-lines path.active {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* The ends of the registration that is pointed at or open. */
+.series-strip li.linked,
+.tree-series li.linked,
+.study-tile.linked {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* What belongs to no series: beside the series, and said to be so. */
+.loose {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.loose-title {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.loose-patient {
+  padding: 0 12px 8px;
 }

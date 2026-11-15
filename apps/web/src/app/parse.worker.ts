@@ -9,9 +9,12 @@ import {
   parseFileAsync,
   parseSpatialRegistration,
   parseStructureSet,
+  readInstanceHeader,
+  rtObjectFacts,
   UnsupportedDicomError,
   type Slice,
   type RegistrationObject,
+  type RtObjectFacts,
   type StructureSet,
 } from '@open-rt-studio/dicom';
 
@@ -45,6 +48,12 @@ export type ParseResponse =
       readonly slices: Slice[];
       readonly structureSets: StructureSet[];
       readonly registrations: RegistrationObject[];
+      /**
+       * What the file says it belongs to, when it is a structure set, a plan,
+       * a dose or a registration: for the timeline, which shows each with
+       * the series it refers to. A plan is nothing else here.
+       */
+      readonly objects: RtObjectFacts[];
     }
   | {
       readonly id: number;
@@ -75,15 +84,24 @@ addEventListener('message', async (event: MessageEvent<ParseRequest>) => {
         ? (parseSpatialRegistration(buffer) ?? parseDeformableRegistration(buffer))
         : null;
     const registrations = registration ? [registration] : [];
+    // What the file refers to, for anything that is no image: read from its
+    // header alone. A dose has pixels and refers to its plan all the same.
+    const objects: RtObjectFacts[] = [];
+    if (slices.length === 0 || slices[0].modality === 'RTDOSE') {
+      const read = readInstanceHeader(new Uint8Array(buffer));
+      const facts = read.ok ? rtObjectFacts(read.header) : null;
+      if (facts) objects.push(facts);
+    }
     // Transfer each frame's pixel buffer back instead of cloning it, and each
     // deformation grid's vectors: a window on the file's own bytes, or a copy.
     const transfer = new Set<ArrayBufferLike>(slices.map((slice) => slice.pixels.buffer));
     for (const { transform } of registration?.registrations ?? []) {
       if (transform.kind === 'deformable') transfer.add(transform.grid.vectors.buffer);
     }
-    postMessage({ id, ok: true, slices, structureSets, registrations } satisfies ParseResponse, [
-      ...transfer,
-    ] as Transferable[]);
+    postMessage(
+      { id, ok: true, slices, structureSets, registrations, objects } satisfies ParseResponse,
+      [...transfer] as Transferable[],
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const reason = error instanceof UnsupportedDicomError ? error.reason : message;
