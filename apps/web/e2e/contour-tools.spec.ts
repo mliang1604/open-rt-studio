@@ -209,3 +209,33 @@ test('a cleanup fills the hole of a painted ring in its slice, as one undo (#110
   expect(await capturedColour(page)).toBeCloseTo(ring, 1);
   expectNoProblems(problems);
 });
+
+test('a margin grows a painted structure, and shrinks it back, each one undo (#112)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  const middle = await at(page, 0.5, 0.5);
+  await page.mouse.click(middle.x, middle.y);
+  const painted = await capturedColour(page);
+
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="margin"]').click();
+  await page.locator('[data-margin-uniform]').fill('3');
+  await page.locator('[data-margin-uniform]').press('Tab');
+  await page.locator('[data-margin="grow"]').click();
+  await expect(page.locator('[data-margin-said]')).toHaveText(/^Grow: \d+ voxels added\.$/);
+  const grown = await capturedColour(page);
+  expect(grown).toBeGreaterThan(painted + 0.05);
+  await page.locator('[data-margin="shrink"]').click();
+  await expect(page.locator('[data-margin-said]')).toHaveText(/^Shrink: \d+ voxels taken away\.$/);
+  expect(await capturedColour(page)).toBeLessThan(grown);
+  // Two undos: back to the stroke as it was painted.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(painted, 1);
+  expectNoProblems(problems);
+});

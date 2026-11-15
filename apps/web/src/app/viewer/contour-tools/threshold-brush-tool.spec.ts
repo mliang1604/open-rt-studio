@@ -93,7 +93,12 @@ describe('ThresholdBrushTool (#107)', () => {
 
   it('is offered with the labs flag, and makes ready a structure to paint into', () => {
     const { tools, brush } = holding();
-    expect(tools.listed().map((tool) => tool.id)).toEqual(['threshold', 'cleanup', 'sample']);
+    expect(tools.listed().map((tool) => tool.id)).toEqual([
+      'threshold',
+      'cleanup',
+      'margin',
+      'sample',
+    ]);
     expect(tools.held()?.id).toBe('threshold');
     expect(brush.activeRoiId()).not.toBeNull();
     expect(tools.isActive()).toBe(true);
