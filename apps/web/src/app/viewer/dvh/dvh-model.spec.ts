@@ -356,6 +356,16 @@ describe('the histograms as a file', () => {
     expect(lines.at(-1)).toBe('');
   });
 
+  it('names a dose that is not simply a dose, in its first line and over its doses', () => {
+    const rows = [dvhRow(structure('A'), { found: TEN }, [], GY, 'percent')];
+    const named = dvhCsv(rows, [], GY, { from: 0, to: 10 }, 'EQD2 (α/β 3 Gy)').split('\r\n');
+    // The line has a comma in it, so it is quoted.
+    expect(named[0].startsWith('"Dose-volume histograms of EQD2 (α/β 3 Gy). Made with')).toBe(true);
+    expect(named[6].startsWith('EQD2 (α/β 3 Gy) (Gy),A: cumulative (%)')).toBe(true);
+    const plain = dvhCsv(rows, [], GY, { from: 0, to: 10 }).split('\r\n');
+    expect(plain[0].startsWith('"Dose-volume histograms. Made with')).toBe(true);
+  });
+
   it('says a relative dose is one', () => {
     const rows = [
       dvhRow(structure('A'), { found: histogramOf([0.5, 1]) }, [], RELATIVE, 'percent'),

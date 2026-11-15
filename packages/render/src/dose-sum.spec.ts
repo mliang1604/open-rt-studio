@@ -52,7 +52,7 @@ const noPause = (): Promise<void> => Promise.resolve();
 describe('summing doses by whichever way there is', () => {
   it('is the reference’s own sum without a GPU', async () => {
     const reference = sumDoses(GRID, TERMS);
-    const found = await sumDosesWith(null, GRID, TERMS, noPause);
+    const found = await sumDosesWith(null, GRID, TERMS, { pause: noPause });
     expect([...found.data]).toEqual([...reference.data]);
     expect([...found.known]).toEqual([...reference.known]);
     expect(found.knownCount).toBe(reference.knownCount);
@@ -83,7 +83,7 @@ describe('summing doses by whichever way there is', () => {
         gpuProblem: first ? null : 'The GPU could not resample: Out of memory.',
       });
     };
-    const found = await sumDosesWith({} as GPUDevice, GRID, TERMS, noPause, resampleBy);
+    const found = await sumDosesWith({} as GPUDevice, GRID, TERMS, { pause: noPause, resampleBy });
     expect(asked.map((one) => one.source)).toEqual([WHOLE, PART, PART]);
     expect(new Set(asked.map((one) => one.outside))).toEqual(new Set([DOSE_SUM_OUTSIDE]));
     expect(new Set(asked.map((one) => one.interpolation))).toEqual(new Set(['linear']));
@@ -105,9 +105,11 @@ describe('summing doses by whichever way there is', () => {
 
   it('lets the page answer between doses', async () => {
     let pauses = 0;
-    await sumDosesWith(null, GRID, TERMS, () => {
-      pauses++;
-      return Promise.resolve();
+    await sumDosesWith(null, GRID, TERMS, {
+      pause: () => {
+        pauses++;
+        return Promise.resolve();
+      },
     });
     // Three doses are read: twice between them. (Each is too small to pause within.)
     expect(pauses).toBe(2);
@@ -116,7 +118,25 @@ describe('summing doses by whichever way there is', () => {
   it('refuses a dose whose grid cannot be inverted', async () => {
     const flat = { ...WHOLE, geometry: { ...WHOLE.geometry!, kStep: WHOLE.geometry!.iStep } };
     await expect(
-      sumDosesWith(null, GRID, [{ dose: flat, through: null, weight: 1 }], noPause),
+      sumDosesWith(null, GRID, [{ dose: flat, through: null, weight: 1 }], { pause: noPause }),
     ).rejects.toThrow(RangeError);
+  });
+
+  it('converts each dose before it is added, as the reference does (#99)', async () => {
+    const terms = TERMS.map((term, index) => ({ ...term, fractions: [30, 5, 10, 3][index] }));
+    const conversion = { kind: 'eqd', alphaBetaGy: 3, fractionGy: 2 } as const;
+    const reference = sumDoses(GRID, terms, conversion);
+    const found = await sumDosesWith(null, GRID, terms, { conversion, pause: noPause });
+    expect([...found.data]).toEqual([...reference.data]);
+    expect([...found.known]).toEqual([...reference.known]);
+    expect(found.made).toEqual({ doses: 3, model: 'eqd', fractionGy: 2, alphaBetaGy: 3 });
+    // Converted, it is another sum than the doses as they are.
+    const plain = await sumDosesWith(null, GRID, terms, { pause: noPause });
+    expect(plain.made).toEqual({ doses: 3, model: 'physical' });
+    expect([...found.data]).not.toEqual([...plain.data]);
+    // A conversion that cannot be made is refused before anything is read.
+    await expect(
+      sumDosesWith(null, GRID, terms, { conversion: { kind: 'bed', alphaBetaGy: 0 } }),
+    ).rejects.toThrow('The α/β ratio is not a number of gray more than 0.');
   });
 });

@@ -10,7 +10,9 @@
 // dose is not known, and the adding, are the reference's own code
 // (`addDoseTerm`), so the two ways differ by what the two ways of
 // resampling differ by and by nothing else: single against double precision
-// in where a place is and in the blend of the eight voxels about it.
+// in where a place is and in the blend of the eight voxels about it. A
+// conversion to BED or EQDx (#99) is part of the adding, done on the values
+// the resampling gave: it too is the reference's own code.
 
 import {
   DOSE_SUM_OUTSIDE,
@@ -18,6 +20,7 @@ import {
   beginDoseSum,
   fieldReaches,
   finishDoseSum,
+  type DoseConversion,
   type DoseSum,
   type DoseSumTerm,
   type ResampleGrid,
@@ -39,23 +42,35 @@ export interface DoseSumRun extends DoseSum {
   readonly gpuProblems: readonly (string | null)[];
 }
 
+/** How a sum is made, where that is not the usual way. */
+export interface DoseSumOptions {
+  /** What each dose is converted to before it is added (#99); nothing when left out. */
+  readonly conversion?: DoseConversion;
+  /** Lets the page answer; a spec gives one that does not wait. */
+  readonly pause?: () => Promise<void>;
+  /** Resamples one dose; `resample` when left out. */
+  readonly resampleBy?: DoseResampler;
+}
+
 /**
  * The sum of `terms` on `grid`, each dose resampled on the GPU when there
- * is one and it can, and by the reference otherwise, a dose at a time. The
- * page is left to answer between doses (`pause`), and within a dose that
- * the reference resamples.
+ * is one and it can, and by the reference otherwise, a dose at a time, and
+ * converted first when a conversion is asked for. The page is left to
+ * answer between doses, and within a dose that the reference resamples.
  *
- * Rejects with a RangeError when a dose's grid cannot be inverted. What may
- * be summed is `doseSumProblem`'s to say, before this is called.
+ * Rejects with a RangeError when a dose's grid cannot be inverted, and for
+ * a conversion that cannot be made. What may be summed is
+ * `doseSumProblem`'s to say, before this is called.
  */
 export async function sumDosesWith(
   device: GPUDevice | null,
   grid: ResampleGrid,
   terms: readonly DoseSumTerm[],
-  pause: () => Promise<void> = () => new Promise((resolve) => setTimeout(resolve)),
-  resampleBy: DoseResampler = resample,
+  options: DoseSumOptions = {},
 ): Promise<DoseSumRun> {
-  const sum = beginDoseSum(grid);
+  const pause = options.pause ?? (() => new Promise<void>((resolve) => setTimeout(resolve)));
+  const resampleBy = options.resampleBy ?? resample;
+  const sum = beginDoseSum(grid, options.conversion);
   const by: ('gpu' | 'cpu' | null)[] = [];
   const gpuProblems: (string | null)[] = [];
   let read = 0;

@@ -72,6 +72,7 @@ function setUp(unavailable: string | null = null, units: 'GY' | 'RELATIVE' = 'GY
     unavailable: signal(unavailable),
     dose: signal(dose),
     unit: signal(units === 'GY' ? 'Gy' : ''),
+    doseName: signal('Dose'),
     placedBy: signal<string | null>(null),
     doseAxis: signal(axisOver(0, 10)),
     rows,
@@ -345,7 +346,12 @@ describe('DvhPanel', () => {
     expect(host.querySelector('[data-dvh-plot]')!.textContent).toContain('Dose (relative)');
     expect(host.querySelector('[data-dvh-placed]')).toBeNull();
     controller.placedBy.set('deformation field');
+    // A dose that was made by summing is named on its axis by what it is.
+    controller.doseName.set('EQD2 (α/β 3 Gy)');
     fixture.detectChanges();
+    expect(host.querySelector('[data-dvh-plot]')!.textContent).toContain(
+      'EQD2 (α/β 3 Gy) (relative)',
+    );
     expect(text('[data-dvh-placed]')).toEqual([
       'The dose is placed over this image by a deformation field: these are of the dose where that puts it.',
     ]);

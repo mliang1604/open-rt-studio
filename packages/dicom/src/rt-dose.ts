@@ -43,6 +43,58 @@ export interface DoseInfo {
    * for frames that are evenly spaced.
    */
   readonly interpolatedPlanes: number;
+  /**
+   * For a dose that was made here by summing doses (#98, #99), and not read
+   * from a file: what it is a sum of, and how each dose was converted
+   * first. It goes with the dose wherever the dose is shown.
+   */
+  readonly sum?: DoseSumMade;
+}
+
+/** What a dose that was made by summing is. */
+export interface DoseSumMade {
+  /** How many doses were added: those with a weight. */
+  readonly doses: number;
+  /**
+   * What each dose was converted to before it was added: nothing
+   * (`physical`), the biologically effective dose (`bed`), or the dose in
+   * fractions of {@link fractionGy} that has the same effect (`eqd`).
+   */
+  readonly model: 'physical' | 'bed' | 'eqd';
+  /** The fraction size an `eqd` sum is in, in gray: 2 for EQD2. */
+  readonly fractionGy?: number;
+  /**
+   * The α/β ratio a `bed` or `eqd` sum was converted with, in gray: one
+   * number, or null when it was a number to each voxel.
+   */
+  readonly alphaBetaGy?: number | null;
+}
+
+/** A number as short as it is: `2`, `1.8`, `0.35`. */
+const brief = (value: number): string => String(Number(value.toPrecision(4)));
+
+/**
+ * What a summed dose is called beside its value: `Summed dose`,
+ * `BED (α/β 3 Gy)`, `EQD2 (α/β by voxel)`. A converted dose is never called
+ * by less than its model and its α/β: a number of gray means nothing
+ * without them.
+ */
+export function doseSumName(made: DoseSumMade): string {
+  if (made.model === 'physical') return 'Summed dose';
+  const ratio =
+    made.alphaBetaGy === null || made.alphaBetaGy === undefined
+      ? 'α/β by voxel'
+      : `α/β ${brief(made.alphaBetaGy)} Gy`;
+  const model = made.model === 'bed' ? 'BED' : `EQD${brief(made.fractionGy ?? Number.NaN)}`;
+  return `${model} (${ratio})`;
+}
+
+/** A summed dose in a line: its name, and of how many doses it is the sum. */
+export function doseSumText(made: DoseSumMade): string {
+  const of = `sum of ${made.doses} ${made.doses === 1 ? 'dose' : 'doses'}`;
+  return made.model === 'physical'
+    ? `Physical dose, ${of}`
+    : `${doseSumName(made)}, ${of}, each converted before it was added`;
 }
 
 /** The unit a dose's values are in, for a readout; null for a share of something not named. */

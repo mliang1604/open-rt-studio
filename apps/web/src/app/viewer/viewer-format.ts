@@ -4,6 +4,8 @@
 
 import {
   clamp,
+  doseSumName,
+  doseSumText,
   valueUnit,
   type DoseInfo,
   type Layer,
@@ -54,6 +56,10 @@ export function formatFieldReading(reading: FieldReading): string {
  * is summed over, and whether planes were laid between its frames.
  */
 export function doseSaid(dose: DoseInfo): string {
+  // A dose that was made here says so first, and what it is a sum of (#98, #99).
+  if (dose.sum) {
+    return `Dose made here by summing, not read from a file: ${doseSumText(dose.sum)}. In Gy, ${dose.type.toLowerCase()}.`;
+  }
   const laid = dose.interpolatedPlanes;
   return [
     `RT Dose: ${dose.units === 'GY' ? 'in Gy' : 'relative, with no unit'}, ${dose.type.toLowerCase()}`,
@@ -66,9 +72,12 @@ export function doseSaid(dose: DoseInfo): string {
 
 /**
  * What a dose is called beside its value (#95): by its type, and that it is
- * relative when it is. A summed or converted dose says its own type.
+ * relative when it is. A dose that was made here by summing is called by
+ * what it is a sum of: a converted one by its model and its α/β (#99),
+ * without which its number of gray means nothing.
  */
-export function doseLabel(dose: Pick<DoseInfo, 'type' | 'units'>): string {
+export function doseLabel(dose: Pick<DoseInfo, 'type' | 'units' | 'sum'>): string {
+  if (dose.sum) return doseSumName(dose.sum);
   const type =
     dose.type === 'EFFECTIVE' ? 'Effective dose' : dose.type === 'ERROR' ? 'Dose error' : 'Dose';
   return dose.units === 'RELATIVE' ? `${type}, relative` : type;

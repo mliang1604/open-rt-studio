@@ -15,6 +15,7 @@ import { DoseController } from '../dose-display/dose-controller';
 import { LayersController } from '../layers-controller';
 import { RoiController } from '../roi-controller';
 import { buildRoiLegend, structureSetLabel } from '../roi-legend';
+import { doseLabel } from '../viewer-format';
 import { dvhInWorker, type DvhOutcome, type DvhRunner } from './dvh-in-worker';
 import {
   DVH_QUERIES_AT_MOST,
@@ -137,6 +138,16 @@ export class DvhController {
   readonly unit = computed(() => this.doseCtl.unit());
 
   /**
+   * What the dose is called on the dose axis and in the file: `Dose`,
+   * `Effective dose`, or, for one made here by summing, what it is a sum of
+   * (`EQD2 (α/β 3 Gy)`), without which its numbers mean nothing.
+   */
+  readonly doseName = computed(() => {
+    const dose = this.doseCtl.layer()?.volume.dose;
+    return dose ? doseLabel({ ...dose, units: 'GY' }) : 'Dose';
+  });
+
+  /**
    * How the dose is placed over the image, when it is in another frame of
    * reference: its histograms are of the dose where the registration puts it.
    */
@@ -218,7 +229,7 @@ export class DvhController {
 
   /** The histograms as a CSV file; see {@link dvhCsv}. */
   csv(): string {
-    return dvhCsv(this.rows(), this.queries(), this.dose(), this.doseAxis());
+    return dvhCsv(this.rows(), this.queries(), this.dose(), this.doseAxis(), this.doseName());
   }
 
   /**
