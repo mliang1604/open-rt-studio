@@ -336,7 +336,25 @@ export {
   doseSumText,
   doseUnit,
   isDoseProblem,
+  packKnown,
+  parseDoseSumMade,
+  serializeDoseSumMade,
+  unpackKnown,
 } from './rt-dose.js';
+export {
+  DOSE_BYTES_AT_MOST,
+  DoseWriteError,
+  RT_DOSE_SOP_CLASS,
+  RT_PLAN_SOP_CLASS,
+  type DoseTransform,
+  type SummedDoseContent,
+  type SummedDoseSource,
+  type SummedDoseWriteOptions,
+  type WrittenDose,
+  doseSumAsciiName,
+  summedDoseDescription,
+  writeSummedDose,
+} from './rt-dose-writer.js';
 export {
   type PlanDoseReference,
   type PlanFacts,

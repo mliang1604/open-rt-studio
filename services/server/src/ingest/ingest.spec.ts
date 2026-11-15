@@ -20,7 +20,7 @@ import {
   type SyntheticFile,
 } from '@open-rt-studio/testdata';
 
-import { readInstanceHeader } from '@open-rt-studio/dicom';
+import { readInstanceHeader, summedDoseVolume, writeSummedDose } from '@open-rt-studio/dicom';
 import { CoreStoppingError, createCore } from '../core/core.js';
 import { createLogger } from '../logger.js';
 import type { PacsIndex } from '../pacs-index/pacs-index.js';
@@ -251,6 +251,62 @@ describe('ingest', () => {
     const followUp = (await index.relatedToSeries(COURSE.followUpCt))!;
     expect(followUp.registrations.map((one) => one.sopInstanceUid)).toEqual([COURSE.registration]);
     expect(followUp.structureSets).toEqual([]);
+  });
+
+  it('takes in a summed dose that the viewer saved, as a dose of the plans it names (#101)', async () => {
+    const { index, ingest } = await pacs();
+    for (const file of COURSE_FILES) await ingest.ingest(file.bytes);
+    const ct = COURSE_FILES.map((file) => readInstanceHeader(file.bytes)).find(
+      (header) => header.ok && header.header.series.uid === COURSE.ct,
+    );
+    if (!ct?.ok) throw new Error('The synthetic course has no CT.');
+    const { patient, study, series } = ct.header;
+    // A sum of 2 Gy at each of a few voxels, in the planning CT's study and frame.
+    const voxels = 4 * 3 * 2;
+    const sum = summedDoseVolume(
+      {
+        data: new Float32Array(voxels).fill(2),
+        known: new Uint8Array(voxels).fill(1),
+        knownCount: voxels,
+        terms: [],
+        made: { doses: 1, model: 'physical' },
+        withoutAlphaBeta: 0,
+      },
+      { dims: [4, 3, 2], spacing: [2, 2, 3], geometry: undefined },
+    );
+    const written = writeSummedDose({
+      volume: sum,
+      frameOfReferenceUid: series.frameOfReferenceUid!,
+      patientName: patient.name,
+      patientId: patient.id,
+      studyInstanceUid: study.uid,
+      studyDate: study.date,
+      studyTime: null,
+      studyDescription: study.description,
+      seriesNumber: null,
+      sources: [
+        {
+          sopInstanceUid: COURSE.dose,
+          planUids: [COURSE.plan],
+          registrations: [],
+          transform: 'none',
+        },
+      ],
+      derivationDescription: 'Not for clinical use. A sum of one synthetic dose.',
+    });
+    expect(await ingest.ingest(new Uint8Array(written.bytes))).toEqual({
+      outcome: 'stored',
+      sopInstanceUid: written.sopInstanceUid,
+    });
+    // No new patient or study: it is filed where the image is.
+    expect(await index.counts()).toMatchObject({ patients: 1, studies: 2, series: 8 });
+    const related = (await index.relatedToSeries(COURSE.ct))!;
+    expect(related.doses.map((one) => one.sopInstanceUid).sort()).toEqual(
+      [COURSE.dose, written.sopInstanceUid].sort(),
+    );
+    expect(await index.referencesFrom(written.sopInstanceUid)).toEqual([
+      { relation: 'dose.plan', targetUid: COURSE.plan },
+    ]);
   });
 
   it('files the instances under the patient and studies the files name', async () => {

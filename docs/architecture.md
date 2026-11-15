@@ -1248,8 +1248,8 @@ chooses the doses and shows the sum is described after it
   dose of another patient than the image.
 - **The sum as a dose** (`summedDoseVolume`) is in gray, physical, on the
   grid it was made on, with a window from nothing to its most and no
-  summation type: nothing was written, so nothing is said of how a file
-  would call it (#101).
+  summation type: nothing was written yet, so nothing is said of how a
+  file calls it. What a file says is in "How a summed dose is written".
 - **How close.** For doses that rise evenly, through a turn and a shift and
   through a field that goes evenly with the place, the suite holds the sum
   to the analytic sum within 0.0001 Gy at every voxel where it is known,
@@ -1307,7 +1307,8 @@ from it in `dose-sum-model.ts`.
   it was made of still there and placed by the same matrix and field. The
   layers are checked each time they are composed, so a stale sum is never
   drawn, not for a frame; the controller then lets go of its values. There
-  is one sum at a time, and it is not saved (#101).
+  is one sum at a time. It is kept only when the user saves it ("How a
+  summed dose is written").
 - **Where the sum is not known it is not shown as zero.** The volume says
   where it is known (`Volume.known`), and each reader goes by that:
   - the probe says "not known here" where any voxel its reading blends is
@@ -1332,6 +1333,72 @@ from it in `dose-sum-model.ts`.
   planning system was summed, nothing was compared with another program,
   and a sum through a deformation field was not looked at in the
   application.
+
+### How a summed dose is written
+
+The sum on screen is saved as one DICOM RT Dose object (#101):
+`writeSummedDose` in `packages/dicom` writes it, `dose-sum/dose-export.ts`
+says what it is filed under and what it refers to, and it goes through
+`DATA_SOURCE.save`: a download for opened files, an upload for a server,
+which the audit log records like any other.
+
+- **Whose it is.** The image's patient, study and frame of reference,
+  since it is on the image's grid. A dose of another patient was refused
+  when the sum was made.
+- **The grid** is the image's, cut down to the box that holds every voxel
+  where the sum is known. Frames lie one behind another along their normal;
+  a grid whose slices are stepped aslant is refused.
+- **The values** are in gray as unsigned 32-bit integers. Dose Grid Scaling
+  is a millionth of a gray, or the least power of ten that lets the
+  greatest value be held, so a value is read back to within half of it. A
+  value below nothing is refused: only a dose error may be stored signed.
+- **Where the sum is not known the file holds 0.** An RT Dose is a box of
+  numbers and has no other way. The file says which voxels those are in a
+  private block (group 3005, creator `OPEN RT STUDIO DOSE 01`): a bit to a
+  voxel, and what the sum is (`EQD2 (α/β 3 Gy)`) as JSON. The reader here
+  finds the block and gives the dose back as it was: not known where it
+  was not (`Slice.known`, `Volume.known`), and called by what it is. A
+  block that does not agree with the dose it is in is a file that is not
+  read. **Another program will read a dose of 0 there**, and the screen
+  says so when it saves such a file.
+- **It says that it is a sum, of what, and through what.** In words:
+  Series Description (`Summed dose: EQD2 (alpha/beta 3 Gy)`), Dose Comment
+  and a Derivation Description that begins with the not-for-clinical-use
+  notice and lists each dose with its fractions, its weight and its
+  registration. In the standard's codes: the source doses (Referenced
+  Instance Sequence), a derived dose and how it was composed (RT Dose
+  Interpreted Type Code Sequence with its modifiers, Derivation Code
+  Sequence), whether a dose was moved rigidly or otherwise and by which
+  registration objects (Spatial Transform of Dose, Referenced Spatial
+  Registration Sequence), and whether biological effect was taken into
+  account and by what model (Dose Radiobiological Interpretation
+  Sequence). A converted sum has Dose Type `EFFECTIVE`. The codes have no
+  place for an α/β; it is in the words and in the private block.
+- **Dose Summation Type** must be one of the standard's terms, and none
+  says "doses a user chose". The doses are taken for whole plans' doses, as
+  the summation screen says they are: `MULTI_PLAN` for two plans or more,
+  `PLAN` when every dose names one plan, with the plans in Referenced RT
+  Plan Sequence. A dose that names no plan is counted as a plan of its own
+  and the file then lacks a reference the standard asks for; the screen
+  says how many. A plan is named as an RT Plan, since whether it was an RT
+  Ion Plan is not kept with a dose. A weight that is not 1 is in the words
+  alone.
+- **A saved sum that is opened again** is listed as a dose of the image's
+  study. It is not offered to be summed again, as a sum on screen is not.
+- **Not sent by DIMSE.** The issue asks for it; the server has no DIMSE
+  yet (#50).
+- **How it is known to be right:** the writer's spec writes sums on grids
+  that lie askew, with frames that go against their normal, of one frame,
+  and with values up to what the scaling must grow for, and reads each
+  back with the reader the viewer uses: the same values to within half
+  the scaling at the same places, the same voxels not known, the same
+  name. The server's ingest spec takes such a file in and files it by the
+  plan it names. `dose-sum.spec.ts` (end to end, both adapters) saves a
+  sum that is known only within two structures, holds the file to the
+  doses' formulas where they rise evenly, opens it again and reads the
+  formulas and "not known here" with the probe. The objects were not
+  checked with a DICOM validator and were not opened in another program,
+  and the coded attributes were written from the standard's text alone.
 
 ### How a voxel's α/β is chosen
 

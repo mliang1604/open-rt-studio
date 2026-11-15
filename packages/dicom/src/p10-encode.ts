@@ -138,6 +138,44 @@ export function formatDs(n: number): string {
   return n.toFixed(Math.max(0, 15 - intDigits));
 }
 
+/**
+ * A length or a direction as a Decimal String with as many places as its
+ * sixteen characters hold. A place in the patient is a slice's position plus
+ * steps of the spacing, so what is rounded away here is multiplied by the
+ * image's width in voxels when the series is read again.
+ */
+export function precise(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  for (let places = 13; places >= 0; places--) {
+    const fixed = value
+      .toFixed(places)
+      .replace(/(\.\d*?)0+$/, '$1')
+      .replace(/\.$/, '');
+    if (fixed.length <= 16) return fixed === '-0' ? '0' : fixed;
+  }
+  return formatDs(value);
+}
+export const preciseDs = (values: readonly number[]): Uint8Array =>
+  text(values.map(precise).join('\\'));
+
+/** An unsigned 16-bit value (US). */
+export function us(value: number): Uint8Array {
+  const out = new Uint8Array(2);
+  new DataView(out.buffer).setUint16(0, value, true);
+  return out;
+}
+
+/** Text as plain ASCII: a character outside it, or one that prints nothing, becomes `?`. */
+export const plain = (value: string): string => value.replace(/[^\x20-\x7e]/g, '?');
+
+/** A coded entry: the Code Sequence Macro's three required elements. */
+export const code = (value: string, scheme: string, meaning: string): Uint8Array =>
+  concat([
+    element(0x0008, 0x0100, 'SH', text(value)), // CodeValue
+    element(0x0008, 0x0102, 'SH', text(scheme)), // CodingSchemeDesignator
+    element(0x0008, 0x0104, 'LO', text(meaning)), // CodeMeaning
+  ]);
+
 export function u32le(value: number): Uint8Array {
   const out = new Uint8Array(4);
   new DataView(out.buffer).setUint32(0, value, true);

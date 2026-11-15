@@ -29,7 +29,28 @@
         and histograms. It is of the doses as they were placed when it was made, and is let go of
         when that changes. Not for clinical use.
       </p>
-      <button type="button" data-sum-discard (click)="ctl.discard()">Discard the sum</button>
+      <p class="note" data-sum-save-note>
+        Saved, it is a new RT Dose of the image’s patient, in the image’s study, on the image’s grid
+        where the sum is known. It says that it is a sum, of which doses, and through which
+        registrations.
+      </p>
+      @if (ctl.cannotSave(); as why) {
+        <p class="problem" data-sum-cannot-save>{{ why }}</p>
+      }
+      <div class="actions">
+        <button
+          type="button"
+          data-sum-save
+          [disabled]="ctl.saving() || ctl.cannotSave() !== null"
+          (click)="ctl.save()"
+        >
+          {{ ctl.saving() ? 'Saving…' : 'Save as RT Dose' }}
+        </button>
+        <button type="button" data-sum-discard (click)="ctl.discard()">Discard the sum</button>
+      </div>
+      @if (ctl.saved(); as saved) {
+        <p class="said" role="status" data-sum-saved>{{ saved }}</p>
+      }
     </section>
   }
 

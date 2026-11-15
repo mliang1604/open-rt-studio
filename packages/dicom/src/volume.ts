@@ -93,13 +93,18 @@ export function buildVolume(slices: Slice[]): Volume {
 
   const frame = assemble(ordered, sliceVoxels, sx, sy);
 
+  const known = knownOf(ordered, sliceVoxels, sx, sy, frame.data.length);
+
   let min = Infinity;
   let max = -Infinity;
   for (let i = 0; i < frame.data.length; i++) {
+    // What is not known is not a value: it is no part of what the values span.
+    if (known && !known[i]) continue;
     const v = frame.data[i];
     if (v < min) min = v;
     if (v > max) max = v;
   }
+  if (min > max) [min, max] = [0, 0];
 
   const { center, width } = defaultWindow(ordered[0], min, max);
 
@@ -117,7 +122,42 @@ export function buildVolume(slices: Slice[]): Volume {
     geometry: frame.geometry,
     missingSlices: frame.missingSlices,
     ...(ordered[0].dose ? { dose: ordered[0].dose } : {}),
+    ...(known ? { known } : {}),
   };
+}
+
+/**
+ * Where a volume is known, when its slices say where they are: laid on the
+ * grid as the values are. A layer of the grid that is a blend of two slices
+ * is known only where both are. Undefined when every slice is known
+ * throughout.
+ */
+function knownOf(
+  ordered: Slice[],
+  sliceVoxels: number,
+  sx: number,
+  sy: number,
+  voxels: number,
+): Uint8Array | undefined {
+  if (!ordered.some((slice) => slice.known)) return undefined;
+  // The slices' known voxels as values of 1 and 0, through the very assembly the values went through.
+  const shadow = assemble(
+    ordered.map((slice) => ({
+      ...slice,
+      pixels: slice.known ? Float32Array.from(slice.known) : new Float32Array(sliceVoxels).fill(1),
+    })),
+    sliceVoxels,
+    sx,
+    sy,
+  );
+  if (shadow.data.length !== voxels) return undefined;
+  const known = new Uint8Array(voxels);
+  let all = true;
+  for (let voxel = 0; voxel < voxels; voxel++) {
+    known[voxel] = shadow.data[voxel] >= 1 - 1e-6 ? 1 : 0;
+    if (!known[voxel]) all = false;
+  }
+  return all ? undefined : known;
 }
 
 /** Voxel data plus the geometry of the regular grid it was assembled onto. */

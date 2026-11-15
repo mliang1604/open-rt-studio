@@ -50,6 +50,12 @@ import {
   dosePlanes,
   doseScaling,
   isDoseProblem,
+  parseDoseSumMade,
+  SUM_RECORD_CREATOR,
+  SUM_RECORD_GROUP,
+  SUM_RECORD_KNOWN,
+  SUM_RECORD_MADE,
+  unpackKnown,
   type DoseInfo,
   type DoseProblem,
 } from './rt-dose.js';
@@ -316,14 +322,23 @@ function parseDose(ctx: FileContext, frames: number): Slice[] {
     : null;
   const placed = read(doseFrameOffsets(vector, frames, origin, facing.normal));
   const grid = read(dosePlanes(placed.offsets));
+  const count = ctx.rows * ctx.columns;
+  // A sum that was written here says what it is, and where it is known (#101).
+  const record = sumRecord(dataSet);
+  const sum = record?.made === undefined ? undefined : read(parseDoseSumMade(record.made));
+  if (sum && (sum.model === 'physical') !== (kind.type === 'PHYSICAL')) {
+    unread('Its record of what sum it is does not agree with its Dose Type');
+  }
+  const known = record?.known ? read(unpackKnown(record.known, count * frames)) : null;
   const dose: DoseInfo = {
     ...kind,
     scaling,
     sopInstanceUid: dataSet.string('x00080018')?.trim() || null,
     frameOffsets: placed.kind,
     interpolatedPlanes: grid.interpolated,
+    ...(sum ? { sum } : {}),
   };
-  const count = ctx.rows * ctx.columns;
+  const knownOfFrame = (at: number): Uint8Array => known!.subarray(at * count, (at + 1) * count);
   const metadata = extractMetadata(dataSet);
   const orientation = [...facing.row, ...facing.column];
   // Each frame is read once, when the first plane that needs it is made.
@@ -347,6 +362,12 @@ function parseDose(ctx: FileContext, frames: number): Slice[] {
         blend[i] = pixels[i] + (next[i] - pixels[i]) * plane.towardsNext;
       }
       pixels = blend;
+    }
+    // A plane between two frames is known only where both are.
+    let planeKnown = known ? knownOfFrame(plane.frame) : undefined;
+    if (planeKnown && plane.towardsNext > 0) {
+      const next = knownOfFrame(plane.frame + 1);
+      planeKnown = planeKnown.map((one, i) => one & next[i]);
     }
     const slice: Slice = {
       name: grid.planes.length > 1 ? `${ctx.name}#${at + 1}` : ctx.name,
@@ -376,9 +397,35 @@ function parseDose(ctx: FileContext, frames: number): Slice[] {
       windowWidth: null,
       pixels,
       dose,
+      ...(planeKnown ? { known: planeKnown } : {}),
     };
     return at === 0 ? { ...slice, metadata } : slice;
   });
+}
+
+/**
+ * The private block a sum that was written here has (`rt-dose.ts`): what it
+ * says the sum is, and the bits that say where it is known. Null for a dose
+ * that has no such block, which is any dose from anywhere else.
+ */
+function sumRecord(
+  dataSet: dicomParser.DataSet,
+): { readonly made?: string; readonly known?: Uint8Array } | null {
+  const group = SUM_RECORD_GROUP.toString(16).padStart(4, '0');
+  const tag = (element: number): string => `x${group}${element.toString(16).padStart(4, '0')}`;
+  for (let block = 0x10; block <= 0xff; block++) {
+    if (!dataSet.elements[tag(block)]) continue;
+    if (dataSet.string(tag(block))?.trim() !== SUM_RECORD_CREATOR) continue;
+    const bits = dataSet.elements[tag((block << 8) | SUM_RECORD_KNOWN)];
+    const made = dataSet.string(tag((block << 8) | SUM_RECORD_MADE));
+    return {
+      ...(made === undefined ? {} : { made }),
+      ...(bits
+        ? { known: dataSet.byteArray.subarray(bits.dataOffset, bits.dataOffset + bits.length) }
+        : {}),
+    };
+  }
+  return null;
 }
 
 /**

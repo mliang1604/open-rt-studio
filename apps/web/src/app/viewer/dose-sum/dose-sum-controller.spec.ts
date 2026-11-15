@@ -6,9 +6,11 @@ import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   baseLayer,
+  buildVolume,
   eqdGy,
   bedGy,
   overlayImageLayer,
+  parseFile,
   overlayLayerUnplaced,
   type Contour,
   type Layer,
@@ -101,6 +103,7 @@ function setup(overlays: readonly Layer[] = [firstLayer(), secondLayer()]) {
     baseSeries: () => series['ct'],
     device: () => null,
     notify: (message, problem) => notices.push({ message, problem }),
+    now: () => new Date(2026, 10, 15, 9, 30, 5),
     sum: (...args) =>
       (sum ?? sumDosesWith)(args[0], args[1], args[2], {
         ...args[3],
@@ -618,6 +621,152 @@ describe('DoseSumController', () => {
     expect(controller.failed()).toBe('A dose’s grid cannot be inverted.');
     expect(notices[0].message).toBe('The doses were not summed: A dose’s grid cannot be inverted.');
     expect(controller.busy()).toBe(false);
+  });
+
+  describe('saving the sum as an RT Dose', () => {
+    it('writes a dose of the image’s patient, study and frame that reads back as the sum', async () => {
+      const { controller, source, notices } = setup();
+      expect(controller.cannotSave()).toBeNull();
+      await controller.sum();
+      await controller.save();
+      expect(source.saved).toHaveLength(1);
+      const [file] = source.saved;
+      expect(file.filename).toBe('summed-dose-20261115-093005.dcm');
+      expect(file.mediaType).toBe('application/dicom');
+
+      const slices = parseFile(file.filename, file.bytes);
+      expect(slices[0]).toMatchObject({
+        modality: 'RTDOSE',
+        patientId: 'SYN-0001',
+        patientName: 'SYNTHETIC^PHANTOM',
+        studyUid: '1.2.3.10',
+        frameOfReferenceUid: '1.2.3.50',
+        seriesDescription: 'Summed dose: physical, 2 doses',
+      });
+      const read = buildVolume(slices);
+      // The box where both doses are known: the image's columns from the third on.
+      expect(read.dims).toEqual([DIMS[0] - SECOND_FROM_COLUMN, DIMS[1], DIMS[2]]);
+      expect(read.geometry!.origin).toEqual([SECOND_FROM_COLUMN, 0, 0]);
+      expect(read.known).toBeUndefined();
+      expect(read.dose).toMatchObject({
+        units: 'GY',
+        type: 'PHYSICAL',
+        summationType: 'MULTI_PLAN',
+        sum: { doses: 2, model: 'physical' },
+      });
+      const [nx, ny] = read.dims;
+      forEachVoxel((_voxel, i, j, k) => {
+        if (i < SECOND_FROM_COLUMN) return;
+        const at = (k * ny + j) * nx + (i - SECOND_FROM_COLUMN);
+        expect(read.data[at]).toBeCloseTo(firstGy(i) + secondGy(k), 5);
+      });
+
+      expect(controller.saved()).toBe(
+        'Saved as summed-dose-20261115-093005.dcm, “Summed dose: physical, 2 doses”. Open it with the image to see it. ' +
+          '4 × 5 × 4 voxels, each to within 5e-7 Gy of the sum’s. Not for clinical use.',
+      );
+      expect(notices).toEqual([
+        {
+          message:
+            'Saved as summed-dose-20261115-093005.dcm, “Summed dose: physical, 2 doses”. Open it with the image to see it.',
+          problem: false,
+        },
+      ]);
+      expect(controller.saving()).toBe(false);
+      // The sum is still on screen: saving lets go of nothing.
+      expect(controller.made()).not.toBeNull();
+    });
+
+    it('says where a server kept it', async () => {
+      const { controller, source } = setup();
+      source.saveAnswer = () => Promise.resolve({ kind: 'stored', where: 'the server' });
+      await controller.sum();
+      await controller.save();
+      expect(controller.saved()).toContain(
+        'Saved as a new RT Dose (the server), “Summed dose: physical, 2 doses”, in the image’s study. It is listed there the next time the patient is opened.',
+      );
+    });
+
+    it('keeps a converted sum’s name, and says that what is not known is written as 0', async () => {
+      const { controller, source, structureSets, alphaBeta } = setup();
+      structureSets.set([STRUCTURES]);
+      TestBed.tick();
+      controller.setKind('eqd');
+      controller.setAlphaBetaMode('structures');
+      expect(alphaBeta.outsideGy()).toBeNull();
+      await controller.sum();
+      expect(controller.made()?.name).toBe('EQD2 (α/β by voxel)');
+      await controller.save();
+      const read = buildVolume(parseFile('sum.dcm', source.saved[0].bytes));
+      expect(read.dose).toMatchObject({
+        type: 'EFFECTIVE',
+        sum: { doses: 2, model: 'eqd', fractionGy: 2, alphaBetaGy: null },
+      });
+      // Two squares that overlap are no box: the box about them has voxels that are not known.
+      expect(read.dims).toEqual([3, 3, 4]);
+      expect(read.known).toBeDefined();
+      const cord = eqdGy(firstGy(4), 30, 3, 2) + eqdGy(secondGy(1), 5, 3, 2);
+      // The image's voxel (4, 4, 1) is the box's (2, 2, 1): in the organ alone.
+      expect(read.known![(1 * 3 + 2) * 3 + 2]).toBe(1);
+      expect(read.data[(1 * 3 + 2) * 3 + 2]).toBeCloseTo(cord, 4);
+      // The image's voxel (4, 2, 1) is the box's (2, 0, 1): in neither structure.
+      expect(read.known![(1 * 3 + 0) * 3 + 2]).toBe(0);
+      expect(controller.saved()).toContain(
+        'Where the sum is not known the file holds 0, as an RT Dose must. Open RT Studio reads back which voxels those are; another program will read a dose of 0 there.',
+      );
+    });
+
+    it('says why when the source cannot keep it, and nothing is said to be saved', async () => {
+      const { controller, source, notices } = setup();
+      source.saveAnswer = () => Promise.reject(new Error('The server did not answer.'));
+      await controller.sum();
+      await controller.save();
+      expect(controller.saved()).toBeNull();
+      expect(controller.saving()).toBe(false);
+      expect(notices).toEqual([
+        { message: 'The sum was not saved. The server did not answer.', problem: true },
+      ]);
+    });
+
+    it('is not offered for an image that names no study or frame to file a dose in', async () => {
+      const { controller, source, series } = setup();
+      await controller.sum();
+      series['ct'] = testSeries('ct', { frameOfReferenceUid: null });
+      // (The series is read when it is asked for: nothing here is a signal.)
+      await controller.save();
+      expect(source.saved).toHaveLength(0);
+    });
+
+    it('does nothing with no sum on screen, and forgets what it said when the sum goes', async () => {
+      const { controller, source } = setup();
+      await controller.save();
+      expect(source.saved).toHaveLength(0);
+      await controller.sum();
+      await controller.save();
+      expect(controller.saved()).not.toBeNull();
+      // Another sum is another thing to save.
+      await controller.sum();
+      expect(controller.saved()).toBeNull();
+      await controller.save();
+      expect(source.saved).toHaveLength(2);
+      controller.discard();
+      expect(controller.saved()).toBeNull();
+    });
+
+    it('says a sum that is being saved is, and does not save it twice at once', async () => {
+      const { controller, source } = setup();
+      let answer: (() => void) | null = null;
+      source.saveAnswer = () =>
+        new Promise((resolve) => (answer = () => resolve({ kind: 'downloaded' })));
+      await controller.sum();
+      const saving = controller.save();
+      expect(controller.saving()).toBe(true);
+      await controller.save();
+      expect(source.saved).toHaveLength(1);
+      answer!();
+      await saving;
+      expect(controller.saving()).toBe(false);
+    });
   });
 
   it('opens and shuts', () => {

@@ -58,7 +58,7 @@ export function sourceOf(series: Series): DerivedSeriesContent['source'] {
 }
 
 /** Specific Character Set of a series' first image, or null. */
-function characterSetOf(series: Series): string | null {
+export function characterSetOf(series: Series): string | null {
   const tag = series.metadata?.rawTags.find((one) => one.tag.toLowerCase() === '(0008,0005)');
   return tag?.value.trim() || null;
 }
