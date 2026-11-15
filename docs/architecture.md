@@ -1262,6 +1262,56 @@ it yet (#102): the result is a dose in memory.
   that are formulas. No dose from a planning system was summed, and
   nothing was compared with another program.
 
+### How a voxel's α/β is chosen
+
+The α/β a dose is converted with where tissues differ (#100): a ratio to
+each voxel of the grid the doses are summed on, from structures.
+`alpha-beta.ts` in `packages/dicom` makes it; `AlphaBetaStore` and
+`app-alpha-beta-editor` (`viewer/alpha-beta/`) hold and edit what it is made
+from. Nothing shows the editor yet: the summation screen will (#102).
+
+- **The values are the user's.** An α/β is a judgement about a tissue and
+  an endpoint. The values structures start with are two generic ones, by RT
+  ROI Interpreted Type alone: 10 Gy for `GTV`, `CTV` and `PTV`, 3 Gy for
+  `ORGAN` and `AVOIDANCE`. No structure is given a value by its name unless
+  the user has made a rule for that name. The editor says the values are
+  generic and are to be checked, and shows beside each whether a rule gave
+  it or the user did.
+- **A structure with no value takes no part.** One that no rule is for
+  (a body outline, a structure of no type) has none until the user gives
+  one, and the user can leave any structure out. A voxel that is only in
+  such a structure is outside the structures.
+- **Where structures overlap, the first in the list has the voxel.** The
+  list is the priority, and the user orders it. It begins in the structure
+  set's order.
+- **Outside every structure** a voxel has the outside value when the user
+  gives one. With none, the voxel has no α/β, a converted sum is not known
+  there (`DoseSum.withoutAlphaBeta`), and it is not shown as zero.
+- **A structure's voxels** are those whose middle is within its contour on
+  its slice, by the even-odd rule: what the viewer fills. A structure with
+  a value must be drawn on the grid's slices, as for a histogram, or the
+  map is refused with its name.
+- **Rules:** the user's rules give starting values by a structure's name
+  or its type, a rule for a name before one for a type, compared without
+  regard to case. They change only structures the user has not set.
+- **What is kept, and where.** The rules and the outside value are kept in
+  the browser's local storage (`open-rt-studio.alpha-beta`): what the user
+  typed there, and nothing of a patient or of the structures in hand. The
+  list of structures, their order and their values are kept while the
+  viewer is open. `AlphaBetaSettings` is all of it as versioned JSON, for a
+  summation to keep with its own settings (#102) and to say what a summed
+  dose was converted with (#101); read back, what is malformed is dropped
+  and not guessed at.
+- **How it is known to be right:** rectangles whose edges lie between
+  voxels, a target, an organ that overlaps it and a body about both. Every
+  voxel's α/β is compared with what its place and the order of the
+  structures give, in each order, with and without an outside value, with a
+  structure left out and with a hole. A uniform 20 Gy in 5 fractions is then
+  converted with the map: EQD2 23.33 Gy where the α/β is 10 Gy and 28 Gy
+  where it is 3 Gy, 30 Gy when a structure's value is changed to 2 Gy, and
+  unchanged everywhere else. No α/β from another program was read, and
+  nothing was compared with one.
+
 ### What is read of a plan
 
 As much of an RT Plan (or RT Ion Plan) as dose summation and conversion

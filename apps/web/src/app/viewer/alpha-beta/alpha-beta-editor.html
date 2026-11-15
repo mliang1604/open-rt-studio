@@ -1,0 +1,180 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+<p class="note" data-alpha-beta-note>
+  The values structures start with are generic, by structure type. They are yours to check: every
+  converted dose depends on them.
+</p>
+
+@if (store.lines().length === 0) {
+  <p class="none" data-alpha-beta-none>No structures that bound an area.</p>
+} @else {
+  <table data-alpha-beta-structures>
+    <caption>
+      Where structures overlap, the one higher in the list gives the voxel its α/β.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Priority</th>
+        <th scope="col">Structure</th>
+        <th scope="col">Type</th>
+        <th scope="col">α/β (Gy)</th>
+        <th scope="col">From</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (line of store.lines(); track line.roi; let index = $index, last = $last) {
+        <tr [class.out]="line.alphaBetaGy === null" data-alpha-beta-line>
+          <td class="order">
+            <span class="place">{{ index + 1 }}</span>
+            <button
+              type="button"
+              [disabled]="index === 0"
+              [attr.aria-label]="'Move ' + line.roi.name + ' up'"
+              title="Higher priority"
+              data-alpha-beta-up
+              (click)="store.move(line.roi, -1)"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              [disabled]="last"
+              [attr.aria-label]="'Move ' + line.roi.name + ' down'"
+              title="Lower priority"
+              data-alpha-beta-down
+              (click)="store.move(line.roi, 1)"
+            >
+              ↓
+            </button>
+          </td>
+          <th scope="row" class="name" [title]="line.roi.name">{{ line.roi.name }}</th>
+          <td class="type">{{ line.roi.interpretedType ?? '—' }}</td>
+          <td>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              inputmode="decimal"
+              [value]="line.alphaBetaGy ?? ''"
+              [attr.aria-label]="'α/β of ' + line.roi.name + ', in gray'"
+              placeholder="none"
+              data-alpha-beta-value
+              (change)="onValue(line.roi, line.alphaBetaGy, $event)"
+            />
+          </td>
+          <td class="from" [title]="sourceTitle(line)">
+            <span data-alpha-beta-source>{{ source(line) }}</span>
+            @if (line.set) {
+              <button
+                type="button"
+                class="back"
+                [attr.aria-label]="'Give ' + line.roi.name + ' back to the rules'"
+                title="Give it back to the rules"
+                data-alpha-beta-clear
+                (click)="store.clearValue(line.roi)"
+              >
+                ↺
+              </button>
+            }
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+  @if (store.without() > 0) {
+    <p class="note" data-alpha-beta-without>
+      {{ store.without() }} {{ store.without() === 1 ? 'structure has' : 'structures have' }} no
+      value and {{ store.without() === 1 ? 'takes' : 'take' }} no part: a voxel that is only in such
+      a structure is outside the structures.
+    </p>
+  }
+}
+
+<label class="row">
+  <span>Outside every structure</span>
+  <input
+    type="number"
+    min="0"
+    step="any"
+    inputmode="decimal"
+    [value]="store.outsideGy() ?? ''"
+    placeholder="none"
+    aria-label="α/β outside every structure, in gray"
+    data-alpha-beta-outside
+    (change)="onOutside($event)"
+  />
+  <span class="unit">Gy</span>
+</label>
+@if (store.outsideGy() === null) {
+  <p class="note" data-alpha-beta-outside-none>
+    With no value outside, a converted dose is not known there: it is not shown as zero.
+  </p>
+}
+
+<details data-alpha-beta-rules>
+  <summary>Starting values ({{ store.defaults().length }})</summary>
+  <p class="note">
+    A rule for a structure’s name is followed before one for its type. Rules are kept in this
+    browser; they change only the structures you have not set yourself.
+  </p>
+  <ul>
+    @for (rule of store.defaults(); track $index) {
+      <li data-alpha-beta-rule>
+        <span class="by">{{ rule.by === 'name' ? 'Name' : 'Type' }}</span>
+        <span class="match" [title]="rule.match">{{ rule.match }}</span>
+        <input
+          type="number"
+          min="0"
+          step="any"
+          inputmode="decimal"
+          [value]="rule.alphaBetaGy"
+          [attr.aria-label]="'α/β for the ' + rule.by + ' ' + rule.match + ', in gray'"
+          (change)="onRuleValue($index, rule.alphaBetaGy, $event)"
+        />
+        <span class="unit">Gy</span>
+        <button
+          type="button"
+          class="back"
+          [attr.aria-label]="'Remove the rule for the ' + rule.by + ' ' + rule.match"
+          title="Remove this rule"
+          data-alpha-beta-rule-remove
+          (click)="store.removeDefault($index)"
+        >
+          ×
+        </button>
+      </li>
+    }
+  </ul>
+  <form class="row" (submit)="addRule(match, value, $event)" data-alpha-beta-rule-add>
+    <select aria-label="A rule by name or by type" (change)="onRuleBy($event)">
+      <option value="name" [selected]="newRuleBy() === 'name'">Name</option>
+      <option value="type" [selected]="newRuleBy() === 'type'">Type</option>
+    </select>
+    <input
+      #match
+      type="text"
+      maxlength="64"
+      [placeholder]="newRuleBy() === 'name' ? 'Structure name' : 'ORGAN, PTV, …'"
+      aria-label="The structure name or type the rule is for"
+    />
+    <input
+      #value
+      type="number"
+      min="0"
+      step="any"
+      inputmode="decimal"
+      placeholder="α/β"
+      aria-label="The rule’s α/β, in gray"
+    />
+    <span class="unit">Gy</span>
+    <button type="submit" [disabled]="store.defaults().length >= rulesAtMost">Add</button>
+  </form>
+  @if (ruleProblem(); as problem) {
+    <p class="problem" role="alert" data-alpha-beta-rule-problem>{{ problem }}</p>
+  }
+  <button type="button" data-alpha-beta-rules-reset (click)="store.resetDefaults()">
+    Generic rules again
+  </button>
+</details>
