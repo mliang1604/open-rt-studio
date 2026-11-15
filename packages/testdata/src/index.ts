@@ -92,6 +92,12 @@ export {
   type RtPlanOptions,
 } from './rt-course.js';
 export {
+  SYNTHETIC_BEAM_DOSES,
+  syntheticBeamDoseGy,
+  syntheticBeamDoses,
+  syntheticBeamPlanDoseGy,
+} from './beam-doses.js';
+export {
   SYNTHETIC_RETREATMENT,
   retreatmentFirstDoseAt,
   retreatmentSecondDoseAt,

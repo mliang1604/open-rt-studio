@@ -8,6 +8,10 @@
   } @else {
     <span class="chip-icon" aria-hidden="true">{{ icon() }}</span>
   }
+  @if (series().doseOf; as of) {
+    <!-- One dose of a series of several: what it is the dose of, where there is room for it. -->
+    <span class="chip-dose-of">{{ of }}</span>
+  }
   @if (structureSets() > 0) {
     <!-- "RS", as RT Structure Set files are commonly prefixed. -->
     <span class="chip-sets" [title]="structureSetsLabel()">

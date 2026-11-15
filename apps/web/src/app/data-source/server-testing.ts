@@ -77,6 +77,8 @@ export interface FakeServer {
   noTimepoints: boolean;
   /** Whether the server is an older one, which says nothing of a plan (#97). */
   noPlans: boolean;
+  /** Whether the server is an older one, which does not say what a dose is the dose of (#257). */
+  noDoseFacts: boolean;
 }
 
 /** An account of a stand-in server that has them. */
@@ -137,6 +139,7 @@ export function fakeServer(
   const instance = ({ header, bytes }: Held) => ({
     sopInstanceUid: header.sopInstanceUid,
     number: header.instanceNumber,
+    frames: header.frames,
     size: bytes.byteLength,
   });
   const json = (body: unknown, status = 200): Response =>
@@ -156,6 +159,7 @@ export function fakeServer(
     timepoints: new Map(),
     noTimepoints: false,
     noPlans: false,
+    noDoseFacts: false,
     pageSize: 1000,
     mostAtOnce: () => most,
     loseNetworkAfter: (count) => (lostAfter = count),
@@ -529,6 +533,7 @@ export function fakeServer(
           sopClassUid: found.header.sopClassUid,
           references: found.header.references,
           ...(server.noPlans ? {} : { plan: found.header.plan }),
+          ...(server.noDoseFacts ? {} : { dose: found.header.dose }),
         });
       }
       if ((match = /^\/instances\/([\d.]+)\/file$/.exec(path))) {

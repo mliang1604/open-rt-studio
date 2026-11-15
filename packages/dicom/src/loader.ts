@@ -43,6 +43,7 @@ import {
   readTriple,
   type FunctionalGroups,
 } from './dicom-tags.js';
+import { readDoseOf } from './instance-header.js';
 import {
   doseFrameOffsets,
   doseKind,
@@ -330,8 +331,11 @@ function parseDose(ctx: FileContext, frames: number): Slice[] {
     unread('Its record of what sum it is does not agree with its Dose Type');
   }
   const known = record?.known ? read(unpackKnown(record.known, count * frames)) : null;
+  const of = readDoseOf(dataSet);
   const dose: DoseInfo = {
     ...kind,
+    beams: of.beams,
+    fractionGroup: of.fractionGroup,
     scaling,
     sopInstanceUid: dataSet.string('x00080018')?.trim() || null,
     frameOffsets: placed.kind,

@@ -1024,9 +1024,55 @@ come.
 - **Any orientation.** A dose keeps its own grid and geometry, like any
   volume, and is sampled where the image is when it is laid over one; it
   need not match the image's grid, spacing or orientation.
-- **One object is one grid.** A series that holds several dose objects (a
-  dose to a beam, say) is not read: stacked as one series they would be
-  shown as one grid (#257).
+- **One object is one grid.** An RT Dose object is a grid of its own, and
+  the planes of two objects are never stacked: `buildVolume` refuses slices
+  that carry more than one dose.
+- **A series that holds several dose objects is several doses** (#257), a
+  plan's dose beside a dose to each of its beams, say. The viewer's unit is
+  the series, so such a series is given as one series to each object
+  (`groupSeries`): on the timeline, as a layer and to the summation screen
+  each is a dose of its own, and nothing shows or sums two of them as one
+  grid. Each goes by a key in place of the series' UID, the series' UID
+  and the object's SOP Instance UID with `@` between (`doseObjectSeriesKey`,
+  `seriesKeyParts`); a series of one dose object goes by its UID alone, as
+  every other series does. Whatever writes a series' identity into a DICOM
+  object, a report or a request to a server takes the UID out of the key
+  first (`seriesInstanceUidOf`): the key is the viewer's and is written
+  nowhere.
+- **Each is named by what it says it is the dose of**: its Dose Summation
+  Type, and the beams and the fraction group it names under the plan it
+  refers to (`readDoseOf`, `doseOfText`): `whole plan`, `beam 2`,
+  `fraction group 1`. That is the file's own statement and no more; a
+  summation type this code does not know is given as it is written, and a
+  beam's dose that names no beam is of `one or more beams`. Doses that say
+  the same of themselves, or nothing, are told apart by which of the series
+  each is (`dose 2 of 3`), so no two go by one name (`nameDoseObjects`). The
+  plan's dose is listed first, then by fraction group and beam. The name is
+  after the series' description (`Plan A (beam 2)`), inside the chip on the
+  timeline, where a line has no room for both, and, for a dose that is
+  less than a whole plan's, in the layers list (`RTDOSE (beam 2)`) and
+  beside its value in the probe (`Dose (beam 2)`), whether its series
+  holds one dose or several. At most 64 beam numbers are read of a dose.
+- **Which is meant is never picked.** A dose's plans, and so the fractions
+  the summation screen begins with, are those of that one dose object
+  (`plansNamed`), not of the doses beside it, and only a dose that says it
+  is a whole plan's is given its plan's fractions. Files of a series that
+  arrive in a later import regroup the series (`addSeriesToCatalog`): a
+  dose that was listed alone is then listed as one of several, under its
+  key. A dose object with no SOP Instance UID cannot be told from another,
+  so a series with one is left whole and refused when it is opened.
+- **On a server** the index keeps what each dose says it is the dose of
+  (`instance.dose`, JSON, schema version 6), read with the file's header
+  like a plan's facts and sent with `/instances/{uid}`. The timeline asks
+  for the instances of a dose series that has more than one and lists each
+  as above; these are requests it makes for every radiotherapy object
+  already, each made once, so the audit log has no new kind of record. One
+  dose is fetched by its own file, without the others of its series. A
+  dose filed before version 6, and one on an older server, is told from
+  the others by which it is until its file is ingested again. A series of
+  more than 64 dose objects is listed whole and says why it is not shown
+  when it is opened; so does a series asked for by its own UID that turns
+  out to hold several.
 - **The dose under the cursor** (#95) is read between the dose's voxels:
   the trilinear blend of the eight voxels about the cursor's place
   (`interpolateVolumeAtPatient`), where an image is read at its voxel, as it

@@ -529,6 +529,29 @@ describe('a layer that was made of the layers on screen (#102)', () => {
     expect(legend[3].label).toBe('EQD2 (α/β 3 Gy)');
     expect(legend[3].said).toContain('Dose made here by summing, not read from a file');
     expect(legend[1].label).toBe('RTDOSE');
+    // A dose that is less than a whole plan's says what it is the dose of (#257).
+    const beam = layers.map((layer, index) =>
+      index === 1
+        ? {
+            ...layer,
+            volume: {
+              ...layer.volume,
+              dose: {
+                units: 'GY' as const,
+                type: 'PHYSICAL' as const,
+                summationType: 'BEAM',
+                beams: [2],
+                fractionGroup: 1,
+                scaling: 1,
+                sopInstanceUid: null,
+                frameOffsets: 'relative' as const,
+                interpolatedPlanes: 0,
+              },
+            },
+          }
+        : layer,
+    );
+    expect(layerLegend(beam)[1].label).toBe('RTDOSE (beam 2)');
     store.reset();
     expect(store.made()).toBeNull();
     expect(store.apply(layers)).toHaveLength(3);

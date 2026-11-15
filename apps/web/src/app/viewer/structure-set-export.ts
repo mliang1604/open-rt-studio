@@ -3,11 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import {
-  buildStructureSet,
-  writeStructureSet,
   type AuthoredRoi,
+  buildStructureSet,
   type LabelVolume,
   type Series,
+  seriesInstanceUidOf,
+  writeStructureSet,
 } from '@open-rt-studio/dicom';
 
 import { slugify, timestampSlug } from './capture';
@@ -51,7 +52,7 @@ export function authoredSetRtStruct(
     name: filename,
     label: set.label.trim().slice(0, LABEL_MAX) || null,
     frameOfReferenceUid: series?.frameOfReferenceUid ?? null,
-    referencedSeriesUids: series ? [series.uid] : [],
+    referencedSeriesUids: series ? [seriesInstanceUidOf(series.uid)] : [],
   });
   const bytes = writeStructureSet(structureSet, {
     patientName: series?.patientName,

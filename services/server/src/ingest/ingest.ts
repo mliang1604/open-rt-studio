@@ -115,6 +115,7 @@ export function indexEntry(
     },
     references: header.references,
     plan: header.plan,
+    dose: header.dose,
   };
 }
 
@@ -185,10 +186,12 @@ export function createIngest({ store, index, logger = SILENT_LOGGER }: IngestPar
       if (indexed?.sha256 === sha256) {
         // The same bytes, read by a newer reader: an index made before the
         // number of frames was kept learns it when the file comes again.
-        // So does one made before a plan's fractions and prescriptions were.
+        // So does one made before a plan's fractions and prescriptions were,
+        // or before what a dose is the dose of was.
         const learnt =
           indexed.frames !== entry.instance.frames ||
-          (!!entry.plan && (await index.planOf(uid)) === null);
+          (!!entry.plan && (await index.planOf(uid)) === null) ||
+          (!!entry.dose && (await index.doseOf(uid)) === null);
         if (learnt) await index.putInstance(entry);
         return { outcome: 'unchanged', sopInstanceUid: uid };
       }

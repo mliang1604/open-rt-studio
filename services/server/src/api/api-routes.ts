@@ -511,6 +511,7 @@ export function apiRoutes(pacs: Pacs, options: ApiOptions): Route[] {
             ...instance,
             references: await index.referencesFrom(uid),
             plan: await index.planOf(uid),
+            dose: await index.doseOf(uid),
           },
         };
       },

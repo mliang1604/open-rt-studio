@@ -227,6 +227,7 @@ describe('the facts of a file’s header', () => {
     frames: null,
     references: [{ relation: 'structure-set.series', targetUid: '1.2.8' }],
     plan: null,
+    dose: null,
   });
 
   it('are taken for a structure set, a plan, a dose and a registration, and nothing else', () => {
@@ -243,6 +244,10 @@ describe('the facts of a file’s header', () => {
     });
     expect(rtObjectFacts(header(' rtplan'))?.kind).toBe('plan');
     expect(rtObjectFacts(header('RTDOSE'))?.kind).toBe('dose');
+    // A dose's facts have what it says it is the dose of, when its header does (#257).
+    const of = { summationType: 'BEAM', beams: [2], fractionGroup: 1 };
+    expect(rtObjectFacts({ ...header('RTDOSE'), dose: of })?.dose).toEqual(of);
+    expect(rtObjectFacts(header('RTDOSE'))).not.toHaveProperty('dose');
     expect(rtObjectFacts(header('REG'))?.kind).toBe('registration');
     expect(rtObjectFacts(header('CT'))).toBeNull();
     expect(rtObjectFacts(header('SEG'))).toBeNull();

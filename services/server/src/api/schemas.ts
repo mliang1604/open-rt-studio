@@ -237,8 +237,18 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
         description:
           'For an RT Plan, what it says of its fractions and prescriptions: every fraction group and dose reference as the file has it, doses in Gy. Null for anything else, and for a plan filed before this was kept.',
       },
+      dose: {
+        ...object({
+          summationType: nullableText,
+          beams: { type: 'array', items: { type: 'integer' } },
+          fractionGroup: nullableInteger,
+        }),
+        type: ['object', 'null'],
+        description:
+          'For an RT Dose, what it says it is the dose of: its Dose Summation Type as written, and the beam numbers and the fraction group number it names under its plan. A series may hold several doses, and this tells them apart. Null for anything else, and for a dose filed before this was kept.',
+      },
     },
-    'An instance, what it refers to, and what a plan says.',
+    'An instance, what it refers to, and what a plan or a dose says.',
   ),
   Related: object(
     {

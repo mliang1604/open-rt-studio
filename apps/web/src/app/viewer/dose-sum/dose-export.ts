@@ -9,13 +9,14 @@
 
 import {
   doseSumAsciiName,
+  type LayerPlacement,
   matrixKind,
   registrationReference,
-  writeSummedDose,
-  type LayerPlacement,
   type Series,
+  seriesInstanceUidOf,
   type SummedDoseSource,
   type Volume,
+  writeSummedDose,
   type WrittenDose,
 } from '@open-rt-studio/dicom';
 
@@ -101,7 +102,7 @@ export function sumDerivationText(
     said.known >= said.voxels
       ? ' The sum is known at every voxel of that grid.'
       : ` The sum is known at ${said.known} of the ${said.voxels} voxels of that grid; 0 is stored where it is not known, which is not a dose of zero.`;
-  return `${DERIVED_NOTICE} ${what}, on the grid of series ${base.uid}.${ratios}${known}${doses.join('')}`;
+  return `${DERIVED_NOTICE} ${what}, on the grid of series ${seriesInstanceUidOf(base.uid)}.${ratios}${known}${doses.join('')}`;
 }
 
 /** A sum as a file, and what was written. */

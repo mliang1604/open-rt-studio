@@ -294,6 +294,7 @@ describe('readInstanceHeader on the synthetic generators', () => {
       frames: null,
       references: [],
       plan: null,
+      dose: null,
     });
   });
 

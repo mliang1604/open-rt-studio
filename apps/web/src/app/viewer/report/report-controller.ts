@@ -10,6 +10,7 @@ import {
   type Mat4,
   type PlacementStep,
   type Roi,
+  seriesInstanceUidOf,
   type Volume,
 } from '@open-rt-studio/dicom';
 
@@ -82,7 +83,8 @@ export function identityOf(patient: PatientHistory | null, layerId: string): Ima
       studyDate: study.date,
       studyDescription: study.description,
       seriesDescription: series.description,
-      seriesUid,
+      // Of one dose of a series of several, the series' own UID and not the key it goes by here.
+      seriesUid: seriesInstanceUidOf(seriesUid),
     };
   }
   return null;

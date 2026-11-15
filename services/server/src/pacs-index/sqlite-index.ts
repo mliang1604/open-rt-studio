@@ -4,7 +4,7 @@
 
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 
-import type { PlanFacts } from '@open-rt-studio/dicom';
+import { DOSE_OF_BEAMS_AT_MOST, type DoseOf, type PlanFacts } from '@open-rt-studio/dicom';
 
 import { SILENT_LOGGER, type Logger } from '../logger.js';
 import { isUid } from '../uid.js';
@@ -227,6 +227,25 @@ const toPatient = (row: Row): PatientRecord => ({
  */
 export const PLAN_CHARACTERS_AT_MOST = 65_536;
 
+/** A Dose Summation Type is a code string: short, and of capitals, digits, spaces and underscores. */
+const CODE_STRING = /^[A-Z0-9_ ]{1,16}$/;
+const isNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value);
+
+/** Whether a value is what the header reader gives of a dose, and no more. */
+function isDoseOf(value: unknown): value is DoseOf {
+  if (typeof value !== 'object' || value === null) return false;
+  const { summationType, beams, fractionGroup } = value as Record<string, unknown>;
+  return (
+    (summationType === null ||
+      (typeof summationType === 'string' && CODE_STRING.test(summationType))) &&
+    Array.isArray(beams) &&
+    beams.length <= DOSE_OF_BEAMS_AT_MOST &&
+    beams.every(isNumber) &&
+    (fractionGroup === null || isNumber(fractionGroup))
+  );
+}
+
 /** Say what is wrong with an entry before any of it reaches the database. */
 function check(entry: InstanceEntry): void {
   const wrong = (what: string): never => {
@@ -243,6 +262,7 @@ function check(entry: InstanceEntry): void {
   if (entry.plan && JSON.stringify(entry.plan).length > PLAN_CHARACTERS_AT_MOST) {
     wrong('plan says more than is kept of one');
   }
+  if (entry.dose && !isDoseOf(entry.dose)) wrong('dose does not say what it is the dose of');
   if (entry.series.modality.trim() === '') wrong('modality is empty');
   if (!Number.isInteger(entry.instance.size) || entry.instance.size <= 0) {
     wrong('size is not a whole number above 0');
@@ -426,11 +446,11 @@ export async function openSqliteIndex(
           series.frameOfReferenceUid,
         );
         run(
-          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, frame_count, size, sha256, plan)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO instance (sop_instance_uid, series_uid, sop_class_uid, instance_number, frame_count, size, sha256, plan, dose)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (sop_instance_uid) DO UPDATE SET sop_class_uid = excluded.sop_class_uid,
              instance_number = excluded.instance_number, frame_count = excluded.frame_count,
-             size = excluded.size, sha256 = excluded.sha256, plan = excluded.plan`,
+             size = excluded.size, sha256 = excluded.sha256, plan = excluded.plan, dose = excluded.dose`,
           instance.uid,
           series.uid,
           instance.sopClassUid,
@@ -439,6 +459,13 @@ export async function openSqliteIndex(
           instance.size,
           instance.sha256,
           entry.plan ? JSON.stringify(entry.plan) : null,
+          entry.dose
+            ? JSON.stringify({
+                summationType: entry.dose.summationType,
+                beams: entry.dose.beams,
+                fractionGroup: entry.dose.fractionGroup,
+              })
+            : null,
         );
         run('DELETE FROM reference WHERE sop_instance_uid = ?', instance.uid);
         for (const reference of entry.references) {
@@ -581,6 +608,19 @@ export async function openSqliteIndex(
         return JSON.parse(kept) as PlanFacts;
       } catch {
         // Not what was written: nothing is said of the plan.
+        return null;
+      }
+    },
+
+    async doseOf(sopInstanceUid) {
+      const row = one('SELECT dose FROM instance WHERE sop_instance_uid = ?', sopInstanceUid);
+      const kept = row ? text(row['dose']) : null;
+      if (!kept) return null;
+      try {
+        const parsed: unknown = JSON.parse(kept);
+        // Not what was written: nothing is said of the dose.
+        return isDoseOf(parsed) ? parsed : null;
+      } catch {
         return null;
       }
     },

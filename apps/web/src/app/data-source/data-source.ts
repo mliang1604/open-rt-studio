@@ -45,7 +45,8 @@ export interface DataSource {
    * Get a series ready to be built into a volume: parsed, with its pixels,
    * and with the structure sets the source holds that may belong to it.
    * Rejects when the series cannot be had; with an `AbortError` when
-   * `options.signal` was aborted.
+   * `options.signal` was aborted. `seriesUid` is a series' key as its
+   * summary gives it ({@link SeriesSummary.uid}).
    */
   fetchSeries(seriesUid: string, options?: FetchOptions): Promise<FetchedSeries>;
 
@@ -167,9 +168,20 @@ export interface StudySummary {
 
 /** A series as its chip shows it: what it is, without its pixels. */
 export interface SeriesSummary {
+  /**
+   * What the series goes by: its SeriesInstanceUID, or, for one dose object
+   * of a series that holds several, a key of that UID and the object's
+   * (`doseObjectSeriesKey`, #257).
+   */
   readonly uid: string;
   readonly seriesNumber: number | null;
   readonly description: string | null;
+  /**
+   * For one dose of a series that holds several (#257): what it says it is
+   * the dose of, as it is told from the others (`beam 2`). Its
+   * {@link description} has it too; a chip has no room for both in a line.
+   */
+  readonly doseOf?: string;
   readonly modality: string | null;
   readonly frameOfReferenceUid: string | null;
   /** How many images (or other instances) it holds. */

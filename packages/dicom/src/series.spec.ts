@@ -2,7 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { groupSeries, largestSeries, middleSlice } from './series.js';
+import type { DoseInfo } from './rt-dose.js';
+import {
+  doseObjectDescription,
+  doseObjectSeriesKey,
+  groupSeries,
+  largestSeries,
+  middleSlice,
+  nameDoseObjects,
+  seriesInstanceUidOf,
+  seriesKeyParts,
+} from './series.js';
 import type { Slice } from './types.js';
 
 /** A minimal slice carrying just the series-grouping fields under test. */
@@ -149,5 +159,125 @@ describe('middleSlice', () => {
     middleSlice(series);
 
     expect(series.slices.map((s) => s.name)).toEqual(before);
+  });
+});
+
+describe('a series that holds several dose objects (#257)', () => {
+  const dose = (sopInstanceUid: string | null, more: Partial<DoseInfo> = {}): DoseInfo => ({
+    units: 'GY',
+    type: 'PHYSICAL',
+    summationType: null,
+    scaling: 1,
+    sopInstanceUid,
+    frameOffsets: 'relative',
+    interpolatedPlanes: 0,
+    ...more,
+  });
+  const planes = (of: DoseInfo, count = 2): Slice[] =>
+    Array.from({ length: count }, () =>
+      slice('1.2.3', { modality: 'RTDOSE', seriesDescription: 'Dose', dose: of }),
+    );
+
+  it('is one series to each object, the plan’s first and the rest by fraction group and beam', () => {
+    const series = groupSeries([
+      ...planes(dose('9.3', { summationType: 'BEAM', beams: [2], fractionGroup: 1 })),
+      ...planes(dose('9.2', { summationType: 'BEAM', beams: [1], fractionGroup: 1 }), 3),
+      ...planes(dose('9.4', { summationType: 'FRACTION', fractionGroup: 2 })),
+      ...planes(dose('9.1', { summationType: 'PLAN' })),
+    ]);
+    expect(series.map((one) => [one.uid, one.description, one.imageCount])).toEqual([
+      ['1.2.3@9.1', 'Dose (whole plan)', 2],
+      ['1.2.3@9.2', 'Dose (beam 1)', 3],
+      ['1.2.3@9.3', 'Dose (beam 2)', 2],
+      ['1.2.3@9.4', 'Dose (fraction group 2)', 2],
+    ]);
+    // What each is the dose of is said by itself too, for where a line has no room for both.
+    expect(series.map((one) => one.doseOf)).toEqual([
+      'whole plan',
+      'beam 1',
+      'beam 2',
+      'fraction group 2',
+    ]);
+    // Each holds its own object's planes and no other's.
+    for (const one of series) {
+      expect(new Set(one.slices.map((plane) => plane.dose?.sopInstanceUid)).size).toBe(1);
+    }
+  });
+
+  it('tells doses that say the same of themselves, or nothing, apart by which of the series they are', () => {
+    const series = groupSeries([
+      ...planes(dose('9.2', { summationType: 'PLAN' })),
+      ...planes(dose('9.1', { summationType: 'PLAN' })),
+      ...planes(dose('9.3')),
+    ]);
+    expect(series.map((one) => one.description)).toEqual([
+      'Dose (whole plan, dose 1 of 3)',
+      'Dose (whole plan, dose 2 of 3)',
+      'Dose (dose 3 of 3)',
+    ]);
+    expect(new Set(series.map((one) => one.uid)).size).toBe(3);
+  });
+
+  it('stays among the other series in the order of its series number', () => {
+    const series = groupSeries([
+      slice('7.7', { seriesNumber: 30 }),
+      ...planes(dose('9.2', { summationType: 'BEAM', beams: [1] })).map((plane) => ({
+        ...plane,
+        seriesNumber: 20,
+      })),
+      ...planes(dose('9.1', { summationType: 'PLAN' })).map((plane) => ({
+        ...plane,
+        seriesNumber: 20,
+      })),
+      slice('1.1', { seriesNumber: 10 }),
+    ]);
+    expect(series.map((one) => one.uid)).toEqual(['1.1', '1.2.3@9.1', '1.2.3@9.2', '7.7']);
+  });
+
+  it('leaves whole a series of one dose object, and one whose objects cannot be told apart', () => {
+    const one = dose('9.1');
+    expect(groupSeries(planes(one)).map((series) => series.uid)).toEqual(['1.2.3']);
+    expect(groupSeries(planes(one))[0]).not.toHaveProperty('doseOf');
+    // Two objects with no UID, or with one UID: nothing to key them by.
+    for (const pair of [
+      [dose(null), dose(null)],
+      [dose('9.1'), dose('9.1')],
+    ]) {
+      const series = groupSeries([...planes(pair[0]), ...planes(pair[1])]);
+      expect(series.map((it) => [it.uid, it.description, it.imageCount])).toEqual([
+        ['1.2.3', 'Dose', 4],
+      ]);
+    }
+    // And a series that is not all dose.
+    expect(
+      groupSeries([...planes(dose('9.1')), ...planes(dose('9.2')), slice('1.2.3')]),
+    ).toHaveLength(1);
+  });
+
+  it('orders and names dose objects the same way for a listing that has no slices', () => {
+    const named = nameDoseObjects([
+      { sopInstanceUid: '9.3', of: { summationType: 'BEAM', beams: [2], fractionGroup: 1 } },
+      { sopInstanceUid: '9.4', of: null },
+      { sopInstanceUid: '9.2', of: { summationType: 'BEAM', beams: [1], fractionGroup: 1 } },
+      { sopInstanceUid: '9.1', of: { summationType: 'PLAN', beams: [], fractionGroup: null } },
+    ]);
+    expect(named.map((one) => [one.object.sopInstanceUid, one.said])).toEqual([
+      ['9.1', 'whole plan'],
+      ['9.4', 'dose 2 of 4'],
+      ['9.2', 'beam 1'],
+      ['9.3', 'beam 2'],
+    ]);
+    expect(doseObjectDescription('Plan A', 'beam 1')).toBe('Plan A (beam 1)');
+    expect(doseObjectDescription(null, 'beam 1')).toBe('Dose (beam 1)');
+  });
+
+  it('keys a dose object by its series and itself, and gives the series back from the key', () => {
+    const key = doseObjectSeriesKey('1.2.3', '9.1');
+    expect(key).toBe('1.2.3@9.1');
+    expect(seriesKeyParts(key)).toEqual({ seriesInstanceUid: '1.2.3', doseObjectUid: '9.1' });
+    expect(seriesInstanceUidOf(key)).toBe('1.2.3');
+    // Any other series' key is its UID.
+    expect(seriesKeyParts('1.2.3')).toEqual({ seriesInstanceUid: '1.2.3', doseObjectUid: null });
+    expect(seriesInstanceUidOf('')).toBe('');
   });
 });

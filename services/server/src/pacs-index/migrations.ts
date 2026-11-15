@@ -124,6 +124,20 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE instance ADD COLUMN plan TEXT;
     `,
   },
+  {
+    version: 6,
+    name: 'what a dose is the dose of',
+    sql: `
+      -- For an RT Dose, what it says it is the dose of, as JSON: its Dose
+      -- Summation Type and the beams and fraction group of its plan that it
+      -- names. A series may hold several doses, a plan's beside its beams',
+      -- and this is what a timeline tells them apart by without their
+      -- files. NULL for anything else, and for every dose filed before this
+      -- step, which is then told from the others of its series only by
+      -- which of them it is, until its file is ingested again.
+      ALTER TABLE instance ADD COLUMN dose TEXT;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

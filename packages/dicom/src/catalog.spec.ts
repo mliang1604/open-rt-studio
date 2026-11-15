@@ -12,7 +12,8 @@ import {
   importPatientIds,
   initialImportSeries,
 } from './catalog.js';
-import type { Series } from './series.js';
+import { groupSeries, type Series } from './series.js';
+import type { Slice } from './types.js';
 
 /** A minimal series carrying just the study/patient-grouping fields under test. */
 function series(studyUid: string | null, overrides: Partial<Series> = {}): Series {
@@ -165,6 +166,49 @@ describe('addSeriesToCatalog', () => {
 
     expect([...second.keys()]).toEqual(['p1']);
     expect(catalogSeries(second).map((s) => s.uid)).toEqual(['a', 'b']);
+  });
+
+  it('groups a dose series anew when more of its dose objects arrive, and keeps what it held (#257)', () => {
+    const doseOf = (sopInstanceUid: string, summationType: string, beams: number[] = []) => ({
+      units: 'GY' as const,
+      type: 'PHYSICAL' as const,
+      summationType,
+      beams,
+      fractionGroup: null,
+      scaling: 1,
+      sopInstanceUid,
+      frameOffsets: 'single' as const,
+      interpolatedPlanes: 0,
+    });
+    const plane = (dose: ReturnType<typeof doseOf>): Slice =>
+      ({
+        seriesUid: 'dose',
+        seriesNumber: null,
+        seriesDescription: 'Dose',
+        modality: 'RTDOSE',
+        studyUid: 's1',
+        patientId: 'p1',
+        columns: 2,
+        rows: 2,
+        dose,
+      }) as unknown as Slice;
+    const plan = doseOf('9.1', 'PLAN');
+    const beam = doseOf('9.2', 'BEAM', [1]);
+    // First the plan's dose alone: a series like any other, by its UID.
+    const first = addSeriesToCatalog(new Map(), groupSeries([plane(plan)]));
+    expect(catalogSeries(first).map((s) => [s.uid, s.description])).toEqual([['dose', 'Dose']]);
+    // Then a beam's dose of the same series, in an import of its own.
+    const second = addSeriesToCatalog(first, groupSeries([plane(beam)]));
+    expect(catalogSeries(second).map((s) => [s.uid, s.description, s.slices.length])).toEqual([
+      ['dose@9.1', 'Dose (whole plan)', 1],
+      ['dose@9.2', 'Dose (beam 1)', 1],
+    ]);
+    // The same files again add nothing, whichever way they come.
+    const again = addSeriesToCatalog(second, groupSeries([plane(beam), plane(plan)]));
+    expect(catalogSeries(again).map((s) => s.uid)).toEqual(['dose@9.1', 'dose@9.2']);
+    expect(catalogSeries(addSeriesToCatalog(again, groupSeries([plane(plan)])))).toHaveLength(2);
+    // The planes that were held are the ones that are kept.
+    expect(catalogSeries(again)[0].slices[0].dose).toBe(plan);
   });
 
   it('dedups by SeriesInstanceUID, keeping the series already present', () => {

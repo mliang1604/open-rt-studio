@@ -17,7 +17,7 @@ import {
   type SyntheticStudy,
 } from '@open-rt-studio/testdata';
 
-import type { PlanFacts } from '@open-rt-studio/dicom';
+import { DOSE_OF_BEAMS_AT_MOST, type DoseOf, type PlanFacts } from '@open-rt-studio/dicom';
 
 import { createLogger } from '../logger.js';
 import {
@@ -205,6 +205,13 @@ describe('migrations', () => {
     ).toBe(null);
     // Nor of what a plan says, which version 5 began to keep.
     expect(await index.planOf(syntheticRtDataset().find(isPlan)!.instance.uid)).toBeNull();
+    // Nor of what a dose is the dose of, which version 6 began to keep.
+    expect(
+      await index.doseOf(
+        (await index.findInstances({ seriesInstanceUid: dose.seriesInstanceUid }))[0]
+          .sopInstanceUid,
+      ),
+    ).toBeNull();
     // And what version 2 added works on it.
     const [structureSet] = syntheticRtDataset().filter((one) => one.series.modality === 'RTSTRUCT');
     expect(await index.putInstance(structureSet)).toBe('updated');
@@ -479,6 +486,31 @@ describe('putting instances', () => {
         plan: { ...PLAN, label: 'x'.repeat(PLAN_CHARACTERS_AT_MOST) },
       }),
     ],
+    [
+      'dose does not say what it is the dose of',
+      (e: InstanceEntry) => ({
+        ...e,
+        dose: { summationType: 'a plan; DROP TABLE', beams: [], fractionGroup: null },
+      }),
+    ],
+    [
+      'dose does not say what it is the dose of',
+      (e: InstanceEntry) => ({
+        ...e,
+        dose: { summationType: 'BEAM', beams: [1.5], fractionGroup: null },
+      }),
+    ],
+    [
+      'dose does not say what it is the dose of',
+      (e: InstanceEntry) => ({
+        ...e,
+        dose: {
+          summationType: 'BEAM',
+          beams: Array.from({ length: DOSE_OF_BEAMS_AT_MOST + 1 }, (_, n) => n),
+          fractionGroup: 1,
+        },
+      }),
+    ],
     ['number of frames is not a count', (e: InstanceEntry) => withFrames(e, 0)],
     ['number of frames is not a count', (e: InstanceEntry) => withFrames(e, 2.5)],
     [
@@ -523,6 +555,50 @@ describe('what a plan says (#97)', () => {
     await index.putInstance(plan());
     await index.removeInstance(uid);
     expect(await index.planOf(uid)).toBeNull();
+  });
+});
+
+describe('what a dose is the dose of (#257)', () => {
+  const dose = (n: number, of: DoseOf | null): InstanceEntry => ({
+    ...entry(PLANNING, 'RTDOSE', SERIES.RTDOSE, n, { frames: 6 }),
+    dose: of,
+  });
+  const uid = (n: number): string => instanceUid(PLANNING, SERIES.RTDOSE, n);
+  const PLAN_DOSE: DoseOf = { summationType: 'PLAN', beams: [], fractionGroup: null };
+  const BEAM_DOSE: DoseOf = { summationType: 'BEAM', beams: [2], fractionGroup: 1 };
+
+  it('is kept with each dose of a series, and nothing is kept for anything else', async () => {
+    const index = await memory([
+      dose(1, PLAN_DOSE),
+      dose(2, BEAM_DOSE),
+      entry(PLANNING, 'CT', SERIES.CT, 1),
+    ]);
+    expect(await index.doseOf(uid(1))).toEqual(PLAN_DOSE);
+    expect(await index.doseOf(uid(2))).toEqual(BEAM_DOSE);
+    expect(await index.doseOf(instanceUid(PLANNING, SERIES.CT, 1))).toBeNull();
+    expect(await index.doseOf('1.2.3.4')).toBeNull();
+    // The two are two instances of one series, of six images each.
+    const [series] = await index.findSeries({ modality: 'RTDOSE' });
+    expect(series).toMatchObject({ instances: 2, images: 12 });
+    // It is no part of an instance as the lists give it.
+    expect(await index.getInstance(uid(1))).not.toHaveProperty('dose');
+  });
+
+  it('keeps what the reader gives and nothing that came with it', async () => {
+    const more = { ...BEAM_DOSE, patientName: 'kept nowhere' } as DoseOf;
+    const index = await memory([dose(1, more)]);
+    expect(await index.doseOf(uid(1))).toEqual(BEAM_DOSE);
+  });
+
+  it('follows the dose when it is put again, and goes with it', async () => {
+    const index = await memory([dose(1, PLAN_DOSE)]);
+    await index.putInstance(dose(1, BEAM_DOSE));
+    expect(await index.doseOf(uid(1))).toEqual(BEAM_DOSE);
+    await index.putInstance(dose(1, null));
+    expect(await index.doseOf(uid(1))).toBeNull();
+    await index.putInstance(dose(1, PLAN_DOSE));
+    await index.removeInstance(uid(1));
+    expect(await index.doseOf(uid(1))).toBeNull();
   });
 });
 

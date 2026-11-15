@@ -34,7 +34,7 @@ import {
   type WindowLevel,
 } from '@open-rt-studio/render';
 
-import { doseSaid } from './viewer-format';
+import { dosePart, doseSaid } from './viewer-format';
 
 /** Checkerboard density bounds (cells across the image), shared by the slider. */
 const CHECKER_CELLS_MIN = 2;
@@ -198,6 +198,13 @@ export function placementChoiceText(placement: LayerPlacement): string {
  * says so, and offers no choice among registrations while it is: the hand
  * goes before them.
  */
+/** A layer's name in the list: its modality, and for a dose that is less than a plan's, what it is of. */
+function layerName(layer: Layer): string {
+  const modality = layer.modality ?? 'Image';
+  const part = layer.volume.dose ? dosePart(layer.volume.dose) : null;
+  return part ? `${modality} (${part})` : modality;
+}
+
 export function layerLegend(
   layers: readonly Layer[],
   byHand: ReadonlyMap<string, ByHand> = new Map(),
@@ -208,9 +215,9 @@ export function layerLegend(
     return {
       id: layer.id,
       // A dose that was made here goes by what it is (#99): `EQD2 (α/β 3 Gy)`.
-      label: layer.volume.dose?.sum
-        ? doseSumName(layer.volume.dose.sum)
-        : (layer.modality ?? 'Image'),
+      // One read from a file that is less than a plan's says what it is the
+      // dose of (#257): `RTDOSE (beam 2)`, beside the `RTDOSE` of its plan.
+      label: layer.volume.dose?.sum ? doseSumName(layer.volume.dose.sum) : layerName(layer),
       said: layer.volume.dose ? doseSaid(layer.volume.dose) : (layer.modality ?? 'Image'),
       roleBadge: layer.role === 'base' ? 'BASE' : 'OVERLAY',
       isBase: layer.role === 'base',

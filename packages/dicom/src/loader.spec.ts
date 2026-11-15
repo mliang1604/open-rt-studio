@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { parseFile, parseFileAsync, UnsupportedDicomError } from './loader.js';
+import { groupSeries, seriesInstanceUidOf, seriesKeyParts } from './series.js';
 import { buildVolume } from './volume.js';
 import { valueUnit, type Slice } from './types.js';
 
@@ -696,6 +697,9 @@ function rtDose(
     orientation?: number[] | null;
     pixelSpacing?: number[] | null;
     sopInstanceUid?: string;
+    /** The plans the dose names, each with the fraction group and beams it says it is of. */
+    plans?: { uid: string; fractionGroup?: number; beams?: number[] }[];
+    description?: string;
   } = {},
 ): ArrayBuffer {
   const { bits = 16, modality = 'RTDOSE', gridOffsets = [0, 5], signed = false } = opts;
@@ -714,6 +718,7 @@ function rtDose(
     element(0x0008, 0x0060, 'CS', text(modality)), // Modality
     element(0x0008, 0x0016, 'UI', uid('1.2.840.10008.5.1.4.1.1.481.2')), // SOPClassUID (RT Dose)
     element(0x0008, 0x0018, 'UI', uid(opts.sopInstanceUid ?? '1.2.dose.1')), // SOPInstanceUID
+    ...(opts.description ? [element(0x0008, 0x103e, 'LO', text(opts.description))] : []), // SeriesDescription
     element(0x0010, 0x0020, 'LO', text('PID-99')), // PatientID
     element(0x0020, 0x000d, 'UI', uid('1.2.dose.study')), // StudyInstanceUID
     element(0x0020, 0x000e, 'UI', uid('1.2.dose')), // SeriesInstanceUID
@@ -733,6 +738,36 @@ function rtDose(
     ...maybe(summation, () => element(0x3004, 0x000a, 'CS', text(summation!))), // DoseSummationType
     ...(gridOffsets ? [element(0x3004, 0x000c, 'DS', numbers(gridOffsets))] : []), // GridFrameOffsetVector
     ...maybe(scaling, () => element(0x3004, 0x000e, 'DS', numbers([scaling!]))), // DoseGridScaling
+    // ReferencedRTPlanSequence > ReferencedFractionGroupSequence > ReferencedBeamSequence
+    ...(opts.plans
+      ? [
+          sequence(
+            0x300c,
+            0x0002,
+            opts.plans.map((plan) =>
+              concat([
+                element(0x0008, 0x1155, 'UI', uid(plan.uid)), // ReferencedSOPInstanceUID
+                ...(plan.fractionGroup === undefined
+                  ? []
+                  : [
+                      sequence(0x300c, 0x0020, [
+                        concat([
+                          sequence(
+                            0x300c,
+                            0x0004,
+                            (plan.beams ?? []).map(
+                              (beam) => element(0x300c, 0x0006, 'IS', numbers([beam])), // ReferencedBeamNumber
+                            ),
+                          ),
+                          element(0x300c, 0x0022, 'IS', numbers([plan.fractionGroup])), // ReferencedFractionGroupNumber
+                        ]),
+                      ]),
+                    ]),
+              ]),
+            ),
+          ),
+        ]
+      : []),
     bits === 32 ? pixelData32(frames) : pixelData(frames),
   ]);
   return dicomFile(body);
@@ -822,6 +857,9 @@ describe('parseFile — RT Dose, as each file says it (#93)', () => {
       // No Dose Type in the file: read as what nearly all are.
       type: 'PHYSICAL',
       summationType: null,
+      // It names no plan, and so no beam or fraction group of one.
+      beams: [],
+      fractionGroup: null,
       scaling: 0.25,
       sopInstanceUid: '1.2.dose.1',
       frameOffsets: 'relative',
@@ -975,5 +1013,93 @@ describe('parseFile — RT Dose, as each file says it (#93)', () => {
     );
     // The planes of one object are one grid, however often they are asked for.
     expect(buildVolume([...one]).dims).toEqual([2, 2, 2]);
+  });
+
+  it('says which beams and which fraction group of its plan a dose is of', () => {
+    const beam = parseFile(
+      'beam.dcm',
+      rtDose({ summation: 'BEAM', plans: [{ uid: '1.2.plan', fractionGroup: 1, beams: [2, 3] }] }),
+    );
+    expect(beam[0].dose).toMatchObject({ summationType: 'BEAM', beams: [2, 3], fractionGroup: 1 });
+    const plan = parseFile('plan.dcm', rtDose({ summation: 'PLAN', plans: [{ uid: '1.2.plan' }] }));
+    expect(plan[0].dose).toMatchObject({ summationType: 'PLAN', beams: [], fractionGroup: null });
+  });
+
+  it('gives a series that holds several dose objects as one series to each, which each build alone (#257)', () => {
+    const plans = (beams?: number[]) => [
+      { uid: '1.2.plan', ...(beams ? { fractionGroup: 1, beams } : {}) },
+    ];
+    // In an order a folder might have: a beam's dose before the plan's.
+    const slices = [
+      ...parseFile(
+        'beam-2.dcm',
+        rtDose({
+          sopInstanceUid: '1.2.dose.3',
+          summation: 'BEAM',
+          plans: plans([2]),
+          description: 'Plan A',
+          frames: [
+            [40, 40, 40, 40],
+            [40, 40, 40, 40],
+          ],
+        }),
+      ),
+      ...parseFile(
+        'plan.dcm',
+        rtDose({
+          sopInstanceUid: '1.2.dose.1',
+          summation: 'PLAN',
+          plans: plans(),
+          description: 'Plan A',
+        }),
+      ),
+      ...parseFile(
+        'beam-1.dcm',
+        rtDose({
+          sopInstanceUid: '1.2.dose.2',
+          summation: 'BEAM',
+          plans: plans([1]),
+          description: 'Plan A',
+          frames: [
+            [8, 8, 8, 8],
+            [8, 8, 8, 8],
+          ],
+        }),
+      ),
+    ];
+    const series = groupSeries(slices);
+    expect(series.map((one) => [one.uid, one.description, one.imageCount])).toEqual([
+      ['1.2.dose@1.2.dose.1', 'Plan A (whole plan)', 2],
+      ['1.2.dose@1.2.dose.2', 'Plan A (beam 1)', 2],
+      ['1.2.dose@1.2.dose.3', 'Plan A (beam 2)', 2],
+    ]);
+    for (const one of series) {
+      expect(seriesInstanceUidOf(one.uid)).toBe('1.2.dose');
+      expect(one.modality).toBe('RTDOSE');
+    }
+    expect(seriesKeyParts(series[2].uid)).toEqual({
+      seriesInstanceUid: '1.2.dose',
+      doseObjectUid: '1.2.dose.3',
+    });
+    // Each is a grid of its own, with its own values: 2 Gy and 10 Gy to the beams.
+    const volumes = series.map((one) => buildVolume(one.slices));
+    expect(volumes.map((volume) => volume.dims)).toEqual([
+      [2, 2, 2],
+      [2, 2, 2],
+      [2, 2, 2],
+    ]);
+    expect(volumes.map((volume) => [volume.min, volume.max])).toEqual([
+      [0, 7],
+      [2, 2],
+      [10, 10],
+    ]);
+    expect(volumes.map((volume) => volume.dose?.sopInstanceUid)).toEqual([
+      '1.2.dose.1',
+      '1.2.dose.2',
+      '1.2.dose.3',
+    ]);
+    // A series of one dose object goes by its UID alone, as it always has.
+    const alone = groupSeries(parseFile('plan.dcm', rtDose({ description: 'Plan A' })));
+    expect(alone.map((one) => [one.uid, one.description])).toEqual([['1.2.dose', 'Plan A']]);
   });
 });

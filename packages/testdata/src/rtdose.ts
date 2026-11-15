@@ -97,6 +97,13 @@ export interface RtDoseSpec {
   readonly summationType?: string;
   /** Which object of its series this is, from 1: several doses in a series are several objects. */
   readonly instance?: number;
+  /**
+   * The fraction group of the plan the dose is of, and the beams of it
+   * (#257): written under the plan that is named, and so left out without
+   * {@link referencedPlanUid}. A beam's dose names its beam here.
+   */
+  readonly referencedFractionGroup?: number;
+  readonly referencedBeams?: readonly number[];
 }
 
 /** A sequence with one item that names an instance by class and UID. */
@@ -110,6 +117,38 @@ function referencedInstance(
     [
       el(0x0008, 0x1150, 'UI', uid(sopClassUid)), // ReferencedSOPClassUID
       el(0x0008, 0x1155, 'UI', uid(sopInstanceUid)), // ReferencedSOPInstanceUID
+    ],
+  ]);
+}
+
+/** The ReferencedRTPlanSequence of a dose: the plan, and the fraction group and beams of it when given. */
+function referencedPlan(spec: RtDoseSpec, planUid: string): DataElement {
+  const beams = spec.referencedBeams ?? [];
+  const group = spec.referencedFractionGroup ?? (beams.length > 0 ? 1 : undefined);
+  return sequence(0x300c, 0x0002, [
+    [
+      el(0x0008, 0x1150, 'UI', uid(RTPLAN_SOP_CLASS)), // ReferencedSOPClassUID
+      el(0x0008, 0x1155, 'UI', uid(planUid)), // ReferencedSOPInstanceUID
+      ...(group === undefined
+        ? []
+        : [
+            // ReferencedFractionGroupSequence
+            sequence(0x300c, 0x0020, [
+              [
+                ...(beams.length === 0
+                  ? []
+                  : [
+                      // ReferencedBeamSequence
+                      sequence(
+                        0x300c,
+                        0x0004,
+                        beams.map((beam) => [el(0x300c, 0x0006, 'IS', numbers([beam]))]), // ReferencedBeamNumber
+                      ),
+                    ]),
+                el(0x300c, 0x0022, 'IS', numbers([group])), // ReferencedFractionGroupNumber
+              ],
+            ]),
+          ]),
     ],
   ]);
 }
@@ -154,9 +193,7 @@ export function writeRtDose(spec: RtDoseSpec): SyntheticFile {
     el(0x3004, 0x000a, 'CS', text(spec.summationType ?? 'PLAN')), // DoseSummationType
     ...(offsets === null ? [] : [el(0x3004, 0x000c, 'DS', numbers([...offsets]))]), // GridFrameOffsetVector
     el(0x3004, 0x000e, 'DS', numbers([spec.scaling])), // DoseGridScaling
-    ...(spec.referencedPlanUid === undefined
-      ? []
-      : [referencedInstance(0x300c, 0x0002, RTPLAN_SOP_CLASS, spec.referencedPlanUid)]),
+    ...(spec.referencedPlanUid === undefined ? [] : [referencedPlan(spec, spec.referencedPlanUid)]),
     ...(spec.referencedStructureSetUid === undefined
       ? []
       : [referencedInstance(0x300c, 0x0060, RTSTRUCT_SOP_CLASS, spec.referencedStructureSetUid)]),

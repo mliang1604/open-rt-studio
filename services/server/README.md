@@ -644,6 +644,14 @@ without asking for each.
   sends it as `plan` with what the instance refers to; `null` for anything
   else. A plan filed before version 5 has none until its file is ingested
   again.
+- **A dose says what it is the dose of.** A series may hold several RT Dose
+  instances, a plan's dose beside a dose to each of its beams. For an RT
+  Dose the index keeps its Dose Summation Type and the beam numbers and
+  fraction group number it names under its plan (`instance.dose`, from
+  version 6 of the schema), and `/instances/{uid}` sends it as `dose`;
+  `null` for anything else. The viewer lists such a series as one dose to
+  each instance and fetches each by its own file. A dose filed before
+  version 6 has none until its file is ingested again.
 - The index holds patient names and IDs. That is its purpose; protect the
   file as you would the data. Its errors and log lines carry none of them.
 

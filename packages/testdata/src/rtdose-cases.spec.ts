@@ -4,6 +4,7 @@
 
 import {
   buildVolume,
+  groupSeries,
   parseFile,
   UnsupportedDicomError,
   valueUnit,
@@ -160,5 +161,14 @@ describe('synthetic doses that are not to be read', () => {
     expect(() => buildVolume(slices)).toThrow('The series holds 3 dose grids');
     // One of them alone is read.
     expect(buildVolume(slices.slice(0, 3)).dims).toEqual([4, 4, 3]);
+    // And so each is given as a dose of its own (#257). They name no beam, so
+    // they are told apart by which of the series they are.
+    const series = groupSeries(slices);
+    expect(series.map((one) => one.description)).toEqual([
+      'Synthetic dose (one or more beams, dose 1 of 3)',
+      'Synthetic dose (one or more beams, dose 2 of 3)',
+      'Synthetic dose (one or more beams, dose 3 of 3)',
+    ]);
+    for (const one of series) expect(buildVolume(one.slices).dims).toEqual([4, 4, 3]);
   });
 });

@@ -8,14 +8,15 @@
 // made is, in words. Nothing here says whether a sum is a good one.
 
 import {
-  doseSumName,
   type AlphaBetaSettings,
+  type AttachedObject,
   type DoseSum,
   type DoseSumMade,
+  doseSumName,
   type Layer,
   type LooseObject,
-  type AttachedObject,
   type Series,
+  seriesKeyParts,
 } from '@open-rt-studio/dicom';
 
 import type { PatientHistory } from '../../data-source/data-source';
@@ -128,13 +129,24 @@ function objectsOf(history: PatientHistory): (AttachedObject | LooseObject)[] {
   ];
 }
 
-/** The plans the dose of a series names, by SOP Instance UID: each once, held or not. */
+/**
+ * The plans the dose of a series names, by SOP Instance UID: each once,
+ * held or not. Of a series that holds several doses, the one dose object
+ * the key is of and no other (#257): a beam's dose is not given the plans
+ * of the dose beside it.
+ */
 export function plansNamed(doseSeriesUid: string, history: PatientHistory | null): string[] {
   if (!history) return [];
+  const { seriesInstanceUid, doseObjectUid } = seriesKeyParts(doseSeriesUid);
   return [
     ...new Set(
       objectsOf(history)
-        .filter((one) => one.kind === 'dose' && one.seriesUid === doseSeriesUid)
+        .filter(
+          (one) =>
+            one.kind === 'dose' &&
+            one.seriesUid === seriesInstanceUid &&
+            (doseObjectUid === null || one.sopInstanceUid === doseObjectUid),
+        )
         .flatMap((one) => one.plans ?? []),
     ),
   ];

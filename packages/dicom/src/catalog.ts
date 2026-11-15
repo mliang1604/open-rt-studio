@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { largestSeries, type Series } from './series.js';
+import { groupSeries, largestSeries, seriesInstanceUidOf, type Series } from './series.js';
 
 /**
  * One DICOM study: the series acquired in a single examination, sharing a
@@ -128,6 +128,8 @@ export function catalogSeries(catalog: PatientCatalogMap): Series[] {
  * deduping by SeriesInstanceUID and rebuilding the patient → study → series
  * hierarchy. A series already present (same UID) is kept as-is — the import
  * doesn't drop or replace what's there — so re-picking a folder is idempotent.
+ * The one exception is a dose series of which more dose objects arrive: it is
+ * grouped anew, one series to each object, and what was held is kept.
  *
  * No {@link import('./volume').Volume} is built: each series' parsed slices are
  * retained for an on-demand build at load time. Pure for unit testing the
@@ -137,14 +139,43 @@ export function addSeriesToCatalog(
   catalog: PatientCatalogMap,
   incoming: readonly Series[],
 ): Map<string, PatientRecord> {
-  const merged = catalogSeries(catalog);
+  let merged = catalogSeries(catalog);
   const seen = new Set(merged.map((s) => s.uid));
   for (const s of incoming) {
+    // Doses of a series that is held in part: the series is grouped anew
+    // from what is held and what has come, since a series of one dose
+    // object and a series of several are not listed the same way (#257).
+    const brought = doseObjectUids(s);
+    if (brought.size > 0) {
+      const ofSeries = seriesInstanceUidOf(s.uid);
+      const held = merged.filter((one) => seriesInstanceUidOf(one.uid) === ofSeries);
+      const heldDoses = new Set(held.flatMap((one) => [...doseObjectUids(one)]));
+      if (held.length > 0 && [...brought].some((uid) => !heldDoses.has(uid))) {
+        const fresh = s.slices.filter(
+          (slice) => !slice.dose?.sopInstanceUid || !heldDoses.has(slice.dose.sopInstanceUid),
+        );
+        const regrouped = groupSeries([...held.flatMap((one) => one.slices), ...fresh]);
+        merged = [...merged.filter((one) => !held.includes(one)), ...regrouped];
+        for (const one of held) seen.delete(one.uid);
+        for (const one of regrouped) seen.add(one.uid);
+        continue;
+      }
+      if (held.length > 0) continue;
+    }
     if (seen.has(s.uid)) continue;
     seen.add(s.uid);
     merged.push(s);
   }
   return new Map(groupPatients(merged).map((p) => [p.patientId, p]));
+}
+
+/** The dose objects a series' slices are of, by SOP Instance UID: none for anything but a dose. */
+function doseObjectUids(series: Series): Set<string> {
+  return new Set(
+    series.slices.flatMap((slice) =>
+      slice.dose?.sopInstanceUid ? [slice.dose.sopInstanceUid] : [],
+    ),
+  );
 }
 
 /**

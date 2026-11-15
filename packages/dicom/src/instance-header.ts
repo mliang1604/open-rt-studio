@@ -5,6 +5,7 @@
 import dicomParser from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 
+import { DOSE_OF_BEAMS_AT_MOST, type DoseOf } from './rt-dose.js';
 import { readPlanFacts, type PlanFacts } from './rt-plan.js';
 
 /**
@@ -84,6 +85,11 @@ export interface InstanceHeader {
    * null for anything else.
    */
   readonly plan: PlanFacts | null;
+  /**
+   * For an RT Dose, what it says it is the dose of (#257); null for anything
+   * else.
+   */
+  readonly dose: DoseOf | null;
 }
 
 /**
@@ -181,6 +187,32 @@ function registrationReferences(dataSet: DataSet, references: References): void 
   for (const one of series) references.add('registration.series', uid(one, 'x0020000e'));
 }
 
+/**
+ * What an RT Dose says it is the dose of: its Dose Summation Type, and the
+ * fraction group and beams under the plans it refers to. Of a parsed file
+ * that the caller knows to be a dose.
+ */
+export function readDoseOf(dataSet: DataSet): DoseOf {
+  const groups = new Set<number>();
+  const beams = new Set<number>();
+  // ReferencedRTPlanSequence > ReferencedFractionGroupSequence > ReferencedBeamSequence
+  for (const plan of items(dataSet, 'x300c0002')) {
+    for (const group of items(plan, 'x300c0020')) {
+      const number = integer(group, 'x300c0022');
+      if (number !== null) groups.add(number);
+      for (const beam of items(group, 'x300c0004')) {
+        const one = integer(beam, 'x300c0006');
+        if (one !== null && beams.size < DOSE_OF_BEAMS_AT_MOST) beams.add(one);
+      }
+    }
+  }
+  return {
+    summationType: text(dataSet, 'x3004000a')?.toUpperCase() ?? null,
+    beams: [...beams],
+    fractionGroup: groups.size === 1 ? [...groups][0] : null,
+  };
+}
+
 /** The ReferencedSOPInstanceUID of each item of a sequence. */
 function referencedInstances(dataSet: DataSet, tag: string): (string | null)[] {
   return items(dataSet, tag).map((item) => uid(item, 'x00081155'));
@@ -207,6 +239,7 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
 
   const references = new References();
   let plan: PlanFacts | null = null;
+  let dose: DoseOf | null = null;
   if (sopClassUid === RT_STRUCTURE_SET) {
     structureSetReferences(dataSet, references);
   } else if (RT_PLANS.has(sopClassUid)) {
@@ -215,6 +248,7 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
       references.add('plan.structure-set', target);
     }
   } else if (sopClassUid === RT_DOSE) {
+    dose = readDoseOf(dataSet);
     for (const target of referencedInstances(dataSet, 'x300c0002')) {
       references.add('dose.plan', target);
     }
@@ -256,6 +290,7 @@ export function readInstanceHeader(bytes: Uint8Array): InstanceHeaderResult {
       frames: count(dataSet, 'x00280008'),
       references: references.list,
       plan,
+      dose,
     },
   };
 }

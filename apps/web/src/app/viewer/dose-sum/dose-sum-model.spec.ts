@@ -129,6 +129,31 @@ describe('the fractions a dose’s plan gives', () => {
     expect(plansNamed('dose-1', null)).toEqual([]);
   });
 
+  it('are of the one dose object, where its series holds several (#257)', () => {
+    // A beam's dose in the first dose's series, which names another plan.
+    const patient = structuredClone(history()) as unknown as {
+      studies: { series: { attached: Record<string, unknown>[] }[] }[];
+    };
+    patient.studies[0].series[0].attached.push({
+      kind: 'dose',
+      sopInstanceUid: 'dose-object-1b',
+      seriesUid: 'dose-1',
+      description: 'First course',
+      by: 'plan',
+      plans: ['plan-9'],
+    });
+    const several = patient as unknown as ReturnType<typeof history>;
+    expect(plansNamed('dose-1@dose-object-1', several)).toEqual(['plan-1']);
+    expect(plansNamed('dose-1@dose-object-1b', several)).toEqual(['plan-9']);
+    expect(plansNamed('dose-1@dose-object-9', several)).toEqual([]);
+    // Each has its own plan's fractions, or none: not the other's.
+    expect(planFractions('dose-1@dose-object-1', several)).toEqual({
+      fractions: 30,
+      plan: 'First plan',
+    });
+    expect(planFractions('dose-1@dose-object-1b', several)).toBeNull();
+  });
+
   it('are none when nothing says which is meant', () => {
     expect(planFractions('dose-1', null)).toBeNull();
     expect(planFractions('dose-9', history())).toBeNull();
