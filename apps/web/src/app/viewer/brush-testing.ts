@@ -24,14 +24,24 @@ import {
 
 export const SQUARE: PaneRect = { x: 0, y: 0, width: 100, height: 100 };
 
-export function makeVolume(): Volume {
+/** The value of the test image at a voxel: 0 everywhere unless a spec gives a formula. */
+export type ImageFormula = (x: number, y: number, z: number) => number;
+
+export function makeVolume(formula: ImageFormula = () => 0): Volume {
   const [x, y, z] = [4, 4, 4];
+  const data = new Float32Array(x * y * z);
+  for (let k = 0; k < z; k++) {
+    for (let j = 0; j < y; j++)
+      for (let i = 0; i < x; i++) data[(k * y + j) * x + i] = formula(i, j, k);
+  }
+  let [min, max] = [Infinity, -Infinity];
+  for (const value of data) [min, max] = [Math.min(min, value), Math.max(max, value)];
   return {
     dims: [x, y, z],
     spacing: [1, 1, 1],
-    data: new Float32Array(x * y * z),
-    min: 0,
-    max: 0,
+    data,
+    min,
+    max,
     windowCenter: 0,
     windowWidth: 1,
     rescaleSlope: 1,
@@ -71,7 +81,10 @@ export interface Notice {
 }
 
 /** `source` is where saves go; left out, it is the application's own (opened files). */
-export function setup(source?: DataSource): {
+export function setup(
+  source?: DataSource,
+  formula?: ImageFormula,
+): {
   brush: BrushController;
   store: EditableStructuresStore;
   tools: ContourToolsController;
@@ -86,7 +99,7 @@ export function setup(source?: DataSource): {
       ...(source ? [{ provide: DATA_SOURCE, useValue: source }] : []),
     ],
   });
-  const { brush, store } = wireBrush(notices);
+  const { brush, store } = wireBrush(notices, formula);
   return { brush, store, tools: TestBed.inject(ContourToolsController), notices };
 }
 
@@ -95,16 +108,20 @@ export function setup(source?: DataSource): {
  * configured, and wire the brush over an axial pane of it, as the viewer
  * does.
  */
-export function wireBrush(notices: Notice[] = []): {
+export function wireBrush(
+  notices: Notice[] = [],
+  formula?: ImageFormula,
+): {
   brush: BrushController;
   store: EditableStructuresStore;
 } {
   const store = TestBed.inject(EditableStructuresStore);
-  store.resetForLoad(makeVolume());
+  const volume = makeVolume(formula);
+  store.resetForLoad(volume);
   const brush = TestBed.inject(BrushController);
   const noObliques: PerOrientationOblique = [NO_OBLIQUE, NO_OBLIQUE, NO_OBLIQUE];
   const deps: BrushInit = {
-    volume: () => store.labelVolume() && makeVolume(),
+    volume: () => store.labelVolume() && volume,
     isReady: () => true,
     canvasBounds: () => ({ left: 0, top: 0 }) as DOMRect,
     zooms: signal<PerOrientation>([1, 1, 1]),

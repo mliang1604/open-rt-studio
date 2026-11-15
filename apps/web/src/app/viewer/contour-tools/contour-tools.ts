@@ -8,6 +8,7 @@ import { BrushTool } from './brush-tool';
 import { CONTOUR_TOOLS } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { SampleTool } from './sample-tool';
+import { ThresholdBrushTool } from './threshold-brush-tool';
 
 /**
  * The contouring tools, in the order they are listed (#106). A tool is
@@ -16,6 +17,8 @@ import { SampleTool } from './sample-tool';
 export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   BrushTool,
   { provide: CONTOUR_TOOLS, useExisting: BrushTool, multi: true },
+  ThresholdBrushTool,
+  { provide: CONTOUR_TOOLS, useExisting: ThresholdBrushTool, multi: true },
   { provide: CONTOUR_TOOLS, useClass: SampleTool, multi: true },
   ContourToolsController,
 ];

@@ -45,6 +45,13 @@ export interface ContourToolContext {
   /** The structure being edited; null for none. */
   activeRoiId(): number | null;
   /**
+   * The image's values on the label grid, voxel for voxel (the label grid
+   * is the image's); null before an image is loaded.
+   */
+  image(): Float32Array | null;
+  /** The voxel of the label grid at a point of the canvas over a pane; null off the image. */
+  voxelAtCanvas(placement: ToolPointer['placement'], x: number, y: number): VoxelIndex | null;
+  /**
    * Change voxels within the edit that is open, through the constraints.
    * Returns how many changed.
    */
@@ -63,6 +70,11 @@ export interface ToolPreviewCircle {
   readonly x: number;
   readonly y: number;
   readonly radiusPx: number;
+  /**
+   * What would be changed under the outline, as an SVG path in pixels from
+   * the pane's corner; left out for nothing to show.
+   */
+  readonly fill?: string;
 }
 
 /** A contouring tool. */
@@ -94,6 +106,8 @@ export interface ContourTool {
   end(context: ContourToolContext): void;
   /** The edit was cancelled: forget what the stroke was about. */
   cancel(): void;
+  /** It was taken up: it may make ready what it needs (a structure to paint into). */
+  activate?(): void;
   /** What it draws over the panes while the pointer is over one; null for nothing. */
   readonly preview: Signal<ToolPreviewCircle | null> | null;
   /** The pointer moved over a pane with no button down, or left (null). */

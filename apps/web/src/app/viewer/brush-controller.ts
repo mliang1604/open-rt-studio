@@ -290,20 +290,30 @@ export class BrushController {
     placement: Extract<PanePlacement, { kind: 'mpr' }>,
     event: PointerEvent,
   ): VoxelIndex | null {
+    const bounds = this.deps?.canvasBounds();
+    if (!bounds) return null;
+    return this.voxelAtCanvas(placement, event.clientX - bounds.left, event.clientY - bounds.top);
+  }
+
+  /** The voxel at a point of the canvas (pixels from its corner) over an MPR pane. */
+  voxelAtCanvas(
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    x: number,
+    y: number,
+  ): VoxelIndex | null {
     const d = this.deps;
     if (!d) return null;
     const volume = d.volume();
     if (!volume) return null;
     const orientation = placement.orientation;
-    const bounds = d.canvasBounds();
     return cursorVoxel(
       volume,
       orientation,
       d.sliceIndices()[orientation],
       d.zooms()[orientation],
       placement.rect,
-      event.clientX - bounds.left,
-      event.clientY - bounds.top,
+      x,
+      y,
       orientation === Orientation.Sagittal && d.sagittalFlipped(),
       d.pans()[orientation],
       d.obliques()[orientation],
@@ -311,7 +321,7 @@ export class BrushController {
   }
 
   /** Ensure an ROI is selected to paint into, picking the first or creating one. */
-  private ensureActiveRoi(): void {
+  ensureActiveRoi(): void {
     if (this.activeRoiId() !== null) return;
     const rois = this.rois();
     this.activeRoiId.set(rois.length > 0 ? rois[0].id : this.store.createRoi().id);

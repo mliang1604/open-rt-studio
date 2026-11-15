@@ -20,6 +20,9 @@ import type { ToolPreviewCircle } from './contour-tool';
         [attr.width]="p.rect.width"
         [attr.height]="p.rect.height"
       >
+        @if (p.fill) {
+          <path class="fill" data-tool-preview-fill [attr.d]="p.fill" />
+        }
         <circle class="outer" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
         <circle class="inner" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
       </svg>
@@ -33,6 +36,11 @@ import type { ToolPreviewCircle } from './contour-tool';
     }
     circle {
       fill: none;
+    }
+    /* What a stroke would paint: the structure-to-be, faint, under the outline. */
+    .fill {
+      fill: rgba(255, 200, 60, 0.35);
+      stroke: none;
     }
     /* Dark under light, so the outline shows on any grey. */
     .outer {
