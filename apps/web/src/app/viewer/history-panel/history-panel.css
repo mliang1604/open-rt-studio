@@ -114,9 +114,14 @@
   white-space: nowrap;
 }
 
-/* Opens the server card. Pushed to the right, with the layout toggle after it. */
+/* Opens the server card. Pushed to the right, with the timepoints button and
+   the layout toggle after it. */
 .history-source {
   margin-left: auto;
+}
+
+.history-source,
+.history-timepoints {
   flex: 0 0 auto;
   padding: 3px 12px;
   font: inherit;
@@ -150,7 +155,10 @@
 
 .history-source:hover,
 .history-source:focus-visible,
-.history-source.active {
+.history-source.active,
+.history-timepoints:hover,
+.history-timepoints:focus-visible,
+.history-timepoints.active {
   color: var(--text);
   border-color: var(--accent);
   outline: none;
@@ -208,6 +216,50 @@
   list-style: none;
   width: max-content;
   min-height: 0;
+}
+
+/* A timepoint: its name over its studies, with a rule down its left side
+   where it begins. One that nobody made (the studies of a date) is named
+   more quietly. */
+.timepoint {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.timepoint-name {
+  max-width: 168px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timepoint.automatic .timepoint-name {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.timepoint-studies {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-height: 0;
+}
+
+.timepoint-empty {
+  width: 100px;
+  padding: 8px 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .study {

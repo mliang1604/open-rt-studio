@@ -97,6 +97,21 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE instance ADD COLUMN frame_count INTEGER;
     `,
   },
+  {
+    version: 4,
+    name: 'timepoints of a patient',
+    sql: `
+      -- The named timepoints a user groups a patient's studies into: one row
+      -- to a patient that has any, holding the whole list as JSON, in the
+      -- user's order. It is made by people and is in no file, so it is not
+      -- to be had again from the store; it goes when the patient's last
+      -- study does.
+      CREATE TABLE patient_timepoints (
+        patient_key INTEGER PRIMARY KEY REFERENCES patient (patient_key),
+        timepoints TEXT NOT NULL
+      ) STRICT;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

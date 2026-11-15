@@ -56,6 +56,19 @@
   >
     Server…
   </button>
+  @if (!collapsed() && hasCatalog()) {
+    <button
+      type="button"
+      class="history-timepoints"
+      data-timepoints="edit"
+      [class.active]="editing()"
+      [attr.aria-expanded]="editing()"
+      (click)="toggleEditing()"
+      title="Group this patient’s studies into named timepoints, such as Planning or Fraction 10"
+    >
+      Timepoints…
+    </button>
+  }
   @if (!collapsed()) {
     <div class="history-views" role="group" aria-label="History layout">
       <button
@@ -84,62 +97,86 @@
 
 @if (!collapsed()) {
   <div id="history-body" class="history-body">
+    @if (editing() && hasCatalog()) {
+      <app-timepoint-editor
+        [timepoints]="timepoints()"
+        [studies]="studies()"
+        [problem]="timepointProblem()"
+        (changed)="onTimepoints($event)"
+        (closed)="toggleEditing()"
+      />
+    }
     @if (view() === 'timeline') {
       <div class="timeline-scroll" #scroll [style.padding-bottom.px]="lanesRoom()">
-        <ol class="timeline" aria-label="Study timeline, oldest to newest">
-          @for (study of studies(); track study.studyUid) {
-            <li class="study" [class.open]="isOpen(study)">
-              <button
-                type="button"
-                class="study-tile"
-                [class.linked]="isLinkedStudy(study)"
-                [attr.data-study-uid]="study.studyUid"
-                (click)="toggleStudy(study.studyUid)"
-                [attr.aria-expanded]="isOpen(study)"
-              >
-                <span class="study-date">{{ dateLabel(study) }}</span>
-                <span class="study-desc" [title]="study.description">{{
-                  study.description || 'Untitled study'
-                }}</span>
-                <span class="study-foot">
-                  <span class="study-modalities">
-                    @for (modality of study.modalities; track modality) {
-                      <span class="modality-badge">{{ modality }}</span>
-                    }
-                  </span>
-                  <span class="study-count">{{ countLabel(study) }}</span>
-                </span>
-              </button>
+        <ol class="timeline" aria-label="Study timeline, by timepoint, then oldest to newest">
+          @for (group of groups(); track group.id) {
+            <li
+              class="timepoint"
+              [class.automatic]="group.automatic"
+              [attr.data-timepoint]="group.id"
+            >
+              <span class="timepoint-name" [title]="groupTitle(group)">{{
+                group.name || 'Unnamed'
+              }}</span>
+              <ol class="timepoint-studies" [attr.aria-label]="groupTitle(group)">
+                @for (study of group.studies; track study.studyUid) {
+                  <li class="study" [class.open]="isOpen(study)">
+                    <button
+                      type="button"
+                      class="study-tile"
+                      [class.linked]="isLinkedStudy(study)"
+                      [attr.data-study-uid]="study.studyUid"
+                      (click)="toggleStudy(study.studyUid)"
+                      [attr.aria-expanded]="isOpen(study)"
+                    >
+                      <span class="study-date">{{ dateLabel(study) }}</span>
+                      <span class="study-desc" [title]="study.description">{{
+                        study.description || 'Untitled study'
+                      }}</span>
+                      <span class="study-foot">
+                        <span class="study-modalities">
+                          @for (modality of study.modalities; track modality) {
+                            <span class="modality-badge">{{ modality }}</span>
+                          }
+                        </span>
+                        <span class="study-count">{{ countLabel(study) }}</span>
+                      </span>
+                    </button>
 
-              @if (isOpen(study)) {
-                <ul class="series-strip" aria-label="Series in this study">
-                  @for (series of study.series; track series.uid) {
-                    <li [class.linked]="isLinked(series)" [attr.data-series-uid]="series.uid">
-                      <app-series-chip
-                        [series]="series"
-                        [thumbnail]="thumbnailFor(series)"
-                        [loaded]="isLoaded(series)"
-                        (activate)="onLoadSeries($event)"
-                      />
-                      @if (series.attached; as attached) {
-                        <app-rt-chips
-                          [objects]="attached"
-                          label="Structure sets, plans and doses that belong to this series"
-                        />
-                      }
-                    </li>
-                  }
-                  @if (study.loose; as loose) {
-                    <li class="loose">
-                      <span class="loose-title">Belongs to no series here</span>
-                      <app-rt-chips
-                        [objects]="loose"
-                        label="Filed in this study, and belonging to no image series here"
-                      />
-                    </li>
-                  }
-                </ul>
-              }
+                    @if (isOpen(study)) {
+                      <ul class="series-strip" aria-label="Series in this study">
+                        @for (series of study.series; track series.uid) {
+                          <li [class.linked]="isLinked(series)" [attr.data-series-uid]="series.uid">
+                            <app-series-chip
+                              [series]="series"
+                              [thumbnail]="thumbnailFor(series)"
+                              [loaded]="isLoaded(series)"
+                              (activate)="onLoadSeries($event)"
+                            />
+                            @if (series.attached; as attached) {
+                              <app-rt-chips
+                                [objects]="attached"
+                                label="Structure sets, plans and doses that belong to this series"
+                              />
+                            }
+                          </li>
+                        }
+                        @if (study.loose; as loose) {
+                          <li class="loose">
+                            <span class="loose-title">Belongs to no series here</span>
+                            <app-rt-chips
+                              [objects]="loose"
+                              label="Filed in this study, and belonging to no image series here"
+                            />
+                          </li>
+                        }
+                      </ul>
+                    }
+                  </li>
+                } @empty {
+                  <li class="timepoint-empty">No studies</li>
+                }
+              </ol>
             </li>
           }
         </ol>

@@ -23,6 +23,7 @@ import {
   type SeriesRecord,
   type StudyOrder,
   type StudyRecord,
+  type TimepointRecord,
 } from './pacs-index.js';
 
 export interface SqliteIndexOptions {
@@ -462,6 +463,12 @@ export async function openSqliteIndex(
            AND NOT EXISTS (SELECT 1 FROM series WHERE study_uid = study.study_uid)`,
           found['study_uid'],
         );
+        // A patient's timepoints go with the patient, and before: they refer to it.
+        run(
+          `DELETE FROM patient_timepoints WHERE patient_key = ?
+           AND NOT EXISTS (SELECT 1 FROM study WHERE patient_key = patient_timepoints.patient_key)`,
+          found['patient_key'],
+        );
         run(
           `DELETE FROM patient WHERE patient_key = ?
            AND NOT EXISTS (SELECT 1 FROM study WHERE patient_key = patient.patient_key)`,
@@ -484,6 +491,11 @@ export async function openSqliteIndex(
     async getInstance(sopInstanceUid) {
       const row = one(`${INSTANCE} WHERE i.sop_instance_uid = ?`, sopInstanceUid);
       return row ? toInstance(row) : null;
+    },
+
+    async getPatient(patientKey) {
+      const row = one(`${PATIENT} WHERE p.patient_key = ?`, patientKey);
+      return row ? toPatient(row) : null;
     },
 
     async findPatients(query = {}) {
@@ -602,6 +614,38 @@ export async function openSqliteIndex(
         registrations: [...registrations.values()],
         sameFrame,
       };
+    },
+
+    async getTimepoints(patientKey) {
+      if (!one('SELECT 1 FROM patient WHERE patient_key = ?', patientKey)) return null;
+      const row = one(
+        'SELECT timepoints FROM patient_timepoints WHERE patient_key = ?',
+        patientKey,
+      );
+      return row ? (JSON.parse(String(row['timepoints'])) as TimepointRecord[]) : [];
+    },
+
+    async putTimepoints(patientKey, timepoints) {
+      return transaction(() => {
+        if (!one('SELECT 1 FROM patient WHERE patient_key = ?', patientKey)) return false;
+        if (timepoints.length === 0) {
+          run('DELETE FROM patient_timepoints WHERE patient_key = ?', patientKey);
+        } else {
+          run(
+            `INSERT INTO patient_timepoints (patient_key, timepoints) VALUES (?, ?)
+             ON CONFLICT (patient_key) DO UPDATE SET timepoints = excluded.timepoints`,
+            patientKey,
+            JSON.stringify(
+              timepoints.map(({ id, name, studyUids }) => ({
+                id,
+                name,
+                studyUids: [...studyUids],
+              })),
+            ),
+          );
+        }
+        return true;
+      });
     },
 
     async counts() {

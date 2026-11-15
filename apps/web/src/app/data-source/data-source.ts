@@ -15,6 +15,7 @@ import type {
 import type { LoadProgress } from '../parse-pool';
 import type { SeriesThumbnail } from '../viewer/series-thumbnail';
 import { ActiveDataSource } from './active-data-source';
+import type { Timepoint } from './timepoints';
 
 /**
  * Where patient data comes from. The timeline, the status line and the load
@@ -75,6 +76,21 @@ export interface DataSource {
    * same objects again adds the rest.
    */
   saveSeries(series: SavedSeries, onProgress?: SaveProgress): Promise<SaveOutcome>;
+
+  /**
+   * The timepoints the current patient's studies were grouped into (#39),
+   * in the user's order: none when none were made, and none until what is
+   * kept has been read. A study in none is grouped by its date
+   * (`groupStudies`).
+   */
+  readonly timepoints: Signal<readonly Timepoint[]>;
+
+  /**
+   * Keep these as the current patient's timepoints, in place of what was
+   * kept: in this browser for opened files, on the server for a server's
+   * patient. Rejects, with why, when they could not be kept.
+   */
+  saveTimepoints(timepoints: readonly Timepoint[]): Promise<void>;
 }
 
 /** Objects made here that belong together, such as the slices of a series. */

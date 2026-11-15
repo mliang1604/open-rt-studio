@@ -14,6 +14,7 @@ import { accountRoutes, openSessionRoute } from './api/account-routes.js';
 import { apiRoutes } from './api/api-routes.js';
 import { auditRoutes } from './api/audit-routes.js';
 import { jobRoutes } from './api/job-routes.js';
+import { timepointRoutes } from './api/timepoint-routes.js';
 import { openSqliteAuditStore } from './audit/audit-store.js';
 import { createAuditLog, type AuditLog } from './audit/audit.js';
 import { ConfigError, ENVIRONMENT_VARIABLES, type ServerConfig } from './config.js';
@@ -294,13 +295,15 @@ export async function startServer(
   const jobApi = jobRoutes(jobs);
   const sessionApi = accounts ? accountRoutes(accounts) : [openSessionRoute()];
   const auditApi = audit ? auditRoutes(audit) : [];
+  const timepointApi = timepointRoutes(core.pacs!.index);
   const routes = [
     ...sessionApi,
     ...auditApi,
     ...jobApi,
+    ...timepointApi,
     ...apiRoutes(core.pacs!, {
       maxUploadBytes: config.maxUploadBytes,
-      described: [healthRoute(core), ...sessionApi, ...auditApi, ...jobApi],
+      described: [healthRoute(core), ...sessionApi, ...auditApi, ...jobApi, ...timepointApi],
       login: accounts !== null,
       audit: audit !== null,
     }),

@@ -23,6 +23,7 @@ import {
   type SeriesSummary,
   type StudySummary,
 } from '../../data-source/data-source';
+import { groupStudies, type Timepoint } from '../../data-source/timepoints';
 import { PreferencesStore, type HistoryView } from '../../preferences-store';
 import type { SeriesThumbnail } from '../series-thumbnail';
 import { bracketPath, lanesHeight, laneY, type Anchor } from './link-lines';
@@ -34,6 +35,7 @@ import {
 } from './registration-links';
 import { RtChips } from './rt-chips';
 import { SeriesChip } from './series-chip';
+import { TimepointEditor } from './timepoint-editor';
 
 /** A registration's line under the timeline, as it is drawn. */
 interface LinkLine {
@@ -75,7 +77,7 @@ const TIMELINE_FOOT_PX = 12;
 @Component({
   selector: 'app-history-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SeriesChip, RtChips, RegistrationLinks],
+  imports: [SeriesChip, RtChips, RegistrationLinks, TimepointEditor],
   templateUrl: './history-panel.html',
   styleUrl: './history-panel.css',
   host: {
@@ -357,6 +359,48 @@ export class HistoryPanel {
     const next = nextOpenStudy(this.openStudyUid(), uid);
     this.openStudyUid.set(next);
     this.preferences.update({ lastOpenedStudyUid: next });
+  }
+
+  /**
+   * The studies in the groups the timeline shows them in (#39): the
+   * timepoints that were made, in their order, and after them the studies
+   * in none, by date.
+   */
+  protected readonly groups = computed(() =>
+    groupStudies(this.studies(), this.source.timepoints()),
+  );
+  protected readonly timepoints = computed(() => this.source.timepoints());
+  /** Whether the timepoints are being edited. */
+  protected readonly editing = signal(false);
+  /** Why the last change to the timepoints was not kept; null when it was. */
+  protected readonly timepointProblem = signal<string | null>(null);
+  /** Counts the changes asked for, so that only the last one's outcome is said. */
+  private timepointChange = 0;
+
+  protected toggleEditing(): void {
+    this.editing.update((now) => !now);
+    this.timepointProblem.set(null);
+  }
+
+  /** Group the studies as a change leaves them, and say so when that could not be kept. */
+  protected onTimepoints(next: readonly Timepoint[]): void {
+    const change = ++this.timepointChange;
+    this.timepointProblem.set(null);
+    this.source.saveTimepoints(next).catch((error: unknown) => {
+      if (change !== this.timepointChange) return;
+      this.timepointProblem.set(
+        error instanceof Error && error.message
+          ? error.message
+          : 'The timepoints could not be kept.',
+      );
+    });
+  }
+
+  /** What a group is called above its studies, and why it is there. */
+  protected groupTitle(group: { name: string; automatic: boolean }): string {
+    return group.automatic
+      ? `Studies of ${group.name === 'No date' ? 'no date' : group.name} that are in no timepoint`
+      : `Timepoint “${group.name || 'Unnamed'}”`;
   }
 
   /** Whether a given study is the currently-open accordion tile. */

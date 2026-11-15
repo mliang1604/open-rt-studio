@@ -31,6 +31,7 @@ import type {
 } from './data-source';
 import { PartlySavedError } from './data-source';
 import { withRelations } from './rt-timeline';
+import { readTimepoints, type Timepoint } from './timepoints';
 
 /** Where the server's API is, under its address. */
 const API = '/api/v1';
@@ -226,6 +227,7 @@ export function studyQuery(search: StudySearch): string {
 export const AUDIT_ACTIONS = [
   ...['login', 'logout', 'password-change', 'patients-list', 'studies-search'],
   ...['study-read', 'series-read', 'instance-read', 'instance-download', 'instance-upload'],
+  ...['timepoints-read', 'timepoints-write'],
   ...['accounts-list', 'account-create', 'account-change', 'account-remove'],
   ...[
     'job-start',
@@ -413,6 +415,16 @@ export class ServerSource implements DataSource {
   /** The patients listed: the first {@link PATIENTS_LISTED} by name. */
   readonly patients = this.listed.asReadonly();
   readonly currentPatient = this.current.asReadonly();
+  /** The current patient's timepoints, as the server has them. */
+  private readonly kept = signal<readonly Timepoint[]>([]);
+  readonly timepoints = this.kept.asReadonly();
+  /** Whether the server said what the current patient's timepoints are. */
+  private timepointsRead = false;
+  /** The current patient's timepoints as the server last said or took them. */
+  private timepointsConfirmed: readonly Timepoint[] = [];
+  /** The saves of timepoints that were asked for, one after another; and how many. */
+  private timepointSaves: Promise<void> = Promise.resolve();
+  private timepointSave = 0;
   /** True when the server holds more patients than are listed. */
   readonly morePatients = this.more.asReadonly();
 
@@ -684,6 +696,9 @@ export class ServerSource implements DataSource {
    */
   async selectPatient(chosen: string | PatientSummary | null, signal?: AbortSignal): Promise<void> {
     const selection = ++this.selection;
+    this.kept.set([]);
+    this.timepointsRead = false;
+    this.timepointsConfirmed = [];
     if (chosen === null) {
       this.current.set(null);
       return;
@@ -741,9 +756,11 @@ export class ServerSource implements DataSource {
       // A study with nothing to show (a plan on its own) is left off.
       studies: history.filter((study) => study.series.length > 0).sort(byDate),
     };
-    // The timeline is there at once; what belongs to what follows.
+    // The timeline is there at once; what belongs to what, and how it is grouped, follow.
     this.current.set(shown);
-    if (rtSeries.length === 0) return;
+    const grouped = this.readTimepoints(selection, key, signal);
+    if (rtSeries.length === 0) return grouped;
+    await grouped;
     let related: PatientHistory;
     try {
       related = withRelations(shown, await this.rtObjects(rtSeries, patient.patientId, signal));
@@ -753,6 +770,67 @@ export class ServerSource implements DataSource {
       return;
     }
     if (selection === this.selection) this.current.set(related);
+  }
+
+  /**
+   * What the server keeps as a patient's timepoints. A server that does not
+   * say (an older one, or one that fails) leaves the studies grouped by
+   * date, and nothing is kept over what it may have.
+   */
+  private async readTimepoints(
+    selection: number,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let answer: { timepoints?: unknown };
+    try {
+      answer = await this.json<{ timepoints?: unknown }>(
+        `/patients/${encodeURIComponent(key)}/timepoints`,
+        signal,
+      );
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      return;
+    }
+    const timepoints = readTimepoints(answer.timepoints);
+    if (selection !== this.selection || timepoints === null) return;
+    this.timepointsRead = true;
+    this.timepointsConfirmed = timepoints;
+    this.kept.set(timepoints);
+  }
+
+  /**
+   * Keep these as the current patient's timepoints on the server, in place
+   * of what it has. They are shown at once, so that the next change goes on
+   * from them, and sent after any save that was asked for before: the
+   * server ends with the last. When the last save asked for has ended, what
+   * is shown is what the server has; one it refused is then undone.
+   */
+  async saveTimepoints(timepoints: readonly Timepoint[]): Promise<void> {
+    const patient = this.current();
+    if (!patient) throw new Error('No patient is open.');
+    if (!this.timepointsRead) {
+      throw new Error(
+        'The server did not say what this patient’s timepoints are, so nothing is put in their place.',
+      );
+    }
+    const selection = this.selection;
+    const save = ++this.timepointSave;
+    this.kept.set(timepoints);
+    const sent = this.timepointSaves.then(async () => {
+      await this.send('PUT', `/patients/${encodeURIComponent(patient.key)}/timepoints`, {
+        timepoints,
+      });
+      if (selection === this.selection) this.timepointsConfirmed = timepoints;
+    });
+    this.timepointSaves = sent.catch(() => undefined);
+    try {
+      await sent;
+    } finally {
+      if (selection === this.selection && save === this.timepointSave) {
+        this.kept.set(this.timepointsConfirmed);
+      }
+    }
   }
 
   /** What each radiotherapy object of a patient refers to, asked of the server one by one. */

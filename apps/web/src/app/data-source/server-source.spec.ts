@@ -1183,3 +1183,110 @@ describe('what belongs to what on a server (#38)', () => {
     );
   });
 });
+
+describe('timepoints of a server’s patient (#39)', () => {
+  const studyUids = (source: ServerSource): string[] =>
+    source.currentPatient()!.studies.map((study) => study.studyUid);
+
+  it('are none for a patient that has none, and are asked for when the patient’s timeline is opened', async () => {
+    const { server, source } = await withPatient();
+    expect(source.timepoints()).toEqual([]);
+    expect(server.asked.filter((path) => path.endsWith('/timepoints'))).toEqual([
+      '/patients/1/timepoints',
+    ]);
+  });
+
+  it('are kept on the server, and there for whoever opens the patient next', async () => {
+    const { server, source } = await withPatient();
+    const [planning, followUp] = studyUids(source);
+    const made = [
+      { id: 'b', name: 'Re-plan', studyUids: [followUp] },
+      { id: 'a', name: 'Planning', studyUids: [planning] },
+    ];
+    await source.saveTimepoints(made);
+    expect(source.timepoints()).toEqual(made);
+    expect(server.timepoints.get('1')).toEqual(made);
+
+    const other = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    expect(other.timepoints()).toEqual([]);
+    await other.selectPatient('1');
+    expect(other.timepoints()).toEqual(made);
+    // And gone from view with the patient.
+    await other.selectPatient(null);
+    expect(other.timepoints()).toEqual([]);
+  });
+
+  it('stay as they were when the server refuses a list, and say why in its words', async () => {
+    const { source } = await withPatient();
+    const [planning] = studyUids(source);
+    const made = [{ id: 'a', name: 'Planning', studyUids: [planning] }];
+    await source.saveTimepoints(made);
+    await expect(
+      source.saveTimepoints([{ id: 'a', name: 'Planning', studyUids: ['1.2.3.4'] }]),
+    ).rejects.toThrow('A timepoint names a study that is not this patient’s.');
+    expect(source.timepoints()).toEqual(made);
+  });
+
+  it('are shown at once and sent one after another, so that a change goes on from the one before', async () => {
+    const { server, source } = await withPatient();
+    const [planning, followUp] = studyUids(source);
+    const first = [{ id: 'a', name: 'Planning', studyUids: [planning] }];
+    const second = [...first, { id: 'b', name: 'Re-plan', studyUids: [followUp] }];
+    const one = source.saveTimepoints(first);
+    // Before the server has answered, the next change is made from what the first left.
+    expect(source.timepoints()).toEqual(first);
+    const two = source.saveTimepoints(second);
+    expect(source.timepoints()).toEqual(second);
+    await Promise.all([one, two]);
+    expect(source.timepoints()).toEqual(second);
+    expect(server.timepoints.get('1')).toEqual(second);
+    expect(server.asked.filter((path) => path.endsWith('/timepoints'))).toHaveLength(3);
+  });
+
+  it('undo a list the server refused once nothing more is on its way, and keep a later one it took', async () => {
+    const { server, source } = await withPatient();
+    const [planning] = studyUids(source);
+    const good = [{ id: 'a', name: 'Planning', studyUids: [planning] }];
+    const bad = [{ id: 'a', name: 'Planning', studyUids: ['1.2.3.4'] }];
+    const refused = source.saveTimepoints(bad);
+    const taken = source.saveTimepoints(good);
+    await expect(refused).rejects.toThrow('A timepoint names a study that is not this patient’s.');
+    await taken;
+    expect(source.timepoints()).toEqual(good);
+    expect(server.timepoints.get('1')).toEqual(good);
+    // Refused last: what is shown is what the server has.
+    await expect(source.saveTimepoints(bad)).rejects.toThrow();
+    expect(source.timepoints()).toEqual(good);
+  });
+
+  it('are read with care: only what is well formed of what the server says', async () => {
+    const server = fakeServer(FILES);
+    server.timepoints.set('1', [
+      { id: 'a', name: 'Planning', studyUids: ['1.2.3'] },
+      { id: 'a b', name: 'Bad id', studyUids: [] },
+      'x',
+    ]);
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await source.selectPatient('1');
+    expect(source.timepoints()).toEqual([{ id: 'a', name: 'Planning', studyUids: ['1.2.3'] }]);
+  });
+
+  it('put nothing in the place of what a server would not say: an older server keeps its timeline', async () => {
+    const server = fakeServer(FILES);
+    server.noTimepoints = true;
+    const source = await connectToServer(ADDRESS, { fetch: server.fetch, parse: parseHere });
+    await source.selectPatient('1');
+    expect(source.currentPatient()!.studies).toHaveLength(2);
+    expect(source.timepoints()).toEqual([]);
+    await expect(source.saveTimepoints([{ id: 'a', name: 'A', studyUids: [] }])).rejects.toThrow(
+      'The server did not say what this patient’s timepoints are, so nothing is put in their place.',
+    );
+    expect(server.asked.filter((path) => path.endsWith('/timepoints'))).toHaveLength(1);
+    expect(server.timepoints.size).toBe(0);
+  });
+
+  it('are not to be kept with no patient open', async () => {
+    const { source } = await connected();
+    await expect(source.saveTimepoints([])).rejects.toThrow('No patient is open.');
+  });
+});

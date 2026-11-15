@@ -7,6 +7,7 @@ import type { RtObjectFacts, Series, Slice, StructureSet } from '@open-rt-studio
 
 import { DATA_SOURCE, listedSeries } from './data-source';
 import { LocalFilesSource } from './local-files-source';
+import { TimepointStore } from './timepoint-store';
 import { registrationObject } from '../registration-testing';
 
 /** A parsed series with one small slice, enough to draw a preview from. */
@@ -464,5 +465,79 @@ describe('what belongs to what among opened files (#38)', () => {
     source.closePatient('SYN-0001');
     source.add([series('1.1.1')]);
     expect(listedSeries(source)[0].attached).toBeUndefined();
+  });
+});
+
+describe('timepoints of a patient whose files were opened (#39)', () => {
+  const MADE = [{ id: 'a', name: 'Planning', studyUids: ['1.2.840.1'] }];
+  let source: LocalFilesSource;
+  /** Let what is read from the browser arrive: an effect, a digest and a read. */
+  const settled = async (): Promise<void> => {
+    for (let turn = 0; turn < 5; turn++) {
+      TestBed.tick();
+      await new Promise((done) => setTimeout(done));
+    }
+  };
+  beforeEach(() => {
+    localStorage.clear();
+    source = TestBed.inject(LocalFilesSource);
+  });
+  afterEach(() => localStorage.clear());
+
+  it('are none until some are made, and are kept in this browser for the next time', async () => {
+    source.add([series('1.1.1')]);
+    await settled();
+    expect(source.timepoints()).toEqual([]);
+    await source.saveTimepoints(MADE);
+    expect(source.timepoints()).toEqual(MADE);
+    expect(await TestBed.inject(TimepointStore).read('SYN-0001')).toEqual(MADE);
+
+    // Everything is closed and the page loaded again: the same patient is grouped as before.
+    TestBed.resetTestingModule();
+    const again = TestBed.inject(LocalFilesSource);
+    again.add([series('1.1.1')]);
+    expect(again.timepoints()).toEqual([]);
+    await settled();
+    expect(again.timepoints()).toEqual(MADE);
+  });
+
+  it('are the current patient’s only', async () => {
+    source.add([series('1.1.1')]);
+    await settled();
+    await source.saveTimepoints(MADE);
+    source.add([series('2.1.1', { patientId: 'SYN-0002' })]);
+    expect(source.timepoints()).toEqual([]);
+    await settled();
+    expect(source.timepoints()).toEqual([]);
+    source.selectPatient('SYN-0001');
+    await settled();
+    expect(source.timepoints()).toEqual(MADE);
+  });
+
+  it('hold while the files are open for a patient without an ID, and say that they are not kept', async () => {
+    source.add([series('3.1.1', { patientId: '' })]);
+    await settled();
+    await expect(source.saveTimepoints(MADE)).rejects.toThrow(
+      'Grouped until the files are closed. It is not kept: the files give no Patient ID to know the patient by again.',
+    );
+    expect(source.timepoints()).toEqual(MADE);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('hold while the files are open when the browser stores nothing, and say so', async () => {
+    source.add([series('1.1.1')]);
+    await settled();
+    const refused = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    await expect(source.saveTimepoints(MADE)).rejects.toThrow(
+      'Grouped until the files are closed. It is not kept: this browser stores nothing for the page.',
+    );
+    refused.mockRestore();
+    expect(source.timepoints()).toEqual(MADE);
+  });
+
+  it('are not to be kept with no patient open', async () => {
+    await expect(source.saveTimepoints(MADE)).rejects.toThrow('No patient is open.');
   });
 });

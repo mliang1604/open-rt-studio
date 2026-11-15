@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { Injectable, computed, inject } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import {
   registrationsOfPatient,
   structureSetsForSeries,
@@ -17,6 +17,8 @@ import { PatientCatalog } from '../patient-catalog';
 import { SeriesThumbnailCache, type SeriesThumbnail } from '../viewer/series-thumbnail';
 import { downloadBlob } from '../viewer/viewer-dom';
 import { withRelations } from './rt-timeline';
+import { TimepointStore } from './timepoint-store';
+import type { Timepoint } from './timepoints';
 import { zipStored } from './zip';
 import type {
   DataSource,
@@ -84,6 +86,52 @@ export class LocalFilesSource implements DataSource {
 
   /** Patient ID of the patient imported last; null when nothing was imported. */
   readonly currentPatientId = this.catalog.currentPatientId;
+
+  private readonly timepointStore = inject(TimepointStore);
+  /** The timepoints that were read or made, and whose they are. */
+  private readonly kept = signal<{
+    readonly patientId: string;
+    readonly timepoints: readonly Timepoint[];
+  }>({ patientId: '', timepoints: [] });
+
+  readonly timepoints = computed<readonly Timepoint[]>(() => {
+    const kept = this.kept();
+    return kept.patientId === this.catalog.currentPatientId() ? kept.timepoints : [];
+  });
+
+  constructor() {
+    // What this browser kept for a patient is read when the patient is the one shown.
+    effect(() => {
+      const patientId = this.catalog.currentPatientId();
+      if (patientId === null || patientId === this.kept().patientId) return;
+      void this.timepointStore.read(patientId).then((timepoints) => {
+        if (this.catalog.currentPatientId() === patientId) this.kept.set({ patientId, timepoints });
+      });
+    });
+  }
+
+  /**
+   * Group the current patient's studies so, and keep it in this browser.
+   * The grouping holds for as long as the files are open either way; it
+   * rejects when the browser kept nothing, with why.
+   */
+  async saveTimepoints(timepoints: readonly Timepoint[]): Promise<void> {
+    const patientId = this.catalog.currentPatientId();
+    if (patientId === null) throw new Error('No patient is open.');
+    this.kept.set({ patientId, timepoints });
+    if (patientId.trim() === '') {
+      throw new Error(
+        'Grouped until the files are closed. It is not kept: the files give no Patient ID to know the patient by again.',
+      );
+    }
+    try {
+      await this.timepointStore.write(patientId, timepoints);
+    } catch {
+      throw new Error(
+        'Grouped until the files are closed. It is not kept: this browser stores nothing for the page.',
+      );
+    }
+  }
 
   fetchSeries(seriesUid: string, options: FetchOptions = {}): Promise<FetchedSeries> {
     if (options.signal?.aborted) {

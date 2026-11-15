@@ -219,6 +219,37 @@ also builds on its own to `dist/` for consumers outside the workspace.
     registration with image series at only one end is listed with its study
     and not drawn; the lines are drawn in the timeline view only, the tree
     lists the same registrations without them.
+- **Timepoints** (#39). A patient's studies are shown in groups. A user
+  makes named timepoints ("Planning", "Fraction 10"), puts them in order
+  and assigns studies to them; a study assigned to none is grouped with the
+  other unassigned studies of its date, under that date. So a patient
+  nobody has grouped is grouped by study date, and a study that arrives
+  later is shown without anyone placing it. The timeline shows the
+  timepoints that were made first, in the user's order, then the groups by
+  date, each with its name over its studies and a rule where it begins.
+  The tree view is not grouped.
+  - What is kept is the list of timepoints, each an id, a name and Study
+    Instance UIDs: at most 100 timepoints, names of at most 64 characters.
+    It is read and replaced whole through the data source (`timepoints`,
+    `saveTimepoints`).
+  - Opened files: kept in the browser's local storage under a SHA-256
+    digest of the Patient ID, so that neither the patient's name nor their
+    ID is kept; the names typed and the study UIDs are. A patient without
+    a Patient ID is grouped until the files are closed and nothing is
+    kept, which the editor says.
+  - A server: kept in the index (`patient_timepoints`, one row to a
+    patient, removed with the patient's last study) and read and replaced
+    at `/patients/{key}/timepoints`. The server takes a list whole or not
+    at all, and only studies of that patient. Both routes are audited with
+    the patient's ID and how many timepoints there were; the names are in
+    neither log. A viewer that could not read a patient's timepoints (an
+    older server) puts nothing in their place.
+  - Changes are shown at once and sent in order; one the server refuses is
+    undone when nothing more is on its way.
+  - Not there: timepoints are not written into any DICOM object, are not
+    part of a saved series or report, and nothing else in the viewer uses
+    them yet. Two people changing one patient's timepoints at once: the
+    last list sent is the one kept.
 
 ## Desktop
 

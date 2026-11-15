@@ -71,6 +71,10 @@ export interface FakeServer {
   readonly accounts: () => { name: string; role: string; disabled: boolean }[];
   /** The password an account now has; undefined when there is no such account. */
   readonly passwordOf: (name: string) => string | undefined;
+  /** The timepoints kept for each patient, by the patient's key. A spec may put some in. */
+  readonly timepoints: Map<string, unknown>;
+  /** True for a server that has no timepoints to ask for: an older one. */
+  noTimepoints: boolean;
 }
 
 /** An account of a stand-in server that has them. */
@@ -147,6 +151,8 @@ export function fakeServer(
     accounts: () =>
       [...people].sort(byName).map(({ name, role, disabled }) => ({ name, role, disabled })),
     passwordOf: (name) => people.find((one) => one.name === name)?.password,
+    timepoints: new Map(),
+    noTimepoints: false,
     pageSize: 1000,
     mostAtOnce: () => most,
     loseNetworkAfter: (count) => (lostAfter = count),
@@ -430,6 +436,32 @@ export function fakeServer(
             })
             .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
         );
+      }
+      if ((match = /^\/patients\/(\d+)\/timepoints$/.exec(path))) {
+        const key = match[1];
+        if (server.noTimepoints || Number(key) > patientIds.length) return missing();
+        if (init?.method === 'PUT') {
+          const { timepoints } = JSON.parse(String(init.body)) as { timepoints: unknown };
+          // As the real server does: a study of another patient is refused.
+          const own = new Set(
+            held
+              .filter((one) => one.header.patient.id === patientIds[Number(key) - 1])
+              .map((one) => one.header.study.uid),
+          );
+          const named = (timepoints as { studyUids: string[] }[]).flatMap((one) => one.studyUids);
+          if (named.some((uid) => !own.has(uid))) {
+            return json(
+              {
+                error: 'invalid-request',
+                message: 'A timepoint names a study that is not this patient’s.',
+              },
+              400,
+            );
+          }
+          server.timepoints.set(key, timepoints);
+          return json({ timepoints });
+        }
+        return json({ timepoints: server.timepoints.get(key) ?? [] });
       }
       if (path === '/studies') {
         // Of the search only the patient, the order and the part asked for are
