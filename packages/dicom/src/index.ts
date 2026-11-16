@@ -178,6 +178,14 @@ export {
 export { type GrowDimension, type GrownRegion, growRegion } from './region-grow.js';
 export { type PlanePoint, closedSpline, fillSliceLoop } from './polygon-spline.js';
 export {
+  type PathTree,
+  type SlicePlane,
+  edgeCost,
+  shortestPaths,
+  slicePlane,
+  tracePath,
+} from './live-wire.js';
+export {
   type LabelChange,
   type LabelConstraints,
   type LabelEdit,

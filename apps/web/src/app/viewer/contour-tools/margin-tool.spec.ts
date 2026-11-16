@@ -59,6 +59,7 @@ describe('MarginTool (#112)', () => {
       'threshold',
       'wand',
       'points',
+      'wire',
       'push',
       'cleanup',
       'margin',
