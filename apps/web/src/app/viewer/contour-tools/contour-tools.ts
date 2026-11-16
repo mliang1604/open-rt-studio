@@ -14,6 +14,7 @@ import { MirrorTool } from './mirror-tool';
 import { PointTool } from './point-tool';
 import { LiveWireTool } from './live-wire-tool';
 import { PushTool } from './push-tool';
+import { RubberBandTool } from './rubber-band-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { SampleTool } from './sample-tool';
 import { ThresholdBrushTool } from './threshold-brush-tool';
@@ -35,6 +36,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: LiveWireTool, multi: true },
   PushTool,
   { provide: CONTOUR_TOOLS, useExisting: PushTool, multi: true },
+  RubberBandTool,
+  { provide: CONTOUR_TOOLS, useExisting: RubberBandTool, multi: true },
   CleanupTool,
   { provide: CONTOUR_TOOLS, useExisting: CleanupTool, multi: true },
   MarginTool,

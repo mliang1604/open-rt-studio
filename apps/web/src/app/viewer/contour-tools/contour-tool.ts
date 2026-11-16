@@ -22,7 +22,7 @@
 // A tool is added in one file and one line of `contour-tools.ts`.
 
 import { InjectionToken, type Signal, type Type } from '@angular/core';
-import type { LabelChange } from '@open-rt-studio/dicom';
+import type { LabelChange, SliceMask } from '@open-rt-studio/dicom';
 import type { VoxelIndex } from '@open-rt-studio/render';
 
 import type { PanePlacement } from '../pane-placement';
@@ -46,6 +46,8 @@ export interface ContourToolContext {
   activeRoiId(): number | null;
   /** The structure a voxel holds: its id, 0 for none; 0 before an image is loaded. */
   held(voxel: VoxelIndex): number;
+  /** A structure's pixels on one slice, across a grid axis (#116); null before an image is loaded. */
+  sliceMask(roiId: number, axis: 0 | 1 | 2, slice: number): SliceMask | null;
   /**
    * The image's values on the label grid, voxel for voxel (the label grid
    * is the image's); null before an image is loaded.

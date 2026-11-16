@@ -417,6 +417,19 @@ its own.
   every pixel are found once, when it is set (Dijkstra over the slice), so
   the path to the cursor is only traced back as it moves. Pixels are taken
   as square. Anchors belong to their slice, as the points tool's do.
+- **Rubber band** (#116, labs): press on the edge of the structure being
+  edited and drag; the section held follows the pointer, and the edge on
+  either side follows by a raised cosine of its distance along the edge,
+  `(1 + cos(π s / L)) / 2`, out to the influence length L (10 mm at first,
+  in mm by the slice's spacing), beyond which nothing moves
+  (`label-rubber-band.ts`). A painted structure is voxels, so the slice's
+  edges are traced (outer edges and holes, cut into half-pixel steps), the
+  loop held is moved, and the slice is filled again from all its loops,
+  even-odd; tracing and filling are each other's inverse, so what the
+  influence does not reach comes back exactly as it was. While dragging,
+  the structure is redrawn from the edge as moved, from the slice as it was
+  when pressed, so the preview is the result. A press farther from the edge
+  than 8 screen pixels (or a voxel) takes no hold, and says so.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

@@ -463,3 +463,44 @@ test('the live wire draws a path between anchors and fills it when the first is 
   expect(await capturedColour(page)).toBeCloseTo(before, 1);
   expectNoProblems(problems);
 });
+
+test('the rubber band drags a section of an edge, as one undo, and says when the press misses (#116)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  // A 5 mm disc, its centre off the knob at the crosshair's centre.
+  const centre = await at(page, 0.35, 0.4);
+  await page.mouse.click(centre.x, centre.y);
+  const painted = await capturedColour(page);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="rubber"]').click();
+  // Far from the disc: no hold.
+  const away = await at(page, 0.8, 0.8);
+  await page.mouse.click(away.x, away.y);
+  await expect(page.locator('[data-rubber-said]')).toHaveText(
+    'Press on the edge of the structure being edited.',
+  );
+  // How many screen pixels a millimetre is: the influence circle is 10 mm across its radius.
+  await page.mouse.move(centre.x, centre.y);
+  const radius = Number(await page.locator('[data-tool-preview] circle').first().getAttribute('r'));
+  const pxPerMm = radius / 10;
+  // On the disc's right edge, 5 mm from its centre, dragged out.
+  const edge = { x: centre.x + 5 * pxPerMm, y: centre.y };
+  await page.mouse.move(edge.x, edge.y);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 60, edge.y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator('[data-rubber-said]')).toHaveCount(0);
+  expect(await capturedColour(page)).toBeGreaterThan(painted);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Rubber band (Ctrl/⌘+Z)',
+  );
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(painted, 1);
+  expectNoProblems(problems);
+});

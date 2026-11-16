@@ -178,6 +178,13 @@ export {
 export { type GrowDimension, type GrownRegion, growRegion } from './region-grow.js';
 export { type PlanePoint, closedSpline, fillSliceLoop } from './polygon-spline.js';
 export {
+  type SliceMask,
+  nearestEdge,
+  rubberBand,
+  sliceMask,
+  sliceVoxelIndex,
+} from './label-rubber-band.js';
+export {
   type PathTree,
   type SlicePlane,
   edgeCost,
