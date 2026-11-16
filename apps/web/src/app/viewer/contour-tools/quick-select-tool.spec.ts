@@ -306,12 +306,31 @@ describe('QuickSelectTool through the volume (#293)', () => {
     expect(tool.said()).toMatch(/^8 voxels found/);
   });
 
-  it('asks for a pane that is not tilted, and for a stroke over the object', async () => {
-    const tilted = holding(TILTED_AXIAL);
-    await tilted.dab(1, 1);
-    expect(tilted.tool.said()).toBe('Through the volume, stroke on a pane that is not tilted.');
-    expect(tilted.tool.underWay()).toBe(false);
-    TestBed.resetTestingModule();
+  it('takes a stroke on a tilted pane as the voxels of its plane under the brush, and shows there what the plane cuts (#312)', async () => {
+    const { brush, tools, tool, dab, painted } = holding(TILTED_AXIAL);
+    // A dab on the tilted axial pane, at the voxel the pane shows there: in the cube.
+    const under = brush.voxelAt(AXIAL_MID, pointer(MID[1], MID[1]))!;
+    expect(CUBE(...under)).toBe(100);
+    await dab(1, 1);
+    expect(tool.said()).toMatch(/^8 voxels found through 4 slices in \d+ ms: Accept adds them\.$/);
+    // The pointer was last on the tilted pane: its mark and what its plane cuts of the cube.
+    const preview = tools.preview()!;
+    expect(preview.rect).toEqual(AXIAL_MID.rect);
+    expect(preview.marks?.object).toMatch(/^M/);
+    expect(preview.fill).toMatch(/^M/);
+    // The coronal pane, not tilted, shows its slice of the same.
+    expect(preview.others).toHaveLength(1);
+    expect(preview.others![0].fill).toMatch(/^M/);
+    // A second dab, on the coronal pane, joins it.
+    tool.marking.set('background');
+    await dab(1, 1, CORONAL);
+    expect(tool.said()).toMatch(/^\d voxels found through 4 slices/);
+    tool.accept();
+    expect(painted().length).toBeGreaterThan(0);
+    expect(painted().length).toBeLessThan(8);
+  });
+
+  it('asks for a stroke over the object', async () => {
     const { tool, dab } = holding();
     tool.marking.set('background');
     await dab(0, 0);

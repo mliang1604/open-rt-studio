@@ -185,9 +185,12 @@ Quick select has a second way to work, "through the volume": the same walk
 with six neighbours a voxel, on a box about the strokes
 (`packages/dicom/src/random-walker-3d.ts`).
 
-- **Strokes are voxels, from any pane** of the column that is not tilted:
-  axial, coronal or sagittal, over the object or over what is not. What is
-  found is shown on each of those panes, at the slice the pane is at.
+- **Strokes are voxels, from any pane** of the column: axial, coronal or
+  sagittal, over the object or over what is not. What is found is shown on
+  each of those panes, at the slice the pane is at. On a tilted pane (#312)
+  a stroke marks the voxels of the plane's sheet under the brush, as the
+  disc brush does there, and the pane shows what its plane cuts: each pixel
+  of the plane's picture is of the voxel its middle is in.
 - **Edges are weighed in mm.** A weight across an edge is the slice's,
   times (finest spacing / the edge's spacing)²: slices 3 mm apart hold
   together a ninth as much as pixels 1 mm apart. The image is smoothed by
@@ -253,7 +256,6 @@ What this does not do:
   through it is cut short as before (0.39), unless a stroke says what is
   not the object: with one dab in the body, the lung was found voxel for
   voxel (at 48³).
-- **Tilted panes** take no strokes in this mode.
 - **Memory**: the solve keeps about 100 bytes a voxel (reckoned from its
   arrays, not measured), some 300 MB at the most voxels allowed.
 

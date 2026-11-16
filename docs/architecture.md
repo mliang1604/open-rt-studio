@@ -458,7 +458,8 @@ its own.
   its edges are weighed (β 250). "Through the volume" (#293) is the same
   walk with six neighbours a voxel (`random-walker-3d.ts`,
   `walk-multigrid-3d.ts`) on a box about the strokes, which are then voxels
-  from any pane of the column that is not tilted
+  from any pane of the column, tilted or not (#312: on a tilted pane, the
+  voxels of its plane's sheet under the brush)
   (`contour-tools/quick-select-volume.ts`). Edges are weighed in mm; a face
   of the box that is the volume's own is left free, the others are not the
   object; the box grows while the object runs past it, to 3,145,728 voxels

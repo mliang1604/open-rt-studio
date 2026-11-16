@@ -16,9 +16,11 @@
 // grid through the voxels of the plane's sheet.
 //
 // Through the volume (#293), a selection is of a box about the strokes, and
-// the strokes are from any pane of the column that is not tilted: see
-// `quick-select-volume.ts`. It is shown on each of those panes, at the slice
-// the pane is at, and the search says how far it has come.
+// the strokes are from any pane of the column: see `quick-select-volume.ts`.
+// It is shown on each of those panes, at the slice the pane is at, and the
+// search says how far it has come. On a tilted pane (#312) a stroke marks
+// the voxels of the plane's sheet under the brush, and the pane shows what
+// its plane cuts.
 
 import {
   ChangeDetectionStrategy,
@@ -39,7 +41,6 @@ import {
   slicePlane,
   strokePixels,
   type LabelVolume,
-  type Orientation,
   type PlanePoint,
   type PlaneSpan,
 } from '@open-rt-studio/dicom';
@@ -55,7 +56,13 @@ import type {
   ToolPreviewCircle,
 } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
-import { picturePixelOf, pictureToPane, planePictureOf, type PlanePicture } from './plane-picture';
+import {
+  picturePixelOf,
+  pictureToPane,
+  pictureVoxelAt,
+  planePictureOf,
+  type PlanePicture,
+} from './plane-picture';
 import {
   quickSelectInWorker,
   quickSelectVolumeInWorker,
@@ -63,6 +70,7 @@ import {
 } from './quick-select-in-worker';
 import {
   QUICK_SELECT_MAX_BOX_VOXELS,
+  pictureOfMarks,
   selectThroughVolume,
   sliceOfBox,
   sliceOfVoxels,
@@ -184,9 +192,9 @@ export class QuickSelectTool implements ContourTool {
   } | null>(null);
 
   /**
-   * A selection through the volume, as each pane of its column that is not
-   * tilted shows it: the strokes and what was found, on the slice the pane
-   * is at.
+   * A selection through the volume, as each pane of its column shows it: the
+   * strokes and what was found, on the slice the pane is at, or where a
+   * tilted pane's plane cuts them (#312).
    */
   private readonly volumeShown = computed(() => {
     this.changed();
@@ -198,7 +206,24 @@ export class QuickSelectTool implements ContourTool {
     })[] = [];
     for (const pane of this.brush.mprPanes(volume.group)) {
       const slice = this.brush.sliceOf(pane);
-      if (slice === null) continue;
+      if (slice === null) {
+        const picture = planePictureOf(this.brush, pane);
+        const toPane = picture && pictureToPane(this.brush, pane, picture);
+        const spacing = this.brush.voxelSpacing();
+        const cut =
+          picture &&
+          pictureOfMarks(dims, volume, picture, (pixel) => pictureVoxelAt(picture, spacing, pixel));
+        if (!picture || !toPane || !cut) continue;
+        shown.push({
+          rect: pane.rect,
+          marks: {
+            object: maskPath(cut.object, picture.width, toPane),
+            background: maskPath(cut.background, picture.width, toPane),
+          },
+          ...(cut.found ? { fill: maskPath(cut.found, picture.width, toPane) } : {}),
+        });
+        continue;
+      }
       const axis = throughPlaneAxis(pane.orientation);
       const toPane = this.sliceToPane(pane, axis, slice);
       if (!toPane) continue;
@@ -333,10 +358,10 @@ export class QuickSelectTool implements ContourTool {
       lastPixel: pixel,
       before: { object: Uint8Array.from(now.object), background: Uint8Array.from(now.background) },
     };
-    this.mark(context, placement.orientation, voxel, voxel, pixel, pixel);
+    this.mark(context, placement, voxel, voxel, pixel, pixel);
   }
 
-  /** A stroke of a selection through the volume: on any pane of its column that is not tilted. */
+  /** A stroke of a selection through the volume: on any pane of its column. */
   private beginThrough(
     context: ContourToolContext,
     pointer: ToolPointer,
@@ -344,10 +369,6 @@ export class QuickSelectTool implements ContourTool {
     label: LabelVolume,
   ): void {
     const { placement } = pointer;
-    if (this.brush.tiltedPlaneOf(placement)) {
-      this.said.set('Through the volume, stroke on a pane that is not tilted.');
-      return;
-    }
     const volume = this.volume;
     if (volume && (volume.group !== placement.group || volume.label !== label)) {
       this.discard();
@@ -366,7 +387,7 @@ export class QuickSelectTool implements ContourTool {
       lastPixel: null,
       before: { object: new Set(this.volume.object), background: new Set(this.volume.background) },
     };
-    this.mark(context, placement.orientation, voxel, voxel, null, null);
+    this.mark(context, placement, voxel, voxel, null, null);
   }
 
   extend(context: ContourToolContext, pointer: ToolPointer): void {
@@ -374,17 +395,8 @@ export class QuickSelectTool implements ContourTool {
     const voxel = context.voxelAt(pointer);
     const stroke = this.stroke;
     if (!voxel || !stroke) return;
-    // Through the volume, nothing is marked on a tilted pane.
-    if (this.volume && this.brush.tiltedPlaneOf(pointer.placement)) return;
     const pixel = this.session ? this.pixelAt(this.session, pointer) : null;
-    this.mark(
-      context,
-      pointer.placement.orientation,
-      stroke.last,
-      voxel,
-      stroke.lastPixel ?? pixel,
-      pixel,
-    );
+    this.mark(context, pointer.placement, stroke.last, voxel, stroke.lastPixel ?? pixel, pixel);
     stroke.last = voxel;
     stroke.lastPixel = pixel ?? stroke.lastPixel;
   }
@@ -686,7 +698,7 @@ export class QuickSelectTool implements ContourTool {
    */
   private mark(
     context: ContourToolContext,
-    orientation: Orientation,
+    placement: MprPlacement,
     from: VoxelIndex,
     to: VoxelIndex,
     fromPixel: PlanePoint | null,
@@ -694,13 +706,17 @@ export class QuickSelectTool implements ContourTool {
   ): void {
     const grid = context.grid();
     const session = this.session;
+    const { orientation } = placement;
     if (!grid) return;
     if (this.volume) {
       const marked = this.marking() === 'object' ? this.volume.object : this.volume.background;
+      // On a tilted pane the disc lies on the pane's own plane (#312), as the brush's does.
+      const plane = this.brush.tiltedPlaneOf(placement)?.stamp;
       const stroked = strokeVoxels(grid.dims, grid.spacing, from, to, {
         shape: 'disk',
         radiusMm: this.brush.radiusMm(),
         axis: throughPlaneAxis(orientation),
+        ...(plane ? { plane } : {}),
       });
       for (const index of stroked) marked.add(index);
       this.changed.update((n) => n + 1);

@@ -6,6 +6,7 @@ import type { VoxelBox } from '@open-rt-studio/dicom';
 
 import {
   QUICK_SELECT_MAX_BOX_VOXELS,
+  pictureOfMarks,
   selectThroughVolume,
   sliceOfBox,
   sliceOfVoxels,
@@ -65,6 +66,60 @@ describe('a selection through the volume, on a slice (#293)', () => {
     // A slice the box does not reach, and one it reaches that holds nothing.
     expect(sliceOfBox(DIMS, 2, 0, box, mask)).toBeNull();
     expect(sliceOfBox(DIMS, 0, 3, box, Uint8Array.of(1, 0, 0, 0, 0, 0, 0, 0))).toBeNull();
+  });
+});
+
+describe('a selection through the volume, as a tilted plane cuts it (#312)', () => {
+  // A plane through the 5 × 4 × 3 grid that climbs a slice every two columns: pixel (u, v) is
+  // at voxel (u, v, u / 2).
+  const climbing = ([u, v]: readonly [number, number]): Triple => [u, v, u / 2];
+  const picture = { width: 5, height: 4 };
+
+  it('shows each pixel what the voxel its middle is in holds: strokes, and what was found', () => {
+    const marks: VolumeMarks = {
+      object: new Set([at(0, 1, 0), at(2, 0, 1), at(2, 3, 0)]),
+      background: new Set([at(4, 2, 2)]),
+      // A box of 2 × 2 × 2 from (2, 1, 1), holding (2, 1, 1) and (3, 2, 2).
+      selection: {
+        box: { first: [2, 1, 1], dims: [2, 2, 2] },
+        mask: Uint8Array.of(1, 0, 0, 0, 0, 0, 0, 1),
+      },
+    };
+    const cut = pictureOfMarks(DIMS, marks, picture, climbing)!;
+    // Column u is on slice round(u / 2): 0, 1 (0.5 rounds up), 1, 2, 2. The stroke at
+    // (2, 3, 0) is off the plane, and is not shown.
+    expect([...cut.object]).toEqual([
+      ...[0, 0, 1, 0, 0],
+      ...[1, 0, 0, 0, 0],
+      ...[0, 0, 0, 0, 0],
+      ...[0, 0, 0, 0, 0],
+    ]);
+    expect([...cut.background]).toEqual([
+      ...[0, 0, 0, 0, 0],
+      ...[0, 0, 0, 0, 0],
+      ...[0, 0, 0, 0, 1],
+      ...[0, 0, 0, 0, 0],
+    ]);
+    expect([...cut.found!]).toEqual([
+      ...[0, 0, 0, 0, 0],
+      ...[0, 0, 1, 0, 0],
+      ...[0, 0, 0, 1, 0],
+      ...[0, 0, 0, 0, 0],
+    ]);
+  });
+
+  it('shows nothing found where the plane misses it, leaves out pixels off the grid, and is nothing for a plane it cannot place', () => {
+    const marks: VolumeMarks = {
+      object: new Set([at(0, 0, 0)]),
+      background: new Set(),
+      selection: { box: { first: [0, 0, 2], dims: [1, 1, 1] }, mask: Uint8Array.of(1) },
+    };
+    const cut = pictureOfMarks(DIMS, marks, picture, climbing)!;
+    expect(cut.found).toBeNull();
+    // A picture wider than the grid: its pixels beyond are of no voxel.
+    const wide = pictureOfMarks(DIMS, marks, { width: 8, height: 4 }, climbing)!;
+    expect(wide.object.reduce((sum, v) => sum + v, 0)).toBe(1);
+    expect(pictureOfMarks(DIMS, marks, picture, () => null)).toBeNull();
   });
 });
 
