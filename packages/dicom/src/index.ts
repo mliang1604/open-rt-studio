@@ -189,7 +189,9 @@ export {
   type QuickSelectRequest,
   type QuickSelection,
   EDGE_ALIKE,
+  QUICK_SELECT_TOLERANCE,
   quickSelect,
+  quickSelectGrowing,
   walk,
 } from './random-walker.js';
 export { type Outline, refineToImage, visualHull } from './image-aware.js';

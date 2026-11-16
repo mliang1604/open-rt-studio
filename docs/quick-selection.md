@@ -82,6 +82,29 @@ measured 0.21 and more; boxes that held them 0 at noise σ 20 and below, but up
 to 0.31 at σ 40, where the box is then grown when it need not be (time, not
 result).
 
+### Since the spike: a faster solve, off the page's thread (#291)
+
+- **A multigrid preconditioner** (`walk-multigrid.ts`): one V-cycle per step
+  of conjugate gradients, coarsening by 2 × 2 aggregation, which keeps each
+  coarse grid a four-neighbour stencil, smoothed by symmetric Gauss–Seidel.
+  It takes the steps from hundreds to 10–40.
+- **A tolerance of 1e-3**, chosen by measurement: the selection then agreed
+  with the fully converged one to Dice 0.9968 or better on every scene above
+  (noise σ 0 to 40, the bridge, 256² and 512²). Before multigrid, loosening
+  the tolerance was not safe: at 1e-3 agreement fell to 0.97.
+- **Two things tried and dropped**: a coarse-to-fine cascade as a warm start
+  (it cut the steps by a fifth, and nothing once multigrid was in), and a
+  tolerance loosened without a better preconditioner (above).
+- **In a web worker**, so the page goes on answering; a new stroke abandons
+  a search under way.
+
+Times now, on the same machine, the whole box solved: 256² 106–186 ms
+(1.5 s before), 512² 0.54–1.03 s (10 s before). In Chrome, through the
+worker: 116–140 ms for a lung of the 256² phantom. Each step costs about
+30 ms at 512²; the issue's targets (under 100 ms at 256², under 500 ms at
+512²) need that step faster, on the GPU or in WebAssembly, and are left
+open in #291.
+
 ## Recommendation
 
 - **Use the random walker for quick selection**, 2D first. It answers the

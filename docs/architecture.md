@@ -449,6 +449,9 @@ its own.
   stroke is found by a random walker (`random-walker.ts`) and added to the
   structure being edited. The spike's measurements and recommendation are
   in [quick-selection.md](quick-selection.md); its follow-ups are #291–#293.
+  The walk is solved with a multigrid preconditioner (`walk-multigrid.ts`)
+  to a tolerance of 1e-3, in a web worker (`quick-select.worker.ts`); the
+  stroke is taken back when it ends, and the object found is one edit.
 - **Settle to the image, and fit from planes** (#120, labs, prototypes in
   the Interpolate tool): each slice filled can be settled to the image's
   edges within 4 pixels of its edge by the random walker of #119

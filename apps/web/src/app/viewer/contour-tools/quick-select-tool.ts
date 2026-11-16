@@ -13,24 +13,30 @@ import {
   ChangeDetectionStrategy,
   Component,
   Injectable,
+  Injector,
   computed,
   inject,
   signal,
 } from '@angular/core';
-import { quickSelect, sliceVoxelIndex, slicePlane, type Orientation } from '@open-rt-studio/dicom';
+import { sliceVoxelIndex, slicePlane, type Orientation } from '@open-rt-studio/dicom';
 import { strokeVoxels, throughPlaneAxis, type VoxelIndex } from '@open-rt-studio/render';
 
 import { BrushController } from '../brush-controller';
+import { EditableStructuresStore } from '../editable-structures-store';
 import type {
   ContourTool,
   ContourToolContext,
   ToolPointer,
   ToolPreviewCircle,
 } from './contour-tool';
+import { ContourToolsController } from './contour-tools-controller';
+import { quickSelectInWorker } from './quick-select-in-worker';
 
 @Injectable()
 export class QuickSelectTool implements ContourTool {
   private readonly brush = inject(BrushController);
+  private readonly store = inject(EditableStructuresStore);
+  private readonly injector = inject(Injector);
 
   readonly id = 'quick';
   readonly name = 'Quick select';
@@ -47,8 +53,18 @@ export class QuickSelectTool implements ContourTool {
   readonly said = signal<string | null>(null);
 
   /** The stroke under way: its slice and the voxels it went over. */
-  private stroke: { axis: 0 | 1 | 2; slice: number; last: VoxelIndex; voxels: Set<number> } | null =
-    null;
+  private stroke: {
+    axis: 0 | 1 | 2;
+    slice: number;
+    last: VoxelIndex;
+    voxels: Set<number>;
+    /** What the stroke painted that was not the structure's before. */
+    added: Set<number>;
+  } | null = null;
+  /** The search under way, to abandon. */
+  private searching: AbortController | null = null;
+  /** The last search, settled when it is done: for whoever waits on it (a spec). */
+  working: Promise<void> | null = null;
 
   private readonly at = signal<{
     readonly rect: ToolPreviewCircle['rect'];
@@ -82,7 +98,7 @@ export class QuickSelectTool implements ContourTool {
     this.stroke = null;
     if (!voxel) return;
     const axis = throughPlaneAxis(pointer.placement.orientation);
-    this.stroke = { axis, slice: voxel[axis], last: voxel, voxels: new Set() };
+    this.stroke = { axis, slice: voxel[axis], last: voxel, voxels: new Set(), added: new Set() };
     this.add(context, pointer.placement.orientation, voxel, voxel);
   }
 
@@ -96,6 +112,12 @@ export class QuickSelectTool implements ContourTool {
   }
 
   /** The pointer came up: find the object under the stroke, and add it. */
+  /**
+   * The pointer came up: the stroke drawn is taken back (it was there to be
+   * seen), the object under it is looked for in a worker (#291), and when it
+   * is found it is added, as one edit. A new stroke abandons a search under
+   * way.
+   */
   end(context: ContourToolContext): void {
     const stroke = this.stroke;
     this.stroke = null;
@@ -104,6 +126,10 @@ export class QuickSelectTool implements ContourTool {
     const roiId = context.activeRoiId();
     const [margin, beta] = [this.marginMm(), this.beta()];
     if (!stroke || !image || !grid || roiId === null) return;
+    // Within the edit under way, which then changes nothing and is not kept.
+    if (stroke.added.size > 0) {
+      context.change({ kind: 'erase', roiId, voxels: [...stroke.added], only: true });
+    }
     if (margin === null || margin <= 0 || beta === null || beta <= 0) {
       this.said.set('Type a margin and an edge sharpness, each more than 0.');
       return;
@@ -123,35 +149,55 @@ export class QuickSelectTool implements ContourTool {
       mask[at[b] * plane.width + at[a]] = 1;
     }
     const pixelMm = Math.min(grid.spacing[a], grid.spacing[b]);
+    this.abandon();
+    const abandon = new AbortController();
+    this.searching = abandon;
+    this.said.set('Looking for the object…');
     const started = performance.now();
-    // An object larger than the box is cut off by it: the margin is doubled, up to three times.
-    let marginPx = margin / pixelMm;
-    let selection = quickSelect({ plane, stroke: mask, marginPx, beta });
-    for (let grow = 0; grow < 3 && selection?.touchesBox; grow++) {
-      marginPx *= 2;
-      selection = quickSelect({ plane, stroke: mask, marginPx, beta });
-    }
-    const took = Math.round(performance.now() - started);
-    if (!selection) return;
-    const voxels: number[] = [];
-    selection.mask.forEach((v, k) => {
-      if (v)
-        voxels.push(
-          sliceVoxelIndex(dims, axis, slice, k % plane.width, Math.floor(k / plane.width)),
+    const label = this.store.labelVolume();
+    const request = { plane, stroke: mask, marginPx: margin / pixelMm, beta };
+    this.working = quickSelectInWorker(request, abandon.signal)
+      .then((selection) => {
+        // Another stroke, or another image, since: this answer is not for them.
+        if (abandon.signal.aborted || this.store.labelVolume() !== label || !selection) return;
+        this.searching = null;
+        const took = Math.round(performance.now() - started);
+        const voxels: number[] = [];
+        selection.mask.forEach((v, k) => {
+          if (v)
+            voxels.push(
+              sliceVoxelIndex(dims, axis, slice, k % plane.width, Math.floor(k / plane.width)),
+            );
+        });
+        const changed = this.injector
+          .get(ContourToolsController)
+          .apply(this.editName(), [{ kind: 'paint', roiId, voxels }]);
+        const { x0, y0, x1, y1 } = selection.box;
+        this.said.set(
+          `${voxels.length} voxels selected in ${took} ms (${x1 - x0 + 1} × ${y1 - y0 + 1} pixels, ${selection.iterations} steps); ${changed} added.` +
+            (selection.touchesBox
+              ? ' It reaches the edge of the area looked in, and may be cut off there.'
+              : ''),
         );
-    });
-    const changed = context.change({ kind: 'paint', roiId, voxels });
-    const { x0, y0, x1, y1 } = selection.box;
-    this.said.set(
-      `${voxels.length} voxels selected in ${took} ms (${x1 - x0 + 1} × ${y1 - y0 + 1} pixels, ${selection.iterations} steps); ${changed} added.` +
-        (selection.touchesBox
-          ? ' It reaches the edge of the area looked in, and may be cut off there.'
-          : ''),
-    );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        this.searching = null;
+        this.said.set(
+          `The object could not be found: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  /** Abandon a search under way. */
+  private abandon(): void {
+    this.searching?.abort();
+    this.searching = null;
   }
 
   cancel(): void {
     this.stroke = null;
+    this.abandon();
   }
 
   hover(_context: ContourToolContext, pointer: ToolPointer | null): void {
@@ -184,7 +230,13 @@ export class QuickSelectTool implements ContourTool {
       radiusMm: this.brush.radiusMm(),
       axis: throughPlaneAxis(orientation),
     });
-    for (const i of voxels) stroke.voxels.add(i);
+    const [nx, ny] = grid.dims;
+    for (const i of voxels) {
+      stroke.voxels.add(i);
+      // What the stroke paints that was not the structure's, to take back when it ends.
+      const held = context.held([i % nx, Math.floor(i / nx) % ny, Math.floor(i / (nx * ny))]);
+      if (held !== roiId) stroke.added.add(i);
+    }
     if (voxels.length > 0) context.change({ kind: 'paint', roiId, voxels });
   }
 }
