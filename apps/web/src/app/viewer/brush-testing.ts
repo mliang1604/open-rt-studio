@@ -86,6 +86,7 @@ export function setup(
   formula?: ImageFormula,
   panes: readonly PanePlacement[] = [],
   slices: PerOrientation = [2, 2, 2],
+  obliques?: PerOrientationOblique,
 ): {
   brush: BrushController;
   store: EditableStructuresStore;
@@ -101,7 +102,7 @@ export function setup(
       ...(source ? [{ provide: DATA_SOURCE, useValue: source }] : []),
     ],
   });
-  const { brush, store } = wireBrush(notices, formula, panes, slices);
+  const { brush, store } = wireBrush(notices, formula, panes, slices, obliques);
   return { brush, store, tools: TestBed.inject(ContourToolsController), notices };
 }
 
@@ -115,6 +116,7 @@ export function wireBrush(
   formula?: ImageFormula,
   panes: readonly PanePlacement[] = [],
   slices: PerOrientation = [2, 2, 2],
+  obliques?: PerOrientationOblique,
 ): {
   brush: BrushController;
   store: EditableStructuresStore;
@@ -135,7 +137,7 @@ export function wireBrush(
       { x: 0, y: 0 },
       { x: 0, y: 0 },
     ]),
-    obliques: signal(noObliques),
+    obliques: signal(obliques ?? noObliques),
     sliceIndices: signal<PerOrientation>(slices),
     sagittalFlipped: () => false,
     baseSeries: () => null,

@@ -40,6 +40,20 @@ export interface BrushStamp {
    * `'sphere'`. Defaults to the z axis.
    */
   readonly axis?: 0 | 1 | 2;
+  /**
+   * For the `'disk'` shape on a tilted pane (#303): the pane's plane, in
+   * millimetres of the grid (a voxel's index times the spacing). The disk is
+   * then the ball's voxels whose centres are within half their extent along
+   * the normal of the plane, a sheet a voxel thick, in place of a slice
+   * across {@link BrushStamp.axis}. Ignored for `'sphere'`.
+   */
+  readonly plane?: StampPlane;
+}
+
+/** A plane in millimetres of the grid: the points `p` with `normal · p = offsetMm`; `normal` of length 1. */
+export interface StampPlane {
+  readonly normal: readonly [number, number, number];
+  readonly offsetMm: number;
 }
 
 /**
@@ -86,10 +100,15 @@ export function stampVoxels(
   // Voxel half-extents the radius reaches along each axis; a flat disk collapses
   // its axis to the centre slice only.
   const disk = stamp.shape === 'disk';
+  const plane = disk ? (stamp.plane ?? null) : null;
   const axis = stamp.axis ?? 2;
-  const extentX = disk && axis === 0 ? 0 : voxelExtent(r, sx);
-  const extentY = disk && axis === 1 ? 0 : voxelExtent(r, sy);
-  const extentZ = disk && axis === 2 ? 0 : voxelExtent(r, sz);
+  const flat = disk && !plane;
+  const extentX = flat && axis === 0 ? 0 : voxelExtent(r, sx);
+  const extentY = flat && axis === 1 ? 0 : voxelExtent(r, sy);
+  const extentZ = flat && axis === 2 ? 0 : voxelExtent(r, sz);
+  // On a tilted plane: half a voxel's extent along its normal, about it.
+  const [nx, ny, nz] = plane?.normal ?? [0, 0, 0];
+  const half = 0.5 * (Math.abs(nx) * sx + Math.abs(ny) * sy + Math.abs(nz) * sz);
 
   const out: number[] = [];
   for (let dz = -extentZ; dz <= extentZ; dz++) {
@@ -104,7 +123,17 @@ export function stampVoxels(
         const x = cx + dx;
         if (x < 0 || x >= dimX) continue;
         const mmX = dx * sx;
-        if (mmX * mmX + mmY * mmY + mmZ * mmZ <= r2) out.push((z * dimY + y) * dimX + x);
+        if (mmX * mmX + mmY * mmY + mmZ * mmZ > r2) continue;
+        // The centre voxel is always covered, on the plane or not.
+        const centre = dx === 0 && dy === 0 && dz === 0;
+        if (
+          plane &&
+          !centre &&
+          Math.abs(nx * x * sx + ny * y * sy + nz * z * sz - plane.offsetMm) > half
+        ) {
+          continue;
+        }
+        out.push((z * dimY + y) * dimX + x);
       }
     }
   }

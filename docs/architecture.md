@@ -461,7 +461,10 @@ its own.
   (`refineToImage`), and a structure can be fitted from an outline in each
   plane by a surface fitted through them (`fitFromContours`, #296; the
   spike's `visualHull` before it), through every slice drawn on with the
-  tools, which the contouring controller keeps for each structure (#302). Settling runs
+  tools, which the contouring controller keeps for each structure (#302).
+  With the labs flag on, the disc brush on a tilted pane paints on the
+  pane's own plane (a sheet a voxel thick, `StampPlane`), and that plane is
+  kept (#303); every other tool paints grid slices. Settling runs
   in a web worker, as an edit of its own after the fill, so that Undo shows
   the guess (#295); its band is at most three quarters of a guess's depth. The spike's
   measurements and recommendation are in

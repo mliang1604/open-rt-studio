@@ -33,6 +33,7 @@ import {
 import {
   interpolateSlices,
   sliceChanges,
+  sectionOf,
   sliceMask,
   slicePlane,
   type LabelChange,
@@ -174,10 +175,18 @@ export class InterpolateTool implements ContourTool {
     const label = this.store.labelVolume();
     const roiId = this.brush.activeRoiId();
     if (!label || roiId === null) return;
-    const drawn: Outline[] = this.injector
+    const drawn: (Outline | PlaneOutline)[] = this.injector
       .get(ContourToolsController)
       .drawnSlices(roiId)
-      .map(({ axis, slice }) => ({ axis, slice, mask: sliceMask(label, roiId, axis, slice).mask }))
+      .map((one) =>
+        one.kind === 'slice'
+          ? {
+              axis: one.axis,
+              slice: one.slice,
+              mask: sliceMask(label, roiId, one.axis, one.slice).mask,
+            }
+          : sectionOf(label, roiId, one.span),
+      )
       .filter(({ mask }) => mask.includes(1));
     const outlines = drawn.length >= 2 ? drawn : this.fullestSlices(label, roiId);
     if (outlines.length < 2) {
