@@ -430,6 +430,20 @@ its own.
   the structure is redrawn from the edge as moved, from the slice as it was
   when pressed, so the preview is the result. A press farther from the edge
   than 8 screen pixels (or a voxel) takes no hold, and says so.
+- **Interpolate** (#115, labs): draw the structure being edited on some
+  slices, with any tool, and the slices between them are filled by its
+  shape (`slice-interpolation.ts`). Each drawn slice becomes a signed
+  distance map in mm (exact Euclidean, by the slice's spacing; below zero
+  inside), a slice between two takes their maps mixed by how near it is to
+  each, and is the structure where the mix is below zero. A sphere drawn
+  on every fifth slice is matched at Dice 0.94 or better on each slice
+  between the drawn ones nearest its middle, and 0.903 over every slice
+  filled; near the poles less (0.35 to 0.86), since a sphere's radius does
+  not grow linearly. The slices filled are listed as not yet accepted; one
+  then drawn on is taken as drawn, and Accept takes them all. "Keep up as
+  I draw" fills again after each edit made with the tools
+  (`ContourToolsController.edited`), as an edit of its own, so undo takes
+  away the fill before the stroke. Slices across any of the three axes.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

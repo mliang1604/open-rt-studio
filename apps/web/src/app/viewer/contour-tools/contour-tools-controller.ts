@@ -170,6 +170,21 @@ export class ContourToolsController {
     tool.end(this.context);
     this.stroking = null;
     this.store.commitEdit();
+    this.announce(tool.editName());
+  }
+
+  /**
+   * The edits made through the tools, one more each time one is made: its
+   * name and a count. A tool that keeps up with the others (interpolation,
+   * #115) follows it. Undo and redo are not edits made.
+   */
+  readonly edited = signal<{ readonly name: string; readonly count: number }>({
+    name: '',
+    count: 0,
+  });
+
+  private announce(name: string): void {
+    this.edited.update((last) => ({ name, count: last.count + 1 }));
   }
 
   /** Put back what the stroke under way changed. Returns whether there was one. */
@@ -202,6 +217,7 @@ export class ContourToolsController {
     let changed = 0;
     for (const change of changes) changed += this.store.applyChange(change, this.constraints());
     this.store.commitEdit();
+    if (changed > 0) this.announce(name);
     return changed;
   }
 

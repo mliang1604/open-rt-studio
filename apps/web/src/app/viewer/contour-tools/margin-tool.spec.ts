@@ -62,6 +62,7 @@ describe('MarginTool (#112)', () => {
       'wire',
       'push',
       'rubber',
+      'interp',
       'cleanup',
       'margin',
       'mirror',

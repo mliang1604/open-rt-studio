@@ -184,6 +184,7 @@ export {
   sliceMask,
   sliceVoxelIndex,
 } from './label-rubber-band.js';
+export { interpolateSlices, signedDistance, sliceChanges } from './slice-interpolation.js';
 export {
   type PathTree,
   type SlicePlane,
