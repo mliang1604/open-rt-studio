@@ -121,6 +121,8 @@ describe('fitting a structure from contours in several planes (#296)', { timeout
 
 // What was measured (#302; Dice against the tilted ellipsoid, 120 points):
 //   three oblique sections near its middle (tilted 30°, 25°, 20°)     0.955
+//     (#303: the second of #302's three was the coronal plane on skewed axes,
+//     not a tilted one; with three truly tilted planes it is 0.955 still)
 //   axial 19, 25, 31, sagittal 26, coronal 22   0.977; the fullest of each axis   0.973
 //   axial 19, 25, 31, sagittal 26               0.968; the fullest of each axis   0.975
 // The last: beyond the outermost axial sections the surface bulges (some 45
@@ -153,9 +155,10 @@ describe('fitting from sections on any plane (#302)', { timeout: 30_000 }, () =>
   it('fits the tilted ellipsoid from three oblique sections', () => {
     const p: V = [25, 23, 24];
     const sections = [
+      // Axial tilted 30° about x; coronal turned 25° about z; sagittal tilted 20° about y.
       plane(p, [1, 0, 0], turn([0, 1, 0], 0, 30)),
-      plane(p, turn([1, 0, 0], 1, 25), [0, 0, 1]),
-      plane(p, turn([0, 1, 0], 2, 20), [0, 0, 1]),
+      plane(p, turn([1, 0, 0], 2, 25), [0, 0, 1]),
+      plane(p, [0, 1, 0], turn([0, 0, 1], 1, 20)),
     ].map((one) => sectionOf(label, 5, one));
     expect(dice(fitFromContours(label, sections), truth)).toBeGreaterThan(0.95);
   });

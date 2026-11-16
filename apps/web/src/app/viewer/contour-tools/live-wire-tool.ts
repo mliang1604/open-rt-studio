@@ -12,6 +12,10 @@
 //
 // The anchors belong to the slice they were set on, across the axis the
 // pane steps through; an anchor set on another pane or slice starts over.
+//
+// **On a tilted pane** (#303) they belong to the pane's own plane: the image
+// is sampled on it, a pixel the grid's finest spacing apart, the path is
+// searched in that picture, and what it encloses is filled on the plane.
 
 import {
   ChangeDetectionStrategy,
@@ -23,12 +27,18 @@ import {
 } from '@angular/core';
 import {
   edgeCost,
+  fillPlaneLoop,
   fillSliceLoop,
+  planeImage,
+  planePointMm,
+  planeVoxelAt,
+  sameGridPlane,
   shortestPaths,
   slicePlane,
   tracePath,
   type PathTree,
   type PlanePoint,
+  type PlaneSpan,
   type Vec3,
 } from '@open-rt-studio/dicom';
 import { throughPlaneAxis } from '@open-rt-studio/render';
@@ -45,6 +55,9 @@ import { POINT_GRAB_PX } from './point-tool';
 
 type MprPlacement = Extract<PanePlacement, { kind: 'mpr' }>;
 
+/** A tilted pane's plane, as the brush controller gives it. */
+type TiltedPlane = NonNullable<ReturnType<BrushController['tiltedPlaneOf']>>;
+
 /** Where the anchors are: the pane, and the slice across the axis it steps through. */
 interface On {
   readonly placement: MprPlacement;
@@ -54,6 +67,11 @@ interface On {
   readonly cost: Float32Array;
   readonly width: number;
   readonly height: number;
+  /**
+   * A tilted pane's own plane (#303), which the anchors then belong to in
+   * place of the slice: the picture searched is of it, its pixels this large in mm.
+   */
+  readonly plane: (TiltedPlane & { readonly pixelMm: readonly [number, number] }) | null;
 }
 
 @Injectable()
@@ -186,28 +204,52 @@ export class LiveWireTool implements ContourTool {
     if (!voxel) return null;
     const axis = throughPlaneAxis(placement.orientation);
     const slice = Math.round(voxel[axis]);
-    const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
-    const pixel: [number, number] = [Math.round(voxel[a]), Math.round(voxel[b])];
+    const tilted = this.brush.tiltedPlaneOf(placement);
     let on = this.on();
-    if (!on || on.axis !== axis || on.slice !== slice || on.placement.group !== placement.group) {
+    const same =
+      on?.axis === axis &&
+      on.placement.group === placement.group &&
+      (tilted
+        ? on.plane !== null && sameGridPlane(on.plane.stamp, tilted.stamp)
+        : on.plane === null && on.slice === slice);
+    if (!on || !same) {
       if (!settle) return null;
       this.startOver();
-      const plane = slicePlane(image, grid.dims as [number, number, number], axis, slice);
+      const dims = grid.dims as [number, number, number];
+      const tiltedPicture = tilted ? planeImage(image, dims, grid.spacing, tilted.span) : null;
+      if (tilted && !tiltedPicture) return null;
+      const picture = tiltedPicture ?? slicePlane(image, dims, axis, slice);
       on = {
         placement,
         axis,
         slice,
-        cost: edgeCost(plane),
-        width: plane.width,
-        height: plane.height,
+        cost: edgeCost(picture),
+        width: picture.width,
+        height: picture.height,
+        plane: tilted && tiltedPicture ? { ...tilted, pixelMm: tiltedPicture.pixelMm } : null,
       };
       this.on.set(on);
+    }
+    let pixel: [number, number];
+    if (on.plane) {
+      // The pixel of the plane's picture the point is in.
+      const at = planePointMm(on.plane.span, grid.spacing, voxel);
+      if (!at) return null;
+      pixel = [Math.floor(at[0] / on.plane.pixelMm[0]), Math.floor(at[1] / on.plane.pixelMm[1])];
+    } else {
+      const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
+      pixel = [Math.round(voxel[a]), Math.round(voxel[b])];
     }
     const inside = pixel[0] >= 0 && pixel[1] >= 0 && pixel[0] < on.width && pixel[1] < on.height;
     return inside ? { on, pixel, local } : null;
   }
 
-  /** Close the path back to the first anchor, fill it on its slice, and start over. */
+  /** A tilted pane's own plane, which the path is filled on (#303): the controller keeps it. */
+  drawsOnPlane(placement: ToolPointer['placement']): PlaneSpan | null {
+    return this.brush.tiltedPlaneOf(placement)?.span ?? null;
+  }
+
+  /** Close the path back to the first anchor, fill it on its slice or its plane, and start over. */
   private close(context: ContourToolContext, on: On): void {
     const roiId = context.activeRoiId();
     const grid = context.grid();
@@ -215,7 +257,20 @@ export class LiveWireTool implements ContourTool {
     if (roiId === null || !grid || !this.tree) return;
     const back = tracePath(this.tree, first);
     const loop = [...this.fixed(), ...back.slice(1)];
-    const voxels = fillSliceLoop(grid.dims as [number, number, number], on.axis, on.slice, loop);
+    const dims = grid.dims as [number, number, number];
+    const { plane } = on;
+    const voxels = plane
+      ? fillPlaneLoop(
+          dims,
+          grid.spacing,
+          plane.span,
+          // Each pixel's middle, in mm along the plane.
+          loop.map(([u, v]): PlanePoint => [
+            (u + 0.5) * plane.pixelMm[0],
+            (v + 0.5) * plane.pixelMm[1],
+          ]),
+        )
+      : fillSliceLoop(dims, on.axis, on.slice, loop);
     const changed = voxels.length > 0 ? context.change({ kind: 'paint', roiId, voxels }) : 0;
     this.said.set(
       voxels.length === 0
@@ -228,7 +283,14 @@ export class LiveWireTool implements ContourTool {
   /** Pixels of the anchors' slice to pane pixels: affine, worked out from three points. */
   private toPane(on: On): ((point: PlanePoint) => [number, number]) | null {
     const [a, b] = ([0, 1, 2] as const).filter((one) => one !== on.axis);
+    const spacing = this.brush.voxelSpacing();
     const voxel = (u: number, v: number): Vec3 => {
+      const { plane } = on;
+      if (plane) {
+        // A pixel's middle on the plane; a span with no area made no picture.
+        const at: PlanePoint = [(u + 0.5) * plane.pixelMm[0], (v + 0.5) * plane.pixelMm[1]];
+        return planeVoxelAt(plane.span, spacing, at) ?? [0, 0, 0];
+      }
       const out: [number, number, number] = [0, 0, 0];
       out[on.axis] = on.slice;
       out[a] = u;

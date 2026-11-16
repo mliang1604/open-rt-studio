@@ -652,3 +652,90 @@ test('quick select finds the object under rough strokes, shows it, and Accept ad
   expect(await capturedColour(page)).toBeCloseTo(before, 1);
   expectNoProblems(problems);
 });
+
+/** Tilt the main pane, the axial one, by its knob: with no crosshair placed it rests in the pane's middle. */
+async function tiltMainPane(page: Page): Promise<void> {
+  // The knob is shown with the crosshairs, over the pane the pointer is on.
+  const crosshairs = page.getByRole('button', { name: /crosshairs/i });
+  if ((await crosshairs.getAttribute('aria-pressed')) !== 'true') await crosshairs.click();
+  const over = await at(page, 0.7, 0.7);
+  await page.mouse.move(over.x, over.y);
+  const knob = page.locator('[aria-label="Axial oblique tilt"]');
+  await expect(knob).toBeVisible();
+  const box = (await knob.boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 35, y + 18, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('.oblique-gizmo.active')).toHaveCount(1);
+}
+
+test('on a tilted pane, a curve of points and a live wire are filled on the pane’s own plane (#303)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.locator('[data-labs]').check();
+  const points = page.locator('[data-contour-tool="points"]');
+  // Six points round a circle, off the knob in the pane's middle; the first, clicked again, fills it.
+  const drawCurve = async (): Promise<void> => {
+    const centre = await at(page, 0.32, 0.45);
+    const round = Array.from({ length: 6 }, (_, i) => ({
+      x: centre.x + 60 * Math.cos((2 * Math.PI * i) / 6),
+      y: centre.y + 60 * Math.sin((2 * Math.PI * i) / 6),
+    }));
+    for (const point of round) await page.mouse.click(point.x, point.y);
+    await expect(page.locator('[data-points-count]')).toHaveText('6 points');
+    await page.mouse.click(round[0].x + 2, round[0].y + 1);
+    await expect(page.locator('[data-points-count]')).toHaveText('0 points');
+    await expect(page.locator('[data-points-said]')).toHaveText(/^\d+ voxels filled\.$/);
+  };
+
+  // On the pane as it is, for what the curve covers of the picture.
+  await points.click();
+  const before = await capturedColour(page);
+  await drawCurve();
+  const flat = (await capturedColour(page)) - before;
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  await points.click();
+
+  // Tilted: the same curve covers as much of the pane, where a fill of grid slices would be a stripe of it.
+  await tiltMainPane(page);
+  await points.click();
+  const beforeTilted = await capturedColour(page);
+  await drawCurve();
+  const tilted = (await capturedColour(page)) - beforeTilted;
+  expect(flat).toBeGreaterThan(1);
+  expect(tilted).toBeGreaterThan(0.7 * flat);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(beforeTilted, 1);
+
+  // The live wire, about the left lung on the image's right: each anchor on the image, which
+  // the tilt has cut off towards the pane's right.
+  await page.locator('[data-contour-tool="wire"]').click();
+  const about = await at(page, 0.64, 0.5);
+  const anchors = [
+    [-40, -50],
+    [40, -50],
+    [40, 50],
+    [-40, 50],
+  ].map(([dx, dy]) => ({ x: about.x + dx, y: about.y + dy }));
+  for (const anchor of anchors) await page.mouse.click(anchor.x, anchor.y);
+  await expect(page.locator('[data-wire-count]')).toHaveText('4 anchors');
+  // The first anchor is drawn at the middle of its pixel of the plane: clicked there, it closes the path.
+  const first = (await page.locator('[data-tool-preview-handle]').first().boundingBox())!;
+  await page.mouse.click(first.x + first.width / 2, first.y + first.height / 2);
+  await expect(page.locator('[data-wire-said]')).toHaveText(/^\d+ voxels filled\.$/);
+  const wired = (await capturedColour(page)) - beforeTilted;
+  expect(wired).toBeGreaterThan(1);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(beforeTilted, 1);
+  expectNoProblems(problems);
+});

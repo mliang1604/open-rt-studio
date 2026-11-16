@@ -12,8 +12,11 @@
 // where they are in the pane each time: zooming or panning while drawing
 // leaves them where they were set. They belong to the slice they were set
 // on (across the axis the pane steps through, as the disk brush keeps to):
-// a point set on another pane or slice starts the curve over. On an oblique
-// pane the curve fills the grid's slice nearest it.
+// a point set on another pane or slice starts the curve over.
+//
+// **On a tilted pane** (#303) the points belong to the pane's own plane, and
+// the curve is filled on it: the voxels a voxel's thickness about the plane
+// whose foot on it is within the curve, as the disc brush paints there.
 
 import {
   ChangeDetectionStrategy,
@@ -23,7 +26,17 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { closedSpline, fillSliceLoop, type PlanePoint, type Vec3 } from '@open-rt-studio/dicom';
+import {
+  closedSpline,
+  fillPlaneLoop,
+  fillSliceLoop,
+  planePointMm,
+  sameGridPlane,
+  sheetHalfMm,
+  type PlanePoint,
+  type PlaneSpan,
+  type Vec3,
+} from '@open-rt-studio/dicom';
 import { throughPlaneAxis } from '@open-rt-studio/render';
 
 import { BrushController } from '../brush-controller';
@@ -36,11 +49,15 @@ import type {
 } from './contour-tool';
 
 type MprPlacement = Extract<PanePlacement, { kind: 'mpr' }>;
+/** A tilted pane's plane, as the brush controller gives it. */
+type TiltedPlane = NonNullable<ReturnType<BrushController['tiltedPlaneOf']>>;
 
 /** How near a point, in pixels, a press takes hold of it (or, the first, closes the curve). */
 export const POINT_GRAB_PX = 8;
 /** Samples of the curve between two points, drawn and filled. */
 const PER_SEGMENT = 16;
+
+type Grid = NonNullable<ReturnType<ContourToolContext['grid']>>;
 
 /** The two axes of the grid a slice across `fixed` lies in, in order. */
 const inPlane = (fixed: 0 | 1 | 2): [number, number] =>
@@ -65,6 +82,8 @@ export class PointTool implements ContourTool {
     readonly placement: MprPlacement;
     readonly axis: 0 | 1 | 2;
     readonly slice: number;
+    /** A tilted pane's own plane (#303), which the points then belong to in place of the slice. */
+    readonly plane: TiltedPlane | null;
   } | null>(null);
   /** The point being dragged; null for none. */
   private dragging: number | null = null;
@@ -131,16 +150,18 @@ export class PointTool implements ContourTool {
     if (!voxel || !local) return;
     const axis = throughPlaneAxis(placement.orientation);
     const slice = Math.round(voxel[axis]);
+    const plane = this.brush.tiltedPlaneOf(placement);
     const on = this.on();
-    // Another pane or slice: the curve starts over there.
-    if (
-      !on ||
-      on.placement.orientation !== placement.orientation ||
-      on.placement.group !== placement.group ||
-      on.slice !== slice
-    ) {
+    // Another pane, slice or tilt: the curve starts over there.
+    const same =
+      on?.placement.orientation === placement.orientation &&
+      on.placement.group === placement.group &&
+      (plane
+        ? on.plane !== null && sameGridPlane(on.plane.stamp, plane.stamp)
+        : on.plane === null && on.slice === slice);
+    if (!on || !same) {
       this.points.set([]);
-      this.on.set({ placement, axis, slice });
+      this.on.set({ placement, axis, slice, plane });
     } else {
       this.on.set({ ...on, placement });
     }
@@ -183,18 +204,20 @@ export class PointTool implements ContourTool {
     this.dragging = null;
   }
 
-  /** Fill what the curve encloses on its slice into the structure being edited, and start over. */
+  /** A tilted pane's own plane, which the curve is filled on (#303): the controller keeps it. */
+  drawsOnPlane(placement: ToolPointer['placement']): PlaneSpan | null {
+    return this.brush.tiltedPlaneOf(placement)?.span ?? null;
+  }
+
+  /** Fill what the curve encloses on its slice, or its plane, into the structure being edited, and start over. */
   private close(context: ContourToolContext): void {
     const on = this.on();
     const grid = context.grid();
     const roiId = context.activeRoiId();
     if (!on || !grid || roiId === null) return;
-    const [a, b] = inPlane(on.axis);
-    const loop = closedSpline(
-      this.points().map((point): PlanePoint => [point[a], point[b]]),
-      PER_SEGMENT,
-    );
-    const voxels = fillSliceLoop(grid.dims as [number, number, number], on.axis, on.slice, loop);
+    const voxels = on.plane
+      ? this.onPlane(grid, on.plane.span)
+      : this.onGridSlice(grid, on.axis, on.slice);
     const changed = voxels.length > 0 ? context.change({ kind: 'paint', roiId, voxels }) : 0;
     this.said.set(
       voxels.length === 0
@@ -204,18 +227,41 @@ export class PointTool implements ContourTool {
     this.startOver();
   }
 
-  /** A voxel moved onto the slice the points belong to. */
+  /** The voxels within the curve on a slice of the grid. */
+  private onGridSlice(grid: Grid, axis: 0 | 1 | 2, slice: number): number[] {
+    const [a, b] = inPlane(axis);
+    const loop = closedSpline(
+      this.points().map((point): PlanePoint => [point[a], point[b]]),
+      PER_SEGMENT,
+    );
+    return fillSliceLoop(grid.dims as [number, number, number], axis, slice, loop);
+  }
+
+  /** The voxels within the curve on a tilted plane: the curve in mm along the plane, as the pane shows it. */
+  private onPlane(grid: Grid, span: PlaneSpan): number[] {
+    const points = this.points().map((point) => planePointMm(span, grid.spacing, point));
+    if (points.some((point) => !point)) return [];
+    const loop = closedSpline(points as PlanePoint[], PER_SEGMENT);
+    return fillPlaneLoop(grid.dims as [number, number, number], grid.spacing, span, loop);
+  }
+
+  /** A voxel moved onto the slice the points belong to; on a tilted plane it is where it was set. */
   private onSlice(voxel: Vec3): Vec3 {
     const on = this.on();
-    if (!on) return voxel;
+    if (!on || on.plane) return voxel;
     const out: [number, number, number] = [voxel[0], voxel[1], voxel[2]];
     out[on.axis] = on.slice;
     return out;
   }
 
-  /** Half a slice's thickness in mm, along the axis the points' slice is across. */
-  private halfSliceMm(on: { readonly axis: 0 | 1 | 2 }): number {
-    return Math.max(this.brush.voxelSpacing()[on.axis] / 2, 0.01) + 1e-6;
+  /** Half a slice's thickness in mm, along the axis the points' slice is across; or half a voxel's across their plane. */
+  private halfSliceMm(on: {
+    readonly axis: 0 | 1 | 2;
+    readonly plane: TiltedPlane | null;
+  }): number {
+    const spacing = this.brush.voxelSpacing();
+    const half = on.plane ? sheetHalfMm(on.plane.stamp.normal, spacing) : spacing[on.axis] / 2;
+    return Math.max(half, 0.01) + 1e-6;
   }
 }
 

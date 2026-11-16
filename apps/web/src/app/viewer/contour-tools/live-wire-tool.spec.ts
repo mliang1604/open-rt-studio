@@ -2,10 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Orientation, labelIndex } from '@open-rt-studio/dicom';
+import { Orientation, labelIndex, sheetHalfMm } from '@open-rt-studio/dicom';
+import { NO_OBLIQUE } from '@open-rt-studio/render';
 
-import { AXIAL_MID, pointer, setup } from '../brush-testing';
+import { AXIAL_MID, pointer, setup, type ImageFormula, type Obliques } from '../brush-testing';
+import type { PerOrientationOblique } from '../viewer-overlays';
 import { LiveWireOptions, LiveWireTool } from './live-wire-tool';
 
 // The 4 × 4 × 4 test image under a 100-pixel axial pane of slice 2: the middle
@@ -23,8 +26,8 @@ describe('LiveWireTool (#118)', () => {
     }
   });
 
-  function holding() {
-    const made = setup(undefined, BLOCK);
+  function holding(obliques?: Obliques, image: ImageFormula = BLOCK) {
+    const made = setup(undefined, image, [], [2, 2, 2], obliques);
     made.tools.setLabs(true);
     made.tools.toggle('wire');
     const label = made.store.labelVolume()!;
@@ -85,5 +88,56 @@ describe('LiveWireTool (#118)', () => {
     fixture.detectChanges();
     expect(tool.anchors()).toEqual([]);
     expect(tools.preview()).toBeNull();
+  });
+  // The axial pane tilted about its horizontal axis.
+  const TILTED: PerOrientationOblique = [{ tiltU: 0.6, tiltV: 0 }, NO_OBLIQUE, NO_OBLIQUE];
+
+  it('searches and fills on a tilted pane’s own plane, and keeps the plane (#303)', () => {
+    // A flat image: with no edge to keep to, the path between anchors is straight.
+    const { press, tool, tools, has, label, brush, roiId } = holding(TILTED, () => 0);
+    press(0, 0);
+    // The anchor is drawn at the middle of the pixel of the plane's picture it was set in.
+    const first = tools.preview()!.handles![0];
+    expect(Math.hypot(first.x - PX[0], first.y - PX[0])).toBeLessThan(18);
+    tools.hover(AXIAL_MID, pointer(PX[3], PX[0]));
+    expect(tools.preview()!.curve).toContain('L');
+    press(3, 0);
+    press(3, 3);
+    press(0, 3);
+    expect(tool.anchors()).toHaveLength(4);
+    expect(has()).toEqual([]);
+    tools.begin(AXIAL_MID, pointer(first.x, first.y));
+    tools.end();
+    const filled = has();
+    const { span, stamp } = brush.tiltedPlaneOf(AXIAL_MID)!;
+    const half = sheetHalfMm(stamp.normal, label.spacing);
+    // Twelve voxels, on three slices of the grid: a slice fill would be on one.
+    expect(filled).toHaveLength(12);
+    expect(new Set(filled.map((i) => Math.floor(i / 16))).size).toBe(3);
+    for (const index of filled) {
+      const voxel = [index % 4, Math.floor(index / 4) % 4, Math.floor(index / 16)] as const;
+      const off =
+        stamp.normal[0] * voxel[0] + stamp.normal[1] * voxel[1] + stamp.normal[2] * voxel[2];
+      expect(Math.abs(off - stamp.offsetMm)).toBeLessThanOrEqual(half + 1e-9);
+    }
+    expect(tool.said()).toBe(`${filled.length} voxels filled.`);
+    expect(tools.drawnSlices(roiId)).toEqual([{ kind: 'plane', span }]);
+    expect(tools.nextUndo()).toBe('Live wire');
+    tools.undo();
+    expect(has()).toEqual([]);
+  });
+
+  it('starts over when the pane is tilted otherwise', () => {
+    const obliques = signal<PerOrientationOblique>(TILTED);
+    const { press, tool } = holding(obliques);
+    press(0, 0);
+    press(3, 0);
+    expect(tool.anchors()).toHaveLength(2);
+    obliques.set([{ tiltU: 0.3, tiltV: 0 }, NO_OBLIQUE, NO_OBLIQUE]);
+    press(3, 3);
+    expect(tool.anchors()).toHaveLength(1);
+    obliques.set([NO_OBLIQUE, NO_OBLIQUE, NO_OBLIQUE]);
+    press(0, 3);
+    expect(tool.anchors()).toHaveLength(1);
   });
 });

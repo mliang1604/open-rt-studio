@@ -5,6 +5,7 @@
 import { Injectable, computed, inject, signal, type Signal } from '@angular/core';
 import {
   Orientation,
+  gridPlaneOf,
   patientToVoxel,
   voxelToPatient,
   type PlaneSpan,
@@ -420,20 +421,9 @@ export class BrushController {
     const [alongU, alongV] = [toward(frame.alongU), toward(frame.alongV)];
     if (!origin || !alongU || !alongV) return null;
     // In mm of the grid: the plane's normal, and how far along it the plane lies.
-    const sp = volume.spacing;
-    const u = [alongU[0] * sp[0], alongU[1] * sp[1], alongU[2] * sp[2]];
-    const v = [alongV[0] * sp[0], alongV[1] * sp[1], alongV[2] * sp[2]];
-    const cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
-    const length = Math.hypot(cross[0], cross[1], cross[2]);
-    if (!(length > 0)) return null;
-    const normal: [number, number, number] = [
-      cross[0] / length,
-      cross[1] / length,
-      cross[2] / length,
-    ];
-    const offsetMm =
-      normal[0] * origin[0] * sp[0] + normal[1] * origin[1] * sp[1] + normal[2] * origin[2] * sp[2];
-    return { span: { origin, alongU, alongV }, stamp: { normal, offsetMm } };
+    const span: PlaneSpan = { origin, alongU, alongV };
+    const stamp = gridPlaneOf(span, volume.spacing);
+    return stamp ? { span, stamp } : null;
   }
 
   /**
