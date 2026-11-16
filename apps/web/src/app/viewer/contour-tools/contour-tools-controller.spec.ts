@@ -4,8 +4,10 @@
 
 import { TestBed } from '@angular/core/testing';
 import { Orientation, labelIndex, type Roi } from '@open-rt-studio/dicom';
+import { NO_OBLIQUE } from '@open-rt-studio/render';
 
 import { AXIAL_MID, makeVolume, pointer, setup } from '../brush-testing';
+import type { PerOrientationOblique } from '../viewer-overlays';
 import { CONTOUR_TOOLS } from './contour-tool';
 import { SampleTool } from './sample-tool';
 
@@ -70,17 +72,47 @@ describe('ContourToolsController (#106)', () => {
     const { tools, store, roi } = painting();
     drag(tools);
     drag(tools);
-    expect(tools.drawnSlices(roi.id)).toEqual([{ axis: 2, slice: 2 }]);
+    expect(tools.drawnSlices(roi.id)).toEqual([{ kind: 'slice', axis: 2, slice: 2 }]);
     // A stroke on the coronal pane paints across y.
     tools.begin({ ...AXIAL_MID, orientation: Orientation.Coronal }, pointer(50, 50));
     tools.end();
     expect(tools.drawnSlices(roi.id)).toEqual([
-      { axis: 2, slice: 2 },
-      { axis: 1, slice: 2 },
+      { kind: 'slice', axis: 2, slice: 2 },
+      { kind: 'slice', axis: 1, slice: 2 },
     ]);
     expect(tools.drawnSlices(store.createRoi().id)).toEqual([]);
     store.resetForLoad(makeVolume());
     expect(tools.drawnSlices(roi.id)).toEqual([]);
+  });
+
+  it('paints a disc on a tilted pane’s own plane with the labs flag on, and keeps the plane (#303)', () => {
+    // The axial pane tilted about its horizontal axis.
+    const tilted: PerOrientationOblique = [{ tiltU: 0.6, tiltV: 0 }, NO_OBLIQUE, NO_OBLIQUE];
+    const stamp = (labs: boolean) => {
+      const made = setup(undefined, undefined, [], [2, 2, 2], tilted);
+      made.tools.setLabs(labs);
+      const roi = made.store.createRoi();
+      made.brush.activeRoiId.set(roi.id);
+      made.brush.mode.set('paint');
+      made.brush.shape.set('disk');
+      made.brush.radiusMm.set(1.5);
+      made.tools.begin(AXIAL_MID, pointer(50, 50));
+      made.tools.end();
+      const label = made.store.labelVolume()!;
+      const slices = new Set<number>();
+      label.data.forEach((v, i) => {
+        if (v === roi.id) slices.add(Math.floor(i / (label.dims[0] * label.dims[1])));
+      });
+      const drawn = made.tools.drawnSlices(roi.id);
+      TestBed.resetTestingModule();
+      return { slices: slices.size, drawn };
+    };
+    const off = stamp(false);
+    expect(off.slices).toBe(1);
+    expect(off.drawn.map((one) => one.kind)).toEqual(['slice']);
+    const on = stamp(true);
+    expect(on.slices).toBeGreaterThan(1);
+    expect(on.drawn.map((one) => one.kind)).toEqual(['plane']);
   });
 
   it('puts back a stroke that is cancelled, and keeps nothing of it to undo', () => {

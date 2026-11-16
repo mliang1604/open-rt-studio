@@ -101,6 +101,45 @@ describe('stampVoxels (disk)', () => {
     expect(disk.length).toBeLessThan(sphere.length); // a slice, not a ball
     expect(disk.map((i) => unflatten(i, dims)).every(([, , z]) => z === 4)).toBe(true);
   });
+
+  it('lies on a tilted pane’s plane: a sheet a voxel thick, the slice itself when the plane is one (#303)', () => {
+    const dims: VoxelIndex = [21, 21, 21];
+    const centre: VoxelIndex = [10, 10, 10];
+    const flat = stampVoxels(dims, [1, 1, 1], centre, { shape: 'disk', radiusMm: 6, axis: 2 });
+    const onAxialPlane = stampVoxels(dims, [1, 1, 1], centre, {
+      shape: 'disk',
+      radiusMm: 6,
+      plane: { normal: [0, 0, 1], offsetMm: 10 },
+    });
+    expect(onAxialPlane.sort((a, b) => a - b)).toEqual(flat.sort((a, b) => a - b));
+
+    // A plane tilted 30° about x through the centre, on 1 × 1 × 2 mm voxels.
+    const spacing: VoxelIndex = [1, 1, 2];
+    const [c, s] = [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6)];
+    const normal: [number, number, number] = [0, -s, c];
+    const offsetMm = normal[1] * 10 + normal[2] * 20;
+    const tilted = stampVoxels(dims, spacing, centre, {
+      shape: 'disk',
+      radiusMm: 6,
+      plane: { normal, offsetMm },
+    });
+    const half = 0.5 * (s * 1 + c * 2);
+    const off = ([, y, z]: VoxelIndex) => normal[1] * y + normal[2] * z * 2 - offsetMm;
+    expect(tilted.map((i) => unflatten(i, dims)).every((v) => Math.abs(off(v)) <= half)).toBe(true);
+    // Every column across it holds a voxel of it within the radius: no holes.
+    for (let x = 6; x <= 14; x++) {
+      for (let y = 7; y <= 13; y++) {
+        const z = Math.round((offsetMm - normal[1] * y) / (normal[2] * 2));
+        const r = Math.hypot(x - 10, y - 10, (z - 10) * 2);
+        if (r > 5) continue;
+        const column = tilted
+          .map((i) => unflatten(i, dims))
+          .filter(([vx, vy]) => vx === x && vy === y);
+        expect(column.length).toBeGreaterThan(0);
+      }
+    }
+    expect(tilted.length).toBeGreaterThan(flat.length * 0.5);
+  });
 });
 
 describe('strokeCenters', () => {

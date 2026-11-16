@@ -8,6 +8,7 @@ import {
   type LabelChange,
   type LabelConstraints,
   type LabelVolume,
+  type PlaneSpan,
 } from '@open-rt-studio/dicom';
 import { throughPlaneAxis } from '@open-rt-studio/render';
 
@@ -27,9 +28,19 @@ type MprPlacement = Extract<PanePlacement, { kind: 'mpr' }>;
 
 /** A slice of the label grid: across `axis`, at `slice`. */
 export interface DrawnSlice {
+  readonly kind: 'slice';
   readonly axis: 0 | 1 | 2;
   readonly slice: number;
 }
+
+/** A tilted plane a tool drew on (#303), as a span of the grid in voxels. */
+export interface DrawnPlane {
+  readonly kind: 'plane';
+  readonly span: PlaneSpan;
+}
+
+/** Where a structure was drawn: a slice of the grid, or a tilted plane. */
+export type Drawn = DrawnSlice | DrawnPlane;
 
 /**
  * Runs the contouring tools (#106): which is in hand, its stroke as one edit
@@ -109,35 +120,43 @@ export class ContourToolsController {
   private stroking: ContourTool | null = null;
 
   /**
-   * The slices strokes painted (#302), for each structure, by a key of the
-   * slice; kept for the label grid they were drawn on, and forgotten when
-   * another is loaded. A tool draws across the grid axis of its pane's
-   * orientation, at the voxel under the pointer: on a tilted pane, a stroke
-   * paints grid slices, and may cross several.
+   * Where strokes painted (#302), for each structure, by a key; kept for
+   * the label grid they were drawn on, and forgotten when another is
+   * loaded. A tool draws across the grid axis of its pane's orientation, at
+   * the voxel under the pointer: on a tilted pane, a stroke paints grid
+   * slices, and may cross several; unless it draws on the pane's own plane
+   * (#303), which is kept.
    */
   private drawn: {
     readonly label: LabelVolume | null;
-    readonly slices: Map<number, Map<string, DrawnSlice>>;
+    readonly slices: Map<number, Map<string, Drawn>>;
   } = { label: null, slices: new Map() };
 
-  /** The slices a structure was drawn on with the tools (#302); none for another grid. */
-  drawnSlices(roiId: number): DrawnSlice[] {
+  /** Where a structure was drawn with the tools (#302, #303); nothing for another grid. */
+  drawnSlices(roiId: number): Drawn[] {
     const label = this.store.labelVolume();
     if (!label || this.drawn.label !== label) return [];
     return [...(this.drawn.slices.get(roiId)?.values() ?? [])];
   }
 
-  /** Keep the slice a stroke paints under the pointer, for the structure being edited. */
-  private recordSlice(pointer: ToolPointer): void {
+  /** Keep where a stroke paints under the pointer, for the structure being edited. */
+  private recordSlice(tool: ContourTool, pointer: ToolPointer): void {
     const label = this.store.labelVolume();
     const roiId = this.brush.activeRoiId();
     const voxel = this.brush.voxelAt(pointer.placement, pointer.event);
     if (!label || roiId === null || !voxel) return;
     if (this.drawn.label !== label) this.drawn = { label, slices: new Map() };
-    const axis = throughPlaneAxis(pointer.placement.orientation);
-    const slice = voxel[axis];
-    const slices = this.drawn.slices.get(roiId) ?? new Map<string, DrawnSlice>();
-    slices.set(`${axis}:${slice}`, { axis, slice });
+    const slices = this.drawn.slices.get(roiId) ?? new Map<string, Drawn>();
+    const span = tool.drawsOnPlane?.(pointer.placement) ?? null;
+    if (span) {
+      const key = [...span.origin, ...span.alongU, ...span.alongV]
+        .map((v) => v.toFixed(3))
+        .join(',');
+      slices.set(`plane:${key}`, { kind: 'plane', span });
+    } else {
+      const axis = throughPlaneAxis(pointer.placement.orientation);
+      slices.set(`${axis}:${voxel[axis]}`, { kind: 'slice', axis, slice: voxel[axis] });
+    }
     this.drawn.slices.set(roiId, slices);
   }
 
@@ -199,7 +218,7 @@ export class ContourToolsController {
     this.store.beginEdit(tool.editName());
     this.stroking = tool;
     tool.begin(this.context, { placement, event });
-    this.recordSlice({ placement, event });
+    this.recordSlice(tool, { placement, event });
     // What the edit is, the tool may know only now: a push in or out (#117).
     this.store.renameEdit(tool.editName());
   }
@@ -208,7 +227,7 @@ export class ContourToolsController {
   extend(placement: MprPlacement, event: PointerEvent): void {
     if (!this.stroking) return;
     this.stroking.extend(this.context, { placement, event });
-    this.recordSlice({ placement, event });
+    this.recordSlice(this.stroking, { placement, event });
   }
 
   /** The pointer came up: the edit is committed, and can be undone. */

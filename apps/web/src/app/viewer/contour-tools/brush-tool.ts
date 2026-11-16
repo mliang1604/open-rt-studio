@@ -9,9 +9,10 @@
 // constraints apply and a stroke is one undo.
 
 import { Injectable, computed, inject, signal } from '@angular/core';
-import type { Orientation } from '@open-rt-studio/dicom';
+import type { PlaneSpan } from '@open-rt-studio/dicom';
 import { strokeVoxels, throughPlaneAxis, type VoxelIndex } from '@open-rt-studio/render';
 
+import { PreferencesStore } from '../../preferences-store';
 import { BrushController, MAX_BRUSH_MM } from '../brush-controller';
 import { sectionRadiusMm } from './sphere-section';
 import type {
@@ -24,6 +25,7 @@ import type {
 @Injectable()
 export class BrushTool implements ContourTool {
   private readonly brush = inject(BrushController);
+  private readonly preferences = inject(PreferencesStore);
 
   readonly id = 'brush';
   readonly name = 'Brush';
@@ -81,7 +83,7 @@ export class BrushTool implements ContourTool {
   begin(context: ContourToolContext, pointer: ToolPointer): void {
     const voxel = context.voxelAt(pointer);
     this.last = voxel;
-    if (voxel) this.stroke(context, pointer.placement.orientation, voxel, voxel);
+    if (voxel) this.stroke(context, pointer.placement, voxel, voxel);
     this.hover(context, pointer);
   }
 
@@ -90,7 +92,7 @@ export class BrushTool implements ContourTool {
     const voxel = context.voxelAt(pointer);
     if (!voxel) return;
     // From where the stroke was, so that a fast drag leaves no gaps.
-    this.stroke(context, pointer.placement.orientation, this.last ?? voxel, voxel);
+    this.stroke(context, pointer.placement, this.last ?? voxel, voxel);
     this.last = voxel;
   }
 
@@ -120,19 +122,34 @@ export class BrushTool implements ContourTool {
     this.at.set({ rect: pointer.placement.rect, x: local.x, y: local.y, mmPerPixel, sections });
   }
 
+  /**
+   * The disc on a tilted pane, with the labs flag on, lies on the pane's
+   * plane (#303); elsewhere, and the sphere, as before.
+   */
+  drawsOnPlane(placement: ToolPointer['placement']): PlaneSpan | null {
+    return this.tilted(placement)?.span ?? null;
+  }
+
+  private tilted(placement: ToolPointer['placement']) {
+    if (this.brush.shape() !== 'disk' || !this.preferences.preferences().labsTools) return null;
+    return this.brush.tiltedPlaneOf(placement);
+  }
+
   /** Paint or erase every voxel the brush covers from `from` to `to`. */
   private stroke(
     context: ContourToolContext,
-    orientation: Orientation,
+    placement: ToolPointer['placement'],
     from: VoxelIndex,
     to: VoxelIndex,
   ): void {
     const grid = context.grid();
     if (!grid) return;
+    const plane = this.tilted(placement)?.stamp;
     const voxels = strokeVoxels(grid.dims, grid.spacing, from, to, {
       shape: this.brush.shape(),
       radiusMm: this.brush.radiusMm(),
-      axis: throughPlaneAxis(orientation),
+      axis: throughPlaneAxis(placement.orientation),
+      ...(plane ? { plane } : {}),
     });
     if (voxels.length === 0) return;
     if (this.brush.mode() === 'paint') {

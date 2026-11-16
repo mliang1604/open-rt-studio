@@ -127,8 +127,9 @@ and is settled to the image afterwards if asked.
   are what is kept.
 - **Outlines on any plane** in the core (`PlaneOutline`, `sectionOf`): the
   tilted ellipsoid from three oblique sections near its middle gave 0.955.
-  No tool yet draws on a tilted plane itself, so the viewer does not use
-  them.
+  With the labs flag on, the disc brush on a tilted pane draws on its plane
+  (#303), and the fit takes the structure's section there; the other tools
+  still draw on grid slices.
 - **More sections are not always better.** Axial 19, 25 and 31 with a
   sagittal and a coronal section gave 0.977, against 0.973 for the fullest
   of each axis; without the coronal, 0.968 against 0.975: beyond the

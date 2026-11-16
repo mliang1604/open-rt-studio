@@ -7,12 +7,14 @@ import {
   Orientation,
   patientToVoxel,
   voxelToPatient,
+  type PlaneSpan,
   type Series,
   type Vec3,
   type Volume,
 } from '@open-rt-studio/dicom';
 import {
   cursorVoxel,
+  isOblique,
   probeVoxel,
   mmPerScreenPixel,
   planeExtentMm,
@@ -20,6 +22,7 @@ import {
   planeToPanePoint,
   resolveGeometry,
   type BrushShape,
+  type StampPlane,
   type VoxelIndex,
 } from '@open-rt-studio/render';
 import { EditableStructuresStore } from './editable-structures-store';
@@ -388,6 +391,49 @@ export class BrushController {
       d.pans()[orientation],
       d.obliques()[orientation],
     );
+  }
+
+  /**
+   * The plane a tilted MPR pane shows (#303): as a span of the grid, in
+   * voxels, from the plane frame the shader and the probe go by; and as a
+   * normal and offset in mm of the grid, for a brush stamp. Null for a pane
+   * that is not tilted, or before an image.
+   */
+  tiltedPlaneOf(
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+  ): { readonly span: PlaneSpan; readonly stamp: StampPlane } | null {
+    const d = this.deps;
+    const volume = d?.volume();
+    const o = placement.orientation;
+    if (!d || !volume || !isOblique(d.obliques()[o])) return null;
+    const frame = planeFrame(volume, o, d.sliceIndices()[o], d.obliques()[o]);
+    const geometry = resolveGeometry(volume);
+    const origin = patientToVoxel(geometry, frame.origin);
+    const toward = (along: Vec3): Vec3 | null => {
+      const end = patientToVoxel(geometry, [
+        frame.origin[0] + along[0],
+        frame.origin[1] + along[1],
+        frame.origin[2] + along[2],
+      ]);
+      return origin && end ? [end[0] - origin[0], end[1] - origin[1], end[2] - origin[2]] : null;
+    };
+    const [alongU, alongV] = [toward(frame.alongU), toward(frame.alongV)];
+    if (!origin || !alongU || !alongV) return null;
+    // In mm of the grid: the plane's normal, and how far along it the plane lies.
+    const sp = volume.spacing;
+    const u = [alongU[0] * sp[0], alongU[1] * sp[1], alongU[2] * sp[2]];
+    const v = [alongV[0] * sp[0], alongV[1] * sp[1], alongV[2] * sp[2]];
+    const cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const length = Math.hypot(cross[0], cross[1], cross[2]);
+    if (!(length > 0)) return null;
+    const normal: [number, number, number] = [
+      cross[0] / length,
+      cross[1] / length,
+      cross[2] / length,
+    ];
+    const offsetMm =
+      normal[0] * origin[0] * sp[0] + normal[1] * origin[1] * sp[1] + normal[2] * origin[2] * sp[2];
+    return { span: { origin, alongU, alongV }, stamp: { normal, offsetMm } };
   }
 
   /**

@@ -10,6 +10,7 @@
 export { type AxisIndicatorOverlay, axisIndicatorGeometry } from './axis-indicator.js';
 export {
   type BrushShape,
+  type StampPlane,
   type VoxelIndex,
   cursorVoxel,
   strokeVoxels,

@@ -22,7 +22,7 @@
 // A tool is added in one file and one line of `contour-tools.ts`.
 
 import { InjectionToken, type Signal, type Type } from '@angular/core';
-import type { LabelChange, SliceMask } from '@open-rt-studio/dicom';
+import type { LabelChange, PlaneSpan, SliceMask } from '@open-rt-studio/dicom';
 import type { VoxelIndex } from '@open-rt-studio/render';
 
 import type { PanePlacement } from '../pane-placement';
@@ -130,6 +130,13 @@ export interface ContourTool {
   readonly preview: Signal<ToolPreviewCircle | null> | null;
   /** The pointer moved over a pane with no button down, or left (null). */
   hover?(context: ContourToolContext, pointer: ToolPointer | null): void;
+  /**
+   * The tilted plane a stroke on this pane paints on, as a span of the grid
+   * in voxels (#303); null, or left out, for a tool that paints across the
+   * grid axis of the pane's orientation, as every tool does on a pane that is
+   * not tilted. The controller keeps what was drawn by it (#302).
+   */
+  drawsOnPlane?(placement: ToolPointer['placement']): PlaneSpan | null;
 }
 
 /** Every contouring tool there is: given by `CONTOUR_TOOL_PROVIDERS`. */
