@@ -3,7 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { sliceMask, type LabelChange, type LabelConstraints } from '@open-rt-studio/dicom';
+import {
+  sliceMask,
+  type LabelChange,
+  type LabelConstraints,
+  type LabelVolume,
+} from '@open-rt-studio/dicom';
+import { throughPlaneAxis } from '@open-rt-studio/render';
 
 import { PreferencesStore } from '../../preferences-store';
 import { BrushController } from '../brush-controller';
@@ -18,6 +24,12 @@ import {
 } from './contour-tool';
 
 type MprPlacement = Extract<PanePlacement, { kind: 'mpr' }>;
+
+/** A slice of the label grid: across `axis`, at `slice`. */
+export interface DrawnSlice {
+  readonly axis: 0 | 1 | 2;
+  readonly slice: number;
+}
 
 /**
  * Runs the contouring tools (#106): which is in hand, its stroke as one edit
@@ -96,6 +108,39 @@ export class ContourToolsController {
   /** The tool whose stroke is under way. */
   private stroking: ContourTool | null = null;
 
+  /**
+   * The slices strokes painted (#302), for each structure, by a key of the
+   * slice; kept for the label grid they were drawn on, and forgotten when
+   * another is loaded. A tool draws across the grid axis of its pane's
+   * orientation, at the voxel under the pointer: on a tilted pane, a stroke
+   * paints grid slices, and may cross several.
+   */
+  private drawn: {
+    readonly label: LabelVolume | null;
+    readonly slices: Map<number, Map<string, DrawnSlice>>;
+  } = { label: null, slices: new Map() };
+
+  /** The slices a structure was drawn on with the tools (#302); none for another grid. */
+  drawnSlices(roiId: number): DrawnSlice[] {
+    const label = this.store.labelVolume();
+    if (!label || this.drawn.label !== label) return [];
+    return [...(this.drawn.slices.get(roiId)?.values() ?? [])];
+  }
+
+  /** Keep the slice a stroke paints under the pointer, for the structure being edited. */
+  private recordSlice(pointer: ToolPointer): void {
+    const label = this.store.labelVolume();
+    const roiId = this.brush.activeRoiId();
+    const voxel = this.brush.voxelAt(pointer.placement, pointer.event);
+    if (!label || roiId === null || !voxel) return;
+    if (this.drawn.label !== label) this.drawn = { label, slices: new Map() };
+    const axis = throughPlaneAxis(pointer.placement.orientation);
+    const slice = voxel[axis];
+    const slices = this.drawn.slices.get(roiId) ?? new Map<string, DrawnSlice>();
+    slices.set(`${axis}:${slice}`, { axis, slice });
+    this.drawn.slices.set(roiId, slices);
+  }
+
   /** What a tool sees and does. */
   private readonly context: ContourToolContext = {
     voxelAt: (pointer) => this.brush.voxelAt(pointer.placement, pointer.event),
@@ -154,13 +199,16 @@ export class ContourToolsController {
     this.store.beginEdit(tool.editName());
     this.stroking = tool;
     tool.begin(this.context, { placement, event });
+    this.recordSlice({ placement, event });
     // What the edit is, the tool may know only now: a push in or out (#117).
     this.store.renameEdit(tool.editName());
   }
 
   /** The pointer moved with its button down. */
   extend(placement: MprPlacement, event: PointerEvent): void {
-    this.stroking?.extend(this.context, { placement, event });
+    if (!this.stroking) return;
+    this.stroking.extend(this.context, { placement, event });
+    this.recordSlice({ placement, event });
   }
 
   /** The pointer came up: the edit is committed, and can be undone. */

@@ -5,7 +5,7 @@
 import { TestBed } from '@angular/core/testing';
 import { Orientation, labelIndex, type Roi } from '@open-rt-studio/dicom';
 
-import { AXIAL_MID, pointer, setup } from '../brush-testing';
+import { AXIAL_MID, makeVolume, pointer, setup } from '../brush-testing';
 import { CONTOUR_TOOLS } from './contour-tool';
 import { SampleTool } from './sample-tool';
 
@@ -64,6 +64,23 @@ describe('ContourToolsController (#106)', () => {
     expect(tools.undo()).toBeNull();
     tools.end();
     expect(tools.nextUndo()).toBe('Erase');
+  });
+
+  it('keeps the slices a structure was drawn on, once each, until another image is loaded (#302)', () => {
+    const { tools, store, roi } = painting();
+    drag(tools);
+    drag(tools);
+    expect(tools.drawnSlices(roi.id)).toEqual([{ axis: 2, slice: 2 }]);
+    // A stroke on the coronal pane paints across y.
+    tools.begin({ ...AXIAL_MID, orientation: Orientation.Coronal }, pointer(50, 50));
+    tools.end();
+    expect(tools.drawnSlices(roi.id)).toEqual([
+      { axis: 2, slice: 2 },
+      { axis: 1, slice: 2 },
+    ]);
+    expect(tools.drawnSlices(store.createRoi().id)).toEqual([]);
+    store.resetForLoad(makeVolume());
+    expect(tools.drawnSlices(roi.id)).toEqual([]);
   });
 
   it('puts back a stroke that is cancelled, and keeps nothing of it to undo', () => {
