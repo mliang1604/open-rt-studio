@@ -3,9 +3,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject, signal, type Signal } from '@angular/core';
-import { Orientation, voxelToPatient, type Series, type Volume } from '@open-rt-studio/dicom';
+import {
+  Orientation,
+  patientToVoxel,
+  voxelToPatient,
+  type Series,
+  type Vec3,
+  type Volume,
+} from '@open-rt-studio/dicom';
 import {
   cursorVoxel,
+  probeVoxel,
   mmPerScreenPixel,
   planeExtentMm,
   planeFrame,
@@ -380,6 +388,72 @@ export class BrushController {
       d.pans()[orientation],
       d.obliques()[orientation],
     );
+  }
+
+  /**
+   * The continuous voxel of the grid at a point of the canvas over an MPR
+   * pane (#114): where in the volume the point is, not rounded to a voxel.
+   */
+  continuousVoxelAtCanvas(
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    x: number,
+    y: number,
+  ): Vec3 | null {
+    const d = this.deps;
+    const volume = d?.volume();
+    if (!d || !volume) return null;
+    const o = placement.orientation;
+    const probe = probeVoxel(
+      volume,
+      o,
+      d.sliceIndices()[o],
+      d.zooms()[o],
+      placement.rect,
+      x,
+      y,
+      o === Orientation.Sagittal && d.sagittalFlipped(),
+      d.pans()[o],
+      d.obliques()[o],
+    );
+    return probe ? patientToVoxel(resolveGeometry(volume), probe.patient) : null;
+  }
+
+  /**
+   * Where a continuous voxel is in a pane, in pixels from the pane's corner,
+   * and how far it is from the pane's plane in mm (#114): what is drawn of
+   * points kept in the volume, wherever the pane has been zoomed or panned to.
+   */
+  paneLocalOfVoxel(
+    placement: Extract<PanePlacement, { kind: 'mpr' }>,
+    voxel: Vec3,
+  ): { readonly x: number; readonly y: number; readonly offPlaneMm: number } | null {
+    const d = this.deps;
+    const volume = d?.volume();
+    if (!d || !volume) return null;
+    const o = placement.orientation;
+    const frame = planeFrame(volume, o, d.sliceIndices()[o], d.obliques()[o]);
+    const section = sphereSection(voxelToPatient(resolveGeometry(volume), voxel), Infinity, frame);
+    if (!section) return null;
+    const at = planeToPanePoint(
+      volume,
+      o,
+      section.u,
+      section.v,
+      d.zooms()[o],
+      placement.rect,
+      o === Orientation.Sagittal && d.sagittalFlipped(),
+      d.pans()[o],
+    );
+    return {
+      x: at.x - placement.rect.x,
+      y: at.y - placement.rect.y,
+      offPlaneMm: section.distanceMm,
+    };
+  }
+
+  /** The spacing of the grid's voxels, in mm along each axis; [1, 1, 1] before an image. */
+  voxelSpacing(): readonly [number, number, number] {
+    return this.deps?.volume()?.spacing ?? [1, 1, 1];
   }
 
   /** Ensure an ROI is selected to paint into, picking the first or creating one. */

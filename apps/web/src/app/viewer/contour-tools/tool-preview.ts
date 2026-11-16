@@ -23,8 +23,24 @@ import type { ToolPreviewCircle } from './contour-tool';
         @if (p.fill) {
           <path class="fill" data-tool-preview-fill [attr.d]="p.fill" />
         }
-        <circle class="outer" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
-        <circle class="inner" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
+        @if (p.curve) {
+          <path class="curve-under" [attr.d]="p.curve" />
+          <path class="curve" data-tool-preview-curve [attr.d]="p.curve" />
+        }
+        @for (h of p.handles ?? []; track $index) {
+          <circle
+            class="handle"
+            [class.first]="h.first"
+            data-tool-preview-handle
+            [attr.cx]="h.x"
+            [attr.cy]="h.y"
+            r="4"
+          />
+        }
+        @if (p.radiusPx > 0) {
+          <circle class="outer" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
+          <circle class="inner" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.radiusPx" />
+        }
       </svg>
       <!-- Where it reaches on the other panes: dashed, a cut and not the brush itself. -->
       @for (o of p.others ?? []; track $index) {
@@ -67,6 +83,28 @@ import type { ToolPreviewCircle } from './contour-tool';
     }
     .section {
       stroke-dasharray: 4 3;
+    }
+    /* A curve being drawn: light over dark, like the outline. */
+    .curve-under {
+      fill: none;
+      stroke: rgba(0, 0, 0, 0.6);
+      stroke-width: 3;
+    }
+    .curve {
+      fill: none;
+      stroke: rgba(255, 200, 60, 0.95);
+      stroke-width: 1.5;
+    }
+    .handle {
+      fill: rgba(255, 200, 60, 0.95);
+      stroke: rgba(0, 0, 0, 0.7);
+      stroke-width: 1;
+    }
+    /* The first point closes the curve: larger, hollow. */
+    .handle.first {
+      fill: none;
+      stroke: rgba(255, 200, 60, 0.95);
+      stroke-width: 2;
     }
   `,
 })

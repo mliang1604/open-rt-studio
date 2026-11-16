@@ -354,3 +354,32 @@ test('the magic wand selects the region clicked, as one undo (#109)', async ({ p
   expect(await capturedColour(page)).toBeCloseTo(before, 1);
   expectNoProblems(problems);
 });
+
+test('points set on a pane are drawn as a smooth curve, and clicking the first fills it, as one undo (#114)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  const before = await capturedColour(page);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="points"]').click();
+  // Six points round a circle, off the knob at the crosshair's centre.
+  const centre = await at(page, 0.35, 0.4);
+  const points = Array.from({ length: 6 }, (_, i) => ({
+    x: centre.x + 50 * Math.cos((2 * Math.PI * i) / 6),
+    y: centre.y + 50 * Math.sin((2 * Math.PI * i) / 6),
+  }));
+  for (const point of points) await page.mouse.click(point.x, point.y);
+  await expect(page.locator('[data-tool-preview-handle]')).toHaveCount(6);
+  await expect(page.locator('[data-tool-preview-curve]')).toHaveCount(1);
+  await expect(page.locator('[data-points-count]')).toHaveText('6 points');
+  // Clicking the first point closes the curve and fills it.
+  await page.mouse.click(points[0].x + 2, points[0].y + 1);
+  await expect(page.locator('[data-points-said]')).toHaveText(/^\d+ voxels filled\.$/);
+  await expect(page.locator('[data-tool-preview-curve]')).toHaveCount(0);
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  expectNoProblems(problems);
+});
