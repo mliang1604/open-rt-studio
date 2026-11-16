@@ -184,6 +184,7 @@ describe('ContourToolsController (#106)', () => {
       tools.setLabs(true);
       expect(tools.listed().map((tool) => tool.id)).toEqual([
         'threshold',
+        'wand',
         'cleanup',
         'margin',
         'mirror',

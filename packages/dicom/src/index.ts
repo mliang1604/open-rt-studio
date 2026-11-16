@@ -175,6 +175,7 @@ export {
   maskCount,
   paintedMask,
 } from './label-boolean.js';
+export { type GrowDimension, type GrownRegion, growRegion } from './region-grow.js';
 export {
   type LabelChange,
   type LabelConstraints,

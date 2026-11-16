@@ -95,6 +95,7 @@ describe('ThresholdBrushTool (#107)', () => {
     const { tools, brush } = holding();
     expect(tools.listed().map((tool) => tool.id)).toEqual([
       'threshold',
+      'wand',
       'cleanup',
       'margin',
       'mirror',
