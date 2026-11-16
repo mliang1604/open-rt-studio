@@ -190,7 +190,9 @@ export {
   type QuickSelection,
   EDGE_ALIKE,
   quickSelect,
+  walk,
 } from './random-walker.js';
+export { type Outline, refineToImage, visualHull } from './image-aware.js';
 export {
   type PathTree,
   type SlicePlane,

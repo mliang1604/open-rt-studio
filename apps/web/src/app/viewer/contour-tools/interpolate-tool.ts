@@ -32,9 +32,13 @@ import {
 } from '@angular/core';
 import {
   interpolateSlices,
+  refineToImage,
   sliceChanges,
   sliceMask,
+  slicePlane,
+  visualHull,
   type LabelChange,
+  type Outline,
 } from '@open-rt-studio/dicom';
 
 import { BrushController } from '../brush-controller';
@@ -44,6 +48,10 @@ import { ContourToolsController } from './contour-tools-controller';
 
 /** What an interpolation is called in Undo. */
 export const INTERPOLATE = 'Interpolate';
+/** What a fit from outlines in several planes is called in Undo. */
+export const FIT = 'Fit from planes';
+/** How far, in pixels, a slice filled may be moved to the image's edges when settled: the spike's best. */
+export const SETTLE_BAND_PX = 4;
 
 /** Slice numbers as they are shown on the panes (from 1), in runs: `7–10, 12`. */
 export function sliceRuns(slices: readonly number[]): string {
@@ -77,6 +85,11 @@ export class InterpolateTool implements ContourTool {
   readonly axis = signal<0 | 1 | 2>(2);
   /** Fill again after each edit made with the tools. */
   readonly live = signal(false);
+  /**
+   * Settle each slice filled to the image's edges, within a band about its
+   * edge (#120, a spike's prototype; `refineToImage`).
+   */
+  readonly settle = signal(false);
   /** The slices it filled, and what it filled there; of one structure and axis. */
   private readonly marked = signal<{
     readonly roiId: number;
@@ -97,7 +110,8 @@ export class InterpolateTool implements ContourTool {
     // Keep up: fill again after each edit made with the tools, but its own.
     effect(() => {
       const edit = this.injector.get(ContourToolsController).edited();
-      if (edit.count === 0 || edit.name === INTERPOLATE || !this.live()) return;
+      if (edit.count === 0 || edit.name === INTERPOLATE || edit.name === FIT || !this.live())
+        return;
       untracked(() => this.fill());
     });
   }
@@ -129,6 +143,62 @@ export class InterpolateTool implements ContourTool {
 
   cancel(): void {
     // Not a stroke.
+  }
+
+  /**
+   * Fit the structure from an outline drawn in each plane (#120, a spike's
+   * prototype): for each axis the slice the structure fills most is taken as
+   * the outline drawn there, and the voxels within all their extrusions
+   * (`visualHull`) are added, settled to the image if asked. One edit.
+   */
+  fitFromPlanes(): number {
+    const label = this.store.labelVolume();
+    const roiId = this.brush.activeRoiId();
+    if (!label || roiId === null) return 0;
+    const outlines: Outline[] = [];
+    for (const axis of [0, 1, 2] as const) {
+      let best: { slice: number; mask: Uint8Array; count: number } | null = null;
+      for (let slice = 0; slice < label.dims[axis]; slice++) {
+        const { mask } = sliceMask(label, roiId, axis, slice);
+        let count = 0;
+        for (const v of mask) count += v;
+        if (count > 0 && (!best || count > best.count)) best = { slice, mask, count };
+      }
+      if (best) outlines.push({ axis, slice: best.slice, mask: best.mask });
+    }
+    if (outlines.length < 2) {
+      this.said.set(
+        'Draw the structure on a slice in two planes or more: axial, coronal, sagittal.',
+      );
+      return 0;
+    }
+    let hull = visualHull(label, outlines);
+    const image = this.store.imageData();
+    if (this.settle() && image) {
+      const settled = Uint8Array.from(hull);
+      const [nx, ny, nz] = label.dims;
+      for (let z = 0; z < nz; z++) {
+        const guess = hull.slice(z * nx * ny, (z + 1) * nx * ny);
+        if (!guess.some((v) => v === 1)) continue;
+        const plane = slicePlane(image, label.dims, 2, z);
+        settled.set(refineToImage(plane, guess, SETTLE_BAND_PX).mask, z * nx * ny);
+      }
+      hull = settled;
+    }
+    const add: number[] = [];
+    hull.forEach((v, i) => {
+      if (v && label.data[i] !== roiId) add.push(i);
+    });
+    const changed =
+      add.length > 0
+        ? this.injector
+            .get(ContourToolsController)
+            .apply(FIT, [{ kind: 'paint', roiId, voxels: add }])
+        : 0;
+    this.said.set(
+      `Fitted from ${outlines.length} outlines; ${changed} voxel${changed === 1 ? '' : 's'} added.`,
+    );
+    return changed;
   }
 
   /** Take every slice filled as drawn: no longer marked. */
@@ -166,6 +236,13 @@ export class InterpolateTool implements ContourTool {
       return 0;
     }
     const wanted = interpolateSlices(label, roiId, axis, drawn);
+    const image = this.store.imageData();
+    if (this.settle() && image) {
+      for (const [slice, mask] of wanted) {
+        const plane = slicePlane(image, label.dims, axis, slice);
+        wanted.set(slice, refineToImage(plane, mask, SETTLE_BAND_PX).mask);
+      }
+    }
     const changes: LabelChange[] = [];
     const touched = new Set<number>([...wanted.keys(), ...still.keys()]);
     for (const slice of touched) {
@@ -227,8 +304,28 @@ export class InterpolateTool implements ContourTool {
         />
         Keep up as I draw
       </label>
+      <label
+        class="row"
+        title="Move each slice filled to the image's edges, up to 4 pixels (labs: the #120 spike)"
+      >
+        <input
+          type="checkbox"
+          data-interp-settle
+          [checked]="tool.settle()"
+          (change)="tool.settle.set($any($event.target).checked)"
+        />
+        Settle to the image
+      </label>
       <button type="button" data-interp-fill (click)="tool.fill()">
         Fill between drawn slices
+      </button>
+      <button
+        type="button"
+        data-interp-fit
+        title="Draw an outline on one slice in each plane; the structure is fitted from them (labs: the #120 spike)"
+        (click)="tool.fitFromPlanes()"
+      >
+        Fit from an outline in each plane
       </button>
       @if (tool.markedSlices().length > 0) {
         <p class="said" data-interp-marked>Filled, not yet accepted: {{ runs() }}</p>
