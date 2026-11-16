@@ -86,6 +86,11 @@ export interface ToolPreviewCircle {
   readonly others?: readonly ToolPreviewCircle[];
   /** A curve the tool is drawing (#114), as an SVG path in pixels from the pane's corner. */
   readonly curve?: string;
+  /**
+   * Marks a tool has made and not yet applied (#292), as SVG paths in pixels
+   * from the pane's corner: what is the object, and what is not.
+   */
+  readonly marks?: { readonly object: string; readonly background: string };
   /** Points of the curve that can be taken hold of; the first closes it. */
   readonly handles?: readonly { readonly x: number; readonly y: number; readonly first: boolean }[];
 }

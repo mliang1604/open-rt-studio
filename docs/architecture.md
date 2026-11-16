@@ -450,8 +450,11 @@ its own.
   structure being edited. The spike's measurements and recommendation are
   in [quick-selection.md](quick-selection.md); its follow-ups are #291–#293.
   The walk is solved with a multigrid preconditioner (`walk-multigrid.ts`)
-  to a tolerance of 1e-3, in a web worker (`quick-select.worker.ts`); the
-  stroke is taken back when it ends, and the object found is one edit.
+  to a tolerance of 1e-3, in a web worker (`quick-select.worker.ts`). A
+  selection is a session on one slice (#292): strokes over the object and over
+  what is not add up, what is found is shown over the pane after each, and
+  only Accept adds it, as one edit. The image is smoothed (σ 0.7 px) before
+  its edges are weighed (β 250).
 - **Settle to the image, and fit from planes** (#120, labs, prototypes in
   the Interpolate tool): each slice filled can be settled to the image's
   edges within 4 pixels of its edge by the random walker of #119

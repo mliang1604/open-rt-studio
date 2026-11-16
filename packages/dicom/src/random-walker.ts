@@ -28,9 +28,20 @@ export interface QuickSelectRequest {
   readonly plane: SlicePlane;
   /** The stroke: 1 for the pixels drawn over, in the slice's pixels. */
   readonly stroke: Uint8Array;
+  /**
+   * Strokes over what is not the object (#292): 1 for those pixels. The box
+   * is about these and the object's strokes together, so a stroke beyond a
+   * large object takes the box past it.
+   */
+  readonly background?: Uint8Array;
   /** How far beyond the stroke the object may reach, in pixels; the box's edge is not the object. */
   readonly marginPx: number;
-  /** How sharply an edge cuts the walk; 90 is Grady's. */
+  /**
+   * Smooth the values by a Gaussian of this σ, in pixels, before weighing
+   * the edges (#292): noise then makes fewer false edges. 0 for none.
+   */
+  readonly smoothPx?: number;
+  /** How sharply an edge cuts the walk; 90 is Grady's; {@link QUICK_SELECT_BETA} if left out. */
   readonly beta?: number;
   /** Stop when the residual is this small against the start; and after so many steps. */
   readonly tolerance?: number;
@@ -53,7 +64,7 @@ export interface QuickSelection {
    * slice: then it is likely larger than the box, and cut off by it.
    */
   readonly touchesBox: boolean;
-  /** How much of the box's sides within the slice is like the stroke, 0 to 1. */
+  /** How much of the box's side most like the stroke (of those within the slice) is like it, 0 to 1. */
   readonly edgeAlike: number;
 }
 
@@ -135,14 +146,23 @@ export function walk(
 }
 
 /**
- * Above this share of its sides like the stroke, the object is taken to run on
- * past the box. On discs of radius 23 and 55 in noise, boxes that cut them
- * measured 0.21 and more; boxes that held them 0 at noise σ 20 and below, but
- * up to 0.31 at σ 40, where the stroke's own spread takes in the background:
- * there the box is grown when it need not be, which costs time and not the
- * result.
+ * Above this share of any one side like the stroke, the object is taken to
+ * run on past the box. Each side is judged on its own (#292). On discs of
+ * radius 23 and 55 in noise σ 0 to 40, boxes that cut them measured 0.29 and
+ * more on their worst side, and boxes that held them 0.
  */
 export const EDGE_ALIKE = 0.1;
+
+/**
+ * The defaults of a quick selection's edges (#292): the image smoothed by a
+ * Gaussian of 0.7 pixels before its edges are weighed, and edges weighed
+ * sharply (β 250, where Grady's is 90). On a disc in noise σ 40 they raised
+ * Dice from 0.603 to 0.990; without noise, or at σ 20, or with a bridge to a
+ * second object, they gave 0.997 to 0.999, where the defaults before gave
+ * 0.998 to 1.000.
+ */
+export const QUICK_SELECT_SMOOTH_PX = 0.7;
+export const QUICK_SELECT_BETA = 250;
 
 /**
  * How small the residual must be, against the start, for a quick selection
@@ -167,18 +187,54 @@ export function quickSelectGrowing(request: QuickSelectRequest, grows = 3): Quic
   return selection;
 }
 
+/** A grid's values blurred by a separable Gaussian of σ pixels, the edges held; the values themselves for σ 0. */
+export function gaussianBlur(
+  values: Float64Array,
+  w: number,
+  h: number,
+  sigma: number,
+): Float64Array {
+  if (!(sigma > 0)) return values;
+  const reach = Math.ceil(3 * sigma);
+  const kernel = Array.from({ length: 2 * reach + 1 }, (_, i) =>
+    Math.exp(-((i - reach) ** 2) / (2 * sigma * sigma)),
+  );
+  const total = kernel.reduce((a, b) => a + b, 0);
+  const across = new Float64Array(values.length);
+  const out = new Float64Array(values.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0;
+      for (let i = -reach; i <= reach; i++)
+        v += kernel[i + reach] * values[y * w + Math.min(w - 1, Math.max(0, x + i))];
+      across[y * w + x] = v / total;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0;
+      for (let i = -reach; i <= reach; i++)
+        v += kernel[i + reach] * across[Math.min(h - 1, Math.max(0, y + i)) * w + x];
+      out[y * w + x] = v / total;
+    }
+  }
+  return out;
+}
+
 /** The object on a slice from a rough stroke over it; null for a stroke of no pixel. */
 export function quickSelect(request: QuickSelectRequest): QuickSelection | null {
   const { plane, stroke, marginPx } = request;
-  const beta = request.beta ?? 90;
+  const beta = request.beta ?? QUICK_SELECT_BETA;
   const tolerance = request.tolerance ?? QUICK_SELECT_TOLERANCE;
   const maxIterations = request.maxIterations ?? 2000;
   const { width: W, height: H, data } = plane;
-  // The stroke's box, grown by the margin and kept in the slice.
+  const background = request.background;
+  // The strokes' box, grown by the margin and kept in the slice.
   let [x0, y0, x1, y1] = [W, H, -1, -1];
+  if (!stroke.includes(1)) return null;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      if (!stroke[y * W + x]) continue;
+      if (!stroke[y * W + x] && !background?.[y * W + x]) continue;
       x0 = Math.min(x0, x);
       y0 = Math.min(y0, y);
       x1 = Math.max(x1, x);
@@ -196,13 +252,19 @@ export function quickSelect(request: QuickSelectRequest): QuickSelection | null 
   const w = x1 - x0 + 1;
   const h = y1 - y0 + 1;
   const n = w * h;
-  const value = (i: number): number => data[(y0 + Math.floor(i / w)) * W + x0 + (i % w)];
-  // Seeds: 1 on the stroke, 0 on the box's edge (unless the stroke is there).
+  const raw = new Float64Array(n);
+  for (let k = 0; k < n; k++) raw[k] = data[(y0 + Math.floor(k / w)) * W + x0 + (k % w)];
+  const smoothed = gaussianBlur(raw, w, h, request.smoothPx ?? QUICK_SELECT_SMOOTH_PX);
+  const value = (i: number): number => smoothed[i];
+  // Seeds: 1 on the stroke, 0 on the background strokes and the box's edge (unless the stroke
+  // is there: the object's stroke wins where the two cross).
   const seed = new Int8Array(n).fill(-1);
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       const k = j * w + i;
-      if (stroke[(y0 + j) * W + x0 + i]) seed[k] = 1;
+      const at = (y0 + j) * W + x0 + i;
+      if (stroke[at]) seed[k] = 1;
+      else if (background?.[at]) seed[k] = 0;
       else if (i === 0 || j === 0 || i === w - 1 || j === h - 1) seed[k] = 0;
     }
   }
@@ -219,19 +281,26 @@ export function quickSelect(request: QuickSelectRequest): QuickSelection | null 
   }
   const mean = strokeSum / strokeCount;
   const spread = 2 * Math.sqrt(Math.max(0, strokeSquares / strokeCount - mean * mean));
-  let [alike, sides] = [0, 0];
-  for (let k = 0; k < n; k++) {
-    const [i, j] = [k % w, Math.floor(k / w)];
-    const onSide =
-      (i === 0 && x0 > 0) ||
-      (j === 0 && y0 > 0) ||
-      (i === w - 1 && x1 < W - 1) ||
-      (j === h - 1 && y1 < H - 1);
-    if (!onSide) continue;
-    sides++;
-    if (Math.abs(value(k) - mean) <= spread) alike++;
+  // Each side within the slice on its own (#292): a long side through what is not the object,
+  // where the box was taken out to a background stroke, must not hide a short one through it.
+  const sideOf = [
+    { inside: x0 > 0, on: (i: number) => i === 0, along: 'i' },
+    { inside: x1 < W - 1, on: (i: number) => i === w - 1, along: 'i' },
+    { inside: y0 > 0, on: (_: number, j: number) => j === 0, along: 'j' },
+    { inside: y1 < H - 1, on: (_: number, j: number) => j === h - 1, along: 'j' },
+  ];
+  let edgeAlike = 0;
+  for (const side of sideOf) {
+    if (!side.inside) continue;
+    let [alike, count] = [0, 0];
+    for (let k = 0; k < n; k++) {
+      const [i, j] = [k % w, Math.floor(k / w)];
+      if (!side.on(i, j)) continue;
+      count++;
+      if (Math.abs(value(k) - mean) <= spread) alike++;
+    }
+    if (count > 0) edgeAlike = Math.max(edgeAlike, alike / count);
   }
-  const edgeAlike = sides > 0 ? alike / sides : 0;
   const touchesBox = edgeAlike > EDGE_ALIKE;
   for (let k = 0; k < n; k++) {
     const chance = seed[k] === -1 ? x[k] : seed[k];
