@@ -450,7 +450,8 @@ its own.
   structure being edited. The spike's measurements and recommendation are
   in [quick-selection.md](quick-selection.md); its follow-ups are #291–#293.
   The walk is solved with a multigrid preconditioner (`walk-multigrid.ts`)
-  to a tolerance of 1e-3, in a web worker (`quick-select.worker.ts`). A
+  to a tolerance of 1e-3, in a web worker (`quick-select.worker.ts`) kept
+  between selections (#291). A
   selection is a session on one slice (#292): strokes over the object and over
   what is not add up, what is found is shown over the pane after each, and
   only Accept adds it, as one edit. The image is smoothed (σ 0.7 px) before

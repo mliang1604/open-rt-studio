@@ -8,7 +8,7 @@ import {
   type QuickSelection,
 } from '@open-rt-studio/dicom';
 
-import { quickSelectInWorker } from './quick-select-in-worker';
+import { quickSelectInWorker, quickSelectRunner } from './quick-select-in-worker';
 import type { QuickSelectAnswer, QuickSelectJob } from './quick-select.worker';
 
 /** A worker that keeps what it was sent and answers when a test says. */
@@ -51,46 +51,85 @@ function request(): QuickSelectRequest {
 
 function setup() {
   const workers: FakeWorker[] = [];
-  const spawn = (): Worker => {
+  const run = quickSelectRunner((): Worker => {
     workers.push(new FakeWorker());
     return workers.at(-1) as unknown as Worker;
-  };
+  });
   const control = new AbortController();
-  const selecting = quickSelectInWorker(request(), control.signal, spawn);
-  return { workers, control, selecting };
+  const selecting = run(request(), control.signal);
+  return { workers, control, selecting, run };
 }
 
 describe('quick selection in a worker (#291)', () => {
-  it('sends the request to a worker, gives back its answer, and ends the worker', async () => {
-    const { workers, selecting } = setup();
+  it('sends the request to a worker, gives back its answer, and keeps the worker for the next', async () => {
+    const { workers, selecting, run } = setup();
     expect(workers).toHaveLength(1);
     expect(workers[0].posted[0].request.marginPx).toBe(16);
     const selection = { iterations: 3 } as QuickSelection;
-    workers[0].answer({ id: 0, ok: true, selection });
+    workers[0].answer({ id: workers[0].posted[0].id, ok: true, selection });
     await expect(selecting).resolves.toBe(selection);
-    expect(workers[0].terminated).toBe(true);
+    expect(workers[0].terminated).toBe(false);
     expect(workers[0].listening()).toBe(0);
+    // The next selection goes to the same worker, and takes only its own answer.
+    const next = run(request(), new AbortController().signal);
+    expect(workers).toHaveLength(1);
+    expect(workers[0].posted).toHaveLength(2);
+    const other = { iterations: 5 } as QuickSelection;
+    workers[0].answer({ id: workers[0].posted[0].id, ok: true, selection });
+    workers[0].answer({ id: workers[0].posted[1].id, ok: true, selection: other });
+    await expect(next).resolves.toBe(other);
   });
 
-  it('rejects with what the worker says went wrong, or that it broke down', async () => {
+  it('rejects with what the worker says went wrong, keeping it, or that it broke down, ending it', async () => {
     const first = setup();
-    first.workers[0].answer({ id: 0, ok: false, message: 'no' });
+    first.workers[0].answer({ id: first.workers[0].posted[0].id, ok: false, message: 'no' });
     await expect(first.selecting).rejects.toThrow('no');
+    expect(first.workers[0].terminated).toBe(false);
     const second = setup();
     second.workers[0].breakDown('');
     await expect(second.selecting).rejects.toThrow('The selection could not be worked out.');
+    expect(second.workers[0].terminated).toBe(true);
+    // After a worker broke down, the next selection has another.
+    void second.run(request(), new AbortController().signal);
+    expect(second.workers).toHaveLength(2);
   });
 
-  it('is abandoned when asked: it rejects with an AbortError and ends the worker', async () => {
-    const { workers, control, selecting } = setup();
+  it('is abandoned when asked: it rejects with an AbortError and ends the worker; the next has another', async () => {
+    const { workers, control, selecting, run } = setup();
     control.abort();
     await expect(selecting).rejects.toMatchObject({ name: 'AbortError' });
     expect(workers[0].terminated).toBe(true);
     const done = new AbortController();
     done.abort();
-    await expect(
-      quickSelectInWorker(request(), done.signal, () => new FakeWorker() as unknown as Worker),
-    ).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(run(request(), done.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(workers).toHaveLength(1);
+    void run(request(), new AbortController().signal);
+    expect(workers).toHaveLength(2);
+  });
+
+  it('gives each of two selections at once a worker, and keeps one', async () => {
+    const { workers, selecting, run } = setup();
+    const second = run(request(), new AbortController().signal);
+    expect(workers).toHaveLength(2);
+    const selection = { iterations: 1 } as QuickSelection;
+    workers[0].answer({ id: workers[0].posted[0].id, ok: true, selection });
+    workers[1].answer({ id: workers[1].posted[0].id, ok: true, selection });
+    await Promise.all([selecting, second]);
+    expect([workers[0].terminated, workers[1].terminated]).toEqual([false, true]);
+  });
+
+  it('starts its worker ahead when asked, once, and the first selection uses it', () => {
+    const workers: FakeWorker[] = [];
+    const run = quickSelectRunner((): Worker => {
+      workers.push(new FakeWorker());
+      return workers.at(-1) as unknown as Worker;
+    });
+    run.warm();
+    run.warm();
+    expect(workers).toHaveLength(1);
+    void run(request(), new AbortController().signal);
+    expect(workers).toHaveLength(1);
+    expect(workers[0].posted).toHaveLength(1);
   });
 
   it('is worked out here where there are no workers, with the same answer', async () => {
