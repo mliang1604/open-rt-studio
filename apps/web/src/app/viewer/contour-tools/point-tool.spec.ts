@@ -2,10 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Orientation, labelIndex } from '@open-rt-studio/dicom';
+import { Orientation, labelIndex, sheetHalfMm } from '@open-rt-studio/dicom';
+import { NO_OBLIQUE } from '@open-rt-studio/render';
 
-import { AXIAL_MID, pointer, setup } from '../brush-testing';
+import { AXIAL_MID, pointer, setup, type Obliques } from '../brush-testing';
+import type { PerOrientationOblique } from '../viewer-overlays';
 import { PointTool, PointToolOptions } from './point-tool';
 
 // The 4 × 4 × 4 test image under a 100-pixel axial pane: 25 px a voxel, the
@@ -23,8 +26,8 @@ describe('PointTool (#114)', () => {
     }
   });
 
-  function holding() {
-    const made = setup();
+  function holding(obliques?: Obliques) {
+    const made = setup(undefined, undefined, [], [2, 2, 2], obliques);
     made.tools.setLabs(true);
     made.tools.toggle('points');
     const label = made.store.labelVolume()!;
@@ -119,5 +122,63 @@ describe('PointTool (#114)', () => {
     fixture.detectChanges();
     expect(tool.points()).toEqual([]);
     expect(tools.preview()).toBeNull();
+  });
+  // The axial pane tilted about its horizontal axis.
+  const TILTED: PerOrientationOblique = [{ tiltU: 0.6, tiltV: 0 }, NO_OBLIQUE, NO_OBLIQUE];
+  const DIAMOND = [
+    [50, 5],
+    [95, 50],
+    [50, 95],
+    [5, 50],
+  ];
+
+  it('fills the curve on a tilted pane’s own plane, where it is drawn, and keeps the plane (#303)', () => {
+    const { press, tool, tools, has, label, brush, roiId } = holding(TILTED);
+    for (const [x, y] of DIAMOND) press(x, y);
+    // The points are where they were pressed: on the plane the pane shows.
+    const handles = tools.preview()!.handles!;
+    expect(handles.map((h) => [round(h.x), round(h.y)])).toEqual(DIAMOND);
+    press(51, 6);
+    const filled = has();
+    const { span, stamp } = brush.tiltedPlaneOf(AXIAL_MID)!;
+    const half = sheetHalfMm(stamp.normal, label.spacing);
+    // Twelve voxels, on three slices of the grid: a slice fill would be on one.
+    expect(filled).toHaveLength(12);
+    expect(new Set(filled.map((i) => Math.floor(i / 16))).size).toBe(3);
+    for (const index of filled) {
+      const voxel = [index % 4, Math.floor(index / 4) % 4, Math.floor(index / 16)] as const;
+      // On the plane's sheet, a voxel thick…
+      const off =
+        stamp.normal[0] * voxel[0] + stamp.normal[1] * voxel[1] + stamp.normal[2] * voxel[2];
+      expect(Math.abs(off - stamp.offsetMm)).toBeLessThanOrEqual(half + 1e-9);
+      // …and within the diamond's reach on the pane.
+      const at = brush.paneLocalOfVoxel(AXIAL_MID, voxel)!;
+      expect(Math.abs(at.x - 50) + Math.abs(at.y - 50)).toBeLessThan(60);
+    }
+    expect(tool.said()).toBe(`${filled.length} voxels filled.`);
+    expect(tools.drawnSlices(roiId)).toEqual([{ kind: 'plane', span }]);
+    expect(tools.nextUndo()).toBe('Points');
+    tools.undo();
+    expect(has()).toEqual([]);
+  });
+
+  it('starts over when the pane is tilted otherwise, and between a tilted pane and one that is not', () => {
+    const obliques = signal<PerOrientationOblique>(TILTED);
+    const { press, tool } = holding(obliques);
+    press(20, 20);
+    press(80, 20);
+    expect(tool.points()).toHaveLength(2);
+    // The same tilt: the curve goes on.
+    obliques.set([{ tiltU: 0.6, tiltV: 0 }, NO_OBLIQUE, NO_OBLIQUE]);
+    press(80, 80);
+    expect(tool.points()).toHaveLength(3);
+    obliques.set([{ tiltU: 0.3, tiltV: 0 }, NO_OBLIQUE, NO_OBLIQUE]);
+    press(20, 80);
+    expect(tool.points()).toHaveLength(1);
+    obliques.set([NO_OBLIQUE, NO_OBLIQUE, NO_OBLIQUE]);
+    press(20, 20);
+    expect(tool.points()).toHaveLength(1);
+    press(80, 20);
+    expect(tool.points()).toHaveLength(2);
   });
 });

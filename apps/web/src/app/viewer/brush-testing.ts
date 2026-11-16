@@ -5,7 +5,7 @@
 // What the specs of the brush and the contouring tools (#106) share: a small
 // image, a pane over it, and the controllers wired as the viewer wires them.
 
-import { signal } from '@angular/core';
+import { signal, type Signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Orientation, type Volume } from '@open-rt-studio/dicom';
 import { type PaneRect, NO_OBLIQUE } from '@open-rt-studio/render';
@@ -75,6 +75,9 @@ export const AXIAL_MID: Extract<PanePlacement, { kind: 'mpr' }> = {
   group: 0,
 };
 
+/** How the panes are tilted: as they stay, or a signal a spec changes. */
+export type Obliques = PerOrientationOblique | Signal<PerOrientationOblique>;
+
 export interface Notice {
   readonly message: string;
   readonly problem: boolean;
@@ -86,7 +89,7 @@ export function setup(
   formula?: ImageFormula,
   panes: readonly PanePlacement[] = [],
   slices: PerOrientation = [2, 2, 2],
-  obliques?: PerOrientationOblique,
+  obliques?: Obliques,
 ): {
   brush: BrushController;
   store: EditableStructuresStore;
@@ -116,7 +119,7 @@ export function wireBrush(
   formula?: ImageFormula,
   panes: readonly PanePlacement[] = [],
   slices: PerOrientation = [2, 2, 2],
-  obliques?: PerOrientationOblique,
+  obliques?: Obliques,
 ): {
   brush: BrushController;
   store: EditableStructuresStore;
@@ -137,7 +140,7 @@ export function wireBrush(
       { x: 0, y: 0 },
       { x: 0, y: 0 },
     ]),
-    obliques: signal(obliques ?? noObliques),
+    obliques: typeof obliques === 'function' ? obliques : signal(obliques ?? noObliques),
     sliceIndices: signal<PerOrientation>(slices),
     sagittalFlipped: () => false,
     baseSeries: () => null,

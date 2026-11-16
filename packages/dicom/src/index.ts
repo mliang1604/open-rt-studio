@@ -178,6 +178,17 @@ export {
 export { type GrowDimension, type GrownRegion, growRegion } from './region-grow.js';
 export { type PlanePoint, closedSpline, fillSliceLoop } from './polygon-spline.js';
 export {
+  type GridPlane,
+  type PlaneImage,
+  fillPlaneLoop,
+  gridPlaneOf,
+  planeImage,
+  planePointMm,
+  planeVoxelAt,
+  sameGridPlane,
+  sheetHalfMm,
+} from './tilted-plane.js';
+export {
   type SliceMask,
   nearestEdge,
   rubberBand,

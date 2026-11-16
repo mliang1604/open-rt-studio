@@ -464,7 +464,10 @@ its own.
   tools, which the contouring controller keeps for each structure (#302).
   With the labs flag on, the disc brush on a tilted pane paints on the
   pane's own plane (a sheet a voxel thick, `StampPlane`), and that plane is
-  kept (#303); every other tool paints grid slices. Settling runs
+  kept (#303). The points and live-wire tools fill their curve on that
+  sheet too (`fillPlaneLoop` in `tilted-plane.ts`), the live wire searching
+  the image sampled on the plane (`planeImage`); every other tool paints
+  grid slices. Settling runs
   in a web worker, as an edit of its own after the fill, so that Undo shows
   the guess (#295); its band is at most three quarters of a guess's depth. The spike's
   measurements and recommendation are in
