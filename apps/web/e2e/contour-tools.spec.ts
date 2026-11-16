@@ -740,6 +740,65 @@ test('on a tilted pane, a curve of points and a live wire are filled on the pane
   expectNoProblems(problems);
 });
 
+test('quick select through the volume finds the object on other slices from a stroke on one, shows it on each pane, and Accept adds it as one undo (#293)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="quick"]').click();
+  await page.locator('[data-quick-through="volume"]').check();
+  const axial = page.locator('.pane-overlay .pane').first();
+  const sliceNow = async () => Number(/Axial · (\d+)/.exec(await axial.innerText())?.[1]);
+  // The slices next to the one stroked, before anything is there.
+  const spot = await at(page, 0.66, 0.45);
+  await page.mouse.move(spot.x, spot.y);
+  const first = await sliceNow();
+  await page.mouse.wheel(0, 100);
+  await expect.poll(sliceNow).toBe(first + 1);
+  await page.mouse.move(5, 400);
+  const before = await capturedColour(page);
+  await page.mouse.move(spot.x, spot.y);
+  await page.mouse.wheel(0, -100);
+  await expect.poll(sliceNow).toBe(first);
+  // A short stroke inside the left lung, on the image's right, on one slice.
+  const to = await at(page, 0.68, 0.52);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator('[data-quick-said]')).toHaveText(
+    /^\d+ voxels found through \d+ slices in \d+ ms: Accept adds them\./,
+    { timeout: 30_000 },
+  );
+  // Shown over the pane stroked, and where the panes across cut it.
+  await expect(page.locator('[data-tool-preview-fill]')).toHaveAttribute('d', /^M/);
+  await expect(page.locator('[data-tool-preview-section-fill]').first()).toHaveAttribute('d', /^M/);
+  // A slice on, it is shown there too, though no stroke was made on it.
+  await page.mouse.wheel(0, 100);
+  await expect.poll(sliceNow).toBe(first + 1);
+  await expect(page.locator('[data-tool-preview-fill]')).toHaveAttribute('d', /^M/);
+  await expect(page.locator('[data-tool-preview-mark-object]')).toHaveAttribute('d', '');
+  // Nothing is painted until Accept; then that slice has it, as one edit.
+  await page.mouse.move(5, 400);
+  await page.locator('[data-quick-accept]').click();
+  await expect(page.locator('[data-quick-said]')).toHaveText(/^\d+ voxels added\.$/);
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Quick select (Ctrl/⌘+Z)',
+  );
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
+  expectNoProblems(problems);
+});
+
 test('on a tilted pane, the threshold brush, push, rubber band and quick select work on the pane’s own plane (#307)', async ({
   page,
 }) => {

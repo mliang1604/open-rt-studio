@@ -212,6 +212,17 @@ export {
   quickSelectGrowing,
   walk,
 } from './random-walker.js';
+export {
+  type QuickSelect3dRequest,
+  type QuickSelection3d,
+  type VoxelBox,
+  QUICK_SELECT_3D_TOLERANCE,
+  boxAbout,
+  boxVoxels,
+  cropBox,
+  quickSelect3d,
+  walk3d,
+} from './random-walker-3d.js';
 export { type Outline, refineToImage, visualHull } from './image-aware.js';
 export {
   type FitOptions,

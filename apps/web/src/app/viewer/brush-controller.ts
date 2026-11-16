@@ -346,6 +346,21 @@ export class BrushController {
     return sections;
   }
 
+  /** The MPR panes of a column of the layout (#293): where a tool that works through the volume shows itself. */
+  mprPanes(group: number): Extract<PanePlacement, { kind: 'mpr' }>[] {
+    return (this.deps?.panes() ?? []).filter(
+      (pane): pane is Extract<PanePlacement, { kind: 'mpr' }> =>
+        pane.kind === 'mpr' && pane.group === group,
+    );
+  }
+
+  /** The slice of the grid a pane shows, across the axis it steps through; null for a tilted pane. */
+  sliceOf(placement: Extract<PanePlacement, { kind: 'mpr' }>): number | null {
+    const d = this.deps;
+    if (!d || isOblique(d.obliques()[placement.orientation])) return null;
+    return d.sliceIndices()[placement.orientation];
+  }
+
   /** Where a pointer event is within its pane, in pixels from the pane's corner. */
   paneLocal(pointer: {
     readonly placement: Extract<PanePlacement, { kind: 'mpr' }>;

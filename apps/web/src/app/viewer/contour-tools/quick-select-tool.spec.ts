@@ -165,3 +165,170 @@ describe('QuickSelectTool (#119, #292)', () => {
     expect(added.every((i) => label.data[i] === 0)).toBe(true);
   });
 });
+
+describe('QuickSelectTool through the volume (#293)', () => {
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    try {
+      localStorage.clear();
+    } catch {
+      // No storage here.
+    }
+  });
+
+  // The 4 × 4 × 4 test image with a cube of 100 in its middle: voxels 1 and 2 along each axis.
+  const CUBE = (x: number, y: number, z: number): number =>
+    [x, y, z].every((at) => at === 1 || at === 2) ? 100 : 0;
+  /** A coronal pane beside the axial one. */
+  const CORONAL = {
+    ...AXIAL_MID,
+    orientation: Orientation.Coronal,
+    rect: { x: 100, y: 0, width: 100, height: 100 },
+  };
+
+  function holding(obliques?: Obliques) {
+    const made = setup(undefined, CUBE, [AXIAL_MID, CORONAL], [2, 2, 2], obliques);
+    made.tools.setLabs(true);
+    made.tools.toggle('quick');
+    made.brush.radiusMm.set(0);
+    const label = made.store.labelVolume()!;
+    const roiId = made.brush.activeRoiId()!;
+    const painted = () => [...label.data].flatMap((v, i) => (v === roiId ? [i] : []));
+    const tool = TestBed.inject(QuickSelectTool);
+    tool.setThrough(true);
+    /** A dab on the axial pane (slice 2) at a voxel, or on the coronal pane at a pixel. */
+    const dab = async (x: number, y: number, pane = AXIAL_MID) => {
+      made.tools.begin(pane, pointer(pane.rect.x + MID[x], MID[y]));
+      made.tools.end();
+      await tool.working;
+    };
+    return { ...made, label, roiId, painted, tool, dab };
+  }
+
+  it('finds an object through the slices from a stroke on one, and Accept adds it as one edit to undo and redo', async () => {
+    const { tools, tool, painted, dab, label } = holding();
+    await dab(1, 1);
+    expect(painted()).toEqual([]);
+    expect(tool.found()).toBe(true);
+    expect(tool.looking()).toBe(false);
+    // The whole cube, on slices 1 and 2, from one voxel stroked on slice 2.
+    expect(tool.said()).toMatch(/^8 voxels found through 4 slices in \d+ ms: Accept adds them\.$/);
+    expect(tool.accept()).toBe(8);
+    const cube = [1, 2].flatMap((z) =>
+      [1, 2].flatMap((y) => [1, 2].map((x) => labelIndex(label.dims, x, y, z))),
+    );
+    expect(painted()).toEqual(cube);
+    expect(tools.nextUndo()).toBe('Quick select');
+    expect(tool.underWay()).toBe(false);
+    tools.undo();
+    expect(painted()).toEqual([]);
+    tools.redo();
+    expect(painted()).toEqual(cube);
+  });
+
+  it('takes strokes from another pane into the same selection, and shows it on each pane', async () => {
+    const { tools, tool, painted, dab, label } = holding();
+    await dab(1, 1);
+    // What is not the object, on the coronal pane (y = 2): a voxel of the cube.
+    tool.marking.set('background');
+    await dab(1, 1, CORONAL);
+    // The walk gives the half of the cube nearer that voxel to it: 4 of the 8 are left.
+    expect(tool.said()).toMatch(/^4 voxels found through 4 slices/);
+    const preview = tools.preview()!;
+    // The pointer was last on the coronal pane: it carries its marks there, and the axial pane its own.
+    expect(preview.rect).toEqual(CORONAL.rect);
+    expect(preview.marks?.background).toMatch(/^M/);
+    expect(preview.marks?.object).toBe('');
+    // What is left is the row of the cube at y = 1: none of it on the coronal pane's slice.
+    expect(preview.fill).toBeUndefined();
+    expect(preview.others).toHaveLength(1);
+    expect(preview.others![0].rect).toEqual(AXIAL_MID.rect);
+    expect(preview.others![0].marks?.object).toMatch(/^M/);
+    expect(preview.others![0].fill).toMatch(/^M/);
+    tool.accept();
+    expect(painted()).toEqual(
+      [1, 2].flatMap((z) => [1, 2].map((x) => labelIndex(label.dims, x, 1, z))),
+    );
+  });
+
+  it('keeps to its constraints: a voxel another structure holds is not taken', async () => {
+    const { tools, tool, painted, dab, label, store, brush, roiId } = holding();
+    const other = store.createRoi();
+    const held = labelIndex(label.dims, 2, 2, 1);
+    store.paint(other.id, [held]);
+    brush.activeRoiId.set(roiId);
+    tools.protectOthers.set(true);
+    await dab(1, 1);
+    tool.accept();
+    expect(painted()).toHaveLength(7);
+    expect(label.data[held]).toBe(other.id);
+  });
+
+  it('takes back a stroke cancelled, lets go on Discard, and on a change of what a selection is of', async () => {
+    const { tools, tool, dab } = holding();
+    await dab(1, 1);
+    const before = tools.preview()!.marks!.object;
+    tools.begin(AXIAL_MID, pointer(MID[2], MID[2]));
+    expect(tools.preview()!.marks!.object).not.toBe(before);
+    tools.cancel();
+    expect(tools.preview()!.marks!.object).toBe(before);
+    tool.setThrough(false);
+    expect(tool.underWay()).toBe(false);
+    expect(tools.preview()?.marks).toBeUndefined();
+    tool.setThrough(true);
+    await dab(1, 1);
+    tool.discard();
+    expect(tool.underWay()).toBe(false);
+    expect(tool.found()).toBe(false);
+  });
+
+  it('stops looking when told, keeping the strokes, and looks again at the next', async () => {
+    const { tools, tool, dab } = holding();
+    tools.begin(AXIAL_MID, pointer(MID[1], MID[1]));
+    tools.end();
+    expect(tool.looking()).toBe(true);
+    const fixture = TestBed.createComponent(QuickSelectOptions);
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('[data-quick-said]')?.textContent).toMatch(
+      /^Looking for the object… \d+ %$/,
+    );
+    host.querySelector<HTMLElement>('[data-quick-stop]')!.click();
+    await tool.working;
+    fixture.detectChanges();
+    expect(tool.looking()).toBe(false);
+    expect(tool.found()).toBe(false);
+    expect(tool.underWay()).toBe(true);
+    expect(host.querySelector('[data-quick-stop]')).toBeNull();
+    expect(tool.said()).toBe('Stopped. The strokes are kept: another stroke looks again.');
+    expect(tools.preview()!.marks!.object).toMatch(/^M/);
+    await dab(2, 2);
+    expect(tool.said()).toMatch(/^8 voxels found/);
+  });
+
+  it('asks for a pane that is not tilted, and for a stroke over the object', async () => {
+    const tilted = holding(TILTED_AXIAL);
+    await tilted.dab(1, 1);
+    expect(tilted.tool.said()).toBe('Through the volume, stroke on a pane that is not tilted.');
+    expect(tilted.tool.underWay()).toBe(false);
+    TestBed.resetTestingModule();
+    const { tool, dab } = holding();
+    tool.marking.set('background');
+    await dab(0, 0);
+    expect(tool.said()).toBe(
+      'Stroke over the object too: strokes over what is not the object alone find nothing.',
+    );
+  });
+
+  it('offers the choice in its options', () => {
+    const { tool } = holding();
+    const fixture = TestBed.createComponent(QuickSelectOptions);
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const choice = (which: string) =>
+      host.querySelector<HTMLInputElement>(`[data-quick-through="${which}"]`)!;
+    expect(choice('volume').checked).toBe(true);
+    choice('slice').click();
+    expect(tool.through()).toBe(false);
+  });
+});

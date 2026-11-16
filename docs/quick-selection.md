@@ -179,6 +179,91 @@ the worker has run once (130 ms the first time; 116–140 ms before).
   object found is shown over the pane after each, and only Accept adds it
   (Discard lets it go).
 
+### Since the spike: through the volume (#293)
+
+Quick select has a second way to work, "through the volume": the same walk
+with six neighbours a voxel, on a box about the strokes
+(`packages/dicom/src/random-walker-3d.ts`).
+
+- **Strokes are voxels, from any pane** of the column that is not tilted:
+  axial, coronal or sagittal, over the object or over what is not. What is
+  found is shown on each of those panes, at the slice the pane is at.
+- **Edges are weighed in mm.** A weight across an edge is the slice's,
+  times (finest spacing / the edge's spacing)²: slices 3 mm apart hold
+  together a ninth as much as pixels 1 mm apart. The image is smoothed by
+  the same distance in mm along each axis.
+- **The solve is the slice's multigrid in 3D**
+  (`walk-multigrid-3d.ts`): 2 × 2 × 2 aggregation, one weight an edge in
+  32 bits, padded arrays, the coarse correction scaled by 1.5. It stops at
+  a residual of 1e-2, not the slice's 1e-3: 7–11 steps for 10–24, and Dice
+  against the object within 0.007.
+- **Progress and Stop.** The worker says how far each solve has come, and
+  the tool shows it; Stop abandons the search and keeps the strokes.
+- **The box grows** as the slice's does: where a face of it within the
+  volume is more than a tenth like the stroke, it is looked in again twice
+  as far out, three times at most, and never in more than 3,145,728 voxels
+  (a half more than 128³).
+- **A face that is the volume's own is left free**, where a face within
+  the volume is taken as not the object. Seeded, it draws down along its
+  whole length an object that runs out of the volume there (see the table).
+  If that leaves nothing that is not the object, every face is seeded after
+  all.
+
+Measured in Node, single-threaded, on the spike's machine (Intel Core
+i7-8850H), Dice against the object:
+
+| Scene, stroked on one slice                             | Box               | Noise σ   | Dice                | Time        | Steps |
+| ------------------------------------------------------- | ----------------- | --------- | ------------------- | ----------- | ----- |
+| A sphere within the box                                 | 64³               | 0, 20, 40 | 0.983, 0.996, 0.984 | 205–254 ms  | 7–9   |
+|                                                         | 128³              | 0, 20, 30 | 0.996, 0.997, 0.985 | 1.5–1.9 s   | 6–8   |
+|                                                         | 128³              | 40        | 0.330               | 1.5 s       | 6     |
+|                                                         | 128² × 43 at 3 mm | 0, 20     | 0.996, 0.999        | 0.88–0.92 s | 14–15 |
+| A lung right through the box, its ends the volume's own | 64³               | 0, 20, 40 | 0.982, 0.993, 0.995 | 350–390 ms  | 15    |
+|                                                         | 128³              | 0, 20, 40 | 0.997, 0.998, 1.000 | 3.9–4.1 s   | 22–23 |
+| The same, its ends seeded as not the object             | 64³, 128³         | 0         | 0.39, 0.01          |             |       |
+
+In Chrome, through the worker, on the thorax phantom, a short stroke in a
+lung at the tool's margin of 30 mm:
+
+| Phantom                           | Last box looked in | Found                    | Time      |
+| --------------------------------- | ------------------ | ------------------------ | --------- |
+| 128² × 48                         | 78 × 92 × 48       | the lung, 27,232 voxels  | 0.56 s    |
+| 256² × 64                         | 157 × 185 × 64     | the lung, 145,198 voxels | 3.7–4.3 s |
+| 128³, the whole volume as the box | 128³               |                          | 3.1–3.2 s |
+
+What this does not do:
+
+- **The issue's target, a 128³ box in under 2 s, is met only for an object
+  within the box, in Node** (1.5–1.9 s). An object that runs out of the
+  volume takes 3.9–4.1 s there, and the phantom's whole 128³ takes
+  3.1–3.2 s in Chrome: without noise it takes 14–15 steps, where the noisy
+  spheres take 6–8.
+- **Heavy noise defeats it sooner than on a slice**: at σ 40 the 128³
+  sphere is not found (0.330, the same solved to the end; 0.92 at 96³,
+  0.984 at 64³).
+- **An object that runs on past a face within the volume is cut short of
+  it**, as on a slice. The box grows only where a tenth of the face is like
+  the stroke, so a thin object (a cord) is not followed: stroke along it on
+  another pane.
+- **Stroking a tissue that encloses others takes them too** when its ends
+  are the volume's own: the body of the lung scene, from one stroke, came
+  with its lungs (Dice 0.78); with a dab in each lung as not the object,
+  0.985–0.996.
+- **A box that is the whole volume** has every face seeded, and an object
+  through it is cut short as before (0.39), unless a stroke says what is
+  not the object: with one dab in the body, the lung was found voxel for
+  voxel (at 48³).
+- **Tilted panes** take no strokes in this mode.
+- **Memory**: the solve keeps about 100 bytes a voxel (reckoned from its
+  arrays, not measured), some 300 MB at the most voxels allowed.
+
+Tried and dropped, each measured: vectors in 32 bits (a fifth slower at
+128³); a chequerboard smoother (no cheaper for the same steps); a first
+guess by full multigrid (8 steps to 5 or 6 on the sphere, one saved on a
+lung through the box, a tenth of the time at best); leaving the volume's own faces free only where they are
+like the stroke (0.50 where free altogether gives 0.98: the object's
+blurred rim is still seeded there).
+
 ## Recommendation
 
 - **Use the random walker for quick selection**, 2D first. It answers the
