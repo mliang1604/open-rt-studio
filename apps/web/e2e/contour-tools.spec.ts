@@ -882,3 +882,44 @@ test('on a tilted pane, the threshold brush, push, rubber band and quick select 
   expect((await capturedColour(page)) - beforeTilted).toBeCloseTo(disc, 2);
   expectNoProblems(problems);
 });
+
+test('quick select through the volume takes a stroke on a tilted pane, and shows there what the pane’s plane cuts (#312)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await tiltMainPane(page);
+  await page.mouse.move(5, 400);
+  const before = await capturedColour(page);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="quick"]').click();
+  await page.locator('[data-quick-through="volume"]').check();
+  // A short stroke inside the left lung, on the tilted pane.
+  const from = await at(page, 0.66, 0.45);
+  const to = await at(page, 0.68, 0.52);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator('[data-quick-said]')).toHaveText(
+    /^\d+ voxels found through \d+ slices in \d+ ms: Accept adds them\./,
+    { timeout: 30_000 },
+  );
+  // The stroke and what was found, on the tilted pane; and what was found on the panes across.
+  await expect(page.locator('[data-tool-preview-mark-object]')).toHaveAttribute('d', /^M/);
+  await expect(page.locator('[data-tool-preview-fill]')).toHaveAttribute('d', /^M/);
+  await expect(page.locator('[data-tool-preview-section-fill]').first()).toHaveAttribute('d', /^M/);
+  await page.mouse.move(5, 400);
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  await page.locator('[data-quick-accept]').click();
+  await expect(page.locator('[data-quick-said]')).toHaveText(/^\d+ voxels added\.$/);
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  expectNoProblems(problems);
+});

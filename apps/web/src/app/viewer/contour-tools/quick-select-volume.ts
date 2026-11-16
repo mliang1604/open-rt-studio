@@ -6,7 +6,7 @@
 // that is not of one slice, and what it asks for. The strokes are voxels of
 // the grid, from any pane; the object is looked for in a box about the
 // strokes (`random-walker-3d.ts`); what is shown on a pane is the slice of
-// all that the pane is at.
+// all that the pane is at, or, on a tilted pane (#312), what its plane cuts.
 //
 // The box grows as the slice's does: where the object seems to run on past
 // it, it is looked for again twice as far out, up to three times, and no
@@ -84,6 +84,54 @@ export function sliceOfBox(
     }
   }
   return any ? out : null;
+}
+
+/**
+ * A selection through the volume as a tilted plane cuts it (#312): the
+ * strokes and what was found, in the pixels of the plane's picture. Each
+ * pixel is of the voxel its middle is in. `voxelAt` says where a pixel's
+ * middle is in the grid, in voxels; the picture is flat, so three of its
+ * pixels place the rest. Null where the plane cannot be placed.
+ */
+export function pictureOfMarks(
+  dims: Triple,
+  marks: VolumeMarks,
+  picture: { readonly width: number; readonly height: number },
+  voxelAt: (pixel: readonly [number, number]) => Triple | null,
+): {
+  readonly object: Uint8Array;
+  readonly background: Uint8Array;
+  readonly found: Uint8Array | null;
+} | null {
+  const [o, eu, ev] = [voxelAt([0, 0]), voxelAt([1, 0]), voxelAt([0, 1])];
+  if (!o || !eu || !ev) return null;
+  const { width, height } = picture;
+  const [nx, ny, nz] = dims;
+  const object = new Uint8Array(width * height);
+  const background = new Uint8Array(width * height);
+  const selection = marks.selection;
+  const found = selection ? new Uint8Array(width * height) : null;
+  let any = false;
+  for (let v = 0, k = 0; v < height; v++) {
+    for (let u = 0; u < width; u++, k++) {
+      const x = Math.round(o[0] + u * (eu[0] - o[0]) + v * (ev[0] - o[0]));
+      const y = Math.round(o[1] + u * (eu[1] - o[1]) + v * (ev[1] - o[1]));
+      const z = Math.round(o[2] + u * (eu[2] - o[2]) + v * (ev[2] - o[2]));
+      if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) continue;
+      const index = (z * ny + y) * nx + x;
+      if (marks.object.has(index)) object[k] = 1;
+      if (marks.background.has(index)) background[k] = 1;
+      if (!selection || !found) continue;
+      const { first, dims: size } = selection.box;
+      const [bx, by, bz] = [x - first[0], y - first[1], z - first[2]];
+      if (bx < 0 || by < 0 || bz < 0 || bx >= size[0] || by >= size[1] || bz >= size[2]) continue;
+      if (selection.mask[(bz * size[1] + by) * size[0] + bx]) {
+        found[k] = 1;
+        any = true;
+      }
+    }
+  }
+  return { object, background, found: any ? found : null };
 }
 
 /** What to ask for, for the strokes so far: the box, and the request for it; or why not. */
