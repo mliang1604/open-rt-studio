@@ -30,7 +30,8 @@ import { signedDistance } from './slice-interpolation.js';
 
 /**
  * A guess of the structure on a slice, settled to the image's edges within
- * `bandPx` pixels of its edge either way. An empty guess is given back empty;
+ * `bandPx` pixels of its edge either way, and at most `depthShare` of its
+ * depth (how far its middle is from its edge). An empty guess is given back empty;
  * a guess with nothing more than `bandPx` inside it, or nothing more than
  * `bandPx` outside it, is given back as it is.
  */
@@ -39,10 +40,18 @@ export function refineToImage(
   guess: Uint8Array,
   bandPx: number,
   beta = 90,
+  depthShare = 0.75,
 ): { readonly mask: Uint8Array; readonly iterations: number } {
   const { width, height, data } = plane;
   if (!guess.some((v) => v === 1)) return { mask: new Uint8Array(guess.length), iterations: 0 };
   const distance = signedDistance({ mask: guess, width, height }, [1, 1]);
+  // The band is at most three quarters of the guess's depth (#295): a guess only a few pixels
+  // deep would otherwise have next to nothing held as the object, and the walk would give it
+  // away. Measured on the spike's cases, three quarters did as well as no cap, and half less.
+  let depth = 0;
+  for (const d of distance) if (-d > depth) depth = -d;
+  bandPx = Math.min(bandPx, Math.floor(depth * depthShare));
+  if (bandPx < 1) return { mask: Uint8Array.from(guess), iterations: 0 };
   // Solve on the box about the band only.
   let [x0, y0, x1, y1] = [width, height, -1, -1];
   for (let k = 0; k < distance.length; k++) {

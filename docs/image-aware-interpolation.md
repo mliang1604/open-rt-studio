@@ -71,6 +71,22 @@ What the numbers mean, and what they do not:
   seen along that axis, so the hull cuts parts of it off. Settling recovers
   those only within its band. The tilted ellipsoid's 0.903 is mostly this.
 
+### Since the spike: settling off the page's thread, the guess an undo away (#295)
+
+- **In a web worker** (`settle.worker.ts`), slice by slice: the options say
+  how far it is ("Settling slice 3 of 7…"), and Stop leaves the slices as
+  filled.
+- **An edit of its own**, after the fill: Undo shows the shape-based guess,
+  Redo the settled. The slices settled are listed. A slice drawn on while it
+  was being settled is left as drawn.
+- **The band is at most three quarters of the guess's depth.** Settling a
+  small disc drawn across a lung's edge first shrank it to a sliver: with the
+  full 4-pixel band almost nothing of a guess 5 pixels deep was held as the
+  object. Capped at half its depth, the sphere's interpolation fell from 0.993
+  to 0.985; at three quarters it was 0.994 (the ellipsoid's 0.978, and the
+  hulls' 1.000), as good as no cap, and the small disc kept its part within
+  the lung.
+
 ## Recommendation
 
 - **Offer settling to the image** as an option of interpolation, off by
