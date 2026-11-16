@@ -32,11 +32,9 @@ import {
 } from '@angular/core';
 import {
   interpolateSlices,
-  refineToImage,
   sliceChanges,
   sliceMask,
   slicePlane,
-  visualHull,
   type LabelChange,
   type Outline,
 } from '@open-rt-studio/dicom';
@@ -46,6 +44,7 @@ import { EditableStructuresStore } from '../editable-structures-store';
 import type { ContourTool } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { settleInWorker } from './settle-in-worker';
+import { fitInWorker } from './surface-fit-in-worker';
 
 /** What an interpolation is called in Undo. */
 export const INTERPOLATE = 'Interpolate';
@@ -162,15 +161,16 @@ export class InterpolateTool implements ContourTool {
   }
 
   /**
-   * Fit the structure from an outline drawn in each plane (#120, a spike's
-   * prototype): for each axis the slice the structure fills most is taken as
-   * the outline drawn there, and the voxels within all their extrusions
-   * (`visualHull`) are added, settled to the image if asked. One edit.
+   * Fit the structure from an outline drawn in each plane (#296): for each
+   * axis the slice the structure fills most is taken as the outline drawn
+   * there, a surface is fitted through them (`fitFromContours`, in a
+   * worker), settled to the image if asked, and the voxels within it are
+   * added, as one edit.
    */
-  fitFromPlanes(): number {
+  fitFromPlanes(): void {
     const label = this.store.labelVolume();
     const roiId = this.brush.activeRoiId();
-    if (!label || roiId === null) return 0;
+    if (!label || roiId === null) return;
     const outlines: Outline[] = [];
     for (const axis of [0, 1, 2] as const) {
       let best: { slice: number; mask: Uint8Array; count: number } | null = null;
@@ -186,35 +186,61 @@ export class InterpolateTool implements ContourTool {
       this.said.set(
         'Draw the structure on a slice in two planes or more: axial, coronal, sagittal.',
       );
-      return 0;
+      return;
     }
-    let hull = visualHull(label, outlines);
+    // The surface through the outlines (#296), in a worker; then settled to the image if asked.
+    this.cancelSettling();
+    const abandon = new AbortController();
+    this.settlingControl = abandon;
+    this.said.set(`Fitting a surface to ${outlines.length} outlines…`);
     const image = this.store.imageData();
-    if (this.settle() && image) {
-      const settled = Uint8Array.from(hull);
-      const [nx, ny, nz] = label.dims;
-      for (let z = 0; z < nz; z++) {
-        const guess = hull.slice(z * nx * ny, (z + 1) * nx * ny);
-        if (!guess.some((v) => v === 1)) continue;
-        const plane = slicePlane(image, label.dims, 2, z);
-        settled.set(refineToImage(plane, guess, SETTLE_BAND_PX).mask, z * nx * ny);
-      }
-      hull = settled;
-    }
-    const add: number[] = [];
-    hull.forEach((v, i) => {
-      if (v && label.data[i] !== roiId) add.push(i);
-    });
-    const changed =
-      add.length > 0
-        ? this.injector
-            .get(ContourToolsController)
-            .apply(FIT, [{ kind: 'paint', roiId, voxels: add }])
-        : 0;
-    this.said.set(
-      `Fitted from ${outlines.length} outlines; ${changed} voxel${changed === 1 ? '' : 's'} added.`,
-    );
-    return changed;
+    const [nx, ny, nz] = label.dims;
+    this.working = fitInWorker(
+      { grid: { dims: label.dims, spacing: label.spacing }, outlines },
+      abandon.signal,
+    )
+      .then(async (fitted) => {
+        if (abandon.signal.aborted || this.store.labelVolume() !== label) return;
+        if (this.settle() && image) {
+          const slices = [];
+          for (let z = 0; z < nz; z++) {
+            const guess = fitted.slice(z * nx * ny, (z + 1) * nx * ny);
+            if (guess.includes(1))
+              slices.push({ slice: z, plane: slicePlane(image, label.dims, 2, z), guess });
+          }
+          this.settling.set({ done: 0, total: slices.length });
+          const settled = await settleInWorker(
+            { slices, bandPx: SETTLE_BAND_PX },
+            abandon.signal,
+            (done, total) => this.settling.set({ done, total }),
+          );
+          if (abandon.signal.aborted || this.store.labelVolume() !== label) return;
+          for (const { slice, mask } of settled) fitted.set(mask, slice * nx * ny);
+        }
+        this.settlingControl = null;
+        this.settling.set(null);
+        const add: number[] = [];
+        fitted.forEach((v, i) => {
+          if (v && label.data[i] !== roiId) add.push(i);
+        });
+        const changed =
+          add.length > 0
+            ? this.injector
+                .get(ContourToolsController)
+                .apply(FIT, [{ kind: 'paint', roiId, voxels: add }])
+            : 0;
+        this.said.set(
+          `Fitted from ${outlines.length} outlines; ${changed} voxel${changed === 1 ? '' : 's'} added.`,
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        this.settlingControl = null;
+        this.settling.set(null);
+        this.said.set(
+          `The surface could not be fitted: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
   }
 
   /** Take every slice filled as drawn: no longer marked. */

@@ -459,7 +459,8 @@ its own.
   the Interpolate tool): each slice filled can be settled to the image's
   edges within 4 pixels of its edge by the random walker of #119
   (`refineToImage`), and a structure can be fitted from an outline in each
-  plane as the intersection of their extrusions (`visualHull`). Settling runs
+  plane by a surface fitted through them (`fitFromContours`, #296; the
+  spike's `visualHull` before it). Settling runs
   in a web worker, as an edit of its own after the fill, so that Undo shows
   the guess (#295); its band is at most three quarters of a guess's depth. The spike's
   measurements and recommendation are in
