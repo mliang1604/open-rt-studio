@@ -180,13 +180,17 @@ export { type PlanePoint, closedSpline, fillSliceLoop } from './polygon-spline.j
 export {
   type GridPlane,
   type PlaneImage,
+  type PlaneRaster,
   fillPlaneLoop,
   gridPlaneOf,
   planeImage,
   planePointMm,
+  planeRaster,
   planeVoxelAt,
   sameGridPlane,
   sheetHalfMm,
+  sheetVoxels,
+  strokePixels,
 } from './tilted-plane.js';
 export {
   type SliceMask,

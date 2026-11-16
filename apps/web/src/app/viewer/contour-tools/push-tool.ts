@@ -22,7 +22,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import type { Orientation } from '@open-rt-studio/dicom';
+import type { PlaneSpan } from '@open-rt-studio/dicom';
 import { strokeVoxels, throughPlaneAxis, type VoxelIndex } from '@open-rt-studio/render';
 
 import { BrushController } from '../brush-controller';
@@ -88,14 +88,14 @@ export class PushTool implements ContourTool {
     this.pushing.set(inside ? 'out' : 'in');
     this.last.set(this.pushing());
     this.from = voxel;
-    this.push(context, pointer.placement.orientation, voxel, voxel);
+    this.push(context, pointer.placement, voxel, voxel);
   }
 
   extend(context: ContourToolContext, pointer: ToolPointer): void {
     this.hover(context, pointer);
     const voxel = context.voxelAt(pointer);
     if (!voxel || !this.from || this.pushing() === null) return;
-    this.push(context, pointer.placement.orientation, this.from, voxel);
+    this.push(context, pointer.placement, this.from, voxel);
     this.from = voxel;
   }
 
@@ -122,20 +122,31 @@ export class PushTool implements ContourTool {
     );
   }
 
+  /** The disc on a tilted pane lies on the pane's own plane (#307), as the brush's does; the sphere as before. */
+  drawsOnPlane(placement: ToolPointer['placement']): PlaneSpan | null {
+    return this.tilted(placement)?.span ?? null;
+  }
+
+  private tilted(placement: ToolPointer['placement']) {
+    return this.brush.shape() === 'disk' ? this.brush.tiltedPlaneOf(placement) : null;
+  }
+
   /** Paint or clear the structure where the brush goes from `from` to `to`. */
   private push(
     context: ContourToolContext,
-    orientation: Orientation,
+    placement: ToolPointer['placement'],
     from: VoxelIndex,
     to: VoxelIndex,
   ): void {
     const grid = context.grid();
     const roiId = context.activeRoiId();
     if (!grid || roiId === null) return;
+    const plane = this.tilted(placement)?.stamp;
     const voxels = strokeVoxels(grid.dims, grid.spacing, from, to, {
       shape: this.brush.shape(),
       radiusMm: this.brush.radiusMm(),
-      axis: throughPlaneAxis(orientation),
+      axis: throughPlaneAxis(placement.orientation),
+      ...(plane ? { plane } : {}),
     });
     if (voxels.length === 0) return;
     if (this.pushing() === 'out') context.change({ kind: 'paint', roiId, voxels });

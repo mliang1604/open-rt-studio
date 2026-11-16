@@ -11,6 +11,9 @@
 //
 // A selection is of one slice, across the axis the pane steps through. A
 // stroke on another slice or pane lets the one under way go, and says so.
+// On a tilted pane (#307) it is of the pane's own plane: the strokes and the
+// image are in the plane's picture, and what is accepted is put into the
+// grid through the voxels of the plane's sheet.
 
 import {
   ChangeDetectionStrategy,
@@ -23,11 +26,16 @@ import {
 } from '@angular/core';
 import {
   QUICK_SELECT_BETA,
+  planeImage,
+  sameGridPlane,
+  sheetVoxels,
   sliceVoxelIndex,
   slicePlane,
+  strokePixels,
   type LabelVolume,
   type Orientation,
   type PlanePoint,
+  type PlaneSpan,
 } from '@open-rt-studio/dicom';
 import { strokeVoxels, throughPlaneAxis, type VoxelIndex } from '@open-rt-studio/render';
 
@@ -41,6 +49,7 @@ import type {
   ToolPreviewCircle,
 } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
+import { picturePixelOf, pictureToPane, planePictureOf, type PlanePicture } from './plane-picture';
 import { quickSelectInWorker } from './quick-select-in-worker';
 
 type MprPlacement = Extract<PanePlacement, { kind: 'mpr' }>;
@@ -61,6 +70,8 @@ interface Session {
   /** What was found for the strokes so far; null before the first search ends. */
   selection: Uint8Array | null;
   readonly label: LabelVolume;
+  /** A tilted pane's plane as a picture (#307), which the selection is then in, in place of the slice. */
+  readonly plane: PlanePicture | null;
 }
 
 /** An SVG path of a slice mask's pixels, each run of a row one quadrilateral, through `toPane`. */
@@ -125,6 +136,8 @@ export class QuickSelectTool implements ContourTool {
   /** The stroke under way: what it marks, the voxel it was last at, and the marks before it. */
   private stroke: {
     last: VoxelIndex;
+    /** On a tilted pane: where the stroke was last, in pixels of the plane's picture. */
+    lastPixel: PlanePoint | null;
     before: { object: Uint8Array; background: Uint8Array };
   } | null = null;
   /** The search under way, to abandon. */
@@ -190,11 +203,14 @@ export class QuickSelectTool implements ContourTool {
     const { placement } = pointer;
     const axis = throughPlaneAxis(placement.orientation);
     const slice = voxel[axis];
+    const picture = planePictureOf(this.brush, placement);
     const session = this.session;
     if (
       session &&
       (session.axis !== axis ||
-        session.slice !== slice ||
+        (picture
+          ? !session.plane || !sameGridPlane(session.plane.stamp, picture.stamp)
+          : session.plane !== null || session.slice !== slice) ||
         session.placement.group !== placement.group ||
         session.label !== label)
     ) {
@@ -205,7 +221,9 @@ export class QuickSelectTool implements ContourTool {
     }
     if (!this.session) {
       const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
-      const [width, height] = [grid.dims[a], grid.dims[b]];
+      const [width, height] = picture
+        ? [picture.width, picture.height]
+        : [grid.dims[a], grid.dims[b]];
       this.session = {
         placement,
         axis,
@@ -216,15 +234,18 @@ export class QuickSelectTool implements ContourTool {
         background: new Uint8Array(width * height),
         selection: null,
         label,
+        plane: picture,
       };
       this.underWay.set(true);
     }
     const now = this.session;
+    const pixel = this.pixelAt(now, pointer);
     this.stroke = {
       last: voxel,
+      lastPixel: pixel,
       before: { object: Uint8Array.from(now.object), background: Uint8Array.from(now.background) },
     };
-    this.mark(context, placement.orientation, voxel, voxel);
+    this.mark(context, placement.orientation, voxel, voxel, pixel, pixel);
   }
 
   extend(context: ContourToolContext, pointer: ToolPointer): void {
@@ -232,8 +253,17 @@ export class QuickSelectTool implements ContourTool {
     const voxel = context.voxelAt(pointer);
     const stroke = this.stroke;
     if (!voxel || !stroke) return;
-    this.mark(context, pointer.placement.orientation, stroke.last, voxel);
+    const pixel = this.session ? this.pixelAt(this.session, pointer) : null;
+    this.mark(
+      context,
+      pointer.placement.orientation,
+      stroke.last,
+      voxel,
+      stroke.lastPixel ?? pixel,
+      pixel,
+    );
     stroke.last = voxel;
+    stroke.lastPixel = pixel ?? stroke.lastPixel;
   }
 
   /** The pointer came up: the object is looked for again, for all the strokes so far. */
@@ -259,9 +289,17 @@ export class QuickSelectTool implements ContourTool {
     const roiId = this.brush.activeRoiId();
     if (!session?.selection || roiId === null) return 0;
     const dims = session.label.dims;
+    const { selection, plane } = session;
     const voxels: number[] = [];
-    session.selection.forEach((v, k) => {
-      if (v)
+    if (plane) {
+      // Every voxel of the plane's sheet whose pixel of the picture was found.
+      const sheet = sheetVoxels(dims, session.label.spacing, plane.span, plane);
+      sheet.voxels.forEach((index, n) => {
+        if (selection[sheet.pixels[n]]) voxels.push(index);
+      });
+    }
+    selection.forEach((v, k) => {
+      if (v && !plane)
         voxels.push(
           sliceVoxelIndex(
             dims,
@@ -324,14 +362,21 @@ export class QuickSelectTool implements ContourTool {
       return;
     }
     const [a, b] = ([0, 1, 2] as const).filter((one) => one !== session.axis);
-    const pixelMm = Math.min(grid.spacing[a], grid.spacing[b]);
+    const pixelMm = session.plane
+      ? Math.min(...session.plane.pixelMm)
+      : Math.min(grid.spacing[a], grid.spacing[b]);
+    const dims = grid.dims as [number, number, number];
+    const picture = session.plane
+      ? planeImage(image, dims, grid.spacing, session.plane.span)
+      : slicePlane(image, dims, session.axis, session.slice);
+    if (!picture) return;
     this.searching?.abort();
     const abandon = new AbortController();
     this.searching = abandon;
     this.said.set('Looking for the object…');
     const started = performance.now();
     const request = {
-      plane: slicePlane(image, grid.dims as [number, number, number], session.axis, session.slice),
+      plane: { data: picture.data, width: picture.width, height: picture.height },
       stroke: Uint8Array.from(session.object),
       background: session.background.includes(1) ? Uint8Array.from(session.background) : undefined,
       marginPx: margin / pixelMm,
@@ -347,7 +392,8 @@ export class QuickSelectTool implements ContourTool {
         const count = selection.mask.reduce((sum, v) => sum + v, 0);
         const took = Math.round(performance.now() - started);
         this.said.set(
-          `${count} voxels found in ${took} ms: Accept adds them.` +
+          // On a tilted plane what is found is pixels of its picture; the voxels are counted when added.
+          `${count} ${session.plane ? 'pixels of the plane' : 'voxels'} found in ${took} ms: Accept adds them.` +
             (selection.touchesBox
               ? ' They reach the edge of the area looked in, and may be cut off there: a stroke over what is not the object beyond it helps.'
               : ''),
@@ -362,16 +408,49 @@ export class QuickSelectTool implements ContourTool {
       });
   }
 
-  /** Mark the brush's disc from `from` to `to`, on the session's slice, as what is being marked. */
+  /** A tilted pane's own plane, which the selection is of (#307): the controller keeps it. */
+  drawsOnPlane(placement: ToolPointer['placement']): PlaneSpan | null {
+    return this.brush.tiltedPlaneOf(placement)?.span ?? null;
+  }
+
+  /** Where the pointer is in the session's picture of a tilted plane, in pixels; null on a slice. */
+  private pixelAt(session: Session, pointer: ToolPointer): PlanePoint | null {
+    const local = this.brush.paneLocal(pointer);
+    if (!session.plane || !local) return null;
+    const { rect } = pointer.placement;
+    const voxel = this.brush.continuousVoxelAtCanvas(
+      pointer.placement,
+      rect.x + local.x,
+      rect.y + local.y,
+    );
+    return voxel ? picturePixelOf(session.plane, this.brush.voxelSpacing(), voxel) : null;
+  }
+
+  /**
+   * Mark the brush's disc from `from` to `to`, on the session's slice, as
+   * what is being marked; on a tilted plane, from one pixel of its picture
+   * to another.
+   */
   private mark(
     context: ContourToolContext,
     orientation: Orientation,
     from: VoxelIndex,
     to: VoxelIndex,
+    fromPixel: PlanePoint | null,
+    toPixel: PlanePoint | null,
   ): void {
     const grid = context.grid();
     const session = this.session;
     if (!grid || !session) return;
+    if (session.plane) {
+      if (!fromPixel || !toPixel) return;
+      const marked = this.marking() === 'object' ? session.object : session.background;
+      for (const pixel of strokePixels(session.plane, fromPixel, toPixel, this.brush.radiusMm())) {
+        marked[pixel] = 1;
+      }
+      this.changed.update((n) => n + 1);
+      return;
+    }
     const voxels = strokeVoxels(grid.dims, grid.spacing, from, to, {
       shape: 'disk',
       radiusMm: this.brush.radiusMm(),
@@ -389,6 +468,7 @@ export class QuickSelectTool implements ContourTool {
 
   /** Pixels of the session's slice to pixels of its pane: affine, from three points. */
   private toPane(session: Session): ((point: PlanePoint) => [number, number]) | null {
+    if (session.plane) return pictureToPane(this.brush, session.placement, session.plane);
     const [a, b] = ([0, 1, 2] as const).filter((one) => one !== session.axis);
     const voxel = (u: number, v: number): [number, number, number] => {
       const out: [number, number, number] = [0, 0, 0];

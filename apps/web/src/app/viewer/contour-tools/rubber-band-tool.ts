@@ -5,7 +5,9 @@
 // The rubber band (#116): press on the edge of the structure being edited and
 // drag; the section held follows the pointer, and the edge on either side
 // follows less and less out to an influence length, beyond which it stays.
-// It works on the slice pressed on, across the axis the pane steps through.
+// It works on the slice pressed on, across the axis the pane steps through;
+// on a tilted pane (#307), on the structure's section on the pane's own
+// plane, put back into the grid through the voxels of the plane's sheet.
 // While dragging the structure itself is redrawn from the edge as moved, so
 // the preview is the result; the drag is one edit, through the shared
 // constraints. The work is `label-rubber-band.ts`'s. Of the labs until it
@@ -22,8 +24,10 @@ import {
 import {
   nearestEdge,
   rubberBand,
+  sheetVoxels,
   sliceVoxelIndex,
   type PlanePoint,
+  type PlaneSpan,
   type SliceMask,
 } from '@open-rt-studio/dicom';
 import { throughPlaneAxis } from '@open-rt-studio/render';
@@ -35,6 +39,7 @@ import type {
   ToolPointer,
   ToolPreviewCircle,
 } from './contour-tool';
+import { picturePixelOf, planePictureOf, type PlanePicture } from './plane-picture';
 import { POINT_GRAB_PX } from './point-tool';
 
 /** The drag under way: the slice, what it was when pressed, and where the edge was taken hold of. */
@@ -45,6 +50,16 @@ interface Held {
   readonly spacing: readonly [number, number];
   readonly grab: PlanePoint;
   readonly start: PlanePoint;
+  /**
+   * On a tilted pane (#307): the plane's picture, which `original` is the
+   * structure's section in; the voxels of the plane's sheet, each with its
+   * pixel of the picture; and which of them the structure held when pressed.
+   */
+  readonly plane: {
+    readonly picture: PlanePicture;
+    readonly sheet: ReturnType<typeof sheetVoxels>;
+    readonly was: Uint8Array;
+  } | null;
 }
 
 @Injectable()
@@ -94,14 +109,18 @@ export class RubberBandTool implements ContourTool {
     this.held = null;
     this.hover(context, pointer);
     const roiId = context.activeRoiId();
-    const found = this.inSlice(pointer);
-    if (roiId === null || !found) return;
+    const grid = context.grid();
+    const picture = planePictureOf(this.brush, pointer.placement);
+    const found = this.inSlice(pointer, picture);
+    if (roiId === null || !found || !grid) return;
     const { axis, slice, point } = found;
-    const original = context.sliceMask(roiId, axis, slice);
+    const original = picture
+      ? context.section(roiId, picture.span)
+      : context.sliceMask(roiId, axis, slice);
     if (!original) return;
     const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
     const all = this.brush.voxelSpacing();
-    const spacing: [number, number] = [all[a], all[b]];
+    const spacing: readonly [number, number] = picture ? picture.pixelMm : [all[a], all[b]];
     const edge = nearestEdge(original, spacing, point);
     // Within the grab distance of the edge, or a voxel, whichever is more.
     const reach = Math.max(
@@ -114,7 +133,19 @@ export class RubberBandTool implements ContourTool {
       return;
     }
     this.said.set(null);
-    this.held = { axis, slice, original, spacing, grab: edge.point, start: point };
+    let plane: Held['plane'] = null;
+    if (picture) {
+      const dims = grid.dims as [number, number, number];
+      const sheet = sheetVoxels(dims, grid.spacing, picture.span, picture);
+      const [nx, ny] = dims;
+      const was = Uint8Array.from(sheet.voxels, (i) =>
+        context.held([i % nx, Math.floor(i / nx) % ny, Math.floor(i / (nx * ny))]) === roiId
+          ? 1
+          : 0,
+      );
+      plane = { picture, sheet, was };
+    }
+    this.held = { axis, slice, original, spacing, grab: edge.point, start: point, plane };
   }
 
   extend(context: ContourToolContext, pointer: ToolPointer): void {
@@ -122,7 +153,7 @@ export class RubberBandTool implements ContourTool {
     const held = this.held;
     const roiId = context.activeRoiId();
     const grid = context.grid();
-    const found = this.inSlice(pointer);
+    const found = this.inSlice(pointer, held?.plane?.picture ?? null);
     if (!held || roiId === null || !grid || !found || found.axis !== held.axis) return;
     const move: PlanePoint = [found.point[0] - held.start[0], found.point[1] - held.start[1]];
     const wanted = rubberBand(
@@ -132,12 +163,29 @@ export class RubberBandTool implements ContourTool {
       move,
       this.influenceMm() ?? 0,
     );
-    const now = context.sliceMask(roiId, held.axis, held.slice);
-    if (!now) return;
-    // From what the slice holds now to what it should: paint what is wanted, clear what is not.
     const dims = grid.dims as [number, number, number];
     const add: number[] = [];
     const remove: number[] = [];
+    if (held.plane) {
+      // Each voxel of the sheet goes as its pixel of the picture went; where the pixel is as it
+      // was when pressed, the voxel is as it was too, whatever the drag did to it on the way.
+      const { sheet, was } = held.plane;
+      const [nx, ny] = dims;
+      for (let n = 0; n < sheet.voxels.length; n++) {
+        const [i, pixel] = [sheet.voxels[n], sheet.pixels[n]];
+        const should = wanted[pixel] === held.original.mask[pixel] ? was[n] : wanted[pixel];
+        const is =
+          context.held([i % nx, Math.floor(i / nx) % ny, Math.floor(i / (nx * ny))]) === roiId;
+        if (should && !is) add.push(i);
+        else if (!should && is) remove.push(i);
+      }
+      if (add.length > 0) context.change({ kind: 'paint', roiId, voxels: add });
+      if (remove.length > 0) context.change({ kind: 'erase', roiId, voxels: remove, only: true });
+      return;
+    }
+    const now = context.sliceMask(roiId, held.axis, held.slice);
+    if (!now) return;
+    // From what the slice holds now to what it should: paint what is wanted, clear what is not.
     for (let v = 0; v < now.height; v++) {
       for (let u = 0; u < now.width; u++) {
         const i = v * now.width + u;
@@ -171,9 +219,18 @@ export class RubberBandTool implements ContourTool {
     );
   }
 
-  /** The slice under the pointer, and where on it the pointer is, in pixels of the slice. */
+  /** A tilted pane's own plane, which the edge is dragged on (#307): the controller keeps it. */
+  drawsOnPlane(placement: ToolPointer['placement']): PlaneSpan | null {
+    return this.brush.tiltedPlaneOf(placement)?.span ?? null;
+  }
+
+  /**
+   * The slice under the pointer, and where on it the pointer is, in pixels
+   * of the slice; with a tilted pane's picture, in pixels of that.
+   */
   private inSlice(
     pointer: ToolPointer,
+    picture: PlanePicture | null,
   ): { axis: 0 | 1 | 2; slice: number; point: PlanePoint } | null {
     const local = this.brush.paneLocal(pointer);
     if (!local) return null;
@@ -187,6 +244,10 @@ export class RubberBandTool implements ContourTool {
     const axis = throughPlaneAxis(placement.orientation);
     const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
     const slice = this.held?.axis === axis ? this.held.slice : Math.round(voxel[axis]);
+    if (picture) {
+      const point = picturePixelOf(picture, this.brush.voxelSpacing(), voxel);
+      return point ? { axis, slice, point } : null;
+    }
     return { axis, slice, point: [voxel[a], voxel[b]] };
   }
 }

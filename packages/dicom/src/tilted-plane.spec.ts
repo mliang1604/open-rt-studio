@@ -13,8 +13,11 @@ import {
   gridPlaneOf,
   planeImage,
   planePointMm,
+  planeRaster,
   planeVoxelAt,
   sheetHalfMm,
+  sheetVoxels,
+  strokePixels,
 } from './tilted-plane.js';
 
 type V = [number, number, number];
@@ -277,5 +280,116 @@ describe('the image on a plane (#303)', () => {
         alongV: [0, 1, 0],
       }),
     ).toBeNull();
+  });
+});
+
+describe('a plane’s picture and the voxels of its sheet (#307)', () => {
+  const dims: V = [40, 40, 24];
+  const spacing: V = [1, 1, 2];
+  const along: V = [0, Math.cos(Math.PI / 6), Math.sin(Math.PI / 6)];
+  const tilted: PlaneSpan = {
+    origin: [0, 20 - 20 * along[1], 12 - (20 * along[2]) / 2],
+    alongU: [40, 0, 0],
+    alongV: [0, 40 * along[1], (40 * along[2]) / 2],
+  };
+
+  it('lays a picture out as the section and the image are laid', () => {
+    const raster = planeRaster(tilted, spacing)!;
+    const label = { dims, spacing, data: new Uint16Array(40 * 40 * 24) };
+    const section = sectionOf(label, 5, tilted);
+    const picture = planeImage(new Float32Array(40 * 40 * 24), dims, spacing, tilted)!;
+    expect([raster.width, raster.height]).toEqual([40, 40]);
+    expect([section.width, section.height]).toEqual([raster.width, raster.height]);
+    expect([picture.width, picture.height]).toEqual([raster.width, raster.height]);
+    expect(picture.pixelMm).toEqual(raster.pixelMm);
+    expect(planeRaster({ ...tilted, alongU: [0, 0, 0] }, spacing)).toBeNull();
+  });
+
+  it('gives a slice of the grid its own voxels, each to its own pixel', () => {
+    const axial: PlaneSpan = { origin: [-0.5, -0.5, 7], alongU: [40, 0, 0], alongV: [0, 40, 0] };
+    const raster = planeRaster(axial, spacing)!;
+    const { voxels, pixels } = sheetVoxels(dims, spacing, axial, raster);
+    expect(voxels).toHaveLength(1600);
+    for (let n = 0; n < voxels.length; n++) {
+      const [x, y, z] = [
+        voxels[n] % 40,
+        Math.floor(voxels[n] / 40) % 40,
+        Math.floor(voxels[n] / 1600),
+      ];
+      expect(z).toBe(7);
+      expect(pixels[n]).toBe(y * 40 + x);
+    }
+  });
+
+  it('gives a tilted plane every voxel of its sheet once, each to the pixel its foot is in', () => {
+    const raster = planeRaster(tilted, spacing)!;
+    const { voxels, pixels } = sheetVoxels(dims, spacing, tilted, raster);
+    const { normal, offsetMm } = gridPlaneOf(tilted, spacing)!;
+    const half = sheetHalfMm(normal, spacing);
+    expect(new Set(voxels).size).toBe(voxels.length);
+    for (let n = 0; n < voxels.length; n++) {
+      const voxel: V = [
+        voxels[n] % 40,
+        Math.floor(voxels[n] / 40) % 40,
+        Math.floor(voxels[n] / 1600),
+      ];
+      const [a, b] = planePointMm(tilted, spacing, voxel)!;
+      expect(pixels[n]).toBe(
+        Math.floor(b / raster.pixelMm[1]) * raster.width + Math.floor(a / raster.pixelMm[0]),
+      );
+    }
+    // None of the sheet within the picture is left out: counted the long way.
+    let count = 0;
+    for (let z = 0; z < 24; z++) {
+      for (let y = 0; y < 40; y++) {
+        for (let x = 0; x < 40; x++) {
+          if (Math.abs(normal[0] * x + normal[1] * y + normal[2] * z * 2 - offsetMm) > half)
+            continue;
+          const [a, b] = planePointMm(tilted, spacing, [x, y, z])!;
+          if (a >= 0 && a <= 40 && b >= 0 && b <= 40) count++;
+        }
+      }
+    }
+    expect(voxels).toHaveLength(count);
+    // The whole picture's worth, painted, is what a curve round the picture fills.
+    const all = fillPlaneLoop(dims, spacing, tilted, [
+      [-1e-6, -1e-6],
+      [40 + 1e-6, -1e-6],
+      [40 + 1e-6, 40 + 1e-6],
+      [-1e-6, 40 + 1e-6],
+    ]);
+    expect([...voxels].sort((p, q) => p - q)).toEqual(all);
+  });
+});
+
+describe('a round brush’s stroke in a picture (#307)', () => {
+  const raster = { width: 20, height: 12, pixelMm: [1, 2] as const };
+  const at = (index: number): [number, number] => [index % 20, Math.floor(index / 20)];
+
+  it('covers a disc in mm for a click, the pixel under it whatever the radius', () => {
+    const disc = strokePixels(raster, [10, 6], [10, 6], 3).map(at);
+    // 3 mm: three pixels either way across, one either way down (pixels 2 mm high).
+    expect(disc).toContainEqual([13, 6]);
+    expect(disc).toContainEqual([7, 6]);
+    expect(disc).toContainEqual([10, 7]);
+    expect(disc).not.toContainEqual([14, 6]);
+    expect(disc).not.toContainEqual([10, 8]);
+    for (const [u, v] of disc) expect(Math.hypot(u - 10, (v - 6) * 2)).toBeLessThanOrEqual(3);
+    expect(strokePixels(raster, [10.4, 5.6], [10.4, 5.6], 0).map(at)).toEqual([[10, 6]]);
+  });
+
+  it('covers the whole way from one end to the other, each pixel once, and nothing off the picture', () => {
+    const stroke = strokePixels(raster, [2, 2], [17, 9], 1.5);
+    expect(new Set(stroke).size).toBe(stroke.length);
+    const cells = stroke.map(at);
+    // A pixel on the line midway, and none far from it.
+    expect(cells).toContainEqual([9, 5]);
+    expect(cells).toContainEqual([2, 2]);
+    expect(cells).toContainEqual([17, 9]);
+    expect(cells).not.toContainEqual([2, 9]);
+    const off = strokePixels(raster, [-5, -5], [1, 1], 2).map(at);
+    expect(off.length).toBeGreaterThan(0);
+    expect(off.every(([u, v]) => u >= 0 && v >= 0 && u < 20 && v < 12)).toBe(true);
+    expect(strokePixels(raster, [-9, -9], [-9, -9], 1)).toEqual([]);
   });
 });

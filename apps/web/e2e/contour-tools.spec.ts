@@ -739,3 +739,87 @@ test('on a tilted pane, a curve of points and a live wire are filled on the pane
   expect(await capturedColour(page)).toBeCloseTo(beforeTilted, 1);
   expectNoProblems(problems);
 });
+
+test('on a tilted pane, the threshold brush, push, rubber band and quick select work on the pane’s own plane (#307)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  const size = page.getByLabel('Brush radius (mm)');
+  for (let step = 0; step < 30; step++) await size.press('ArrowRight');
+  await page.locator('[data-labs]').check();
+  const threshold = page.locator('[data-contour-tool="threshold"]');
+  // In the soft tissue in front of the heart, off the knob in the pane's middle and off the lungs.
+  const spot = await at(page, 0.47, 0.33);
+  const park = await at(page, 0.5, 0.97);
+
+  // On the pane as it is: a disc of the tissue's values, for what it covers of the picture.
+  await threshold.click();
+  const before = await capturedColour(page);
+  await page.mouse.click(spot.x, spot.y);
+  const flat = (await capturedColour(page)) - before;
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  await threshold.click();
+
+  // Tilted: the disc covers as much of the pane, where a disc on a grid slice would be a stripe of it.
+  await tiltMainPane(page);
+  await threshold.click();
+  const beforeTilted = await capturedColour(page);
+  await page.mouse.move(spot.x, spot.y);
+  const radius = Number(await page.locator('[data-tool-preview] circle').first().getAttribute('r'));
+  await page.mouse.click(spot.x, spot.y);
+  const disc = (await capturedColour(page)) - beforeTilted;
+  // Measured: 0.89 of the untilted disc; painted on a grid slice, as before #307, 0.54.
+  expect(flat).toBeGreaterThan(0.2);
+  expect(disc).toBeGreaterThan(0.7 * flat);
+
+  // Push, begun inside the disc: its edge goes out with the brush.
+  await page.locator('[data-contour-tool="push"]').click();
+  await page.mouse.move(spot.x, spot.y);
+  await page.mouse.down();
+  await page.mouse.move(spot.x - radius * 1.5, spot.y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator('[data-push-said]')).toHaveText('The last stroke pushed out.');
+  const pushed = (await capturedColour(page)) - beforeTilted;
+  expect(pushed).toBeGreaterThan(disc + 0.15);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await capturedColour(page)) - beforeTilted).toBeCloseTo(disc, 2);
+
+  // The rubber band, on the disc's lower edge, dragged down.
+  await page.locator('[data-contour-tool="rubber"]').click();
+  await page.mouse.move(spot.x, spot.y + radius);
+  await page.mouse.down();
+  await page.mouse.move(spot.x, spot.y + radius + 30, { steps: 6 });
+  await page.mouse.up();
+  const dragged = (await capturedColour(page)) - beforeTilted;
+  expect(dragged).toBeGreaterThan(disc + 0.03);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await capturedColour(page)) - beforeTilted).toBeCloseTo(disc, 2);
+
+  // Quick select: a stroke in the left lung, on the image's right.
+  await page.locator('[data-contour-tool="quick"]').click();
+  const lung = await at(page, 0.64, 0.45);
+  await page.mouse.move(lung.x, lung.y);
+  await page.mouse.down();
+  await page.mouse.move(lung.x + 5, lung.y + 40, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('[data-quick-said]')).toHaveText(
+    /^\d+ pixels of the plane found in \d+ ms: Accept adds them\./,
+  );
+  await page.getByRole('button', { name: 'Accept' }).click();
+  await expect(page.locator('[data-quick-said]')).toHaveText(/^\d+ voxels added\.$/);
+  await page.mouse.move(park.x, park.y);
+  const selected = (await capturedColour(page)) - beforeTilted;
+  expect(selected).toBeGreaterThan(disc + 1);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await capturedColour(page)) - beforeTilted).toBeCloseTo(disc, 2);
+  expectNoProblems(problems);
+});

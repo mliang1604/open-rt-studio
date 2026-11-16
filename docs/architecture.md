@@ -466,8 +466,12 @@ its own.
   pane's own plane (a sheet a voxel thick, `StampPlane`), and that plane is
   kept (#303). The points and live-wire tools fill their curve on that
   sheet too (`fillPlaneLoop` in `tilted-plane.ts`), the live wire searching
-  the image sampled on the plane (`planeImage`); every other tool paints
-  grid slices. Settling runs
+  the image sampled on the plane (`planeImage`). The threshold brush and
+  the push brush stamp their disc on it as the brush does; the rubber band
+  and quick select work in the plane's picture (`plane-picture.ts`: the
+  structure's section, the image) and put the result into the grid through
+  the sheet's voxels, each by the pixel its foot is in (`sheetVoxels`,
+  #307). Settling runs
   in a web worker, as an edit of its own after the fill, so that Undo shows
   the guess (#295); its band is at most three quarters of a guess's depth. The spike's
   measurements and recommendation are in
