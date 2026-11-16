@@ -117,6 +117,30 @@ and is settled to the image afterwards if asked.
 - A fit took about 1 s on a 48³ grid: the solve grows with the cube of the
   points, the sampling with the voxels in the structure's box.
 
+### Since: every slice drawn, outlines on any plane, and speed (#302)
+
+- **The fit takes every slice the structure was drawn on with the tools**
+  (several on an axis too), and the slice it fills most on each axis only
+  when fewer than two were drawn (a structure loaded). Every tool that draws
+  on a slice draws across the grid axis of its pane's orientation, at the
+  voxel under the pointer: on a tilted pane it paints grid slices, and those
+  are what is kept.
+- **Outlines on any plane** in the core (`PlaneOutline`, `sectionOf`): the
+  tilted ellipsoid from three oblique sections near its middle gave 0.955.
+  No tool yet draws on a tilted plane itself, so the viewer does not use
+  them.
+- **More sections are not always better.** Axial 19, 25 and 31 with a
+  sagittal and a coronal section gave 0.977, against 0.973 for the fullest
+  of each axis; without the coronal, 0.968 against 0.975: beyond the
+  outermost axial sections the surface bulges where one outline holds it.
+- **Points off the surface are two of the grid's coarsest voxels off**, and
+  2 mm at least. On the 4 mm voxels of the thorax phantom, five small discs
+  drawn in the browser were fitted with a lobe far from them; 2 mm off was
+  half a voxel.
+- **`Math.sqrt` in place of `Math.hypot`** made a fit 7 to 9 times faster: a
+  box of 150 × 150 × 100 voxels took 1.6 s. Sampling a coarse lattice first
+  saved a third at most, and only with a margin nothing guarantees; dropped.
+
 ## Recommendation
 
 - **Offer settling to the image** as an option of interpolation, off by

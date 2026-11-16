@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { TestBed } from '@angular/core/testing';
-import { labelIndex } from '@open-rt-studio/dicom';
+import { Orientation, labelIndex } from '@open-rt-studio/dicom';
 
 import { AXIAL_MID, pointer, setup } from '../brush-testing';
 import { InterpolateOptions, InterpolateTool, sliceRuns } from './interpolate-tool';
@@ -193,5 +193,28 @@ describe('InterpolateTool (#115)', () => {
     expect(tool.said()).toBe(
       'Draw the structure on a slice in two planes or more: axial, coronal, sagittal.',
     );
+  });
+
+  it('fits through the slices drawn on, not the fullest slice of each axis (#302)', async () => {
+    const made = setup();
+    // A stroke across the axial pane and one across the coronal: two slices drawn on.
+    made.brush.activeRoiId.set(made.store.createRoi().id);
+    made.brush.mode.set('paint');
+    made.brush.radiusMm.set(0);
+    for (const orientation of [Orientation.Axial, Orientation.Coronal]) {
+      made.tools.begin({ ...AXIAL_MID, orientation }, pointer(0, 50));
+      made.tools.extend({ ...AXIAL_MID, orientation }, pointer(99, 50));
+      made.tools.end();
+    }
+    expect(made.tools.drawnSlices(made.brush.activeRoiId()!)).toHaveLength(2);
+    made.brush.mode.set('off');
+    made.tools.setLabs(true);
+    made.tools.toggle('interp');
+    const tool = TestBed.inject(InterpolateTool);
+    tool.fitFromPlanes();
+    // The fullest slice of each axis would be three outlines: the structure is on all three.
+    expect(tool.said()).toBe('Fitting a surface to 2 outlines…');
+    await tool.working;
+    expect(tool.said()).toMatch(/^Fitted from 2 outlines; \d+ voxels? added\.$/);
   });
 });

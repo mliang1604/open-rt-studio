@@ -4,12 +4,17 @@
 
 /// <reference lib="webworker" />
 
-import { fitFromContours, type LabelVolume, type Outline } from '@open-rt-studio/dicom';
+import {
+  fitFromContours,
+  type LabelVolume,
+  type Outline,
+  type PlaneOutline,
+} from '@open-rt-studio/dicom';
 
 /** A fit asked of the worker: the grid, and the outlines drawn on it. */
 export interface FitJob {
   readonly grid: Pick<LabelVolume, 'dims' | 'spacing'>;
-  readonly outlines: readonly Outline[];
+  readonly outlines: readonly (Outline | PlaneOutline)[];
 }
 
 /** What came of a {@link FitJob}; the worker never throws across the boundary. */

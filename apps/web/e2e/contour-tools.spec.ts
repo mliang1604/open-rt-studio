@@ -576,6 +576,40 @@ test('the slices filled are settled to the image in a worker, listed, and the gu
   expectNoProblems(problems);
 });
 
+test('a surface is fitted through the slices drawn on, in a worker, as one undo (#296, #302)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  // A stamp on this slice and one two slices on, off the knob at the crosshair's centre.
+  const spot = await at(page, 0.42, 0.42);
+  await page.mouse.click(spot.x, spot.y);
+  const axial = page.locator('.pane-overlay .pane').first();
+  const sliceNow = async () => Number(/Axial · (\d+)/.exec(await axial.innerText())?.[1]);
+  const first = await sliceNow();
+  for (let step = 1; step <= 2; step++) {
+    await page.mouse.wheel(0, 100);
+    await expect.poll(sliceNow).toBe(first + step);
+  }
+  await page.mouse.click(spot.x, spot.y);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="interp"]').click();
+  await page.locator('[data-interp-fit]').click();
+  // The two slices drawn on: the fullest slice of each axis would be three outlines.
+  await expect(page.locator('[data-interp-said]')).toHaveText(
+    /^Fitted from 2 outlines; \d+ voxels? added\.$/,
+    { timeout: 30_000 },
+  );
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Fit from planes (Ctrl/⌘+Z)',
+  );
+  expectNoProblems(problems);
+});
+
 test('quick select finds the object under rough strokes, shows it, and Accept adds it as one undo (#119, #292)', async ({
   page,
 }) => {

@@ -199,8 +199,14 @@ export {
 } from './random-walker.js';
 export { type Outline, refineToImage, visualHull } from './image-aware.js';
 export {
+  type FitOptions,
   type ImplicitSurface,
+  type PlaneOutline,
+  type PlaneSpan,
+  planeOutlineOf,
+  sectionOf,
   OFF_MM,
+  offSurfaceMm,
   constraintsOf,
   fitFromContours,
   fitSurface,

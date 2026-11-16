@@ -36,7 +36,9 @@ import {
   sliceMask,
   slicePlane,
   type LabelChange,
+  type LabelVolume,
   type Outline,
+  type PlaneOutline,
 } from '@open-rt-studio/dicom';
 
 import { BrushController } from '../brush-controller';
@@ -161,16 +163,34 @@ export class InterpolateTool implements ContourTool {
   }
 
   /**
-   * Fit the structure from an outline drawn in each plane (#296): for each
-   * axis the slice the structure fills most is taken as the outline drawn
-   * there, a surface is fitted through them (`fitFromContours`, in a
-   * worker), settled to the image if asked, and the voxels within it are
-   * added, as one edit.
+   * Fit the structure from the outlines drawn (#296, #302): its sections on
+   * every slice it was drawn on with the tools, several on an axis too; or,
+   * when fewer than two of those hold it (a structure loaded, not drawn),
+   * the slice it fills most on each axis. A surface is fitted through them
+   * (`fitFromContours`, in a worker), settled to the image if asked, and the
+   * voxels within it are added, as one edit.
    */
   fitFromPlanes(): void {
     const label = this.store.labelVolume();
     const roiId = this.brush.activeRoiId();
     if (!label || roiId === null) return;
+    const drawn: Outline[] = this.injector
+      .get(ContourToolsController)
+      .drawnSlices(roiId)
+      .map(({ axis, slice }) => ({ axis, slice, mask: sliceMask(label, roiId, axis, slice).mask }))
+      .filter(({ mask }) => mask.includes(1));
+    const outlines = drawn.length >= 2 ? drawn : this.fullestSlices(label, roiId);
+    if (outlines.length < 2) {
+      this.said.set(
+        'Draw the structure on a slice in two planes or more: axial, coronal, sagittal.',
+      );
+      return;
+    }
+    this.fitThrough(label, roiId, outlines);
+  }
+
+  /** The slice a structure fills most on each axis, as outlines. */
+  private fullestSlices(label: LabelVolume, roiId: number): Outline[] {
     const outlines: Outline[] = [];
     for (const axis of [0, 1, 2] as const) {
       let best: { slice: number; mask: Uint8Array; count: number } | null = null;
@@ -182,12 +202,15 @@ export class InterpolateTool implements ContourTool {
       }
       if (best) outlines.push({ axis, slice: best.slice, mask: best.mask });
     }
-    if (outlines.length < 2) {
-      this.said.set(
-        'Draw the structure on a slice in two planes or more: axial, coronal, sagittal.',
-      );
-      return;
-    }
+    return outlines;
+  }
+
+  /** Fit a surface through outlines in a worker, settle it if asked, and add it as one edit. */
+  private fitThrough(
+    label: LabelVolume,
+    roiId: number,
+    outlines: readonly (Outline | PlaneOutline)[],
+  ): void {
     // The surface through the outlines (#296), in a worker; then settled to the image if asked.
     this.cancelSettling();
     const abandon = new AbortController();
@@ -437,10 +460,10 @@ export class InterpolateTool implements ContourTool {
       <button
         type="button"
         data-interp-fit
-        title="Draw an outline on one slice in each plane; the structure is fitted from them (labs: the #120 spike)"
+        title="Draw the structure on slices in two planes or more; a surface is fitted through every slice drawn (labs)"
         (click)="tool.fitFromPlanes()"
       >
-        Fit from an outline in each plane
+        Fit from the slices drawn
       </button>
       @if (tool.settling(); as progress) {
         <div class="row">
