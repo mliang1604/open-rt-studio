@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, computed, inject, signal } from '@angular/core';
-import type { LabelChange, LabelConstraints } from '@open-rt-studio/dicom';
+import { sliceMask, type LabelChange, type LabelConstraints } from '@open-rt-studio/dicom';
 
 import { PreferencesStore } from '../../preferences-store';
 import { BrushController } from '../brush-controller';
@@ -111,6 +111,10 @@ export class ContourToolsController {
       return label.data[(voxel[2] * ny + voxel[1]) * nx + voxel[0]] ?? 0;
     },
     image: () => this.store.imageData(),
+    sliceMask: (roiId, axis, slice) => {
+      const label = this.store.labelVolume();
+      return label ? sliceMask(label, roiId, axis, slice) : null;
+    },
     voxelAtCanvas: (placement, x, y) => this.brush.voxelAtCanvas(placement, x, y),
     change: (change) => this.store.applyChange(change, this.constraints()),
   };
