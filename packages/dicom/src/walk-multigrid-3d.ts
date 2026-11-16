@@ -24,6 +24,11 @@
 // fifth slower); a chequerboard smoother (as many steps with two sweeps, and
 // no cheaper; twice the steps with one); a first guess by full multigrid
 // (8 steps to 5 or 6 on a sphere, one saved on an object through the box).
+// And since (#311), against the many steps an object closed off by sharp
+// edges takes: stopping when the selection stops changing (it stands still,
+// then takes in more); coarsening further; blocks that do not straddle
+// sharp edges, with the coarsest level solved outright (far more steps).
+// `docs/quick-selection.md` has the figures.
 
 /** One grid of the hierarchy. Its arrays are padded: voxel `k` is at `pad + k`. */
 export interface Level3 {
@@ -286,15 +291,24 @@ export function vCycle3(levels: readonly Level3[], l: number, r: Float64Array): 
   return z;
 }
 
+/** What a solve may be told, beyond its equation. */
+export interface SolveOptions3 {
+  /**
+   * Told after each step how far the solve has come, from 0 to 1: how much
+   * of the way, in orders of magnitude, the residual is to the tolerance;
+   * 1 at the last step, however it ended.
+   */
+  readonly onStep?: (done: number) => void;
+  /** `x` is 0 to begin with: the solve need not work out A x. */
+  readonly fromZero?: boolean;
+}
+
 /**
  * A x = b by conjugate gradients preconditioned with one V-cycle, from `x`
  * (in place). `b` and `x` are padded as the level's arrays are
  * ({@link levelVector3}), and 0 where a voxel is not free. Stops when the
  * residual is `tolerance` of b, or after `maxIterations`. Returns how many
  * steps it took.
- *
- * `onStep` is told after each step how far it has come, from 0 to 1: how
- * much of the way, in orders of magnitude, the residual is to the tolerance.
  */
 export function multigridSolve3(
   level: Level3,
@@ -302,33 +316,33 @@ export function multigridSolve3(
   x: Float64Array,
   tolerance: number,
   maxIterations: number,
-  onStep?: (done: number) => void,
+  { onStep, fromZero = false }: SolveOptions3 = {},
 ): number {
   const levels = hierarchy3(level);
   const { pad } = level;
   const end = pad + level.w * level.h * level.d;
   const r = levelVector3(level);
-  multiply(level, x, r);
+  // From 0, A x is 0: there is nothing to multiply.
+  if (!fromZero) multiply(level, x, r);
   let begin = 0;
+  let rr = 0;
   for (let j = pad; j < end; j++) {
-    r[j] = b[j] - r[j];
+    const left = b[j] - r[j];
+    r[j] = left;
     begin += b[j] * b[j];
+    rr += left * left;
   }
+  const target = tolerance * tolerance * begin;
+  if (maxIterations <= 0 || rr <= target || rr === 0) return 0;
   let z = vCycle3(levels, 0, r);
   const p = Float64Array.from(z);
   const ap = levelVector3(level);
   let rz = 0;
-  let rr = 0;
-  for (let j = pad; j < end; j++) {
-    rz += r[j] * z[j];
-    rr += r[j] * r[j];
-  }
-  const target = tolerance * tolerance * begin;
+  for (let j = pad; j < end; j++) rz += r[j] * z[j];
   const from = rr;
   let done = 0;
   let iterations = 0;
-  for (; iterations < maxIterations; iterations++) {
-    if (rr <= target || rr === 0) break;
+  for (;;) {
     const pap = multiply(level, p, ap);
     if (pap <= 0) break;
     const alpha = rz / pap;
@@ -339,11 +353,18 @@ export function multigridSolve3(
       r[j] = left;
       rr += left * left;
     }
-    if (onStep && from > target && rr > 0) {
+    iterations++;
+    // The last step needs no V-cycle after it.
+    const stop = rr <= target || rr === 0 || iterations >= maxIterations;
+    if (onStep) {
       // The residual does not fall at every step: what is told never goes back.
-      done = Math.max(done, Math.min(1, Math.log(from / rr) / Math.log(from / target)));
+      if (stop) done = 1;
+      else if (from > target && rr > 0) {
+        done = Math.max(done, Math.min(1, Math.log(from / rr) / Math.log(from / target)));
+      }
       onStep(done);
     }
+    if (stop) break;
     z = vCycle3(levels, 0, r);
     let next = 0;
     for (let j = pad; j < end; j++) next += r[j] * z[j];

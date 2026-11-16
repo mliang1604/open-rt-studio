@@ -156,21 +156,42 @@ function blurAlong(
   const [w, h, d] = dims;
   const step = axis === 0 ? 1 : axis === 1 ? w : w * h;
   const along = dims[axis];
+  const taps = kernel.length;
+  // Where each tap reads from, about a voxel in from the ends.
+  const offsets = new Int32Array(taps);
+  for (let t = 0; t < taps; t++) offsets[t] = (t - reach) * step;
   const out = new Float64Array(values.length);
-  for (let z = 0, k = 0; z < d; z++) {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++, k++) {
-        const at = axis === 0 ? x : axis === 1 ? y : z;
-        let v = 0;
-        if (at >= reach && at + reach < along) {
-          for (let i = -reach; i <= reach; i++) v += kernel[i + reach] * values[k + i * step];
-        } else {
-          for (let i = -reach; i <= reach; i++) {
-            const to = Math.min(along - 1, Math.max(0, at + i));
-            v += kernel[i + reach] * values[k + (to - at) * step];
-          }
-        }
-        out[k] = v;
+  /** Voxels `from` to `to` of a row, the voxel `at` along the axis for the first: the ends held. */
+  const held = (from: number, to: number, at: number, moves: number): void => {
+    for (let k = from; k < to; k++, at += moves) {
+      let v = 0;
+      for (let t = 0; t < taps; t++) {
+        const reads = Math.min(along - 1, Math.max(0, at + t - reach));
+        v += kernel[t] * values[k + (reads - at) * step];
+      }
+      out[k] = v;
+    }
+  };
+  /** The same for voxels every tap of which is within the box: nothing to hold. */
+  const within = (from: number, to: number): void => {
+    for (let k = from; k < to; k++) {
+      let v = 0;
+      for (let t = 0; t < taps; t++) v += kernel[t] * values[k + offsets[t]];
+      out[k] = v;
+    }
+  };
+  // Along x a row has its two ends to hold; along y or z a whole row is within, or is not.
+  const [first, last] = [Math.min(reach, w), Math.max(Math.min(reach, w), w - reach)];
+  for (let z = 0, row = 0; z < d; z++) {
+    for (let y = 0; y < h; y++, row += w) {
+      if (axis === 0) {
+        held(row, row + first, 0, 1);
+        within(row + first, row + last);
+        held(row + last, row + w, last, 1);
+      } else {
+        const at = axis === 1 ? y : z;
+        if (at >= reach && at + reach < along) within(row, row + w);
+        else held(row, row + w, at, 0);
       }
     }
   }
@@ -211,21 +232,25 @@ export function walk3d(
   // The weight across each edge: to the right, down and back; 0 where there is none. Written
   // into the level's own arrays: a box is too large to keep twice.
   const { right, down, back, diag: degree } = level;
-  for (let z = 0, k = 0; z < d; z++) {
+  // A step of 0 weighs 1 + 1e-6, as its exponential would: an image without noise is mostly such.
+  const [nearX, nearY, nearZ] = near;
+  for (let z = 0, k = 0, j = pad; z < d; z++) {
+    const behind = z + 1 < d;
     for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++, k++) {
+      const below = y + 1 < h;
+      for (let x = 0; x < w; x++, k++, j++) {
         const v = values[k];
         if (x + 1 < w) {
           const step = v - values[k + 1];
-          right[pad + k] = near[0] * (Math.exp(-scale * step * step) + 1e-6);
+          right[j] = nearX * ((step === 0 ? 1 : Math.exp(-scale * step * step)) + 1e-6);
         }
-        if (y + 1 < h) {
+        if (below) {
           const step = v - values[k + w];
-          down[pad + k] = near[1] * (Math.exp(-scale * step * step) + 1e-6);
+          down[j] = nearY * ((step === 0 ? 1 : Math.exp(-scale * step * step)) + 1e-6);
         }
-        if (z + 1 < d) {
+        if (behind) {
           const step = v - values[k + s];
-          back[pad + k] = near[2] * (Math.exp(-scale * step * step) + 1e-6);
+          back[j] = nearZ * ((step === 0 ? 1 : Math.exp(-scale * step * step)) + 1e-6);
         }
       }
     }
@@ -240,14 +265,12 @@ export function walk3d(
   for (let k = 0, j = pad; k < n; k++, j++) {
     if (seeds[j] !== -1) continue;
     free[k] = 1;
-    const [l, r, u, dn, f, bk] = [
-      right[j - 1],
-      right[j],
-      down[j - w],
-      down[j],
-      back[j - s],
-      back[j],
-    ];
+    const l = right[j - 1];
+    const r = right[j];
+    const u = down[j - w];
+    const dn = down[j];
+    const f = back[j - s];
+    const bk = back[j];
     degree[j] = l + r + u + dn + f + bk;
     let pull = 0;
     if (seeds[j - 1] === 1) pull += l;
@@ -266,7 +289,10 @@ export function walk3d(
   }
   setOperator3(level);
   const x = levelVector3(level);
-  const iterations = multigridSolve3(level, b, x, tolerance, maxIterations, onStep);
+  const iterations = multigridSolve3(level, b, x, tolerance, maxIterations, {
+    ...(onStep ? { onStep } : {}),
+    fromZero: true,
+  });
   const chance = new Float64Array(n);
   for (let k = 0; k < n; k++) chance[k] = free[k] ? x[pad + k] : seed[k];
   return { chance, iterations };
@@ -292,19 +318,27 @@ export function quickSelect3d(
   for (const axis of [0, 1, 2] as const) {
     values = blurAlong(values, dims, axis, (sigma * finest) / spacing[axis]);
   }
-  // What the stroke is over: its mean, and its spread (a standard deviation; at least a
-  // two-hundredth of the box's range, as a stroke over values all alike has no spread, and
-  // smoothing leaves the same tissue a hair different elsewhere).
-  let [sum, squares, count] = [0, 0, 0];
+  // Seeds: 1 on the stroke, 0 on the background strokes and the box's faces (unless the stroke
+  // is there: the object's stroke wins where the two cross). And what the stroke is over: its
+  // mean, and its spread (a standard deviation; at least a two-hundredth of the box's range, as
+  // a stroke over values all alike has no spread, and smoothing leaves the same tissue a hair
+  // different elsewhere).
+  const seed = new Int8Array(n).fill(-1);
+  let [sum, squares, count, zeros] = [0, 0, 0, 0];
   let [least, most] = [Infinity, -Infinity];
   for (let k = 0; k < n; k++) {
     const v = values[k];
     if (v < least) least = v;
     if (v > most) most = v;
-    if (!stroke[k]) continue;
-    sum += v;
-    squares += v * v;
-    count++;
+    if (stroke[k]) {
+      seed[k] = 1;
+      sum += v;
+      squares += v * v;
+      count++;
+    } else if (background?.[k]) {
+      seed[k] = 0;
+      zeros++;
+    }
   }
   const mean = sum / count;
   const deviation = Math.max(
@@ -313,37 +347,35 @@ export function quickSelect3d(
   );
   const spread = 2 * deviation;
   const inside = request.inside ?? [true, true, true, true, true, true];
-  // Seeds: 1 on the stroke, 0 on the background strokes and the box's faces (unless the stroke
-  // is there: the object's stroke wins where the two cross). A face that is the volume's own is
-  // left free: there is nothing beyond it for the object to be cut off from, and seeded, it
-  // draws down along its whole length an object that runs out of the volume there (measured on
-  // one right through a 64³ box, from a stroke on one slice: Dice 0.39 seeded, 0.98 free). If
-  // that leaves nothing that is not the object, every face is 0 after all.
-  const seed = new Int8Array(n).fill(-1);
-  const seedFaces = (every: boolean): number => {
-    let zeros = 0;
-    for (let z = 0, k = 0; z < d; z++) {
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++, k++) {
-          if (stroke[k]) seed[k] = 1;
-          else if (background?.[k]) seed[k] = 0;
-          else if (
-            (x === 0 && (every || inside[0])) ||
-            (x === w - 1 && (every || inside[1])) ||
-            (y === 0 && (every || inside[2])) ||
-            (y === h - 1 && (every || inside[3])) ||
-            (z === 0 && (every || inside[4])) ||
-            (z === d - 1 && (every || inside[5]))
-          ) {
-            seed[k] = 0;
-          }
-          if (seed[k] === 0) zeros++;
+  const s = w * h;
+  // Each face: its first voxel, and the two steps and counts that cover it.
+  const faces: readonly (readonly [number, number, number, number, number])[] = [
+    [0, w, h, s, d],
+    [w - 1, w, h, s, d],
+    [0, 1, w, s, d],
+    [(h - 1) * w, 1, w, s, d],
+    [0, 1, w, w, h],
+    [(d - 1) * s, 1, w, w, h],
+  ];
+  // A face that is the volume's own is left free: there is nothing beyond it for the object to
+  // be cut off from, and seeded, it draws down along its whole length an object that runs out
+  // of the volume there (measured on one right through a 64³ box, from a stroke on one slice:
+  // Dice 0.39 seeded, 0.98 free). If that leaves nothing that is not the object, every face is
+  // 0 after all.
+  const seedFaces = (every: boolean): void => {
+    faces.forEach(([first, stepA, countA, stepB, countB], face) => {
+      if (!every && !inside[face]) return;
+      for (let q = 0; q < countB; q++) {
+        for (let p = 0, k = first + q * stepB; p < countA; p++, k += stepA) {
+          if (seed[k] !== -1) continue;
+          seed[k] = 0;
+          zeros++;
         }
       }
-    }
-    return zeros;
+    });
   };
-  if (seedFaces(false) === 0) seedFaces(true);
+  seedFaces(false);
+  if (zeros === 0) seedFaces(true);
   const { chance, iterations } = walk3d(
     values,
     dims,
@@ -359,16 +391,6 @@ export function quickSelect3d(
   // Of the box's faces within the volume, how much is like the stroke (its mean ± 2 standard
   // deviations), as the slice's box's sides are judged: the walk's chance falls to a half about
   // midway to a face, so an object that runs on past one is cut short of it, not at it.
-  const s = w * h;
-  // Each face: its first voxel, and the two steps and counts that cover it.
-  const faces: readonly (readonly [number, number, number, number, number])[] = [
-    [0, w, h, s, d],
-    [w - 1, w, h, s, d],
-    [0, 1, w, s, d],
-    [(h - 1) * w, 1, w, s, d],
-    [0, 1, w, w, h],
-    [(d - 1) * s, 1, w, w, h],
-  ];
   let edgeAlike = 0;
   faces.forEach(([first, stepA, countA, stepB, countB], face) => {
     if (!inside[face]) return;
