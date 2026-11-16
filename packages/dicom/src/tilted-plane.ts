@@ -121,6 +121,66 @@ export function planeVoxelAt(plane: PlaneSpan, spacing: Vec3, point: PlanePoint)
 }
 
 /**
+ * Every voxel of the grid on a plane's sheet whose foot on the plane is
+ * within a rectangle of it, `[aLo, aHi, bLo, bHi]` in mm along the plane's
+ * two axes, ends included: its flat index, and where its foot is.
+ */
+function eachSheetVoxel(
+  dims: readonly [number, number, number],
+  spacing: Vec3,
+  axes: PlaneAxes,
+  [aLo, aHi, bLo, bHi]: readonly [number, number, number, number],
+  visit: (index: number, a: number, b: number) => void,
+): void {
+  const { origin, u, v, normal } = axes;
+  const offsetMm = dot(normal, origin);
+  const half = sheetHalfMm(normal, spacing);
+
+  // Step through the two axes the plane lies along most, and solve for the third.
+  const weight = [0, 1, 2].map((k) => Math.abs(normal[k]) * spacing[k]);
+  const k = weight.indexOf(Math.max(...weight)) as 0 | 1 | 2;
+  const [i, j] = ([0, 1, 2] as const).filter((axis) => axis !== k);
+  const perStep = normal[k] * spacing[k];
+
+  // The rectangle's reach along those two axes, in voxels.
+  let [iLo, iHi, jLo, jHi] = [Infinity, -Infinity, Infinity, -Infinity];
+  for (const [a, b] of [
+    [aLo, bLo],
+    [aHi, bLo],
+    [aLo, bHi],
+    [aHi, bHi],
+  ]) {
+    const atI = (origin[i] + a * u[i] + b * v[i]) / spacing[i];
+    const atJ = (origin[j] + a * u[j] + b * v[j]) / spacing[j];
+    [iLo, iHi] = [Math.min(iLo, atI), Math.max(iHi, atI)];
+    [jLo, jHi] = [Math.min(jLo, atJ), Math.max(jHi, atJ)];
+  }
+  const [i0, i1] = [Math.max(0, Math.floor(iLo) - 1), Math.min(dims[i] - 1, Math.ceil(iHi) + 1)];
+  const [j0, j1] = [Math.max(0, Math.floor(jLo) - 1), Math.min(dims[j] - 1, Math.ceil(jHi) + 1)];
+
+  const [nx, ny] = dims;
+  const at: [number, number, number] = [0, 0, 0];
+  for (at[j] = j0; at[j] <= j1; at[j]++) {
+    for (at[i] = i0; at[i] <= i1; at[i]++) {
+      // Along the third axis, the few voxels about where the plane crosses this column.
+      const rest = normal[i] * at[i] * spacing[i] + normal[j] * at[j] * spacing[j] - offsetMm;
+      const [from, to] = [(-half - rest) / perStep, (half - rest) / perStep];
+      const k0 = Math.max(0, Math.ceil(Math.min(from, to)) - 1);
+      const k1 = Math.min(dims[k] - 1, Math.floor(Math.max(from, to)) + 1);
+      for (at[k] = k0; at[k] <= k1; at[k]++) {
+        const mm: Vec3 = [at[0] * spacing[0], at[1] * spacing[1], at[2] * spacing[2]];
+        // The disc brush's test of its sheet, word for word (`stampVoxels`).
+        if (Math.abs(dot(normal, mm) - offsetMm) > half) continue;
+        const off: Vec3 = [mm[0] - origin[0], mm[1] - origin[1], mm[2] - origin[2]];
+        const [a, b] = [dot(off, u), dot(off, v)];
+        if (a < aLo || a > aHi || b < bLo || b > bHi) continue;
+        visit((at[2] * ny + at[1]) * nx + at[0], a, b);
+      }
+    }
+  }
+}
+
+/**
  * The voxels of a grid within a closed loop on a plane through it: those on
  * the plane's sheet whose foot on the plane is within the loop. The loop is
  * in mm along the plane's two axes from its origin (`planePointMm`). Flat
@@ -134,30 +194,12 @@ export function fillPlaneLoop(
 ): number[] {
   const axes = axesOf(plane, spacing);
   if (!axes || loop.length < 3) return [];
-  const { origin, u, v, normal } = axes;
-  const offsetMm = dot(normal, origin);
-  const half = sheetHalfMm(normal, spacing);
-
-  // Step through the two axes the plane lies along most, and solve for the third.
-  const weight = [0, 1, 2].map((k) => Math.abs(normal[k]) * spacing[k]);
-  const k = weight.indexOf(Math.max(...weight)) as 0 | 1 | 2;
-  const [i, j] = ([0, 1, 2] as const).filter((axis) => axis !== k);
-  const perStep = normal[k] * spacing[k];
-
-  // The loop's reach along those two axes, in voxels, and in the plane.
-  let [iLo, iHi, jLo, jHi] = [Infinity, -Infinity, Infinity, -Infinity];
   let [aLo, aHi, bLo, bHi] = [Infinity, -Infinity, Infinity, -Infinity];
   for (const [a, b] of loop) {
-    const atI = (origin[i] + a * u[i] + b * v[i]) / spacing[i];
-    const atJ = (origin[j] + a * u[j] + b * v[j]) / spacing[j];
-    [iLo, iHi] = [Math.min(iLo, atI), Math.max(iHi, atI)];
-    [jLo, jHi] = [Math.min(jLo, atJ), Math.max(jHi, atJ)];
     [aLo, aHi] = [Math.min(aLo, a), Math.max(aHi, a)];
     [bLo, bHi] = [Math.min(bLo, b), Math.max(bHi, b)];
   }
-  if (!Number.isFinite(iLo + iHi + jLo + jHi)) return [];
-  const [i0, i1] = [Math.max(0, Math.floor(iLo) - 1), Math.min(dims[i] - 1, Math.ceil(iHi) + 1)];
-  const [j0, j1] = [Math.max(0, Math.floor(jLo) - 1), Math.min(dims[j] - 1, Math.ceil(jHi) + 1)];
+  if (!Number.isFinite(aLo + aHi + bLo + bHi)) return [];
 
   const n = loop.length;
   /** Even-odd, a vertex on the line counted for one of its two edges, as `fillLoops` counts. */
@@ -173,28 +215,119 @@ export function fillPlaneLoop(
     return inside;
   };
 
-  const [nx, ny] = dims;
   const voxels: number[] = [];
-  const at: [number, number, number] = [0, 0, 0];
-  for (at[j] = j0; at[j] <= j1; at[j]++) {
-    for (at[i] = i0; at[i] <= i1; at[i]++) {
-      // Along the third axis, the few voxels about where the plane crosses this column.
-      const rest = normal[i] * at[i] * spacing[i] + normal[j] * at[j] * spacing[j] - offsetMm;
-      const [from, to] = [(-half - rest) / perStep, (half - rest) / perStep];
-      const k0 = Math.max(0, Math.ceil(Math.min(from, to)) - 1);
-      const k1 = Math.min(dims[k] - 1, Math.floor(Math.max(from, to)) + 1);
-      for (at[k] = k0; at[k] <= k1; at[k]++) {
-        const mm: Vec3 = [at[0] * spacing[0], at[1] * spacing[1], at[2] * spacing[2]];
-        // The disc brush's test of its sheet, word for word (`stampVoxels`).
-        if (Math.abs(dot(normal, mm) - offsetMm) > half) continue;
-        const off: Vec3 = [mm[0] - origin[0], mm[1] - origin[1], mm[2] - origin[2]];
-        const [a, b] = [dot(off, u), dot(off, v)];
-        if (a < aLo || a > aHi || b < bLo || b > bHi || !within(a, b)) continue;
-        voxels.push((at[2] * ny + at[1]) * nx + at[0]);
-      }
+  eachSheetVoxel(dims, spacing, axes, [aLo, aHi, bLo, bHi], (index, a, b) => {
+    if (within(a, b)) voxels.push(index);
+  });
+  return voxels.sort((p, q) => p - q);
+}
+
+/**
+ * How a plane is laid out as a picture: how many pixels across and down, and
+ * a pixel's width and height in mm. Pixel (u, v)'s middle is at
+ * ((u + ½)·width, (v + ½)·height) mm along the plane's two axes.
+ */
+export interface PlaneRaster {
+  readonly width: number;
+  readonly height: number;
+  readonly pixelMm: readonly [number, number];
+}
+
+function rasterOf(axes: PlaneAxes, pixelMm: number): PlaneRaster {
+  const width = Math.max(1, Math.round(axes.lengthU / pixelMm));
+  const height = Math.max(1, Math.round(axes.lengthV / pixelMm));
+  return { width, height, pixelMm: [axes.lengthU / width, axes.lengthV / height] };
+}
+
+/**
+ * A plane's picture: its pixels the grid's finest spacing apart (or
+ * `pixelMm`), as `sectionOf` and `planeImage` lay them. Null for a span with
+ * no area.
+ */
+export function planeRaster(
+  plane: PlaneSpan,
+  spacing: Vec3,
+  pixelMm = Math.min(...spacing),
+): PlaneRaster | null {
+  const axes = axesOf(plane, spacing);
+  return axes ? rasterOf(axes, pixelMm) : null;
+}
+
+/**
+ * The voxels of the grid on a plane's sheet, each with the pixel of the
+ * plane's picture its foot is in: `voxels[n]` is a flat index of the grid,
+ * `pixels[n]` the pixel `v · width + u` it belongs to. What is drawn in the
+ * picture is put into the grid through these, and no voxel of the sheet is
+ * left out, so the sheet has no holes seen from another plane.
+ */
+export function sheetVoxels(
+  dims: readonly [number, number, number],
+  spacing: Vec3,
+  plane: PlaneSpan,
+  raster: PlaneRaster,
+): { readonly voxels: Int32Array; readonly pixels: Int32Array } {
+  const axes = axesOf(plane, spacing);
+  if (!axes) return { voxels: new Int32Array(0), pixels: new Int32Array(0) };
+  const { width, height, pixelMm } = raster;
+  const [voxels, pixels]: [number[], number[]] = [[], []];
+  eachSheetVoxel(
+    dims,
+    spacing,
+    axes,
+    [0, width * pixelMm[0], 0, height * pixelMm[1]],
+    (index, a, b) => {
+      const u = Math.min(width - 1, Math.floor(a / pixelMm[0]));
+      const v = Math.min(height - 1, Math.floor(b / pixelMm[1]));
+      voxels.push(index);
+      pixels.push(v * width + u);
+    },
+  );
+  return { voxels: Int32Array.from(voxels), pixels: Int32Array.from(pixels) };
+}
+
+/**
+ * The pixels of a picture a round brush covers from `from` to `to`: those
+ * whose middle is within `radiusMm` of the stroke, and the pixel under each
+ * end whatever the radius. `from` and `to` are in pixels, a whole number at
+ * a pixel's middle. Pixel indices `v · width + u`, each once.
+ */
+export function strokePixels(
+  raster: PlaneRaster,
+  from: PlanePoint,
+  to: PlanePoint,
+  radiusMm: number,
+): number[] {
+  const { width, height, pixelMm } = raster;
+  const [pu, pv] = pixelMm;
+  const out = new Set<number>();
+  const inside = (u: number, v: number): boolean => u >= 0 && v >= 0 && u < width && v < height;
+  for (const [u, v] of [from, to]) {
+    const [ru, rv] = [Math.round(u), Math.round(v)];
+    if (inside(ru, rv)) out.add(rv * width + ru);
+  }
+  const r = Math.max(0, radiusMm);
+  const [u0, u1] = [
+    Math.max(0, Math.floor(Math.min(from[0], to[0]) - r / pu)),
+    Math.min(width - 1, Math.ceil(Math.max(from[0], to[0]) + r / pu)),
+  ];
+  const [v0, v1] = [
+    Math.max(0, Math.floor(Math.min(from[1], to[1]) - r / pv)),
+    Math.min(height - 1, Math.ceil(Math.max(from[1], to[1]) + r / pv)),
+  ];
+  // In mm: the stroke's line, and how far each pixel's middle is from it.
+  const [ax, ay] = [from[0] * pu, from[1] * pv];
+  const [dx, dy] = [to[0] * pu - ax, to[1] * pv - ay];
+  const lengthSquared = dx * dx + dy * dy;
+  for (let v = v0; v <= v1; v++) {
+    for (let u = u0; u <= u1; u++) {
+      const [px, py] = [u * pu - ax, v * pv - ay];
+      const along =
+        lengthSquared > 0 ? Math.min(1, Math.max(0, (px * dx + py * dy) / lengthSquared)) : 0;
+      const [ox, oy] = [px - along * dx, py - along * dy];
+      if (ox * ox + oy * oy <= r * r) out.add(v * width + u);
     }
   }
-  return voxels.sort((p, q) => p - q);
+  return [...out];
 }
 
 /** The image on a plane through the grid, as a picture, and how large its pixels are. */
@@ -220,9 +353,8 @@ export function planeImage(
   const axes = axesOf(plane, spacing);
   if (!axes) return null;
   const [nx, ny, nz] = dims;
-  const width = Math.max(1, Math.round(axes.lengthU / pixelMm));
-  const height = Math.max(1, Math.round(axes.lengthV / pixelMm));
-  const [stepU, stepV] = [axes.lengthU / width, axes.lengthV / height];
+  const { width, height, pixelMm: steps } = rasterOf(axes, pixelMm);
+  const [stepU, stepV] = steps;
   const data = new Float32Array(width * height);
   const clamp = (value: number, most: number): number => Math.min(Math.max(value, 0), most);
   for (let row = 0; row < height; row++) {

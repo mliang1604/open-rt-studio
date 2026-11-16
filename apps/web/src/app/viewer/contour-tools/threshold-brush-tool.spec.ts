@@ -5,7 +5,14 @@
 import { TestBed } from '@angular/core/testing';
 import { labelIndex } from '@open-rt-studio/dicom';
 
-import { AXIAL_MID, pointer, setup } from '../brush-testing';
+import {
+  AXIAL_MID,
+  TILTED_AXIAL,
+  onTiltedSheet,
+  pointer,
+  setup,
+  type Obliques,
+} from '../brush-testing';
 import {
   ThresholdBrushOptions,
   ThresholdBrushTool,
@@ -71,8 +78,8 @@ describe('ThresholdBrushTool (#107)', () => {
   });
 
   /** The threshold brush in hand over the edge, one voxel wide and of the slice. */
-  function holding() {
-    const made = setup(undefined, EDGE);
+  function holding(obliques?: Obliques) {
+    const made = setup(undefined, EDGE, [], [2, 2, 2], obliques);
     made.tools.setLabs(true);
     made.tools.toggle('threshold');
     made.brush.radiusMm.set(0);
@@ -193,5 +200,26 @@ describe('ThresholdBrushTool (#107)', () => {
     tool.max.set(100);
     fixture.detectChanges();
     expect(said()).toBe('Paints values from -100 to 100.');
+  });
+  it('on a tilted pane, paints the disc on the pane’s own plane, within the range, and keeps the plane (#307)', () => {
+    const { brush, tools, tool, label } = holding(TILTED_AXIAL);
+    brush.radiusMm.set(1.5);
+    tool.from.set('typed');
+    tool.min.set(50);
+    tool.max.set(150);
+    tools.begin(AXIAL_MID, pointer(COLUMN_PX[2], 50));
+    tools.end();
+    const painted = [...label.data.keys()].filter((i) => label.data[i] !== 0);
+    // Eight voxels, on three slices of the grid: a disc on a slice would be on one.
+    expect(painted).toHaveLength(8);
+    expect(onTiltedSheet(brush, painted)).toEqual({ onSheet: true, slices: 3 });
+    // Only where the image is within the range: columns 2 and 3.
+    expect(painted.every((i) => i % 4 >= 2)).toBe(true);
+    expect(tools.drawnSlices(brush.activeRoiId()!)).toEqual([
+      { kind: 'plane', span: brush.tiltedPlaneOf(AXIAL_MID)!.span },
+    ]);
+    // The sphere is as it was: kept as a slice of the grid.
+    brush.shape.set('sphere');
+    expect(tool.drawsOnPlane(AXIAL_MID)).toBeNull();
   });
 });

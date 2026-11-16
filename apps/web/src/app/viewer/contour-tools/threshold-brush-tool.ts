@@ -21,7 +21,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { labelIndex, type Orientation } from '@open-rt-studio/dicom';
+import { labelIndex, type PlaneSpan } from '@open-rt-studio/dicom';
 import { strokeVoxels, throughPlaneAxis, type VoxelIndex } from '@open-rt-studio/render';
 
 import { BrushController } from '../brush-controller';
@@ -277,7 +277,7 @@ export class ThresholdBrushTool implements ContourTool {
     const range = this.rangeAbout(value ?? null);
     if (!range) return;
     this.stroke = { range, last: voxel };
-    this.paint(context, pointer.placement.orientation, voxel, voxel);
+    this.paint(context, pointer.placement, voxel, voxel);
   }
 
   extend(context: ContourToolContext, pointer: ToolPointer): void {
@@ -285,7 +285,7 @@ export class ThresholdBrushTool implements ContourTool {
     const stroke = this.stroke;
     const voxel = context.voxelAt(pointer);
     if (!stroke || !voxel) return;
-    this.paint(context, pointer.placement.orientation, stroke.last, voxel);
+    this.paint(context, pointer.placement, stroke.last, voxel);
     stroke.last = voxel;
   }
 
@@ -341,10 +341,19 @@ export class ThresholdBrushTool implements ContourTool {
     return image[labelIndex(grid.dims as [number, number, number], ...voxel)];
   }
 
+  /** The disc on a tilted pane lies on the pane's own plane (#307), as the brush's does; the sphere as before. */
+  drawsOnPlane(placement: ToolPointer['placement']): PlaneSpan | null {
+    return this.tilted(placement)?.span ?? null;
+  }
+
+  private tilted(placement: ToolPointer['placement']) {
+    return this.brush.shape() === 'disk' ? this.brush.tiltedPlaneOf(placement) : null;
+  }
+
   /** Paint the voxels the brush covers from `from` to `to` whose value is in the stroke's range. */
   private paint(
     context: ContourToolContext,
-    orientation: Orientation,
+    placement: ToolPointer['placement'],
     from: VoxelIndex,
     to: VoxelIndex,
   ): void {
@@ -353,10 +362,12 @@ export class ThresholdBrushTool implements ContourTool {
     const roiId = context.activeRoiId();
     const range = this.stroke?.range;
     if (!grid || !image || roiId === null || !range) return;
+    const plane = this.tilted(placement)?.stamp;
     const voxels = strokeVoxels(grid.dims, grid.spacing, from, to, {
       shape: this.brush.shape(),
       radiusMm: this.brush.radiusMm(),
-      axis: throughPlaneAxis(orientation),
+      axis: throughPlaneAxis(placement.orientation),
+      ...(plane ? { plane } : {}),
     }).filter((i) => inRange(image[i], range));
     if (voxels.length > 0) context.change({ kind: 'paint', roiId, voxels });
   }

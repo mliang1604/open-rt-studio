@@ -5,7 +5,14 @@
 import { TestBed } from '@angular/core/testing';
 import { labelIndex, Orientation } from '@open-rt-studio/dicom';
 
-import { AXIAL_MID, pointer, setup } from '../brush-testing';
+import {
+  AXIAL_MID,
+  TILTED_AXIAL,
+  onTiltedSheet,
+  pointer,
+  setup,
+  type Obliques,
+} from '../brush-testing';
 import { QuickSelectOptions, QuickSelectTool, maskPath } from './quick-select-tool';
 
 // The 4 × 4 × 4 test image with an edge: 0 in columns 0 and 1, 100 in columns 2
@@ -32,8 +39,8 @@ describe('QuickSelectTool (#119, #292)', () => {
     }
   });
 
-  function holding() {
-    const made = setup(undefined, EDGE);
+  function holding(obliques?: Obliques) {
+    const made = setup(undefined, EDGE, [], [2, 2, 2], obliques);
     made.tools.setLabs(true);
     made.tools.toggle('quick');
     made.brush.radiusMm.set(0);
@@ -130,5 +137,31 @@ describe('QuickSelectTool (#119, #292)', () => {
     host.querySelector<HTMLElement>('[data-quick-discard]')!.click();
     fixture.detectChanges();
     expect(host.querySelector('[data-quick-accept]')).toBeNull();
+  });
+  it('on a tilted pane, finds the object in the pane’s own plane and adds it on that plane (#307)', async () => {
+    const { brush, tools, tool, stroke, label, roiId } = holding(TILTED_AXIAL);
+    await stroke(3, 1, 2);
+    expect(tool.found()).toBe(true);
+    expect(tool.said()).toMatch(/^\d+ pixels of the plane found in \d+ ms: Accept adds them\./);
+    const preview = tools.preview()!;
+    expect(preview.fill).toMatch(/^M/);
+    expect(preview.marks?.object).toMatch(/^M/);
+    expect(tools.nextUndo()).toBeNull();
+    tool.accept();
+    expect(tool.said()).toMatch(/^\d+ voxels added\.$/);
+    const added = [...label.data.keys()].filter((i) => label.data[i] === roiId);
+    // On the plane's sheet, across slices of the grid, and on the stroke's side of the edge.
+    expect(added.length).toBeGreaterThanOrEqual(2);
+    expect(onTiltedSheet(brush, added)).toEqual({ onSheet: true, slices: 2 });
+    expect(added.every((i) => i % 4 >= 2)).toBe(true);
+    // The voxel shown where the stroke began is the structure's.
+    const under = brush.voxelAt(AXIAL_MID, pointer(MID[3], MID[1]))!;
+    expect(label.data[labelIndex(label.dims, ...under)]).toBe(roiId);
+    expect(tools.drawnSlices(roiId)).toEqual([
+      { kind: 'plane', span: brush.tiltedPlaneOf(AXIAL_MID)!.span },
+    ]);
+    expect(tools.nextUndo()).toBe('Quick select');
+    tools.undo();
+    expect(added.every((i) => label.data[i] === 0)).toBe(true);
   });
 });

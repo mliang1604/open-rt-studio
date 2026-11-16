@@ -4,6 +4,7 @@
 
 import { Injectable, computed, inject, signal } from '@angular/core';
 import {
+  sectionOf,
   sliceMask,
   type LabelChange,
   type LabelConstraints,
@@ -178,6 +179,12 @@ export class ContourToolsController {
     sliceMask: (roiId, axis, slice) => {
       const label = this.store.labelVolume();
       return label ? sliceMask(label, roiId, axis, slice) : null;
+    },
+    section: (roiId, plane) => {
+      const label = this.store.labelVolume();
+      if (!label) return null;
+      const { mask, width, height } = sectionOf(label, roiId, plane);
+      return { mask, width, height };
     },
     voxelAtCanvas: (placement, x, y) => this.brush.voxelAtCanvas(placement, x, y),
     change: (change) => this.store.applyChange(change, this.constraints()),

@@ -7,7 +7,7 @@
 
 import { signal, type Signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Orientation, type Volume } from '@open-rt-studio/dicom';
+import { Orientation, sheetHalfMm, type Volume } from '@open-rt-studio/dicom';
 import { type PaneRect, NO_OBLIQUE } from '@open-rt-studio/render';
 
 import { DATA_SOURCE, type DataSource } from '../data-source/data-source';
@@ -77,6 +77,35 @@ export const AXIAL_MID: Extract<PanePlacement, { kind: 'mpr' }> = {
 
 /** How the panes are tilted: as they stay, or a signal a spec changes. */
 export type Obliques = PerOrientationOblique | Signal<PerOrientationOblique>;
+
+/** The axial pane tilted about its horizontal axis (#303). */
+export const TILTED_AXIAL: PerOrientationOblique = [
+  { tiltU: 0.6, tiltV: 0 },
+  NO_OBLIQUE,
+  NO_OBLIQUE,
+];
+
+/**
+ * Of some voxels of the 4 × 4 × 4 test image, by flat index: whether every
+ * one is on the sheet of the plane the tilted axial pane shows, and how many
+ * slices of the grid they are on.
+ */
+export function onTiltedSheet(
+  brush: BrushController,
+  indices: readonly number[],
+): { readonly onSheet: boolean; readonly slices: number } {
+  const { stamp } = brush.tiltedPlaneOf(AXIAL_MID)!;
+  const half = sheetHalfMm(stamp.normal, [1, 1, 1]);
+  const off = (i: number): number =>
+    stamp.normal[0] * (i % 4) +
+    stamp.normal[1] * (Math.floor(i / 4) % 4) +
+    stamp.normal[2] * Math.floor(i / 16) -
+    stamp.offsetMm;
+  return {
+    onSheet: indices.every((i) => Math.abs(off(i)) <= half + 1e-9),
+    slices: new Set(indices.map((i) => Math.floor(i / 16))).size,
+  };
+}
 
 export interface Notice {
   readonly message: string;

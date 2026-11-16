@@ -132,7 +132,8 @@ and is settled to the image afterwards if asked.
   there (`fillPlaneLoop`); the fit takes the structure's section on the
   plane. The ellipsoid's outline filled that way on three tilted planes and
   then fitted gave 0.950, against 0.955 from its own sections on them. The
-  other tools still draw on grid slices.
+  threshold brush, the push brush, the rubber band and quick select draw on
+  the pane's plane too (#307).
 - **More sections are not always better.** Axial 19, 25 and 31 with a
   sagittal and a coronal section gave 0.977, against 0.973 for the fullest
   of each axis; without the coronal, 0.968 against 0.975: beyond the

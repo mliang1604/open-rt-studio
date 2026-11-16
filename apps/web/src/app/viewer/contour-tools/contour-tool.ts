@@ -49,6 +49,11 @@ export interface ContourToolContext {
   /** A structure's pixels on one slice, across a grid axis (#116); null before an image is loaded. */
   sliceMask(roiId: number, axis: 0 | 1 | 2, slice: number): SliceMask | null;
   /**
+   * A structure's section on a plane through the grid (#307), its pixels
+   * the grid's finest spacing apart; null before an image is loaded.
+   */
+  section(roiId: number, plane: PlaneSpan): SliceMask | null;
+  /**
    * The image's values on the label grid, voxel for voxel (the label grid
    * is the image's); null before an image is loaded.
    */

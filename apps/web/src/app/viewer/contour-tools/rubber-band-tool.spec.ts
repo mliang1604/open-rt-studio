@@ -5,7 +5,14 @@
 import { TestBed } from '@angular/core/testing';
 import { labelIndex } from '@open-rt-studio/dicom';
 
-import { AXIAL_MID, pointer, setup } from '../brush-testing';
+import {
+  AXIAL_MID,
+  TILTED_AXIAL,
+  onTiltedSheet,
+  pointer,
+  setup,
+  type Obliques,
+} from '../brush-testing';
 import { RubberBandOptions, RubberBandTool } from './rubber-band-tool';
 
 // The 4 × 4 × 4 test image under a 100-pixel axial pane of slice 2, 1 mm and
@@ -23,8 +30,8 @@ describe('RubberBandTool (#116)', () => {
   });
 
   /** The rubber band in hand over a structure of columns 0 and 1 of slice 2. */
-  function holding() {
-    const made = setup();
+  function holding(obliques?: Obliques) {
+    const made = setup(undefined, undefined, [], [2, 2, 2], obliques);
     made.tools.setLabs(true);
     made.tools.toggle('rubber');
     const label = made.store.labelVolume()!;
@@ -92,5 +99,43 @@ describe('RubberBandTool (#116)', () => {
         .querySelector('[data-rubber-said]')
         ?.textContent?.trim(),
     ).toBe('Press on the edge of the structure being edited.');
+  });
+  it('on a tilted pane, drags the edge of the structure’s section on the pane’s own plane (#307)', () => {
+    const { brush, store, tools, tool, label, roiId } = holding(TILTED_AXIAL);
+    // Columns 0 and 1 through the whole grid: on the tilted plane, the pane's left half.
+    const block = [];
+    for (let z = 0; z < 4; z++) {
+      for (let y = 0; y < 4; y++)
+        for (const x of [0, 1]) block.push(labelIndex(label.dims, x, y, z));
+    }
+    store.paint(roiId, block);
+    const before = Uint16Array.from(label.data);
+    /** Whether the voxel shown at a point of the pane holds the structure. */
+    const shown = (x: number, y: number) =>
+      label.data[labelIndex(label.dims, ...brush.voxelAt(AXIAL_MID, pointer(x, y))!)] === roiId;
+    expect([shown(MID[1], MID[1]), shown(MID[2], MID[1])]).toEqual([true, false]);
+    tool.influenceMm.set(1);
+    // Hold the right edge at row 1 and drag it one voxel right.
+    tools.begin(AXIAL_MID, pointer(50, MID[1]));
+    expect(tool.said()).toBeNull();
+    tools.extend(AXIAL_MID, pointer(75, MID[1]));
+    const added = [...label.data.keys()].filter(
+      (i) => label.data[i] === roiId && before[i] !== roiId,
+    );
+    // Shown as it is dragged, on the pane: row 1 has its next column, row 3 has not.
+    expect([shown(MID[2], MID[1]), shown(MID[2], MID[3])]).toEqual([true, false]);
+    expect(added.length).toBeGreaterThan(0);
+    expect(onTiltedSheet(brush, added)).toEqual({ onSheet: true, slices: 2 });
+    // Dragged back to where it was pressed, the grid is as it was, voxel for voxel.
+    tools.extend(AXIAL_MID, pointer(50, MID[1]));
+    expect([...label.data]).toEqual([...before]);
+    tools.extend(AXIAL_MID, pointer(75, MID[1]));
+    tools.end();
+    expect(tools.drawnSlices(roiId)).toEqual([
+      { kind: 'plane', span: brush.tiltedPlaneOf(AXIAL_MID)!.span },
+    ]);
+    expect(tools.nextUndo()).toBe('Rubber band');
+    tools.undo();
+    expect([...label.data]).toEqual([...before]);
   });
 });

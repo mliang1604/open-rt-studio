@@ -5,7 +5,14 @@
 import { TestBed } from '@angular/core/testing';
 import { labelIndex } from '@open-rt-studio/dicom';
 
-import { AXIAL_MID, pointer, setup } from '../brush-testing';
+import {
+  AXIAL_MID,
+  TILTED_AXIAL,
+  onTiltedSheet,
+  pointer,
+  setup,
+  type Obliques,
+} from '../brush-testing';
 import { PushTool, PushToolOptions } from './push-tool';
 
 // The 4 × 4 × 4 test image under a 100-pixel axial pane of slice 2: the
@@ -23,8 +30,8 @@ describe('PushTool (#117)', () => {
   });
 
   /** The push brush in hand, one voxel wide, over a structure of columns 0 and 1 of slice 2. */
-  function holding() {
-    const made = setup();
+  function holding(obliques?: Obliques) {
+    const made = setup(undefined, undefined, [], [2, 2, 2], obliques);
     made.tools.setLabs(true);
     made.tools.toggle('push');
     made.brush.radiusMm.set(0);
@@ -92,5 +99,32 @@ describe('PushTool (#117)', () => {
     expect(
       (fixture.nativeElement as HTMLElement).querySelector('[data-push-said]')?.textContent?.trim(),
     ).toBe('The last stroke pushed in.');
+  });
+  it('on a tilted pane, pushes with the disc on the pane’s own plane, and keeps the plane (#307)', () => {
+    const { brush, store, tools, label, roiId } = holding(TILTED_AXIAL);
+    // Columns 0 and 1 through the whole grid: on the tilted plane, the pane's left half.
+    const block = [];
+    for (let z = 0; z < 4; z++) {
+      for (let y = 0; y < 4; y++)
+        for (const x of [0, 1]) block.push(labelIndex(label.dims, x, y, z));
+    }
+    store.paint(roiId, block);
+    brush.radiusMm.set(1.5);
+    const before = Uint16Array.from(label.data);
+    tools.begin(AXIAL_MID, pointer(MID[1], MID[1]));
+    tools.extend(AXIAL_MID, pointer(MID[3], MID[1]));
+    tools.end();
+    const added = [...label.data.keys()].filter(
+      (i) => label.data[i] === roiId && before[i] !== roiId,
+    );
+    // Ten voxels, on three slices of the grid: a disc on a slice would be on one.
+    expect(added).toHaveLength(10);
+    expect(onTiltedSheet(brush, added)).toEqual({ onSheet: true, slices: 3 });
+    expect(tools.drawnSlices(roiId)).toEqual([
+      { kind: 'plane', span: brush.tiltedPlaneOf(AXIAL_MID)!.span },
+    ]);
+    expect(tools.nextUndo()).toBe('Push out');
+    tools.undo();
+    expect([...label.data]).toEqual([...before]);
   });
 });
