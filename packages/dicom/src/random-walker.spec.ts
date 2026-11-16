@@ -88,10 +88,62 @@ describe('quick selection by random walker (#119)', () => {
     expect(dice(grown(plane, stroke), truth)).toBeLessThan(0.85);
   });
 
+  it('is close through heavy noise by its defaults: the image smoothed, the edges weighed sharply (#292)', () => {
+    const { plane, truth, stroke, marginPx } = scene(40, false);
+    // Before smoothing, with β 90: 0.603.
+    expect(
+      dice(quickSelect({ plane, stroke, marginPx, beta: 90, smoothPx: 0 })!.mask, truth),
+    ).toBeLessThan(0.65);
+    expect(dice(quickSelect({ plane, stroke, marginPx })!.mask, truth)).toBeGreaterThan(0.98);
+    const bridged = scene(40, true);
+    expect(
+      dice(
+        quickSelect({ plane: bridged.plane, stroke: bridged.stroke, marginPx })!.mask,
+        bridged.truth,
+      ),
+    ).toBeGreaterThan(0.98);
+  });
+
+  it('takes strokes over what is not the object, and the box reaches them (#292)', () => {
+    // A disc of radius 50, stroked near its middle with room for 10 pixels: it is cut off.
+    const data = new Float32Array(W * W);
+    const truth = new Uint8Array(W * W);
+    for (let y = 0; y < W; y++) {
+      for (let x = 0; x < W; x++) {
+        truth[y * W + x] = Math.hypot(x - 64, y - 64) <= 50 ? 1 : 0;
+        data[y * W + x] = truth[y * W + x] * 100;
+      }
+    }
+    const plane = { data, width: W, height: W };
+    const stroke = new Uint8Array(W * W);
+    for (let x = 60; x <= 68; x++) stroke[64 * W + x] = 1;
+    expect(dice(quickSelect({ plane, stroke, marginPx: 10 })!.mask, truth)).toBeLessThan(0.1);
+    // A background stroke round it, beyond it: the whole of it (measured 1.000).
+    const background = new Uint8Array(W * W);
+    for (let i = 6; i <= 122; i++)
+      background[4 * W + i] =
+        background[124 * W + i] =
+        background[i * W + 6] =
+        background[i * W + 122] =
+          1;
+    expect(
+      dice(quickSelect({ plane, stroke, background, marginPx: 3 })!.mask, truth),
+    ).toBeGreaterThan(0.99);
+    // Where the two cross, the object's stroke wins.
+    const crossed = Uint8Array.from(background);
+    crossed[64 * W + 64] = 1;
+    expect(
+      quickSelect({ plane, stroke, background: crossed, marginPx: 3 })!.mask[64 * W + 64],
+    ).toBe(1);
+  });
+
   it('cuts at edges more sharply with a larger β, which helps through heavy noise', () => {
     const { plane, truth, stroke, marginPx } = scene(40, false);
-    const soft = dice(quickSelect({ plane, stroke, marginPx, beta: 90 })!.mask, truth);
-    const sharp = dice(quickSelect({ plane, stroke, marginPx, beta: 250 })!.mask, truth);
+    const soft = dice(quickSelect({ plane, stroke, marginPx, beta: 90, smoothPx: 0 })!.mask, truth);
+    const sharp = dice(
+      quickSelect({ plane, stroke, marginPx, beta: 250, smoothPx: 0 })!.mask,
+      truth,
+    );
     expect(sharp).toBeGreaterThan(0.8);
     expect(sharp).toBeGreaterThan(soft);
   });

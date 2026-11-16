@@ -20,6 +20,14 @@ import type { ToolPreviewCircle } from './contour-tool';
         [attr.width]="p.rect.width"
         [attr.height]="p.rect.height"
       >
+        @if (p.marks; as marks) {
+          <path class="mark-object" data-tool-preview-mark-object [attr.d]="marks.object" />
+          <path
+            class="mark-background"
+            data-tool-preview-mark-background
+            [attr.d]="marks.background"
+          />
+        }
         @if (p.fill) {
           <path class="fill" data-tool-preview-fill [attr.d]="p.fill" />
         }
@@ -94,6 +102,15 @@ import type { ToolPreviewCircle } from './contour-tool';
       fill: none;
       stroke: rgba(255, 200, 60, 0.95);
       stroke-width: 1.5;
+    }
+    /* Strokes not yet applied: what is the object, and what is not. */
+    .mark-object {
+      fill: rgba(80, 220, 120, 0.55);
+      stroke: none;
+    }
+    .mark-background {
+      fill: rgba(90, 150, 255, 0.55);
+      stroke: none;
     }
     .handle {
       fill: rgba(255, 200, 60, 0.95);

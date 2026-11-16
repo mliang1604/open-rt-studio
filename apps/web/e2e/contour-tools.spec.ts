@@ -541,7 +541,9 @@ test('the slices between two drawn ones are filled by their shape, marked until 
   expectNoProblems(problems);
 });
 
-test('quick select finds the object under a rough stroke, as one undo (#119)', async ({ page }) => {
+test('quick select finds the object under rough strokes, shows it, and Accept adds it as one undo (#119, #292)', async ({
+  page,
+}) => {
   const problems = watchProblems(page);
   await preAcknowledge(page);
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -552,14 +554,30 @@ test('quick select finds the object under a rough stroke, as one undo (#119)', a
   const before = await capturedColour(page);
   await page.locator('[data-labs]').check();
   await page.locator('[data-contour-tool="quick"]').click();
+  const drag = async (fx: number, fy: number, tx: number, ty: number) => {
+    const from = await at(page, fx, fy);
+    const to = await at(page, tx, ty);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 4 });
+    await page.mouse.up();
+  };
   // A short stroke inside the left lung, on the image's right.
-  const from = await at(page, 0.66, 0.45);
-  const to = await at(page, 0.68, 0.52);
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(to.x, to.y, { steps: 4 });
-  await page.mouse.up();
-  await expect(page.locator('[data-quick-said]')).toHaveText(/^\d+ voxels selected in \d+ ms/);
+  await drag(0.66, 0.45, 0.68, 0.52);
+  await expect(page.locator('[data-quick-said]')).toHaveText(
+    /^\d+ voxels found in \d+ ms: Accept adds them\./,
+  );
+  await expect(page.locator('[data-tool-preview-mark-object]')).toHaveCount(1);
+  // A stroke over what is not the object, beside the lung.
+  await page.locator('[data-quick-marking="background"]').check();
+  await drag(0.5, 0.3, 0.5, 0.6);
+  await expect(page.locator('[data-quick-said]')).toHaveText(/^\d+ voxels found/);
+  await expect(page.locator('[data-tool-preview-mark-background]')).toHaveAttribute('d', /^M/);
+  // Nothing is painted until Accept.
+  await page.mouse.move(5, 400);
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  await page.locator('[data-quick-accept]').click();
+  await expect(page.locator('[data-quick-said]')).toHaveText(/^\d+ voxels added\.$/);
   expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
   await page.keyboard.press('ControlOrMeta+z');
   expect(await capturedColour(page)).toBeCloseTo(before, 1);

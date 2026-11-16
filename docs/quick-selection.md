@@ -105,6 +105,29 @@ worker: 116–140 ms for a lung of the 256² phantom. Each step costs about
 512²) need that step faster, on the GPU or in WebAssembly, and are left
 open in #291.
 
+### Since the spike: strokes over what is not the object, and smoothing (#292)
+
+- **Strokes over what is not the object** are seeds of the background, and
+  the box is about every stroke: a stroke beyond an object larger than the
+  box takes the box past it. On a disc of radius 50 stroked with room for 10
+  pixels, Dice went from 0.021 to 1.000.
+- **They do not help against noise.** On the disc in noise σ 40 a ring of
+  background strokes about it lowered Dice (0.603 to 0.515); a second stroke
+  over the object raised it (to 0.920).
+- **Smoothing the image first does.** With the image blurred by a Gaussian of
+  0.7 pixels before its edges are weighed, and the edges weighed more sharply
+  (β 250), the σ 40 disc went from 0.603 to 0.990, and every other scene
+  stayed at 0.997 to 0.999 (from 0.998 to 1.000). These are now the defaults.
+- **Each side of the box is judged on its own** when deciding whether the
+  object runs past it: a background stroke that took the box far out through
+  soft tissue had diluted a measure over all its sides, and a lung was cut
+  off where it should have been found whole (the browser showed it). Boxes
+  that cut a disc then measured 0.29 and more on their worst side, boxes that
+  held one 0.
+- **The tool is a session**: strokes of either kind add up on one slice, the
+  object found is shown over the pane after each, and only Accept adds it
+  (Discard lets it go).
+
 ## Recommendation
 
 - **Use the random walker for quick selection**, 2D first. It answers the
