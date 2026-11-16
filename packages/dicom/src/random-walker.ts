@@ -57,54 +57,21 @@ export interface QuickSelection {
 }
 
 /**
- * Above this share of its sides like the stroke, the object is taken to run on
- * past the box. On discs of radius 23 and 55 in noise, boxes that cut them
- * measured 0.21 and more; boxes that held them 0 at noise σ 20 and below, but
- * up to 0.31 at σ 40, where the stroke's own spread takes in the background:
- * there the box is grown when it need not be, which costs time and not the
- * result.
+ * The random walk on a `w` × `h` grid of values: for each pixel, the chance
+ * that a walk from it reaches a pixel seeded 1 before one seeded 0 (seeds
+ * −1 are free). Edges weigh `exp(−β Δg² / σ²)`, σ the grid's value range;
+ * solved by Jacobi-preconditioned conjugate gradients.
  */
-export const EDGE_ALIKE = 0.1;
-
-/** The object on a slice from a rough stroke over it; null for a stroke of no pixel. */
-export function quickSelect(request: QuickSelectRequest): QuickSelection | null {
-  const { plane, stroke, marginPx } = request;
-  const beta = request.beta ?? 90;
-  const tolerance = request.tolerance ?? 1e-4;
-  const maxIterations = request.maxIterations ?? 2000;
-  const { width: W, height: H, data } = plane;
-  // The stroke's box, grown by the margin and kept in the slice.
-  let [x0, y0, x1, y1] = [W, H, -1, -1];
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      if (!stroke[y * W + x]) continue;
-      x0 = Math.min(x0, x);
-      y0 = Math.min(y0, y);
-      x1 = Math.max(x1, x);
-      y1 = Math.max(y1, y);
-    }
-  }
-  if (x1 < 0) return null;
-  const m = Math.max(1, Math.round(marginPx));
-  [x0, y0, x1, y1] = [
-    Math.max(0, x0 - m),
-    Math.max(0, y0 - m),
-    Math.min(W - 1, x1 + m),
-    Math.min(H - 1, y1 + m),
-  ];
-  const w = x1 - x0 + 1;
-  const h = y1 - y0 + 1;
+export function walk(
+  value: (k: number) => number,
+  w: number,
+  h: number,
+  seed: Int8Array,
+  beta: number,
+  tolerance = 1e-4,
+  maxIterations = 2000,
+): { readonly chance: Float64Array; readonly iterations: number } {
   const n = w * h;
-  const value = (i: number): number => data[(y0 + Math.floor(i / w)) * W + x0 + (i % w)];
-  // Seeds: 1 on the stroke, 0 on the box's edge (unless the stroke is there).
-  const seed = new Int8Array(n).fill(-1);
-  for (let j = 0; j < h; j++) {
-    for (let i = 0; i < w; i++) {
-      const k = j * w + i;
-      if (stroke[(y0 + j) * W + x0 + i]) seed[k] = 1;
-      else if (i === 0 || j === 0 || i === w - 1 || j === h - 1) seed[k] = 0;
-    }
-  }
   // Weights to the right and below; σ the range of the region's values, as Grady scales them.
   const right = new Float64Array(n);
   const down = new Float64Array(n);
@@ -184,6 +151,60 @@ export function quickSelect(request: QuickSelectRequest): QuickSelection | null 
     rz = next;
     for (let k = 0; k < n; k++) p[k] = z[k] + ratio * p[k];
   }
+  for (let k = 0; k < n; k++) if (seed[k] !== -1) x[k] = seed[k];
+  return { chance: x, iterations };
+}
+
+/**
+ * Above this share of its sides like the stroke, the object is taken to run on
+ * past the box. On discs of radius 23 and 55 in noise, boxes that cut them
+ * measured 0.21 and more; boxes that held them 0 at noise σ 20 and below, but
+ * up to 0.31 at σ 40, where the stroke's own spread takes in the background:
+ * there the box is grown when it need not be, which costs time and not the
+ * result.
+ */
+export const EDGE_ALIKE = 0.1;
+
+/** The object on a slice from a rough stroke over it; null for a stroke of no pixel. */
+export function quickSelect(request: QuickSelectRequest): QuickSelection | null {
+  const { plane, stroke, marginPx } = request;
+  const beta = request.beta ?? 90;
+  const tolerance = request.tolerance ?? 1e-4;
+  const maxIterations = request.maxIterations ?? 2000;
+  const { width: W, height: H, data } = plane;
+  // The stroke's box, grown by the margin and kept in the slice.
+  let [x0, y0, x1, y1] = [W, H, -1, -1];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!stroke[y * W + x]) continue;
+      x0 = Math.min(x0, x);
+      y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x);
+      y1 = Math.max(y1, y);
+    }
+  }
+  if (x1 < 0) return null;
+  const m = Math.max(1, Math.round(marginPx));
+  [x0, y0, x1, y1] = [
+    Math.max(0, x0 - m),
+    Math.max(0, y0 - m),
+    Math.min(W - 1, x1 + m),
+    Math.min(H - 1, y1 + m),
+  ];
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const n = w * h;
+  const value = (i: number): number => data[(y0 + Math.floor(i / w)) * W + x0 + (i % w)];
+  // Seeds: 1 on the stroke, 0 on the box's edge (unless the stroke is there).
+  const seed = new Int8Array(n).fill(-1);
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const k = j * w + i;
+      if (stroke[(y0 + j) * W + x0 + i]) seed[k] = 1;
+      else if (i === 0 || j === 0 || i === w - 1 || j === h - 1) seed[k] = 0;
+    }
+  }
+  const { chance: x, iterations } = walk(value, w, h, seed, beta, tolerance, maxIterations);
   const mask = new Uint8Array(W * H);
   // Of the box's sides within the slice, how much is like the stroke (its mean ± 2 standard
   // deviations): little where what is not the object rings it, much where the object runs on.

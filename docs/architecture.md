@@ -449,6 +449,14 @@ its own.
   stroke is found by a random walker (`random-walker.ts`) and added to the
   structure being edited. The spike's measurements and recommendation are
   in [quick-selection.md](quick-selection.md); its follow-ups are #291–#293.
+- **Settle to the image, and fit from planes** (#120, labs, prototypes in
+  the Interpolate tool): each slice filled can be settled to the image's
+  edges within 4 pixels of its edge by the random walker of #119
+  (`refineToImage`), and a structure can be fitted from an outline in each
+  plane as the intersection of their extrusions (`visualHull`). The spike's
+  measurements and recommendation are in
+  [image-aware-interpolation.md](image-aware-interpolation.md); its
+  follow-ups are #295 and #296.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

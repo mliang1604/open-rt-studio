@@ -112,4 +112,47 @@ describe('InterpolateTool (#115)', () => {
         ?.textContent?.trim(),
     ).toBe('Filled, not yet accepted: 2');
   });
+
+  it('fits a structure from an outline in each plane, as one edit (#120)', () => {
+    const made = setup();
+    made.tools.setLabs(true);
+    made.tools.toggle('interp');
+    const label = made.store.labelVolume()!;
+    const roiId = made.brush.activeRoiId()!;
+    const at = (x: number, y: number, z: number) => labelIndex(label.dims, x, y, z);
+    // Outlines of the cube x, y, z 1..2: on axial slice 2, coronal slice 1 and sagittal slice 1.
+    const outline: number[] = [];
+    for (const u of [1, 2]) {
+      for (const v of [1, 2]) outline.push(at(u, v, 2), at(u, 1, v), at(1, u, v));
+    }
+    made.store.paint(roiId, outline);
+    const tool = TestBed.inject(InterpolateTool);
+    const has = () => [...label.data].filter((v) => v === roiId).length;
+    expect(has()).toBeLessThan(8);
+    tool.fitFromPlanes();
+    expect(has()).toBe(8);
+    for (const x of [1, 2])
+      for (const y of [1, 2]) for (const z of [1, 2]) expect(label.data[at(x, y, z)]).toBe(roiId);
+    expect(tool.said()).toBe('Fitted from 3 outlines; 1 voxel added.');
+    expect(made.tools.nextUndo()).toBe('Fit from planes');
+  });
+
+  it('fills with settling on, keeping a slice too thin to settle as it is', () => {
+    // On the 4 × 4 test image no slice is wide enough to have pixels 4 within its edge.
+    const { tool, count } = holding();
+    tool.settle.set(true);
+    tool.fill();
+    expect([count(1), count(2)]).toEqual([8, 8]);
+  });
+
+  it('asks for outlines in two planes or more', () => {
+    const made = setup();
+    made.tools.setLabs(true);
+    made.tools.toggle('interp');
+    const tool = TestBed.inject(InterpolateTool);
+    tool.fitFromPlanes();
+    expect(tool.said()).toBe(
+      'Draw the structure on a slice in two planes or more: axial, coronal, sagittal.',
+    );
+  });
 });
