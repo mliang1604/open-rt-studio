@@ -52,6 +52,7 @@ describe('CleanupTool (#110)', () => {
       'wire',
       'push',
       'rubber',
+      'interp',
       'cleanup',
       'margin',
       'mirror',

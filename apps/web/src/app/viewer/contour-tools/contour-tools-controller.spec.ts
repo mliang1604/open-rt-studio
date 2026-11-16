@@ -189,6 +189,7 @@ describe('ContourToolsController (#106)', () => {
         'wire',
         'push',
         'rubber',
+        'interp',
         'cleanup',
         'margin',
         'mirror',

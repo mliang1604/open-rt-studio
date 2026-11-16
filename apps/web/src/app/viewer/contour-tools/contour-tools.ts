@@ -12,6 +12,7 @@ import { MagicWandTool } from './magic-wand-tool';
 import { MarginTool } from './margin-tool';
 import { MirrorTool } from './mirror-tool';
 import { PointTool } from './point-tool';
+import { InterpolateTool } from './interpolate-tool';
 import { LiveWireTool } from './live-wire-tool';
 import { PushTool } from './push-tool';
 import { RubberBandTool } from './rubber-band-tool';
@@ -38,6 +39,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: PushTool, multi: true },
   RubberBandTool,
   { provide: CONTOUR_TOOLS, useExisting: RubberBandTool, multi: true },
+  InterpolateTool,
+  { provide: CONTOUR_TOOLS, useExisting: InterpolateTool, multi: true },
   CleanupTool,
   { provide: CONTOUR_TOOLS, useExisting: CleanupTool, multi: true },
   MarginTool,

@@ -100,6 +100,7 @@ describe('ThresholdBrushTool (#107)', () => {
       'wire',
       'push',
       'rubber',
+      'interp',
       'cleanup',
       'margin',
       'mirror',
