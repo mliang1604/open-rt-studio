@@ -51,7 +51,13 @@ function touch(label: LabelVolume, i: number): void {
  */
 export type LabelChange =
   | { readonly kind: 'paint'; readonly roiId: number; readonly voxels: Iterable<number> }
-  | { readonly kind: 'erase'; readonly roiId: number | null; readonly voxels: Iterable<number> };
+  | {
+      readonly kind: 'erase';
+      readonly roiId: number | null;
+      readonly voxels: Iterable<number>;
+      /** Clear only the voxels of `roiId`, whatever the constraints: a push in (#117). */
+      readonly only?: boolean;
+    };
 
 /** The rules every change goes through. */
 export interface LabelConstraints {
@@ -91,6 +97,7 @@ export function allowedVoxels(
     if (i < 0 || i >= data.length) continue;
     const held = data[i];
     if (change.kind === 'erase' && held === 0) continue;
+    if (change.kind === 'erase' && change.only && held !== own) continue;
     // Another structure's voxel, when others are protected.
     if (protectOthers && held !== 0 && held !== own) continue;
     if (clipToRoiId !== null && held !== clipToRoiId && held !== own) continue;
@@ -123,7 +130,8 @@ export class LabelEditRecorder {
 
   constructor(
     private readonly label: LabelVolume,
-    readonly name: string,
+    /** What the edit is called; a tool may name it once it knows what it does. */
+    public name: string,
   ) {}
 
   /** How many voxels the edit has changed so far. */

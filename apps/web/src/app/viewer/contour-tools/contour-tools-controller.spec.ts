@@ -186,6 +186,7 @@ describe('ContourToolsController (#106)', () => {
         'threshold',
         'wand',
         'points',
+        'push',
         'cleanup',
         'margin',
         'mirror',

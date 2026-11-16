@@ -419,6 +419,11 @@ export class EditableStructuresStore {
     return changed;
   }
 
+  /** Call the open edit something else: a tool knows what it does once it has begun (#117). */
+  renameEdit(name: string): void {
+    if (this.openEdit) this.openEdit.name = name;
+  }
+
   /** Commit the open edit, which then can be undone. One that changed nothing is let go of. */
   commitEdit(): void {
     const edit = this.openEdit?.finish() ?? null;

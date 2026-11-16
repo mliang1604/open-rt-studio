@@ -383,3 +383,49 @@ test('points set on a pane are drawn as a smooth curve, and clicking the first f
   expect(await capturedColour(page)).toBeCloseTo(before, 1);
   expectNoProblems(problems);
 });
+
+test('the push brush pushes an edge in from outside and out from inside, each one undo (#117)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  // An 8 mm disc: about 104 px at this size (some 13 px a voxel), so a stroke begun 160 px off
+  // begins outside, and one that stops 60 px off leaves its middle the structure's.
+  const size = page.getByLabel('Brush radius (mm)');
+  for (let step = 0; step < 6; step++) await size.press('ArrowRight');
+  await expect(page.locator('.brush-size-readout')).toHaveText('8 mm');
+  const centre = await at(page, 0.35, 0.45);
+  await page.mouse.click(centre.x, centre.y);
+  const painted = await capturedColour(page);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="push"]').click();
+  // A 2 mm push, narrower than the disc.
+  for (let step = 0; step < 12; step++) await size.press('ArrowLeft');
+  await expect(page.locator('.brush-size-readout')).toHaveText('2 mm');
+  // From outside, into the disc: its edge goes in.
+  await page.mouse.move(centre.x + 160, centre.y);
+  await page.mouse.down();
+  await page.mouse.move(centre.x + 60, centre.y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator('[data-push-said]')).toHaveText('The last stroke pushed in.');
+  const pushedIn = await capturedColour(page);
+  expect(pushedIn).toBeLessThan(painted);
+  // From inside, outwards: its edge goes out.
+  await page.mouse.move(centre.x, centre.y);
+  await page.mouse.down();
+  await page.mouse.move(centre.x, centre.y - 160, { steps: 10 });
+  await page.mouse.up();
+  await expect(page.locator('[data-push-said]')).toHaveText('The last stroke pushed out.');
+  expect(await capturedColour(page)).toBeGreaterThan(pushedIn);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveAttribute(
+    'title',
+    'Undo Push out (Ctrl/⌘+Z)',
+  );
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(painted, 1);
+  expectNoProblems(problems);
+});
