@@ -455,7 +455,14 @@ its own.
   selection is a session on one slice (#292): strokes over the object and over
   what is not add up, what is found is shown over the pane after each, and
   only Accept adds it, as one edit. The image is smoothed (σ 0.7 px) before
-  its edges are weighed (β 250).
+  its edges are weighed (β 250). "Through the volume" (#293) is the same
+  walk with six neighbours a voxel (`random-walker-3d.ts`,
+  `walk-multigrid-3d.ts`) on a box about the strokes, which are then voxels
+  from any pane of the column that is not tilted
+  (`contour-tools/quick-select-volume.ts`). Edges are weighed in mm; a face
+  of the box that is the volume's own is left free, the others are not the
+  object; the box grows while the object runs past it, to 3,145,728 voxels
+  at most; the worker says how far the solve has come, and Stop abandons it.
 - **Settle to the image, and fit from planes** (#120, labs, prototypes in
   the Interpolate tool): each slice filled can be settled to the image's
   edges within 4 pixels of its edge by the random walker of #119

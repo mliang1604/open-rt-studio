@@ -14,6 +14,11 @@
 // On a tilted pane (#307) it is of the pane's own plane: the strokes and the
 // image are in the plane's picture, and what is accepted is put into the
 // grid through the voxels of the plane's sheet.
+//
+// Through the volume (#293), a selection is of a box about the strokes, and
+// the strokes are from any pane of the column that is not tilted: see
+// `quick-select-volume.ts`. It is shown on each of those panes, at the slice
+// the pane is at, and the search says how far it has come.
 
 import {
   ChangeDetectionStrategy,
@@ -26,6 +31,7 @@ import {
 } from '@angular/core';
 import {
   QUICK_SELECT_BETA,
+  boxVoxels,
   planeImage,
   sameGridPlane,
   sheetVoxels,
@@ -50,7 +56,18 @@ import type {
 } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { picturePixelOf, pictureToPane, planePictureOf, type PlanePicture } from './plane-picture';
-import { quickSelectInWorker, warmQuickSelectWorker } from './quick-select-in-worker';
+import {
+  quickSelectInWorker,
+  quickSelectVolumeInWorker,
+  warmQuickSelectWorker,
+} from './quick-select-in-worker';
+import {
+  QUICK_SELECT_MAX_BOX_VOXELS,
+  selectThroughVolume,
+  sliceOfBox,
+  sliceOfVoxels,
+  type VolumeMarks,
+} from './quick-select-volume';
 
 type MprPlacement = Extract<PanePlacement, { kind: 'mpr' }>;
 
@@ -73,6 +90,15 @@ interface Session {
   /** A tilted pane's plane as a picture (#307), which the selection is then in, in place of the slice. */
   readonly plane: PlanePicture | null;
 }
+
+/** A selection under way through the volume (#293): its strokes are voxels of the grid, from any pane of its column. */
+interface VolumeSession extends VolumeMarks {
+  readonly group: number;
+  readonly label: LabelVolume;
+}
+
+/** The most voxels a box looked in may have, as it is said. */
+const MOST = QUICK_SELECT_MAX_BOX_VOXELS.toLocaleString('en');
 
 /** An SVG path of a slice mask's pixels, each run of a row one quadrilateral, through `toPane`. */
 export function maskPath(
@@ -125,8 +151,13 @@ export class QuickSelectTool implements ContourTool {
   /** How sharply an edge stops the walk. */
   readonly beta = signal<number | null>(QUICK_SELECT_BETA);
   readonly said = signal<string | null>(null);
+  /** Whether a selection is through the volume (#293), not of the one slice. */
+  readonly through = signal(false);
+  /** Whether the object is being looked for now. */
+  readonly looking = signal(false);
 
   private session: Session | null = null;
+  private volume: VolumeSession | null = null;
   /** One more each time the session changes, for the preview. */
   private readonly changed = signal(0);
   /** Whether a selection is under way, and whether something was found to accept. */
@@ -138,7 +169,7 @@ export class QuickSelectTool implements ContourTool {
     last: VoxelIndex;
     /** On a tilted pane: where the stroke was last, in pixels of the plane's picture. */
     lastPixel: PlanePoint | null;
-    before: { object: Uint8Array; background: Uint8Array };
+    before: { object: Uint8Array | Set<number>; background: Uint8Array | Set<number> };
   } | null = null;
   /** The search under way, to abandon. */
   private searching: AbortController | null = null;
@@ -152,6 +183,42 @@ export class QuickSelectTool implements ContourTool {
     readonly mmPerPixel: number;
   } | null>(null);
 
+  /**
+   * A selection through the volume, as each pane of its column that is not
+   * tilted shows it: the strokes and what was found, on the slice the pane
+   * is at.
+   */
+  private readonly volumeShown = computed(() => {
+    this.changed();
+    const volume = this.volume;
+    if (!volume) return [];
+    const dims = volume.label.dims;
+    const shown: (Pick<ToolPreviewCircle, 'rect' | 'marks' | 'fill'> & {
+      marks: NonNullable<ToolPreviewCircle['marks']>;
+    })[] = [];
+    for (const pane of this.brush.mprPanes(volume.group)) {
+      const slice = this.brush.sliceOf(pane);
+      if (slice === null) continue;
+      const axis = throughPlaneAxis(pane.orientation);
+      const toPane = this.sliceToPane(pane, axis, slice);
+      if (!toPane) continue;
+      const [a] = ([0, 1, 2] as const).filter((one) => one !== axis);
+      const width = dims[a];
+      const found =
+        volume.selection &&
+        sliceOfBox(dims, axis, slice, volume.selection.box, volume.selection.mask);
+      shown.push({
+        rect: pane.rect,
+        marks: {
+          object: maskPath(sliceOfVoxels(dims, axis, slice, volume.object), width, toPane),
+          background: maskPath(sliceOfVoxels(dims, axis, slice, volume.background), width, toPane),
+        },
+        ...(found ? { fill: maskPath(found, width, toPane) } : {}),
+      });
+    }
+    return shown;
+  });
+
   /** The brush's outline where the pointer is; the strokes and what was found, over their pane. */
   readonly preview = computed<ToolPreviewCircle | null>(() => {
     this.changed();
@@ -160,6 +227,21 @@ export class QuickSelectTool implements ContourTool {
     const outline = at
       ? { rect: at.rect, x: at.x, y: at.y, radiusPx: this.brush.radiusMm() / at.mmPerPixel }
       : null;
+    const panes = this.volumeShown();
+    if (panes.length > 0) {
+      // The pane the pointer is over carries the outline; the others, only what is on them.
+      const same = (one: ToolPreviewCircle['rect'], other: ToolPreviewCircle['rect']): boolean =>
+        one.x === other.x &&
+        one.y === other.y &&
+        one.width === other.width &&
+        one.height === other.height;
+      const under = outline && panes.find((pane) => same(pane.rect, outline.rect));
+      const main = outline
+        ? { ...outline, ...(under ? { marks: under.marks, fill: under.fill } : {}) }
+        : { x: 0, y: 0, radiusPx: 0, ...panes[0] };
+      const rest = panes.filter((pane) => pane !== (outline ? under : panes[0]));
+      return { ...main, others: rest.map((pane) => ({ x: 0, y: 0, radiusPx: 0, ...pane })) };
+    }
     if (!session) return outline;
     const toPane = this.toPane(session);
     if (!toPane) return outline;
@@ -203,6 +285,10 @@ export class QuickSelectTool implements ContourTool {
     this.stroke = null;
     if (!voxel || !grid || !label) return;
     const { placement } = pointer;
+    if (this.through()) {
+      this.beginThrough(context, pointer, voxel, label);
+      return;
+    }
     const axis = throughPlaneAxis(placement.orientation);
     const slice = voxel[axis];
     const picture = planePictureOf(this.brush, placement);
@@ -250,11 +336,46 @@ export class QuickSelectTool implements ContourTool {
     this.mark(context, placement.orientation, voxel, voxel, pixel, pixel);
   }
 
+  /** A stroke of a selection through the volume: on any pane of its column that is not tilted. */
+  private beginThrough(
+    context: ContourToolContext,
+    pointer: ToolPointer,
+    voxel: VoxelIndex,
+    label: LabelVolume,
+  ): void {
+    const { placement } = pointer;
+    if (this.brush.tiltedPlaneOf(placement)) {
+      this.said.set('Through the volume, stroke on a pane that is not tilted.');
+      return;
+    }
+    const volume = this.volume;
+    if (volume && (volume.group !== placement.group || volume.label !== label)) {
+      this.discard();
+      this.said.set('The selection under way, on another image, was let go.');
+    }
+    this.volume ??= {
+      group: placement.group,
+      label,
+      object: new Set(),
+      background: new Set(),
+      selection: null,
+    };
+    this.underWay.set(true);
+    this.stroke = {
+      last: voxel,
+      lastPixel: null,
+      before: { object: new Set(this.volume.object), background: new Set(this.volume.background) },
+    };
+    this.mark(context, placement.orientation, voxel, voxel, null, null);
+  }
+
   extend(context: ContourToolContext, pointer: ToolPointer): void {
     this.hover(context, pointer);
     const voxel = context.voxelAt(pointer);
     const stroke = this.stroke;
     if (!voxel || !stroke) return;
+    // Through the volume, nothing is marked on a tilted pane.
+    if (this.volume && this.brush.tiltedPlaneOf(pointer.placement)) return;
     const pixel = this.session ? this.pixelAt(this.session, pointer) : null;
     this.mark(
       context,
@@ -278,9 +399,20 @@ export class QuickSelectTool implements ContourTool {
   cancel(): void {
     const stroke = this.stroke;
     this.stroke = null;
-    if (stroke && this.session) {
-      this.session.object.set(stroke.before.object);
-      this.session.background.set(stroke.before.background);
+    const { object, background } = stroke?.before ?? {};
+    if (this.session && object instanceof Uint8Array && background instanceof Uint8Array) {
+      this.session.object.set(object);
+      this.session.background.set(background);
+      this.changed.update((n) => n + 1);
+    }
+    if (this.volume && object instanceof Set && background instanceof Set) {
+      for (const [now, was] of [
+        [this.volume.object, object],
+        [this.volume.background, background],
+      ] as const) {
+        now.clear();
+        for (const index of was) now.add(index);
+      }
       this.changed.update((n) => n + 1);
     }
   }
@@ -289,6 +421,16 @@ export class QuickSelectTool implements ContourTool {
   accept(): number {
     const session = this.session;
     const roiId = this.brush.activeRoiId();
+    const volume = this.volume;
+    if (volume?.selection && roiId !== null) {
+      const found = boxVoxels(volume.selection.mask, volume.label.dims, volume.selection.box);
+      this.discard();
+      const changed = this.injector
+        .get(ContourToolsController)
+        .apply(this.editName(), [{ kind: 'paint', roiId, voxels: found }]);
+      this.said.set(`${changed} voxel${changed === 1 ? '' : 's'} added.`);
+      return changed;
+    }
     if (!session?.selection || roiId === null) return 0;
     const dims = session.label.dims;
     const { selection, plane } = session;
@@ -324,12 +466,30 @@ export class QuickSelectTool implements ContourTool {
   discard(): void {
     this.searching?.abort();
     this.searching = null;
+    this.looking.set(false);
     this.session = null;
+    this.volume = null;
     this.stroke = null;
     this.underWay.set(false);
     this.found.set(false);
     this.said.set(null);
     this.changed.update((n) => n + 1);
+  }
+
+  /** Choose whether selections are through the volume; one under way the other way is let go. */
+  setThrough(through: boolean): void {
+    if (through === this.through()) return;
+    if (this.session || this.volume) this.discard();
+    this.through.set(through);
+  }
+
+  /** Stop looking for the object: the strokes are kept, and the next looks again. */
+  stop(): void {
+    if (!this.searching) return;
+    this.searching.abort();
+    this.searching = null;
+    this.looking.set(false);
+    this.said.set('Stopped. The strokes are kept: another stroke looks again.');
   }
 
   hover(_context: ContourToolContext, pointer: ToolPointer | null): void {
@@ -352,11 +512,16 @@ export class QuickSelectTool implements ContourTool {
     const image = context.image();
     const grid = context.grid();
     const [margin, beta] = [this.marginMm(), this.beta()];
-    if (!session || !image || !grid) return;
+    if ((!session && !this.volume) || !image || !grid) return;
     if (margin === null || margin <= 0 || beta === null || beta <= 0) {
       this.said.set('Type a margin and an edge sharpness, each more than 0.');
       return;
     }
+    if (this.volume) {
+      this.searchThrough(this.volume, image, grid, margin, beta);
+      return;
+    }
+    if (!session) return;
     if (!session.object.includes(1)) {
       this.said.set(
         'Stroke over the object too: strokes over what is not the object alone find nothing.',
@@ -375,6 +540,7 @@ export class QuickSelectTool implements ContourTool {
     this.searching?.abort();
     const abandon = new AbortController();
     this.searching = abandon;
+    this.looking.set(true);
     this.said.set('Looking for the object…');
     const started = performance.now();
     const request = {
@@ -388,6 +554,7 @@ export class QuickSelectTool implements ContourTool {
       .then((selection) => {
         if (abandon.signal.aborted || this.session !== session || !selection) return;
         this.searching = null;
+        this.looking.set(false);
         session.selection = selection.mask;
         this.found.set(true);
         this.changed.update((n) => n + 1);
@@ -404,6 +571,90 @@ export class QuickSelectTool implements ContourTool {
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         this.searching = null;
+        this.looking.set(false);
+        this.said.set(
+          `The object could not be found: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  /** Look for the object through the volume, in a box about its strokes, saying how far the search has come. */
+  private searchThrough(
+    volume: VolumeSession,
+    image: Float32Array,
+    grid: { readonly dims: readonly number[]; readonly spacing: readonly number[] },
+    margin: number,
+    beta: number,
+  ): void {
+    if (volume.object.size === 0) {
+      this.said.set(
+        'Stroke over the object too: strokes over what is not the object alone find nothing.',
+      );
+      return;
+    }
+    type Triple = readonly [number, number, number];
+    this.searching?.abort();
+    const abandon = new AbortController();
+    this.searching = abandon;
+    this.looking.set(true);
+    this.said.set('Looking for the object… 0 %');
+    const started = performance.now();
+    this.working = selectThroughVolume(
+      image,
+      grid.dims as unknown as Triple,
+      grid.spacing as unknown as Triple,
+      volume,
+      margin,
+      beta,
+      (request, onProgress) => quickSelectVolumeInWorker(request, abandon.signal, onProgress),
+      (done, reach) => {
+        if (this.searching !== abandon) return;
+        const percent = `${Math.round(100 * done)} %`;
+        this.said.set(
+          reach > margin
+            ? `Looking further out, to ${reach} mm of the strokes… ${percent}`
+            : `Looking for the object… ${percent}`,
+        );
+      },
+    )
+      .then((found) => {
+        if (abandon.signal.aborted || this.volume !== volume) return;
+        this.searching = null;
+        this.looking.set(false);
+        if (!found) {
+          this.said.set('Nothing was found for the strokes.');
+          return;
+        }
+        if ('tooLarge' in found) {
+          this.said.set(
+            `The strokes and their margin take in ${found.tooLarge.toLocaleString('en')} voxels, more than the ${MOST} that are looked in at once: a smaller margin, or strokes nearer each other, would do.`,
+          );
+          return;
+        }
+        const { box, selection } = found;
+        volume.selection = { box, mask: selection.mask };
+        this.found.set(true);
+        this.changed.update((n) => n + 1);
+        const count = selection.mask.reduce((sum, v) => sum + v, 0);
+        const took = Math.round(performance.now() - started);
+        this.said.set(
+          `${count} voxels found through ${box.dims[2]} slices in ${took} ms: Accept adds them.` +
+            (found.marginMm > margin
+              ? ` The object ran on past ${margin} mm of the strokes, and was looked for out to ${found.marginMm} mm.`
+              : '') +
+            (selection.touchesBox
+              ? ' It seems to run on past the box looked in, and is cut off short of it' +
+                (found.tooLargeBeyond
+                  ? ` (a box further out would be of more than the ${MOST} voxels looked in at once)`
+                  : '') +
+                ': a stroke over what is not the object helps.'
+              : ''),
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        this.searching = null;
+        this.looking.set(false);
         this.said.set(
           `The object could not be found: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -443,7 +694,19 @@ export class QuickSelectTool implements ContourTool {
   ): void {
     const grid = context.grid();
     const session = this.session;
-    if (!grid || !session) return;
+    if (!grid) return;
+    if (this.volume) {
+      const marked = this.marking() === 'object' ? this.volume.object : this.volume.background;
+      const stroked = strokeVoxels(grid.dims, grid.spacing, from, to, {
+        shape: 'disk',
+        radiusMm: this.brush.radiusMm(),
+        axis: throughPlaneAxis(orientation),
+      });
+      for (const index of stroked) marked.add(index);
+      this.changed.update((n) => n + 1);
+      return;
+    }
+    if (!session) return;
     if (session.plane) {
       if (!fromPixel || !toPixel) return;
       const marked = this.marking() === 'object' ? session.object : session.background;
@@ -471,17 +734,26 @@ export class QuickSelectTool implements ContourTool {
   /** Pixels of the session's slice to pixels of its pane: affine, from three points. */
   private toPane(session: Session): ((point: PlanePoint) => [number, number]) | null {
     if (session.plane) return pictureToPane(this.brush, session.placement, session.plane);
-    const [a, b] = ([0, 1, 2] as const).filter((one) => one !== session.axis);
+    return this.sliceToPane(session.placement, session.axis, session.slice);
+  }
+
+  /** Pixels of a slice of the grid to pixels of a pane that shows it: affine, from three points. */
+  private sliceToPane(
+    placement: MprPlacement,
+    axis: 0 | 1 | 2,
+    slice: number,
+  ): ((point: PlanePoint) => [number, number]) | null {
+    const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
     const voxel = (u: number, v: number): [number, number, number] => {
       const out: [number, number, number] = [0, 0, 0];
-      out[session.axis] = session.slice;
+      out[axis] = slice;
       out[a] = u;
       out[b] = v;
       return out;
     };
-    const o = this.brush.paneLocalOfVoxel(session.placement, voxel(0, 0));
-    const ea = this.brush.paneLocalOfVoxel(session.placement, voxel(1, 0));
-    const eb = this.brush.paneLocalOfVoxel(session.placement, voxel(0, 1));
+    const o = this.brush.paneLocalOfVoxel(placement, voxel(0, 0));
+    const ea = this.brush.paneLocalOfVoxel(placement, voxel(1, 0));
+    const eb = this.brush.paneLocalOfVoxel(placement, voxel(0, 1));
     if (!o || !ea || !eb) return null;
     return ([u, v]) => [
       o.x + u * (ea.x - o.x) + v * (eb.x - o.x),
@@ -490,7 +762,7 @@ export class QuickSelectTool implements ContourTool {
   }
 }
 
-/** The quick selection's options: what strokes mark, the margin, the sharpness, Accept and Discard. */
+/** The quick selection's options: what strokes mark, slice or volume, the margin, the sharpness, Accept, Discard and Stop. */
 @Component({
   selector: 'app-quick-select-options',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -518,6 +790,29 @@ export class QuickSelectTool implements ContourTool {
             (change)="tool.marking.set('background')"
           />
           what is not
+        </label>
+      </div>
+      <div class="row" role="radiogroup" aria-label="What a selection is of">
+        Select
+        <label>
+          <input
+            type="radio"
+            name="quick-through"
+            data-quick-through="slice"
+            [checked]="!tool.through()"
+            (change)="tool.setThrough(false)"
+          />
+          on this slice
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="quick-through"
+            data-quick-through="volume"
+            [checked]="tool.through()"
+            (change)="tool.setThrough(true)"
+          />
+          through the volume
         </label>
       </div>
       <label class="row">
@@ -554,6 +849,9 @@ export class QuickSelectTool implements ContourTool {
             Accept
           </button>
           <button type="button" data-quick-discard (click)="tool.discard()">Discard</button>
+          @if (tool.looking() && tool.through()) {
+            <button type="button" data-quick-stop (click)="tool.stop()">Stop</button>
+          }
         </div>
       }
       @if (tool.said(); as text) {

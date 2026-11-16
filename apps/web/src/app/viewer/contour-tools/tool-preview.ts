@@ -60,8 +60,18 @@ import type { ToolPreviewCircle } from './contour-tool';
           [attr.width]="o.rect.width"
           [attr.height]="o.rect.height"
         >
-          <circle class="outer" [attr.cx]="o.x" [attr.cy]="o.y" [attr.r]="o.radiusPx" />
-          <circle class="inner section" [attr.cx]="o.x" [attr.cy]="o.y" [attr.r]="o.radiusPx" />
+          <!-- What a tool that works through the volume shows on the panes across (#293). -->
+          @if (o.marks; as marks) {
+            <path class="mark-object" [attr.d]="marks.object" />
+            <path class="mark-background" [attr.d]="marks.background" />
+          }
+          @if (o.fill) {
+            <path class="fill" data-tool-preview-section-fill [attr.d]="o.fill" />
+          }
+          @if (o.radiusPx > 0) {
+            <circle class="outer" [attr.cx]="o.x" [attr.cy]="o.y" [attr.r]="o.radiusPx" />
+            <circle class="inner section" [attr.cx]="o.x" [attr.cy]="o.y" [attr.r]="o.radiusPx" />
+          }
         </svg>
       }
     }
