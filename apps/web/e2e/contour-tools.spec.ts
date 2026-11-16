@@ -541,6 +541,41 @@ test('the slices between two drawn ones are filled by their shape, marked until 
   expectNoProblems(problems);
 });
 
+test('the slices filled are settled to the image in a worker, listed, and the guess is an undo away (#295)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await open(page);
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  await page.getByTitle('Create a new structure and paint it').click();
+  await page.getByLabel('Brush shape').selectOption({ label: 'Disk (slice)' });
+  // A stamp on this slice and one four slices on, off the knob at the crosshair's centre.
+  const spot = await at(page, 0.42, 0.42);
+  await page.mouse.click(spot.x, spot.y);
+  const axial = page.locator('.pane-overlay .pane').first();
+  const sliceNow = async () => Number(/Axial · (\d+)/.exec(await axial.innerText())?.[1]);
+  const first = await sliceNow();
+  // Each step of the wheel is a slice on; each is waited for, as a slow adapter may be behind.
+  for (let step = 1; step <= 4; step++) {
+    await page.mouse.wheel(0, 100);
+    await expect.poll(sliceNow).toBe(first + step);
+  }
+  await page.mouse.click(spot.x, spot.y);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="interp"]').click();
+  await page.locator('[data-interp-settle]').check();
+  await page.locator('[data-interp-fill]').click();
+  await expect(page.locator('[data-interp-settled]')).toHaveText(
+    /^Settled to the image: \d+(–\d+)?\. Undo shows the guess, Redo the settled\.$/,
+    { timeout: 30_000 },
+  );
+  await expect(page.locator('[data-interp-said]')).toHaveText(
+    /^\d+ slices? settled to the image; \d+ voxels? changed\. Undo shows the guess\.$/,
+  );
+  await expect(page.locator('[data-interp-settling]')).toHaveCount(0);
+  expectNoProblems(problems);
+});
+
 test('quick select finds the object under rough strokes, shows it, and Accept adds it as one undo (#119, #292)', async ({
   page,
 }) => {

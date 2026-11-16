@@ -70,11 +70,12 @@ function settled(volume: Uint8Array, image: Float32Array, only?: ReadonlySet<num
   return out;
 }
 
-// What was measured (Dice against the object; the band 4 pixels):
-//   sphere,    shape-based from every fifth axial slice 0.963, settled to the image 0.993
+// What was measured (Dice against the object; the band 4 pixels, at most three quarters of the
+// guess's depth since #295):
+//   sphere,    shape-based from every fifth axial slice 0.963, settled to the image 0.994
 //   sphere,    hull of three central outlines           0.934, settled               1.000
-//   ellipsoid, shape-based                              0.943, settled               0.971
-//   ellipsoid, hull                                     0.903, settled               0.990
+//   ellipsoid, shape-based                              0.943, settled               0.978
+//   ellipsoid, hull                                     0.903, settled               1.000
 // A band of 2 or 6 pixels did less well; settling took 1 to 3 ms a 48² slice.
 describe('settling interpolation to the image (#120)', () => {
   it('raises shape-based interpolation from every fifth slice of a sphere', () => {

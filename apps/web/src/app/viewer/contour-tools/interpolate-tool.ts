@@ -45,9 +45,12 @@ import { BrushController } from '../brush-controller';
 import { EditableStructuresStore } from '../editable-structures-store';
 import type { ContourTool } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
+import { settleInWorker } from './settle-in-worker';
 
 /** What an interpolation is called in Undo. */
 export const INTERPOLATE = 'Interpolate';
+/** What settling the slices filled to the image is called in Undo (#295). */
+export const SETTLE = 'Settle to the image';
 /** What a fit from outlines in several planes is called in Undo. */
 export const FIT = 'Fit from planes';
 /** How far, in pixels, a slice filled may be moved to the image's edges when settled: the spike's best. */
@@ -90,6 +93,13 @@ export class InterpolateTool implements ContourTool {
    * edge (#120, a spike's prototype; `refineToImage`).
    */
   readonly settle = signal(false);
+  /** How far a settling under way is; null for none. */
+  readonly settling = signal<{ readonly done: number; readonly total: number } | null>(null);
+  /** The slices the last settling settled. */
+  readonly settledSlices = signal<readonly number[]>([]);
+  private settlingControl: AbortController | null = null;
+  /** The last settling, settled when it is done: for whoever waits on it (a spec). */
+  working: Promise<void> | null = null;
   /** The slices it filled, and what it filled there; of one structure and axis. */
   private readonly marked = signal<{
     readonly roiId: number;
@@ -110,7 +120,13 @@ export class InterpolateTool implements ContourTool {
     // Keep up: fill again after each edit made with the tools, but its own.
     effect(() => {
       const edit = this.injector.get(ContourToolsController).edited();
-      if (edit.count === 0 || edit.name === INTERPOLATE || edit.name === FIT || !this.live())
+      if (
+        edit.count === 0 ||
+        edit.name === INTERPOLATE ||
+        edit.name === FIT ||
+        edit.name === SETTLE ||
+        !this.live()
+      )
         return;
       untracked(() => this.fill());
     });
@@ -236,13 +252,6 @@ export class InterpolateTool implements ContourTool {
       return 0;
     }
     const wanted = interpolateSlices(label, roiId, axis, drawn);
-    const image = this.store.imageData();
-    if (this.settle() && image) {
-      for (const [slice, mask] of wanted) {
-        const plane = slicePlane(image, label.dims, axis, slice);
-        wanted.set(slice, refineToImage(plane, mask, SETTLE_BAND_PX).mask);
-      }
-    }
     const changes: LabelChange[] = [];
     const touched = new Set<number>([...wanted.keys(), ...still.keys()]);
     for (const slice of touched) {
@@ -264,12 +273,92 @@ export class InterpolateTool implements ContourTool {
       if (mask.some((v) => v === 1)) now.set(slice, mask);
     }
     this.marked.set({ roiId, axis, slices: now });
+    this.settledSlices.set([]);
     this.said.set(
       now.size === 0
         ? 'No slice between those drawn was filled.'
         : `${now.size} slice${now.size === 1 ? '' : 's'} filled between those drawn; ${changed} voxel${changed === 1 ? '' : 's'} changed.`,
     );
+    if (this.settle() && now.size > 0) this.settleFilled(roiId, axis, now);
     return changed;
+  }
+
+  /**
+   * Settle the slices just filled to the image, in a worker (#295), as an
+   * edit of its own after the fill: Undo then shows the shape-based guess,
+   * Redo the settled. A slice edited while it was being settled is left as
+   * edited. A settling before is abandoned.
+   */
+  private settleFilled(
+    roiId: number,
+    axis: 0 | 1 | 2,
+    filled: ReadonlyMap<number, Uint8Array>,
+  ): void {
+    const label = this.store.labelVolume();
+    const image = this.store.imageData();
+    if (!label || !image) return;
+    this.cancelSettling();
+    const abandon = new AbortController();
+    this.settlingControl = abandon;
+    this.settling.set({ done: 0, total: filled.size });
+    const job = {
+      slices: [...filled].map(([slice, guess]) => ({
+        slice,
+        plane: slicePlane(image, label.dims, axis, slice),
+        guess,
+      })),
+      bandPx: SETTLE_BAND_PX,
+    };
+    this.working = settleInWorker(job, abandon.signal, (done, total) =>
+      this.settling.set({ done, total }),
+    )
+      .then((settled) => {
+        if (abandon.signal.aborted || this.store.labelVolume() !== label) return;
+        this.settlingControl = null;
+        this.settling.set(null);
+        const changes: LabelChange[] = [];
+        const kept: number[] = [];
+        for (const { slice, mask } of settled) {
+          // A slice edited since it was filled is the user's now.
+          const guess = filled.get(slice)!;
+          const now = sliceMask(label, roiId, axis, slice).mask;
+          if (!guess.every((v, i) => v === now[i])) continue;
+          kept.push(slice);
+          const { add, remove } = sliceChanges(label, roiId, axis, slice, mask);
+          if (add.length > 0) changes.push({ kind: 'paint', roiId, voxels: add });
+          if (remove.length > 0) changes.push({ kind: 'erase', roiId, voxels: remove, only: true });
+        }
+        const changed =
+          changes.length > 0 ? this.injector.get(ContourToolsController).apply(SETTLE, changes) : 0;
+        // The marks follow what the slices hold now.
+        const marked = this.marked();
+        if (marked) {
+          const slices = new Map(marked.slices);
+          for (const slice of kept) slices.set(slice, sliceMask(label, roiId, axis, slice).mask);
+          this.marked.set({ ...marked, slices });
+        }
+        this.settledSlices.set(kept);
+        this.said.set(
+          `${kept.length} slice${kept.length === 1 ? '' : 's'} settled to the image; ${changed} voxel${changed === 1 ? '' : 's'} changed. Undo shows the guess.`,
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        this.settlingControl = null;
+        this.settling.set(null);
+        this.said.set(
+          `The slices could not be settled: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  /** Abandon a settling under way: the slices stay as filled. */
+  cancelSettling(): void {
+    const was = this.settlingControl;
+    this.settlingControl?.abort();
+    this.settlingControl = null;
+    this.settling.set(null);
+    if (was) this.said.set('Settling was stopped: the slices are as filled.');
   }
 }
 
@@ -327,6 +416,21 @@ export class InterpolateTool implements ContourTool {
       >
         Fit from an outline in each plane
       </button>
+      @if (tool.settling(); as progress) {
+        <div class="row">
+          <span data-interp-settling
+            >Settling slice
+            {{ progress.done + 1 > progress.total ? progress.total : progress.done + 1 }} of
+            {{ progress.total }}…</span
+          >
+          <button type="button" data-interp-settle-cancel (click)="tool.cancelSettling()">
+            Stop
+          </button>
+        </div>
+      }
+      @if (tool.settledSlices().length > 0) {
+        <p class="said" data-interp-settled>{{ settledText() }}</p>
+      }
       @if (tool.markedSlices().length > 0) {
         <p class="said" data-interp-marked>Filled, not yet accepted: {{ runs() }}</p>
         <button type="button" data-interp-accept (click)="tool.accept()">Accept</button>
@@ -385,4 +489,8 @@ export class InterpolateOptions {
     { axis: 0, name: 'sagittal' },
   ];
   protected readonly runs = computed(() => sliceRuns(this.tool.markedSlices()));
+  protected readonly settledText = computed(
+    () =>
+      `Settled to the image: ${sliceRuns(this.tool.settledSlices())}. Undo shows the guess, Redo the settled.`,
+  );
 }

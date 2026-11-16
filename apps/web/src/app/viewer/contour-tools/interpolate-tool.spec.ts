@@ -137,11 +137,32 @@ describe('InterpolateTool (#115)', () => {
     expect(made.tools.nextUndo()).toBe('Fit from planes');
   });
 
-  it('fills with settling on, keeping a slice too thin to settle as it is', () => {
-    // On the 4 × 4 test image no slice is wide enough to have pixels 4 within its edge.
+  it('settles the slices filled after the fill, as an edit of its own, and lists them (#295)', async () => {
+    // On the 4 × 4 test image no slice is wide enough to have pixels 4 within its edge, so
+    // settling keeps them as they are, and changes nothing: no edit of its own is made.
+    const { tool, tools, count } = holding();
+    tool.settle.set(true);
+    tool.fill();
+    expect(tool.settling()).toEqual({ done: 0, total: 2 });
+    await tool.working;
+    expect(tool.settling()).toBeNull();
+    expect([count(1), count(2)]).toEqual([8, 8]);
+    expect(tool.settledSlices()).toEqual([1, 2]);
+    expect(tool.said()).toBe(
+      '2 slices settled to the image; 0 voxels changed. Undo shows the guess.',
+    );
+    expect(tools.nextUndo()).toBe('Interpolate');
+  });
+
+  it('stops a settling when asked: the slices stay as filled', async () => {
     const { tool, count } = holding();
     tool.settle.set(true);
     tool.fill();
+    tool.cancelSettling();
+    expect(tool.settling()).toBeNull();
+    expect(tool.said()).toBe('Settling was stopped: the slices are as filled.');
+    await tool.working;
+    expect(tool.settledSlices()).toEqual([]);
     expect([count(1), count(2)]).toEqual([8, 8]);
   });
 
