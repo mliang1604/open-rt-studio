@@ -20,6 +20,7 @@
 // on the box only.
 
 import type { SlicePlane } from './live-wire.js';
+import { multigridSolve } from './walk-multigrid.js';
 
 /** What a quick selection is asked for. */
 export interface QuickSelectRequest {
@@ -60,7 +61,13 @@ export interface QuickSelection {
  * The random walk on a `w` × `h` grid of values: for each pixel, the chance
  * that a walk from it reaches a pixel seeded 1 before one seeded 0 (seeds
  * −1 are free). Edges weigh `exp(−β Δg² / σ²)`, σ the grid's value range;
- * solved by Jacobi-preconditioned conjugate gradients.
+ * solved by Jacobi-preconditioned conjugate gradients, from `start` if
+ * given (the chance at each pixel, as a guess).
+ *
+ * Written for speed (#291): the weights to free neighbours are kept per
+ * pixel and direction (0 to a seed or off the grid), and the vectors are
+ * padded by a row and a pixel either side, so the stencil needs no bounds
+ * checks.
  */
 export function walk(
   value: (k: number) => number,
@@ -70,89 +77,61 @@ export function walk(
   beta: number,
   tolerance = 1e-4,
   maxIterations = 2000,
+  start?: Float64Array,
 ): { readonly chance: Float64Array; readonly iterations: number } {
   const n = w * h;
-  // Weights to the right and below; σ the range of the region's values, as Grady scales them.
-  const right = new Float64Array(n);
-  const down = new Float64Array(n);
+  const values = new Float64Array(n);
   let [least, most] = [Infinity, -Infinity];
   for (let k = 0; k < n; k++) {
-    least = Math.min(least, value(k));
-    most = Math.max(most, value(k));
+    const v = value(k);
+    values[k] = v;
+    if (v < least) least = v;
+    if (v > most) most = v;
   }
-  const sigma2 = most > least ? (most - least) ** 2 : 1;
+  const scale = most > least ? beta / (most - least) ** 2 : beta;
+  // The weight across each edge: to the right (k, k + 1) and down (k, k + w).
+  const right = new Float64Array(n);
+  const down = new Float64Array(n);
   for (let k = 0; k < n; k++) {
-    const [i, j] = [k % w, Math.floor(k / w)];
-    if (i + 1 < w) right[k] = Math.exp((-beta * (value(k) - value(k + 1)) ** 2) / sigma2) + 1e-6;
-    if (j + 1 < h) down[k] = Math.exp((-beta * (value(k) - value(k + w)) ** 2) / sigma2) + 1e-6;
+    const i = k % w;
+    if (i + 1 < w) right[k] = Math.exp(-scale * (values[k] - values[k + 1]) ** 2) + 1e-6;
+    if (k + w < n) down[k] = Math.exp(-scale * (values[k] - values[k + w]) ** 2) + 1e-6;
   }
-  const neighbours = (k: number, visit: (other: number, weight: number) => void): void => {
-    const [i, j] = [k % w, Math.floor(k / w)];
-    if (i > 0) visit(k - 1, right[k - 1]);
-    if (i + 1 < w) visit(k + 1, right[k]);
-    if (j > 0) visit(k - w, down[k - w]);
-    if (j + 1 < h) visit(k + w, down[k]);
-  };
-  // L_UU x = b, b the weights to the stroke's seeds.
+  // Per free pixel: its degree, the pull of the seeds 1 (b), and its weights to free neighbours.
   const degree = new Float64Array(n);
   const b = new Float64Array(n);
+  const wl = new Float64Array(n);
+  const wr = new Float64Array(n);
+  const wu = new Float64Array(n);
+  const wd = new Float64Array(n);
   for (let k = 0; k < n; k++) {
     if (seed[k] !== -1) continue;
-    neighbours(k, (other, weight) => {
+    const i = k % w;
+    const edges: [number, number, Float64Array][] = [];
+    if (i > 0) edges.push([k - 1, right[k - 1], wl]);
+    if (i + 1 < w) edges.push([k + 1, right[k], wr]);
+    if (k >= w) edges.push([k - w, down[k - w], wu]);
+    if (k + w < n) edges.push([k + w, down[k], wd]);
+    for (const [other, weight, into] of edges) {
       degree[k] += weight;
       if (seed[other] === 1) b[k] += weight;
-    });
-  }
-  const multiply = (x: Float64Array, out: Float64Array): void => {
-    for (let k = 0; k < n; k++) {
-      if (seed[k] !== -1) {
-        out[k] = 0;
-        continue;
-      }
-      let acc = degree[k] * x[k];
-      neighbours(k, (other, weight) => {
-        if (seed[other] === -1) acc -= weight * x[other];
-      });
-      out[k] = acc;
+      else if (seed[other] === -1) into[k] = weight;
     }
-  };
+  }
+  const free = new Uint8Array(n);
+  for (let k = 0; k < n; k++) free[k] = seed[k] === -1 ? 1 : 0;
   const x = new Float64Array(n);
-  const r = Float64Array.from(b);
-  const z = new Float64Array(n);
-  for (let k = 0; k < n; k++) z[k] = degree[k] > 0 ? r[k] / degree[k] : 0;
-  const p = Float64Array.from(z);
-  const ap = new Float64Array(n);
-  let rz = 0;
-  let start = 0;
-  for (let k = 0; k < n; k++) {
-    rz += r[k] * z[k];
-    start += r[k] * r[k];
-  }
-  let iterations = 0;
-  for (; iterations < maxIterations; iterations++) {
-    let rr = 0;
-    for (let k = 0; k < n; k++) rr += r[k] * r[k];
-    if (rr <= tolerance * tolerance * start || rr === 0) break;
-    multiply(p, ap);
-    let pap = 0;
-    for (let k = 0; k < n; k++) pap += p[k] * ap[k];
-    if (pap <= 0) break;
-    const alpha = rz / pap;
-    for (let k = 0; k < n; k++) {
-      x[k] += alpha * p[k];
-      r[k] -= alpha * ap[k];
-    }
-    let next = 0;
-    for (let k = 0; k < n; k++) {
-      z[k] = degree[k] > 0 ? r[k] / degree[k] : 0;
-      next += r[k] * z[k];
-    }
-    const ratio = next / rz;
-    rz = next;
-    for (let k = 0; k < n; k++) p[k] = z[k] + ratio * p[k];
-  }
-  for (let k = 0; k < n; k++) if (seed[k] !== -1) x[k] = seed[k];
-  return { chance: x, iterations };
+  if (start) for (let k = 0; k < n; k++) if (free[k]) x[k] = start[k];
+  const iterations = multigridSolve(
+    { w, h, diag: degree, wl, wr, wu, wd, free },
+    b,
+    x,
+    tolerance,
+    maxIterations,
+  );
+  const chance = new Float64Array(n);
+  for (let k = 0; k < n; k++) chance[k] = free[k] ? x[k] : seed[k];
+  return { chance, iterations };
 }
 
 /**
@@ -165,11 +144,34 @@ export function walk(
  */
 export const EDGE_ALIKE = 0.1;
 
+/**
+ * How small the residual must be, against the start, for a quick selection
+ * to stop (#291). With the multigrid preconditioner, at 1e-3 the selection
+ * agreed with the fully converged one to Dice 0.9968 or better on every
+ * synthetic scene measured (noise σ 0 to 40, a bridge, 256² and 512²).
+ */
+export const QUICK_SELECT_TOLERANCE = 1e-3;
+
+/**
+ * A quick selection whose box is doubled, up to `grows` times, while the
+ * object runs past it ({@link QuickSelection.touchesBox}); null for a stroke
+ * of no pixel.
+ */
+export function quickSelectGrowing(request: QuickSelectRequest, grows = 3): QuickSelection | null {
+  let marginPx = request.marginPx;
+  let selection = quickSelect(request);
+  for (let grow = 0; grow < grows && selection?.touchesBox; grow++) {
+    marginPx *= 2;
+    selection = quickSelect({ ...request, marginPx });
+  }
+  return selection;
+}
+
 /** The object on a slice from a rough stroke over it; null for a stroke of no pixel. */
 export function quickSelect(request: QuickSelectRequest): QuickSelection | null {
   const { plane, stroke, marginPx } = request;
   const beta = request.beta ?? 90;
-  const tolerance = request.tolerance ?? 1e-4;
+  const tolerance = request.tolerance ?? QUICK_SELECT_TOLERANCE;
   const maxIterations = request.maxIterations ?? 2000;
   const { width: W, height: H, data } = plane;
   // The stroke's box, grown by the margin and kept in the slice.

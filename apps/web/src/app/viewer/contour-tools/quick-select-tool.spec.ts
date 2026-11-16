@@ -43,13 +43,17 @@ describe('QuickSelectTool (#119)', () => {
     expect(tools.isActive()).toBe(true);
   });
 
-  it('a stroke on the bright side selects there and not across the edge, and is one undo', () => {
+  it('a stroke on the bright side selects there and not across the edge, and is one undo', async () => {
     // On a 4 × 4 slice the box about the stroke is the whole slice, whose edge is taken as
     // not the object (see random-walker.ts): the quality is the core's tests'; this is the wiring.
     const { tools, tool, columns, count } = holding();
     tools.begin(AXIAL_MID, pointer(87.5, 37.5));
     tools.extend(AXIAL_MID, pointer(87.5, 62.5));
     tools.end();
+    // The stroke is taken back while the object is looked for.
+    expect(count()).toBe(0);
+    expect(tool.said()).toBe('Looking for the object…');
+    await tool.working;
     expect(columns(2)).toContain(3);
     expect(columns(2).every((x) => x >= 2)).toBe(true);
     expect(count()).toBeGreaterThanOrEqual(2);
@@ -59,6 +63,26 @@ describe('QuickSelectTool (#119)', () => {
     expect(tools.nextUndo()).toBe('Quick select');
     tools.undo();
     expect(count()).toBe(0);
+  });
+
+  it('takes back only what the stroke painted, and a new stroke abandons the search before', async () => {
+    const { tools, tool, store, roiId, label, count } = holding();
+    // A voxel of the structure under the stroke stays when the stroke is taken back.
+    const kept = labelIndex(label.dims, 3, 1, 2);
+    store.paint(roiId, [kept]);
+    tools.begin(AXIAL_MID, pointer(87.5, 37.5));
+    tools.end();
+    const first = tool.working;
+    expect(label.data[kept]).toBe(roiId);
+    tools.begin(AXIAL_MID, pointer(87.5, 62.5));
+    tools.end();
+    await first;
+    await tool.working;
+    // One selection made, after the setup's paint: the first was abandoned.
+    expect(tools.nextUndo()).toBe('Quick select');
+    tools.undo();
+    expect(tools.nextUndo()).toBe('Paint');
+    expect(count()).toBe(1);
   });
 
   it('asks for a margin and a sharpness, and says what the last selection took in its options', () => {
