@@ -406,6 +406,17 @@ its own.
   never another, whatever the constraints: `only` on the erase). Only what
   the brush touches changes. Its edit is named for which way it pushed:
   a tool may name its edit once it has begun (`renameEdit`).
+- **Live wire** (#118, labs): click anchors on a pane, and the path from
+  the last anchor to the cursor keeps to the image's edges as the cursor
+  moves; each click fixes the path so far; clicking the first anchor closes
+  it and fills what it encloses, on that slice, into the structure the
+  brush paints into (`live-wire.ts`). Each pixel of the slice costs
+  `1 − g / gmax` (g the gradient's size, by central differences) plus a
+  small floor; the path is the least-cost path through pixels' eight
+  neighbours, a diagonal step costing √2 times. The paths from an anchor to
+  every pixel are found once, when it is set (Dijkstra over the slice), so
+  the path to the cursor is only traced back as it moves. Pixels are taken
+  as square. Anchors belong to their slice, as the points tool's do.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

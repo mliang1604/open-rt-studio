@@ -12,6 +12,7 @@ import { MagicWandTool } from './magic-wand-tool';
 import { MarginTool } from './margin-tool';
 import { MirrorTool } from './mirror-tool';
 import { PointTool } from './point-tool';
+import { LiveWireTool } from './live-wire-tool';
 import { PushTool } from './push-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { SampleTool } from './sample-tool';
@@ -30,6 +31,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: MagicWandTool, multi: true },
   PointTool,
   { provide: CONTOUR_TOOLS, useExisting: PointTool, multi: true },
+  LiveWireTool,
+  { provide: CONTOUR_TOOLS, useExisting: LiveWireTool, multi: true },
   PushTool,
   { provide: CONTOUR_TOOLS, useExisting: PushTool, multi: true },
   CleanupTool,

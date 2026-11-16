@@ -429,3 +429,37 @@ test('the push brush pushes an edge in from outside and out from inside, each on
   expect(await capturedColour(page)).toBeCloseTo(painted, 1);
   expectNoProblems(problems);
 });
+
+test('the live wire draws a path between anchors and fills it when the first is clicked, as one undo (#118)', async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  const before = await capturedColour(page);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="wire"]').click();
+  // Anchors on the edge of the left lung, on the image's right.
+  const anchors = [
+    await at(page, 0.67, 0.3),
+    await at(page, 0.77, 0.5),
+    await at(page, 0.67, 0.68),
+  ];
+  for (const anchor of anchors) await page.mouse.click(anchor.x, anchor.y);
+  const inside = await at(page, 0.58, 0.5);
+  await page.mouse.move(inside.x, inside.y);
+  await expect(page.locator('[data-tool-preview-curve]')).toHaveCount(1);
+  await expect(page.locator('[data-tool-preview-handle]')).toHaveCount(3);
+  await page.mouse.click(inside.x, inside.y);
+  await expect(page.locator('[data-wire-count]')).toHaveText('4 anchors');
+  await page.mouse.click(anchors[0].x + 2, anchors[0].y + 1);
+  await expect(page.locator('[data-wire-said]')).toHaveText(/^\d+ voxels filled\.$/);
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  expectNoProblems(problems);
+});
