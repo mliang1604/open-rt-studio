@@ -60,7 +60,7 @@ export interface ContourToolContext {
 
 /** A circle a tool draws over a pane while the pointer is over it, in pixels from the pane's corner. */
 export interface ToolPreviewCircle {
-  /** The pane it is over, in canvas pixels. */
+  /** The pane it is over, in canvas pixels. A radius of 0 draws no circle. */
   readonly rect: {
     readonly x: number;
     readonly y: number;
@@ -80,6 +80,10 @@ export interface ToolPreviewCircle {
    * through their planes, #108), each in pixels from its own pane's corner.
    */
   readonly others?: readonly ToolPreviewCircle[];
+  /** A curve the tool is drawing (#114), as an SVG path in pixels from the pane's corner. */
+  readonly curve?: string;
+  /** Points of the curve that can be taken hold of; the first closes it. */
+  readonly handles?: readonly { readonly x: number; readonly y: number; readonly first: boolean }[];
 }
 
 /** A contouring tool. */

@@ -385,6 +385,19 @@ its own.
   all, so that a leak through a gap does not flood the volume and nothing
   half-filled is painted; it says so. One click, one edit, under the
   shared constraints. It has no preview.
+- **Points** (#114, labs): click points on a pane and a smooth closed
+  curve is drawn through them as they are set (a closed centripetal
+  Catmull-Rom spline, `polygon-spline.ts`, which passes through every
+  point and does not loop where points crowd); drag a point to move it;
+  click the first to fill what the curve encloses, on that slice, into the
+  structure the brush paints into. Six points on a circle stray from it by
+  2.6% at worst, eight by 0.85%, twelve by 0.17%. The points are kept as
+  continuous voxels and drawn where they are in the pane each time, so
+  zooming or panning while drawing leaves them in place; they belong to the
+  slice they were set on, across the axis the pane steps through, and a
+  point set on another pane or slice starts the curve over. On an oblique
+  pane the curve fills the grid's nearest slice. Closing is one edit under
+  the shared constraints; the points set are not part of the history.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

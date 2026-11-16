@@ -176,6 +176,7 @@ export {
   paintedMask,
 } from './label-boolean.js';
 export { type GrowDimension, type GrownRegion, growRegion } from './region-grow.js';
+export { type PlanePoint, closedSpline, fillSliceLoop } from './polygon-spline.js';
 export {
   type LabelChange,
   type LabelConstraints,
