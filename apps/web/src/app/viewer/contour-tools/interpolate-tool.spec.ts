@@ -113,7 +113,7 @@ describe('InterpolateTool (#115)', () => {
     ).toBe('Filled, not yet accepted: 2');
   });
 
-  it('fits a structure from an outline in each plane, as one edit (#120)', () => {
+  it('fits a surface to an outline in each plane, in a worker, as one edit (#296)', async () => {
     const made = setup();
     made.tools.setLabs(true);
     made.tools.toggle('interp');
@@ -128,13 +128,31 @@ describe('InterpolateTool (#115)', () => {
     made.store.paint(roiId, outline);
     const tool = TestBed.inject(InterpolateTool);
     const has = () => [...label.data].filter((v) => v === roiId).length;
-    expect(has()).toBeLessThan(8);
+    expect(has()).toBe(7);
     tool.fitFromPlanes();
-    expect(has()).toBe(8);
-    for (const x of [1, 2])
-      for (const y of [1, 2]) for (const z of [1, 2]) expect(label.data[at(x, y, z)]).toBe(roiId);
-    expect(tool.said()).toBe('Fitted from 3 outlines; 1 voxel added.');
+    expect(tool.said()).toBe('Fitting a surface to 3 outlines…');
+    await tool.working;
+    // The one voxel of the cube the outlines leave, (2, 2, 1), is within the surface; nothing drawn goes.
+    expect(label.data[at(2, 2, 1)]).toBe(roiId);
+    expect(has()).toBeGreaterThanOrEqual(8);
+    expect(tool.said()).toMatch(/^Fitted from 3 outlines; \d+ voxels? added\.$/);
     expect(made.tools.nextUndo()).toBe('Fit from planes');
+    // One edit: Undo leaves what was drawn, Redo the fit.
+    const fitted = has();
+    made.tools.undo();
+    expect(has()).toBe(7);
+    made.tools.redo();
+    expect(has()).toBe(fitted);
+    // The shared constraints apply: another structure's voxel in the fit is kept.
+    made.tools.undo();
+    const other = made.store.createRoi();
+    made.store.paint(other.id, [at(2, 2, 1)]);
+    made.brush.activeRoiId.set(roiId);
+    made.tools.protectOthers.set(true);
+    tool.fitFromPlanes();
+    await tool.working;
+    expect(label.data[at(2, 2, 1)]).toBe(other.id);
+    expect(has()).toBeGreaterThanOrEqual(7);
   });
 
   it('settles the slices filled after the fill, as an edit of its own, and lists them (#295)', async () => {

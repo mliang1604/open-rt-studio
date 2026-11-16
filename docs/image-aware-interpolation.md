@@ -87,6 +87,36 @@ What the numbers mean, and what they do not:
   hulls' 1.000), as good as no cap, and the small disc kept its part within
   the lung.
 
+### Since the spike: a surface fitted to the contours (#296)
+
+"Fit from an outline in each plane" now fits an implicit surface through
+the outlines in place of the hull (`surface-fit.ts`, Turk and O'Brien): a
+function `f(x) = Σ wᵢ |x − cᵢ| + a·x + b`, solved exactly through points on
+the outlines' edges (f = 0) and points 2 mm inside and outside them along
+their normals (f = ∓2), the structure where f < 0. It runs in a web worker,
+and is settled to the image afterwards if asked.
+
+| Object, three sections                            | Hull  | Fitted surface |
+| ------------------------------------------------- | ----- | -------------- |
+| Sphere, sections through its middle               | 0.934 | 0.980          |
+| Tilted ellipsoid, sections not through its middle | 0.903 | 0.973          |
+
+- Both of the issue's targets are met: above 0.97 on the sphere, above 0.95
+  on the ellipsoid.
+- **Outlines that cross share points**, which made the system singular; the
+  first fit missed its own constraints by 400 and gave Dice 0.22. Each point
+  is now taken once.
+- **Points were first thinned by taking every second in raster order**,
+  which took only the left edge of each outline (most rows have two edge
+  pixels): the sphere reached 0.952. They are now thinned by distance.
+- **Normals were first taken per pixel**, wrong where pixels are not
+  square (a coronal pane of thick slices); per mm, a sphere on 3 mm slices
+  went from 0.974 to 0.978.
+- 120 points on the edges: 240 gave 0.982 and 0.975, in twice the time.
+  Points 0.5 to 4 mm off the surface all held with 120; 2 mm is used.
+- A fit took about 1 s on a 48³ grid: the solve grows with the cube of the
+  points, the sampling with the voxels in the structure's box.
+
 ## Recommendation
 
 - **Offer settling to the image** as an option of interpolation, off by
