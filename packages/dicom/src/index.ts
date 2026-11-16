@@ -186,6 +186,12 @@ export {
 } from './label-rubber-band.js';
 export { interpolateSlices, signedDistance, sliceChanges } from './slice-interpolation.js';
 export {
+  type QuickSelectRequest,
+  type QuickSelection,
+  EDGE_ALIKE,
+  quickSelect,
+} from './random-walker.js';
+export {
   type PathTree,
   type SlicePlane,
   edgeCost,

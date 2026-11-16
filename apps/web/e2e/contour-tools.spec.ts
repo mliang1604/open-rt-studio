@@ -540,3 +540,28 @@ test('the slices between two drawn ones are filled by their shape, marked until 
   await expect(page.locator('[data-interp-marked]')).toHaveCount(0);
   expectNoProblems(problems);
 });
+
+test('quick select finds the object under a rough stroke, as one undo (#119)', async ({ page }) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.getByRole('button', { name: /^Overlays/ }).click();
+  const before = await capturedColour(page);
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="quick"]').click();
+  // A short stroke inside the left lung, on the image's right.
+  const from = await at(page, 0.66, 0.45);
+  const to = await at(page, 0.68, 0.52);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator('[data-quick-said]')).toHaveText(/^\d+ voxels selected in \d+ ms/);
+  expect(await capturedColour(page)).toBeGreaterThan(before + 0.5);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await capturedColour(page)).toBeCloseTo(before, 1);
+  expectNoProblems(problems);
+});

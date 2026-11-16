@@ -444,6 +444,11 @@ its own.
   I draw" fills again after each edit made with the tools
   (`ContourToolsController.edited`), as an edit of its own, so undo takes
   away the fill before the stroke. Slices across any of the three axes.
+- **Quick select** (#119, labs, a prototype): stroke roughly over an
+  object on a slice, and when the pointer comes up the object under the
+  stroke is found by a random walker (`random-walker.ts`) and added to the
+  structure being edited. The spike's measurements and recommendation are
+  in [quick-selection.md](quick-selection.md); its follow-ups are #291–#293.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes
