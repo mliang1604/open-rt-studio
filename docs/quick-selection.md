@@ -98,12 +98,63 @@ result).
 - **In a web worker**, so the page goes on answering; a new stroke abandons
   a search under way.
 
-Times now, on the same machine, the whole box solved: 256² 106–186 ms
-(1.5 s before), 512² 0.54–1.03 s (10 s before). In Chrome, through the
-worker: 116–140 ms for a lung of the 256² phantom. Each step costs about
-30 ms at 512²; the issue's targets (under 100 ms at 256², under 500 ms at
-512²) need that step faster, on the GPU or in WebAssembly, and are left
-open in #291.
+Times then, on the same machine, the whole box solved: 256² 106–186 ms
+(1.5 s before), 512² 0.54–1.03 s (10 s before); each step cost about
+30 ms at 512².
+
+### Since: the speed targets, without a GPU (#291)
+
+The issue's targets (under 100 ms at 256², under 500 ms at 512²) were
+thought to need the GPU or WebAssembly. Measuring showed otherwise: a third
+of the time at 512² was spent putting the equation together, and a step's
+cost was mostly memory read.
+
+- **A level keeps less** (`walk-multigrid.ts`): one weight an edge (to the
+  right, and down) where it kept four a pixel; the diagonal and its inverse;
+  all in 32 bits, the vectors still in 64. Everything is padded by a row and
+  a pixel at each end, and a weight to no free neighbour is 0, so a stencil
+  tests neither where the grid ends nor which pixels are free.
+- **The coarse correction is scaled by 1.5.** Aggregation makes the coarse
+  operator too stiff, so its correction is too small (Braess 1995). Steps
+  went from 15–28 to 11–20.
+- **Putting the equation together allocates nothing a pixel**; before, each
+  pixel made a list of its edges.
+- **The worker is kept between selections** (`quick-select-in-worker.ts`),
+  and started when the tool is taken up. Starting one each time, its code
+  running cold, cost more than a small selection.
+- **Tried and dropped**: vectors in 32 bits (a sixth slower: every load and
+  store converts); a chequerboard (red-black) smoother (cheaper a sweep,
+  more steps, no gain); a W-cycle (1.7 times a step for a step or two
+  fewer); a half sweep before and after (half as many more steps).
+
+Times now, single-threaded in Node on the same machine, the whole box
+solved, on the discs above (noise σ 0, 20, 20 with the bridge, 40):
+
+| Box  | Time       | Steps | Before (#298) |
+| ---- | ---------- | ----- | ------------- |
+| 64²  | 5 ms       | 8–13  |               |
+| 128² | 15–19 ms   | 10–14 | 54 ms         |
+| 256² | 61–86 ms   | 11–17 | 106–186 ms    |
+| 512² | 265–400 ms | 12–20 | 0.54–1.03 s   |
+
+The selection is the same as before this change, pixel for pixel, on every
+scene measured (48² to 512²). Against the walk solved to the end it agrees
+to Dice 0.9985 or better at 256² and 512². On smaller boxes without noise it
+differs by a few pixels of the edge (14 of 414 at 64², 26 of 3,748 at 192²),
+as it did before, and as it still does at a tolerance of 1e-4.
+
+Harder than the discs is the thorax phantom, whose tissues have no noise
+and so no weight across their edges. A whole slice of it, a stroke in a lung:
+
+| Slice | Node, the solve alone | Chrome, through the worker |
+| ----- | --------------------- | -------------------------- |
+| 256²  | 103 ms, 20 steps      | 122–132 ms                 |
+| 512²  | 442 ms, 23 steps      | 543–675 ms                 |
+
+So the targets are met as the issue measures them (the discs, in Node), and
+not for a whole 512² slice of the phantom in the browser. A lung of the 256²
+phantom, at the tool's own margin of 30 mm, takes 77–88 ms in Chrome once
+the worker has run once (130 ms the first time; 116–140 ms before).
 
 ### Since the spike: strokes over what is not the object, and smoothing (#292)
 

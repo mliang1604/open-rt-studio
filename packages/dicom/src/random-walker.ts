@@ -20,7 +20,7 @@
 // on the box only.
 
 import type { SlicePlane } from './live-wire.js';
-import { multigridSolve } from './walk-multigrid.js';
+import { emptyLevel, levelVector, multigridSolve, setOperator } from './walk-multigrid.js';
 
 /** What a quick selection is asked for. */
 export interface QuickSelectRequest {
@@ -72,13 +72,13 @@ export interface QuickSelection {
  * The random walk on a `w` × `h` grid of values: for each pixel, the chance
  * that a walk from it reaches a pixel seeded 1 before one seeded 0 (seeds
  * −1 are free). Edges weigh `exp(−β Δg² / σ²)`, σ the grid's value range;
- * solved by Jacobi-preconditioned conjugate gradients, from `start` if
- * given (the chance at each pixel, as a guess).
+ * solved by conjugate gradients preconditioned by multigrid
+ * (`walk-multigrid.ts`), from `start` if given (the chance at each pixel,
+ * as a guess).
  *
- * Written for speed (#291): the weights to free neighbours are kept per
- * pixel and direction (0 to a seed or off the grid), and the vectors are
- * padded by a row and a pixel either side, so the stencil needs no bounds
- * checks.
+ * Written for speed (#291): everything is padded by a row and a pixel
+ * either side, a weight to no pixel being 0, so that neither putting the
+ * equation together nor solving it tests where the grid ends.
  */
 export function walk(
   value: (k: number) => number,
@@ -100,48 +100,53 @@ export function walk(
     if (v > most) most = v;
   }
   const scale = most > least ? beta / (most - least) ** 2 : beta;
-  // The weight across each edge: to the right (k, k + 1) and down (k, k + w).
-  const right = new Float64Array(n);
-  const down = new Float64Array(n);
-  for (let k = 0; k < n; k++) {
-    const i = k % w;
-    if (i + 1 < w) right[k] = Math.exp(-scale * (values[k] - values[k + 1]) ** 2) + 1e-6;
-    if (k + w < n) down[k] = Math.exp(-scale * (values[k] - values[k + w]) ** 2) + 1e-6;
-  }
-  // Per free pixel: its degree, the pull of the seeds 1 (b), and its weights to free neighbours.
-  const degree = new Float64Array(n);
-  const b = new Float64Array(n);
-  const wl = new Float64Array(n);
-  const wr = new Float64Array(n);
-  const wu = new Float64Array(n);
-  const wd = new Float64Array(n);
-  for (let k = 0; k < n; k++) {
-    if (seed[k] !== -1) continue;
-    const i = k % w;
-    const edges: [number, number, Float64Array][] = [];
-    if (i > 0) edges.push([k - 1, right[k - 1], wl]);
-    if (i + 1 < w) edges.push([k + 1, right[k], wr]);
-    if (k >= w) edges.push([k - w, down[k - w], wu]);
-    if (k + w < n) edges.push([k + w, down[k], wd]);
-    for (const [other, weight, into] of edges) {
-      degree[k] += weight;
-      if (seed[other] === 1) b[k] += weight;
-      else if (seed[other] === -1) into[k] = weight;
+  const level = emptyLevel(w, h);
+  const { pad } = level;
+  const size = n + 2 * pad;
+  // The weight across each edge: to the right (k, k + 1) and down (k, k + w); 0 where there is none.
+  const right = new Float64Array(size);
+  const down = new Float64Array(size);
+  for (let y = 0, k = 0; y < h; y++) {
+    for (let i = 0; i < w; i++, k++) {
+      if (i + 1 < w) {
+        const step = values[k] - values[k + 1];
+        right[pad + k] = Math.exp(-scale * step * step) + 1e-6;
+      }
+      if (y + 1 < h) {
+        const step = values[k] - values[k + w];
+        down[pad + k] = Math.exp(-scale * step * step) + 1e-6;
+      }
     }
   }
-  const free = new Uint8Array(n);
-  for (let k = 0; k < n; k++) free[k] = seed[k] === -1 ? 1 : 0;
-  const x = new Float64Array(n);
-  if (start) for (let k = 0; k < n; k++) if (free[k]) x[k] = start[k];
-  const iterations = multigridSolve(
-    { w, h, diag: degree, wl, wr, wu, wd, free },
-    b,
-    x,
-    tolerance,
-    maxIterations,
-  );
+  // The seeds, padded: what is off the grid is no pixel, and no weight reaches it.
+  const seeds = new Int8Array(size);
+  seeds.set(seed, pad);
+  // Per free pixel: its degree, the pull of the seeds 1 (b), and its weights to free neighbours.
+  const degree = new Float64Array(size);
+  const toRight = new Float64Array(size);
+  const below = new Float64Array(size);
+  const b = levelVector(level);
+  const x = levelVector(level);
+  const { free } = level;
+  for (let k = 0, j = pad; k < n; k++, j++) {
+    if (seeds[j] !== -1) continue;
+    free[k] = 1;
+    const [l, r, u, d] = [right[j - 1], right[j], down[j - w], down[j]];
+    degree[j] = l + r + u + d;
+    let pull = 0;
+    if (seeds[j - 1] === 1) pull += l;
+    if (seeds[j + 1] === 1) pull += r;
+    if (seeds[j - w] === 1) pull += u;
+    if (seeds[j + w] === 1) pull += d;
+    b[j] = pull;
+    if (seeds[j + 1] === -1) toRight[j] = r;
+    if (seeds[j + w] === -1) below[j] = d;
+    if (start) x[j] = start[k];
+  }
+  setOperator(level, degree, toRight, below);
+  const iterations = multigridSolve(level, b, x, tolerance, maxIterations);
   const chance = new Float64Array(n);
-  for (let k = 0; k < n; k++) chance[k] = free[k] ? x[k] : seed[k];
+  for (let k = 0; k < n; k++) chance[k] = free[k] ? x[pad + k] : seed[k];
   return { chance, iterations };
 }
 
@@ -253,7 +258,10 @@ export function quickSelect(request: QuickSelectRequest): QuickSelection | null 
   const h = y1 - y0 + 1;
   const n = w * h;
   const raw = new Float64Array(n);
-  for (let k = 0; k < n; k++) raw[k] = data[(y0 + Math.floor(k / w)) * W + x0 + (k % w)];
+  for (let j = 0; j < h; j++) {
+    const from = (y0 + j) * W + x0;
+    for (let i = 0; i < w; i++) raw[j * w + i] = data[from + i];
+  }
   const smoothed = gaussianBlur(raw, w, h, request.smoothPx ?? QUICK_SELECT_SMOOTH_PX);
   const value = (i: number): number => smoothed[i];
   // Seeds: 1 on the stroke, 0 on the background strokes and the box's edge (unless the stroke
@@ -283,28 +291,28 @@ export function quickSelect(request: QuickSelectRequest): QuickSelection | null 
   const spread = 2 * Math.sqrt(Math.max(0, strokeSquares / strokeCount - mean * mean));
   // Each side within the slice on its own (#292): a long side through what is not the object,
   // where the box was taken out to a background stroke, must not hide a short one through it.
-  const sideOf = [
-    { inside: x0 > 0, on: (i: number) => i === 0, along: 'i' },
-    { inside: x1 < W - 1, on: (i: number) => i === w - 1, along: 'i' },
-    { inside: y0 > 0, on: (_: number, j: number) => j === 0, along: 'j' },
-    { inside: y1 < H - 1, on: (_: number, j: number) => j === h - 1, along: 'j' },
+  const sides = [
+    { inside: x0 > 0, first: 0, step: w, count: h },
+    { inside: x1 < W - 1, first: w - 1, step: w, count: h },
+    { inside: y0 > 0, first: 0, step: 1, count: w },
+    { inside: y1 < H - 1, first: (h - 1) * w, step: 1, count: w },
   ];
   let edgeAlike = 0;
-  for (const side of sideOf) {
+  for (const side of sides) {
     if (!side.inside) continue;
-    let [alike, count] = [0, 0];
-    for (let k = 0; k < n; k++) {
-      const [i, j] = [k % w, Math.floor(k / w)];
-      if (!side.on(i, j)) continue;
-      count++;
-      if (Math.abs(value(k) - mean) <= spread) alike++;
+    let alike = 0;
+    for (let at = 0, k = side.first; at < side.count; at++, k += side.step) {
+      if (Math.abs(smoothed[k] - mean) <= spread) alike++;
     }
-    if (count > 0) edgeAlike = Math.max(edgeAlike, alike / count);
+    if (side.count > 0) edgeAlike = Math.max(edgeAlike, alike / side.count);
   }
   const touchesBox = edgeAlike > EDGE_ALIKE;
-  for (let k = 0; k < n; k++) {
-    const chance = seed[k] === -1 ? x[k] : seed[k];
-    if (chance > 0.5) mask[(y0 + Math.floor(k / w)) * W + x0 + (k % w)] = 1;
+  for (let j = 0; j < h; j++) {
+    const into = (y0 + j) * W + x0;
+    for (let i = 0; i < w; i++) {
+      // A seed's chance is the seed: 1 on the stroke, 0 elsewhere.
+      if (x[j * w + i] > 0.5) mask[into + i] = 1;
+    }
   }
   return { mask, iterations, box: { x0, y0, x1, y1 }, touchesBox, edgeAlike };
 }

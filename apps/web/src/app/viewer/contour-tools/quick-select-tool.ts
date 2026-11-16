@@ -50,7 +50,7 @@ import type {
 } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { picturePixelOf, pictureToPane, planePictureOf, type PlanePicture } from './plane-picture';
-import { quickSelectInWorker } from './quick-select-in-worker';
+import { quickSelectInWorker, warmQuickSelectWorker } from './quick-select-in-worker';
 
 type MprPlacement = Extract<PanePlacement, { kind: 'mpr' }>;
 
@@ -191,6 +191,8 @@ export class QuickSelectTool implements ContourTool {
 
   activate(): void {
     this.brush.ensureActiveRoi();
+    // The worker is started now, so that the first stroke does not wait for it (#291).
+    warmQuickSelectWorker();
   }
 
   begin(context: ContourToolContext, pointer: ToolPointer): void {
