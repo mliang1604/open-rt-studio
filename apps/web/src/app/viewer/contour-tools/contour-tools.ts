@@ -15,6 +15,7 @@ import { PointTool } from './point-tool';
 import { InterpolateTool } from './interpolate-tool';
 import { LiveWireTool } from './live-wire-tool';
 import { PushTool } from './push-tool';
+import { QuickSelectTool } from './quick-select-tool';
 import { RubberBandTool } from './rubber-band-tool';
 import { ContourToolsController } from './contour-tools-controller';
 import { SampleTool } from './sample-tool';
@@ -31,6 +32,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: ThresholdBrushTool, multi: true },
   MagicWandTool,
   { provide: CONTOUR_TOOLS, useExisting: MagicWandTool, multi: true },
+  QuickSelectTool,
+  { provide: CONTOUR_TOOLS, useExisting: QuickSelectTool, multi: true },
   PointTool,
   { provide: CONTOUR_TOOLS, useExisting: PointTool, multi: true },
   LiveWireTool,

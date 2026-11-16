@@ -48,6 +48,7 @@ describe('CleanupTool (#110)', () => {
     expect(tools.listed().map((tool) => tool.id)).toEqual([
       'threshold',
       'wand',
+      'quick',
       'points',
       'wire',
       'push',
