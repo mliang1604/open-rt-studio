@@ -66,7 +66,9 @@ say "the image has no DICOM file in it"
 # and never uses: an echo to a port nothing listens on says that nothing
 # answered, and does not fail to start.
 echoed="$(docker compose run --rm -T server dicom-echo 127.0.0.1 9 NOBODY 2>&1 || true)"
-[ "$echoed" = "No DICOM system answered at 127.0.0.1:9." ] ||
+# Compose writes what it is doing to the same place as the command's answer.
+printf '%s\n' "$echoed" | grep --quiet --fixed-strings --line-regexp \
+  'No DICOM system answered at 127.0.0.1:9.' ||
   fail "the echo command did not run in the image: $echoed"
 say "the DICOM library runs in the image"
 
