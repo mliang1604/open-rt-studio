@@ -23,6 +23,7 @@ import { createHost, type HostAddress } from './host/host.js';
 import { healthRoute } from './host/routes.js';
 import { createJobManager } from './jobs/job-manager.js';
 import { openSqliteJobStore } from './jobs/job-store.js';
+import type { DicomListener } from './dimse/listener.js';
 import type { JobKind } from './jobs/job.js';
 import { errorFields, type LogFields, type Logger } from './logger.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
@@ -35,6 +36,8 @@ export interface RunningServer {
   readonly address: HostAddress;
   /** Whether it speaks HTTPS. */
   readonly tls: boolean;
+  /** Where it listens for DICOM associations, or null when it has no DICOM listener. */
+  readonly dicom: { readonly host: string; readonly port: number } | null;
   /**
    * Stop cleanly: no new connections, the requests in flight answered, then
    * the core's work finished. True when nothing had to be cut off or
@@ -328,20 +331,49 @@ export async function startServer(
   }
   logger.info('listening', { host: address.host, port: address.port, tls: tls !== null });
 
+  let dicom: DicomListener | null = null;
+  if (config.dicomPort !== null) {
+    try {
+      // Loaded only by a server that listens for DICOM: the library is large.
+      const { startDicomListener } = await import('./dimse/listener.js');
+      dicom = await startDicomListener({
+        pacs: core.pacs!,
+        host: config.host,
+        port: config.dicomPort,
+        aeTitle: config.dicomAeTitle,
+        callers: config.dicomCallers,
+        maxObjectBytes: config.maxUploadBytes,
+        logger,
+      });
+    } catch (error) {
+      await host.close();
+      await core.dispose();
+      await clear();
+      stopClearing();
+      accounts?.close();
+      audit?.close();
+      throw error;
+    }
+    // DICOM has no login, and an AE title is not a proof of who calls.
+    if (!LOOPBACK.has(config.host)) logger.warn('dicom-without-login', { host: config.host });
+  }
+
   let stopped: Promise<boolean> | null = null;
   return {
     core,
     address,
     tls: tls !== null,
+    dicom: dicom ? { host: dicom.host, port: dicom.port } : null,
     stop() {
       stopped ??= (async () => {
+        const released = dicom ? await dicom.close({ timeoutMs: config.shutdownTimeoutMs }) : true;
         const closure = await host.close();
         const disposal = await core.dispose({ timeoutMs: config.shutdownTimeoutMs });
         await clear();
         stopClearing();
         accounts?.close();
         audit?.close();
-        const clean = closure.finished && disposal.finished;
+        const clean = released && closure.finished && disposal.finished;
         logger.info('stopped', { clean });
         return clean;
       })();

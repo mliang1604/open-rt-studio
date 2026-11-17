@@ -62,6 +62,14 @@ say "the server does not run as root"
   fail "the image has a DICOM file in it"
 say "the image has no DICOM file in it"
 
+# The DIMSE library loads in the image, which leaves out a package it names
+# and never uses: an echo to a port nothing listens on says that nothing
+# answered, and does not fail to start.
+echoed="$(docker compose run --rm -T server dicom-echo 127.0.0.1 9 NOBODY 2>&1 || true)"
+[ "$echoed" = "No DICOM system answered at 127.0.0.1:9." ] ||
+  fail "the echo command did not run in the image: $echoed"
+say "the DICOM library runs in the image"
+
 # The first account, as the README says to make it: the password on standard input.
 printf '%s\n' "$password" | docker compose run --rm -T server account add "$name" --admin
 token="$(log_in || true)"

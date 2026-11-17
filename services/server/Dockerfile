@@ -49,7 +49,12 @@ RUN npm ci --omit=dev --workspace @open-rt-studio/server --ignore-scripts --no-a
     # jpeg-lossless-decoder-js publishes its tests with their sample DICOM
     # files, and a build tool's binary as an optional dependency. Neither is
     # anything the server runs, and the image holds no DICOM file of anyone's.
-    && rm -rf node_modules/jpeg-lossless-decoder-js/tests node_modules/@rollup
+    && rm -rf node_modules/jpeg-lossless-decoder-js/tests node_modules/@rollup \
+    # dcmjs names adm-zip as a dependency and nothing in it, or in the DIMSE
+    # library on top of it, loads it. It has advisories with no fix, so it is
+    # not shipped (docs/dimse-library.md). The container check runs the
+    # library in the image without it.
+    && rm -rf node_modules/adm-zip
 
 FROM node:${NODE_VERSION}-bookworm-slim
 ENV NODE_ENV=production

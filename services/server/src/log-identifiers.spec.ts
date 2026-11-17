@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +18,8 @@ import { createAccounts } from './accounts/accounts.js';
 import { API_PREFIX } from './api/api-routes.js';
 import type { AuditRecord } from './audit/audit-store.js';
 import { DEFAULT_CONFIG } from './config.js';
+import { dicomEcho } from './dimse/echo.js';
+import { sendFiles } from './dimse/testing/peer.js';
 import { createLogger } from './logger.js';
 import { startServer, type RunningServer } from './server.js';
 
@@ -37,6 +39,8 @@ const PATIENT = SYNTHETIC_STUDY.patient;
 /** Asked for and not there: it must not be logged either. */
 const ABSENT_UID = '1.2.826.0.1.3680043.999.77';
 const ABSENT_PATIENT = 'ZZ-NOT-A-PATIENT-4242';
+/** A system that is let in by DICOM. */
+const DICOM_PEER = 'GUARD-PEER';
 
 let directory: string;
 let server: RunningServer | null = null;
@@ -61,7 +65,15 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   await accounts.add(USER.name, USER.password, 'user');
   // On disk, as a server is run: the store, the index, the jobs and the audit log.
   server = await startServer(
-    { ...DEFAULT_CONFIG, port: 0, shutdownTimeoutMs: 2_000, dataDir: directory, logLevel: 'debug' },
+    {
+      ...DEFAULT_CONFIG,
+      port: 0,
+      shutdownTimeoutMs: 2_000,
+      dataDir: directory,
+      logLevel: 'debug',
+      dicomPort: 0,
+      dicomCallers: [DICOM_PEER],
+    },
     logger,
     { accounts },
   );
@@ -297,6 +309,28 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   await call('DELETE', api('/session'), { token: user });
   await call('DELETE', api('/session'), { token: user });
 
+  // ---- By DICOM: the same objects sent in by a system on the list, then by
+  // one that is not, and an echo from each.
+  const sending = join(directory, 'sent-by-dicom');
+  await mkdir(sending);
+  const paths: string[] = [];
+  for (const file of FILES) {
+    paths.push(join(sending, file.name));
+    await writeFile(paths.at(-1)!, file.bytes);
+  }
+  const dicom = { host: '127.0.0.1', port: server.dicom!.port };
+  const addressed = { calledAeTitle: DEFAULT_CONFIG.dicomAeTitle };
+  const sent = await sendFiles(dicom.port, paths, { ...addressed, callingAeTitle: DICOM_PEER });
+  expect(sent.statuses).toHaveLength(FILES.length);
+  const stranger = await sendFiles(dicom.port, paths, {
+    ...addressed,
+    callingAeTitle: 'NOT-ON-THE-LIST',
+  });
+  expect(stranger.rejected).toBe(true);
+  expect(await dicomEcho({ ...dicom, ...addressed, callingAeTitle: DICOM_PEER })).toEqual({
+    outcome: 'ok',
+  });
+
   await server.stop();
   server = null;
 
@@ -305,6 +339,9 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   const logged = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   expect(logged.filter((line) => line['event'] === 'request')).toHaveLength(calls);
   expect(logged.some((line) => line['event'] === 'stopped')).toBe(true);
+  // And a line for each object that came by DICOM, and for the caller turned away.
+  expect(logged.filter((line) => line['event'] === 'object-received')).toHaveLength(FILES.length);
+  expect(logged.some((line) => line['event'] === 'association-rejected')).toBe(true);
   const forbidden: Record<string, string> = {
     'the Patient ID': PATIENT.id,
     'the patient’s name': PATIENT.name,
