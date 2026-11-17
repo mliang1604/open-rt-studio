@@ -213,34 +213,38 @@ with six neighbours a voxel, on a box about the strokes
   all.
 
 Measured in Node, single-threaded, on the spike's machine (Intel Core
-i7-8850H), Dice against the object:
+i7-8850H), Dice against the object. The times are since #311, which took
+0.13–0.28 s off a 128³ box and changed no selection:
 
-| Scene, stroked on one slice                             | Box               | Noise σ   | Dice                | Time        | Steps |
-| ------------------------------------------------------- | ----------------- | --------- | ------------------- | ----------- | ----- |
-| A sphere within the box                                 | 64³               | 0, 20, 40 | 0.983, 0.996, 0.984 | 205–254 ms  | 7–9   |
-|                                                         | 128³              | 0, 20, 30 | 0.996, 0.997, 0.985 | 1.5–1.9 s   | 6–8   |
-|                                                         | 128³              | 40        | 0.330               | 1.5 s       | 6     |
-|                                                         | 128² × 43 at 3 mm | 0, 20     | 0.996, 0.999        | 0.88–0.92 s | 14–15 |
-| A lung right through the box, its ends the volume's own | 64³               | 0, 20, 40 | 0.982, 0.993, 0.995 | 350–390 ms  | 15    |
-|                                                         | 128³              | 0, 20, 40 | 0.997, 0.998, 1.000 | 3.9–4.1 s   | 22–23 |
-| The same, its ends seeded as not the object             | 64³, 128³         | 0         | 0.39, 0.01          |             |       |
+| Scene, stroked on one slice                                 | Box       | Noise σ   | Dice                | Time       | Steps |
+| ----------------------------------------------------------- | --------- | --------- | ------------------- | ---------- | ----- |
+| A sphere within the box                                     | 64³       | 0, 20, 40 | 0.983, 0.996, 0.984 | 200–240 ms | 7–9   |
+|                                                             | 128³      | 0, 20, 30 | 0.996, 0.997, 0.985 | 1.5–1.6 s  | 6–8   |
+|                                                             | 128³      | 40        | 0.330               | 1.3 s      | 6     |
+| A lung right through the box, its ends the volume's own     | 64³       | 0, 20, 40 | 0.982, 0.993, 0.995 | 335 ms     | 15    |
+|                                                             | 128³      | 0, 20, 40 | 0.997, 0.998, 1.000 | 3.9 s      | 22–23 |
+| The same, its ends seeded as not the object                 | 64³, 128³ | 0         | 0.39, 0.01          |            |       |
+| Lungs within the box, the whole volume as the box, no noise | 128³      | 0         | 0.998               | 2.6 s      | 15    |
+
+On slices 3 mm apart (128² × 43, σ 0 and 20) Dice was 0.996 and 0.999 in
+14–15 steps, 0.88–0.92 s before #311.
 
 In Chrome, through the worker, on the thorax phantom, a short stroke in a
-lung at the tool's margin of 30 mm:
+lung at the tool's margin of 30 mm (since #311; before it in brackets):
 
-| Phantom                           | Last box looked in | Found                    | Time      |
-| --------------------------------- | ------------------ | ------------------------ | --------- |
-| 128² × 48                         | 78 × 92 × 48       | the lung, 27,232 voxels  | 0.56 s    |
-| 256² × 64                         | 157 × 185 × 64     | the lung, 145,198 voxels | 3.7–4.3 s |
-| 128³, the whole volume as the box | 128³               |                          | 3.1–3.2 s |
+| Phantom                           | Last box looked in | Found                    | Time                  |
+| --------------------------------- | ------------------ | ------------------------ | --------------------- |
+| 128² × 48                         | 78 × 92 × 48       | the lung, 27,224 voxels  | 0.54–0.67 s (0.56 s)  |
+| 256² × 64                         | 157 × 185 × 64     | the lung, 145,198 voxels | 3.6–4.0 s (3.7–4.3 s) |
+| 128³, the whole volume as the box | 128³               |                          | 2.9–3.1 s (3.1–3.2 s) |
 
 What this does not do:
 
 - **The issue's target, a 128³ box in under 2 s, is met only for an object
-  within the box, in Node** (1.5–1.9 s). An object that runs out of the
-  volume takes 3.9–4.1 s there, and the phantom's whole 128³ takes
-  3.1–3.2 s in Chrome: without noise it takes 14–15 steps, where the noisy
-  spheres take 6–8.
+  within the box, in Node** (1.5–1.6 s). An object that runs out of the
+  volume takes 3.9 s there, and the phantom's whole 128³ takes 2.9–3.1 s in
+  Chrome: without noise it takes 14–15 steps, where the noisy spheres take
+  6–8. #311 looked for the rest and did not find it: see below.
 - **Heavy noise defeats it sooner than on a slice**: at σ 40 the 128³
   sphere is not found (0.330, the same solved to the end; 0.92 at 96³,
   0.984 at 64³).
@@ -256,15 +260,52 @@ What this does not do:
   through it is cut short as before (0.39), unless a stroke says what is
   not the object: with one dab in the body, the lung was found voxel for
   voxel (at 48³).
-- **Memory**: the solve keeps about 100 bytes a voxel (reckoned from its
-  arrays, not measured), some 300 MB at the most voxels allowed.
+- **Memory**: measured in Node (the array buffers held, read at each
+  step), 179 MB at 128³ and 272 MB at the most voxels allowed
+  (256 × 192 × 64): about 90 bytes a voxel.
 
 Tried and dropped, each measured: vectors in 32 bits (a fifth slower at
 128³); a chequerboard smoother (no cheaper for the same steps); a first
 guess by full multigrid (8 steps to 5 or 6 on the sphere, one saved on a
-lung through the box, a tenth of the time at best); leaving the volume's own faces free only where they are
-like the stroke (0.50 where free altogether gives 0.98: the object's
-blurred rim is still seeded there).
+lung through the box, a tenth of the time at best); leaving the volume's
+own faces free only where they are like the stroke (0.50 where free
+altogether gives 0.98: the object's blurred rim is still seeded there).
+
+#### Since: where the time goes, and what did not help (#311)
+
+What #311 kept changes no selection (28 scenes from 32³ to 128³ compared
+voxel for voxel with the code before): the last step is not followed by a
+V-cycle that nothing reads; from 0, the first product is left out; the
+smoothing, the weights and the seeds are set up in leaner loops. Of a 128³
+box's time, about 0.4 s is that setting up and 0.15 s each step.
+
+The steps are the rest, and they are many where the object is closed off
+by sharp edges or runs out of the volume: its level settles slowly, long
+after the easy part of the residual has gone. The coarse levels are why:
+a block of eight that straddles a sharp edge has one value for both sides,
+so on a coarse level the object is tied to what is about it. What was
+tried against that, and dropped:
+
+- **Stopping when the selection has stopped changing** (no more than 0.2 %
+  of it in each of two steps). On the hard 128³ scenes it took 10–11 steps for 15–23, and
+  2.0–2.1 s for 2.8–3.9 s, with Dice within 0.004. But the selection stands
+  still for several steps and then takes in more: an object out of the
+  volume lost its last slices at each end (Dice 0.945 for 0.994 at 48³).
+  Not safe.
+- **Lifting what is selected by the one amount that best fits the
+  equation**, once it has stopped changing: the amount was under 0.01, and
+  nothing was gained. What lags is the ends, not the whole.
+- **Coarsening further, and more sweeps on the coarsest level**: the same
+  steps.
+- **Blocks that do not straddle sharp edges** (of each block of eight, only
+  the voxels that hold together have a part in the next level), with the
+  coarsest level solved outright: far worse, 9 to several hundred steps
+  for 7 to 16. Taking the weights to the voxels left out off the coarse
+  operator makes its corrections too large.
+
+What is left is a coarse space made for the image (aggregates that follow
+its edges, with an operator that stays as stiff as the fine one), or the
+same solve on the GPU. Neither is small.
 
 ## Recommendation
 

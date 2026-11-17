@@ -217,15 +217,16 @@ describe('the walk through a volume (#293)', () => {
   });
 });
 
-// What was measured (#293; Dice against the object; single-threaded in Node, Intel Core i7-8850H).
+// What was measured (#293, and since #311 for the times; Dice against the object;
+// single-threaded in Node, Intel Core i7-8850H).
 // A sphere within the box, stroked on its middle slice:
-//   64³, noise σ 0, 20, 40          0.983, 0.996, 0.984    205–254 ms, 7–9 steps
-//   128³, noise σ 0, 20, 30         0.996, 0.997, 0.985    1.5–1.9 s, 6–8 steps
+//   64³, noise σ 0, 20, 40          0.983, 0.996, 0.984    200–240 ms, 7–9 steps
+//   128³, noise σ 0, 20, 30         0.996, 0.997, 0.985    1.5–1.6 s, 6–8 steps
 //   128³, noise σ 40                0.330 (and so solved to the end: the walk's, not the solve's)
-//   128² × 43 at 3 mm, σ 0, 20      0.996, 0.999           0.88–0.92 s, 14–15 steps
+//   128² × 43 at 3 mm, σ 0, 20      0.996, 0.999           0.88–0.92 s before #311, 14–15 steps
 // A lung right through the box, its ends the volume's own, from a dab on one slice:
-//   64³, noise σ 0, 20, 40          0.982, 0.993, 0.995    350–390 ms, 15 steps
-//   128³, noise σ 0, 20, 40         0.997, 0.998, 1.000    3.9–4.1 s, 22–23 steps
+//   64³, noise σ 0, 20, 40          0.982, 0.993, 0.995    335 ms, 15 steps
+//   128³, noise σ 0, 20, 40         0.997, 0.998, 1.000    3.9 s, 22–23 steps
 //   the same with its ends seeded   0.39 at 64³, 0.01 at 128³
 describe('quick selection through the volume (#293)', () => {
   it('selects a sphere whole from a stroke on one slice, through noise, in few steps', () => {
@@ -241,6 +242,19 @@ describe('quick selection through the volume (#293)', () => {
       true,
     );
     expect(progress.at(-1)).toBe(1);
+    // A solve cut short says it is done at its last step too, and takes no more.
+    const short: number[] = [];
+    const cut = quickSelect3d({ ...scene, maxIterations: 3 }, (done) => short.push(done))!;
+    expect(cut.iterations).toBe(3);
+    expect(short).toHaveLength(3);
+    expect(short[1]).toBeLessThan(1);
+    expect(short[2]).toBe(1);
+    // And one that may take none says nothing.
+    const none: number[] = [];
+    expect(
+      quickSelect3d({ ...scene, maxIterations: 0 }, (done) => none.push(done))!.iterations,
+    ).toBe(0);
+    expect(none).toEqual([]);
   });
 
   it('selects it on slices three times as far apart as its pixels', () => {
