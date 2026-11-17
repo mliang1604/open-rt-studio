@@ -16,12 +16,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { readInstanceHeader } from '@open-rt-studio/dicom';
 import { syntheticCtSeries, syntheticRtCourse, type SyntheticFile } from '@open-rt-studio/testdata';
 
 import { sopInstanceUidOf } from '../store/testing.js';
 import { dicomEcho } from './echo.js';
 import { dataSetOf, outgoingFrom } from './part10.js';
 import { sendObjects } from './send.js';
+import { IMPLICIT_VR_LE } from './sop-classes.js';
 import {
   freePort,
   LISTENER_AE,
@@ -194,8 +196,17 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
       objects.map(() => ({ outcome: 'stored', status: 0, rewritten: true })),
     );
     // The same objects, as the server's own reader finds them in what DCMTK wrote.
-    const there = (await written(folder)).map((file) => sopInstanceUidOf(file));
-    expect(there.sort()).toEqual(objects.map((object) => object.sopInstanceUid).sort());
+    const there = (await written(folder)).map((file) => {
+      const read = readInstanceHeader(file);
+      if (!read.ok) throw new Error('the server cannot read what DCMTK wrote');
+      return read.header;
+    });
+    expect(there.map((header) => header.transferSyntaxUid)).toEqual(
+      objects.map(() => IMPLICIT_VR_LE),
+    );
+    expect(there.map((header) => header.sopInstanceUid).sort()).toEqual(
+      objects.map((object) => object.sopInstanceUid).sort(),
+    );
   });
 
   it('storescp is not sent compressed pixel data it does not take', async () => {
