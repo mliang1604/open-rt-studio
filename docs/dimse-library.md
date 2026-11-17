@@ -3,9 +3,10 @@
 The written half of the spike in
 [#40](https://github.com/mliang1604/open-rt-studio/issues/40): which library
 the server should speak DICOM networking with. It ends in a recommendation.
-The other half of the spike, a proof of concept against a test peer, is not
-done: it means installing a package, and adding a dependency is Michael's to
-approve.
+The other half of the spike, a proof of concept against a test peer, was run
+on 2026-11-17, after Michael approved the dependency:
+[what it showed](#what-the-proof-of-concept-showed) is below, and it changes
+two things in how the library should be used.
 
 **Recommendation: [`dcmjs-dimse`](https://github.com/PantelisGeorgiadis/dcmjs-dimse),
 kept behind an interface of our own, and run off the main thread.** The
@@ -13,11 +14,12 @@ reasons and the gaps follow.
 
 ## How this was done, and what it is worth
 
-Everything below was read on 2026-11-14 from each project's repository, type
-declarations and README, and from the npm registry. **Nothing was run.** What
-a README says a library does is not the same as what it does under load, and
-the sections "Gaps" and "What the proof of concept has to show" list what
-remains to be found out by running it.
+The comparison, the reasons and the gaps were read on 2026-11-14 from each
+project's repository, type declarations and README, and from the npm
+registry, with nothing run. What a README says a library does is not the same
+as what it does, so "What the proof of concept has to show" listed what
+running it had to find out, and "What the proof of concept showed" is what it
+found, for `dcmjs-dimse` 0.3.4 alone. The other candidates were never run.
 
 ## What the server needs
 
@@ -136,6 +138,71 @@ If 2 or 3 fail and cannot be worked round, the fallback is DCMTK's own tools
 (`storescp`, `findscu` and the rest) started as jobs, which `src/jobs` can
 already do, at the cost of DCMTK having to be installed beside the server.
 
+## What the proof of concept showed
+
+`dcmjs-dimse` 0.3.4, on Node 24. The code is `services/server/src/dimse`:
+`testing/proof.ts` is an SCP of ours on the library and a client,
+`proof.spec.ts` tries them on each other, and `dcmtk.spec.ts` tries them on
+DCMTK's `echoscu`, `storescu` and `storescp`, in the CI job "DIMSE interop"
+(DCMTK 3.6.9, from the runner's package archive; it is not on the
+machine the rest was run on). All data was synthetic. The measurements were
+made once each, by hand, on an Intel Core i7-8850H with the sender and the
+receiver in processes of their own on one machine; they are not tests.
+
+| What it had to show                         | What it showed                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. C-ECHO both ways                         | Yes. `echoscu` is answered, and refused under a calling AE title that is not let in; `storescp` answers our C-ECHO.                                                                                                                                                                                                                       |
+| 2. C-STORE received, byte for byte          | Yes. Through the stream hook the data set arrives as `storescu` sent it, for a CT, an MR, a structure set, a plan, a dose and a registration. A 256 MB object from the library's own client arrived whole and the same. With a Part 10 header of ours in front, the ingest stores and indexes each.                                       |
+| 3. A large object, with the memory measured | Received through the hook into a file, a 256 MB object took the receiver from 64 MB to 400 MB, and a 64 MB one to 193 MB: the hook does not make memory flat. Left to the library, which gathers and parses, 1,157 MB. **Sending the 256 MB object took the sender to 1,762 MB**, and the 64 MB one to 623 MB.                            |
+| 4. C-STORE sent                             | Yes: `storescp` takes what we send, and an image's data set is written as it is in our file. **An object with sequences is not sent as it is**: see below.                                                                                                                                                                                |
+| 5. TLS both ways                            | Yes, with a listener of Node's own (`node:tls`) and the library's client: `echoscu` gets through to us with TLS and not without, and we get through to `storescp` with TLS. Between the library's client and our listener, the certificate made for the HTTPS specs works; a client that trusts another certificate does not get through. |
+| 6. Four associations at once                | Four 64 MB objects at once, each into a file through the hook: the slowest of 186 HTTP answers from the same process took 73 ms, and the event loop was held for 33 ms at most. Left to the library: 408 ms, and 259 ms.                                                                                                                  |
+
+### What it changes
+
+1. **Do not use the library's `Server`.** It listens on every interface and
+   takes no address, where this server listens on `127.0.0.1` unless told
+   otherwise. The library's `Scp` class is the protocol on one socket and
+   takes any socket. So the listener is ours: `node:net`, or `node:tls` with
+   the key and certificate the server already has for HTTPS, bound where
+   the configuration says, and each connection handed to an `Scp` of ours.
+   That is how `testing/proof.ts` does it. It also gives a port the system
+   picks, for specs.
+2. **What the library's client sends is not always our bytes.** It parses
+   the file and writes it again. A CT and an MR came out the same; a
+   structure set, a plan, a dose and a registration did not (the structure
+   set's data set was 1,052 bytes in the file and 1,188 on the wire). The
+   ingest files an instance by its checksum and refuses other bytes under a
+   UID it knows, so an object sent out and sent back would be refused as
+   different. #50 has to decide: accept that what we send is re-written
+   (and say so in the conformance statement), or send the bytes ourselves.
+3. **Sending is where the memory goes**: about seven times the object.
+   Gap 3 above stands, measured, and nothing in the library avoids it. Until
+   it is solved, #50 needs a limit on the size of what is sent, and on how
+   many at once.
+4. **Receiving through the hook is not flat either.** The receiver grew by
+   more than the object's size for a 64 MB object and by somewhat more than
+   it for a 256 MB one. I did not find out why; that the library does not
+   wait for the stream when it writes to it is a guess. #49 should bound
+   what an association may send, or measure again with a slower sender.
+
+### Smaller things found
+
+- `npm audit` reports `adm-zip`, with no fix available (reading a crafted
+  ZIP file can exhaust memory or overwrite files). `dcmjs` declares it as a
+  dependency, but nothing in the published code of `dcmjs`, `dcmjs-codecs`
+  or `dcmjs-dimse` loads it: it is installed and never run. When the server
+  comes to depend on the library (#49), its image can leave the folder out.
+- The library is CommonJS and Node sees no named exports in it: import the
+  default and take the names from that.
+- It logs every association to the console unless told not to
+  (`log.setLevel('silent')`). Its log lines were not read for identifiers.
+- The Part 10 header in front of a received data set is ours to write. The
+  proof writes the least an ingest needs; #49 has to add the Implementation
+  Class UID, which the standard requires.
+- It is a development dependency for now, pinned to 0.3.4: nothing the
+  server runs imports it until #49.
+
 ## One more thing it would bring
 
 `dcmjs-dimse` transcodes with `dcmjs-codecs`, by the same author and also
@@ -146,7 +213,11 @@ licence and that they exist.
 
 ## Not verified
 
-- No code was run: every capability above is as declared.
+- Of `dcmjs-dimse`, only what "What the proof of concept showed" lists was
+  run. C-FIND, C-MOVE and C-GET, compressed transfer syntaxes, transcoding,
+  user identity and client certificates are as declared.
+- Of the other candidates, no code was run.
+- Nothing was tried from inside Electron, or on Windows.
 - DCMTK's licence was not read from the vendored sources; "BSD-style" is how
   DCMTK is generally described.
 - `dicom-dimse-native` may have options its README and type declarations do

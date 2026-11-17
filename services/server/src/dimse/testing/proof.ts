@@ -11,20 +11,23 @@
 //
 // - The library is CommonJS with no named exports Node can see: import the
 //   default and take the names from it.
-// - An SCP is a class of ours that the library makes one of per association.
-//   What it should know (who may call, where objects go) has to reach it
-//   some other way than its constructor; here, a subclass made per listener.
+// - The library's `Server` listens on every interface and cannot be given an
+//   address. Its `Scp` class is the protocol on one socket, and takes any
+//   socket: so the listener here is Node's own (`node:net`, or `node:tls`
+//   with the key and certificate), bound to 127.0.0.1 on a port the system
+//   picks, and each connection is handed to an `Scp` of ours.
 // - A received object reaches us through `createStoreWritableStream`, as the
 //   bytes of its data set and nothing else. The Part 10 header in front is
 //   ours to write.
 // - `createDatasetFromStoreWritableStream` must hand the library a Dataset.
 //   An empty one will do: the library then parses nothing.
 
-import { createServer } from 'node:net';
+import { createServer, type Server as NetServer, type Socket } from 'node:net';
+import { createServer as createTlsServer } from 'node:tls';
 import { Writable } from 'node:stream';
 import dimse from 'dcmjs-dimse';
 
-const { Client, Dataset, Scp, Server } = dimse;
+const { Client, Dataset, Scp } = dimse;
 const { CEchoRequest, CStoreRequest } = dimse.requests;
 const { CEchoResponse, CStoreResponse } = dimse.responses;
 const { PresentationContextResult, RejectReason, RejectResult, RejectSource, Status } =
@@ -78,7 +81,7 @@ export interface ProofScp {
   close(): void;
 }
 
-/** A port nothing is listening on. The library does not take port 0. */
+/** A port nothing is listening on, for a peer that has to be told one. */
 export async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer();
@@ -198,12 +201,34 @@ export async function startProofScp(options: ProofScpOptions = {}): Promise<Proo
     }
   }
 
-  const port = await freePort();
-  const server = new Server(ProofScpAssociation);
-  // Without a listener a refused TLS handshake is an unhandled error.
-  server.on('networkError', () => undefined);
-  server.listen(port, options.tls ? { securityOptions: options.tls } : {});
-  return { port, received, close: () => server.close() };
+  const sockets = new Set<Socket>();
+  const connected = (socket: Socket): void => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+    // Without a listener a broken connection is an unhandled error.
+    new ProofScpAssociation(socket, {}).on('networkError', () => undefined);
+  };
+  const server: NetServer = options.tls
+    ? createTlsServer({ key: options.tls.key, cert: options.tls.cert }, connected)
+    : createServer(connected);
+  // A handshake that fails is the client's affair.
+  server.on('tlsClientError', () => undefined);
+  const port = await new Promise<number>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (typeof address === 'object' && address) resolve(address.port);
+      else reject(new Error('no port'));
+    });
+  });
+  return {
+    port,
+    received,
+    close: () => {
+      server.close();
+      for (const socket of sockets) socket.destroy();
+    },
+  };
 }
 
 export interface SendOptions {

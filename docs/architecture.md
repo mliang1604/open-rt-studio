@@ -43,7 +43,7 @@ Status is **decided** unless a row says otherwise.
 | Desktop          | Electron for macOS, Windows and Linux. It hosts the same web client. A **standalone mode** runs without any server by embedding the server core in the main process.                                                         |
 | Server           | TypeScript on Node. The core (store, index, ingest, jobs) is a library that runs both as the network service and inside Electron. HTTP is served with Node's own `node:http`, with no framework ([below](#server-and-pacs)). |
 | PACS             | Our own, not Orthanc: a filesystem DICOM store with an index in SQLite (standalone and small installs) or PostgreSQL (server installs).                                                                                      |
-| DICOM networking | DIMSE (C-ECHO, C-STORE, C-FIND, C-MOVE, C-GET) through a permissively licensed library. The spike in #40 recommends `dcmjs-dimse` ([dimse-library.md](dimse-library.md)); not yet run or approved.                           |
+| DICOM networking | DIMSE (C-ECHO, C-STORE, C-FIND, C-MOVE, C-GET) through `dcmjs-dimse`, behind `src/dimse`, on a listener of our own ([dimse-library.md](dimse-library.md)). Approved by Michael and tried in #40; the listener itself is #49. |
 | Heavy compute    | C++ command-line tools built on ITK and elastix (registration, resampling), started by the server as jobs. **No Python at runtime.**                                                                                         |
 | AI models        | ONNX Runtime, later (contouring spikes #121 and #122).                                                                                                                                                                       |
 | Hosting          | GitHub only: Actions for CI, Pages for the web client, Releases for desktop installers, GHCR for the server image.                                                                                                           |
@@ -1831,6 +1831,9 @@ desktop installers bundle them.
   in Chromium with a software WebGPU adapter.
 - `End-to-end` runs the whole Playwright suite the same way. It is not a
   required check.
+- `DIMSE interop` tries the DIMSE proof of concept against DCMTK's
+  command-line tools, installed on the runner as a test peer (#40). It is
+  not a required check.
 - A merge to `main` deploys the web client to GitHub Pages
   (`.github/workflows/deploy.yml`).
 
