@@ -23,7 +23,14 @@ import { createHost, type HostAddress } from './host/host.js';
 import { healthRoute } from './host/routes.js';
 import { createJobManager } from './jobs/job-manager.js';
 import { openSqliteJobStore } from './jobs/job-store.js';
-import type { DicomListener } from './dimse/listener.js';
+import { dicomRoutes } from './api/dicom-routes.js';
+import { createDicomService } from './dimse/dicom-service.js';
+import {
+  createMemorySettingsStore,
+  newRemoteId,
+  openFileSettingsStore,
+  type DicomSettings,
+} from './dimse/dicom-settings.js';
 import type { JobKind } from './jobs/job.js';
 import { errorFields, type LogFields, type Logger } from './logger.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
@@ -186,6 +193,35 @@ export function openTls(
 /** The name of the file in the data directory that holds the audit log. */
 export const AUDIT_FILE = 'audit.sqlite';
 
+/** The file in the data directory that keeps the DICOM settings changed while the server ran. */
+export const DICOM_SETTINGS_FILE = 'dicom.json';
+
+/** The port offered for a listener that was never given one. */
+const USUAL_DICOM_PORT = 11112;
+
+/**
+ * The DICOM settings of a server that has kept none: what its configuration
+ * says. The calling AE titles of the configuration are systems that only
+ * call, and may store.
+ */
+export function dicomDefaults(config: ServerConfig): DicomSettings {
+  return {
+    local: {
+      enabled: config.dicomPort !== null,
+      port: config.dicomPort ?? USUAL_DICOM_PORT,
+      aeTitle: config.dicomAeTitle,
+    },
+    remotes: config.dicomCallers.map((aeTitle) => ({
+      id: newRemoteId(),
+      name: aeTitle,
+      aeTitle,
+      host: null,
+      port: null,
+      mayStore: true,
+    })),
+  };
+}
+
 /**
  * Where it is written who did what: in the data directory. Null for a
  * server without one, which keeps nothing, an audit log no more than
@@ -299,14 +335,36 @@ export async function startServer(
   const sessionApi = accounts ? accountRoutes(accounts) : [openSessionRoute()];
   const auditApi = audit ? auditRoutes(audit) : [];
   const timepointApi = timepointRoutes(core.pacs!.index);
+  const dicom = createDicomService({
+    pacs: core.pacs!,
+    host: config.host,
+    exposed: !LOOPBACK.has(config.host),
+    maxObjectBytes: config.maxUploadBytes,
+    store:
+      config.dataDir === null
+        ? createMemorySettingsStore()
+        : openFileSettingsStore(join(config.dataDir, DICOM_SETTINGS_FILE)),
+    defaults: dicomDefaults(config),
+    closeTimeoutMs: config.shutdownTimeoutMs,
+    logger,
+  });
+  const dicomApi = dicomRoutes(dicom);
   const routes = [
     ...sessionApi,
     ...auditApi,
     ...jobApi,
     ...timepointApi,
+    ...dicomApi,
     ...apiRoutes(core.pacs!, {
       maxUploadBytes: config.maxUploadBytes,
-      described: [healthRoute(core), ...sessionApi, ...auditApi, ...jobApi, ...timepointApi],
+      described: [
+        healthRoute(core),
+        ...sessionApi,
+        ...auditApi,
+        ...jobApi,
+        ...timepointApi,
+        ...dicomApi,
+      ],
       login: accounts !== null,
       audit: audit !== null,
     }),
@@ -331,31 +389,17 @@ export async function startServer(
   }
   logger.info('listening', { host: address.host, port: address.port, tls: tls !== null });
 
-  let dicom: DicomListener | null = null;
-  if (config.dicomPort !== null) {
-    try {
-      // Loaded only by a server that listens for DICOM: the library is large.
-      const { startDicomListener } = await import('./dimse/listener.js');
-      dicom = await startDicomListener({
-        pacs: core.pacs!,
-        host: config.host,
-        port: config.dicomPort,
-        aeTitle: config.dicomAeTitle,
-        callers: config.dicomCallers,
-        maxObjectBytes: config.maxUploadBytes,
-        logger,
-      });
-    } catch (error) {
-      await host.close();
-      await core.dispose();
-      await clear();
-      stopClearing();
-      accounts?.close();
-      audit?.close();
-      throw error;
-    }
-    // DICOM has no login, and an AE title is not a proof of who calls.
-    if (!LOOPBACK.has(config.host)) logger.warn('dicom-without-login', { host: config.host });
+  try {
+    // Opens the DICOM listener, when the settings ask for one.
+    await dicom.start();
+  } catch (error) {
+    await host.close();
+    await core.dispose();
+    await clear();
+    stopClearing();
+    accounts?.close();
+    audit?.close();
+    throw error;
   }
 
   let stopped: Promise<boolean> | null = null;
@@ -363,10 +407,12 @@ export async function startServer(
     core,
     address,
     tls: tls !== null,
-    dicom: dicom ? { host: dicom.host, port: dicom.port } : null,
+    get dicom() {
+      return dicom.state().listening;
+    },
     stop() {
       stopped ??= (async () => {
-        const released = dicom ? await dicom.close({ timeoutMs: config.shutdownTimeoutMs }) : true;
+        const released = await dicom.close();
         const closure = await host.close();
         const disposal = await core.dispose({ timeoutMs: config.shutdownTimeoutMs });
         await clear();

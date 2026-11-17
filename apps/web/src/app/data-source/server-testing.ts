@@ -81,6 +81,30 @@ export interface FakeServer {
   noDoseFacts: boolean;
   /** Whether the server is an older one, which does not say whether an object is derived (#254). */
   noDerived: boolean;
+  /** Its DICOM settings (#53) as they now are, and the network it calls into. A spec may change them. */
+  readonly dicom: FakeDicom;
+}
+
+/** The DICOM side of a stand-in server. */
+export interface FakeDicom {
+  local: { enabled: boolean; port: number; aeTitle: string };
+  remotes: {
+    id: string;
+    name: string;
+    aeTitle: string;
+    host: string | null;
+    port: number | null;
+    mayStore: boolean;
+  }[];
+  /** The address the server itself is on. */
+  host: string;
+  /**
+   * What answers an echo, by `host:port`: the AE title that is there and the
+   * AE titles it lets in. An address not named has nothing at it.
+   */
+  readonly there: Map<string, { aeTitle: string; knows: string[]; status?: number }>;
+  /** Ports the server cannot listen on. */
+  readonly taken: Set<number>;
 }
 
 /** An account of a stand-in server that has them. */
@@ -150,8 +174,107 @@ export function fakeServer(
   const missing = (): Response =>
     json({ error: 'not-found', message: 'The server does not hold that.' }, 404);
 
+  const dicom: FakeDicom = {
+    local: { enabled: false, port: 11112, aeTitle: 'OPENRTSTUDIO' },
+    remotes: [],
+    host: '127.0.0.1',
+    there: new Map(),
+    taken: new Set(),
+  };
+  let systems = 0;
+  /** A request about the DICOM settings, answered as the server answers it. */
+  const answerDicom = (path: string, verb: string, body: () => unknown): Response => {
+    const refuse = (error: string, message: string, status: number): Response =>
+      json({ error, message }, status);
+    const state = () => ({
+      local: dicom.local,
+      remotes: dicom.remotes,
+      listening: dicom.local.enabled ? { host: dicom.host, port: dicom.local.port } : null,
+    });
+    const aeTitle = (value: unknown): value is string =>
+      typeof value === 'string' &&
+      /^[\x20-\x5b\x5d-\x7e]{1,16}$/.test(value) &&
+      value.trim() !== '';
+    if (path === '/dicom' && verb === 'GET') return json(state());
+    if (path === '/dicom/local' && verb === 'PUT') {
+      const local = body() as FakeDicom['local'];
+      if (!aeTitle(local.aeTitle)) {
+        return refuse(
+          'invalid-request',
+          'aeTitle is 1 to 16 printable ASCII characters, with no backslash.',
+          400,
+        );
+      }
+      if (local.enabled && dicom.taken.has(local.port)) {
+        return refuse(
+          'port-unavailable',
+          'The server cannot listen on that port. Nothing was changed.',
+          409,
+        );
+      }
+      dicom.local = local;
+      return json(state());
+    }
+    const [, , , id, echo] = path.split('/');
+    const taken = (title: string, but?: string): boolean =>
+      dicom.remotes.some((one) => one.aeTitle === title && one.id !== but);
+    const checked = (): FakeDicom['remotes'][number] | Response => {
+      const remote = body() as FakeDicom['remotes'][number];
+      if (!aeTitle(remote.aeTitle)) {
+        return refuse(
+          'invalid-request',
+          'aeTitle is 1 to 16 printable ASCII characters, with no backslash.',
+          400,
+        );
+      }
+      if (taken(remote.aeTitle, id)) {
+        return refuse('ae-title-taken', 'Another system has that AE title.', 409);
+      }
+      return remote;
+    };
+    if (path === '/dicom/remotes' && verb === 'POST') {
+      const remote = checked();
+      if (remote instanceof Response) return remote;
+      const made = { ...remote, id: `system-${++systems}` };
+      dicom.remotes = [...dicom.remotes, made];
+      return json(made, 201);
+    }
+    const known = dicom.remotes.find((one) => one.id === id);
+    if (!known) return refuse('not-found', 'The server knows no such system.', 404);
+    if (echo === 'echo' && verb === 'POST') {
+      if (known.host === null) {
+        return refuse(
+          'no-address',
+          'That system has no address: it can call this server and cannot be called.',
+          409,
+        );
+      }
+      const there = dicom.there.get(`${known.host}:${known.port}`);
+      if (!there) return json({ outcome: 'unreachable', status: null });
+      if (there.aeTitle !== known.aeTitle || !there.knows.includes(dicom.local.aeTitle)) {
+        return json({ outcome: 'rejected', status: null });
+      }
+      return there.status === undefined
+        ? json({ outcome: 'ok', status: null })
+        : json({ outcome: 'failed', status: there.status });
+    }
+    if (verb === 'PUT') {
+      const remote = checked();
+      if (remote instanceof Response) return remote;
+      const changed = { ...remote, id: known.id };
+      dicom.remotes = dicom.remotes.map((one) => (one === known ? changed : one));
+      return json(changed);
+    }
+    if (verb === 'DELETE') {
+      dicom.remotes = dicom.remotes.filter((one) => one !== known);
+      return new Response(null, { status: 204 });
+    }
+    return missing();
+  };
+
   const server: FakeServer = {
     asked,
+    dicom,
     uploads: [],
     loseUploads: () => (uploadsLost = true),
     endSessions: () => sessions.clear(),
@@ -230,6 +353,12 @@ export function fakeServer(
       }
       if (accounts && !who) {
         return json({ error: 'unauthenticated', message: 'Log in to use this server.' }, 401);
+      }
+      if (path === '/dicom' || path.startsWith('/dicom/')) {
+        if (who && who.role !== 'admin') {
+          return json({ error: 'forbidden', message: 'This is for an administrator.' }, 403);
+        }
+        return answerDicom(path, init?.method ?? 'GET', () => JSON.parse(String(init?.body)));
       }
       if (who && (path === '/session/password' || path.startsWith('/accounts'))) {
         const verb = init?.method ?? 'GET';

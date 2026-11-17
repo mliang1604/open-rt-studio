@@ -102,6 +102,22 @@ export {
 } from './api/api-routes.js';
 export { openApiDocument } from './api/openapi.js';
 export { jobRoutes } from './api/job-routes.js';
+export { dicomRoutes } from './api/dicom-routes.js';
+export {
+  createDicomService,
+  type DicomService,
+  type DicomServiceOptions,
+  type DicomState,
+} from './dimse/dicom-service.js';
+export {
+  createMemorySettingsStore,
+  DicomSettingsError,
+  openFileSettingsStore,
+  type DicomSettings,
+  type DicomSettingsStore,
+  type LocalDicom,
+  type RemoteSystem,
+} from './dimse/dicom-settings.js';
 export { createJobManager, type JobManager, type JobManagerOptions } from './jobs/job-manager.js';
 export {
   JOB_MIGRATIONS,

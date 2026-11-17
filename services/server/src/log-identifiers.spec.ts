@@ -41,6 +41,8 @@ const ABSENT_UID = '1.2.826.0.1.3680043.999.77';
 const ABSENT_PATIENT = 'ZZ-NOT-A-PATIENT-4242';
 /** A system that is let in by DICOM. */
 const DICOM_PEER = 'GUARD-PEER';
+/** What an administrator calls another system. */
+const SYSTEM_NAME = 'Yarrow Hospital planning';
 
 let directory: string;
 let server: RunningServer | null = null;
@@ -300,6 +302,39 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   });
   user = await login({ name: USER.name, password: NEW_PASSWORD });
 
+  // The DICOM settings: read, changed, a system added, echoed, changed and
+  // forgotten, and each asked for wrongly.
+  await call('GET', api('/dicom'), { token: admin });
+  await call('GET', api('/dicom'), { token: user });
+  const local = { enabled: true, port: server.dicom!.port, aeTitle: DEFAULT_CONFIG.dicomAeTitle };
+  await call('PUT', api('/dicom/local'), { token: admin, body: local });
+  // A backslash makes it no AE title, whatever else it holds.
+  const refusedTitle = await call('PUT', api('/dicom/local'), {
+    token: admin,
+    body: { ...local, aeTitle: `${PATIENT.id}\\X` },
+  });
+  expect(refusedTitle.status).toBe(400);
+  const system = { name: SYSTEM_NAME, aeTitle: 'GUARD-OTHER', host: '127.0.0.1', port: 9 };
+  const known = await call('POST', api('/dicom/remotes'), {
+    token: admin,
+    body: { ...system, mayStore: false },
+  });
+  expect(known.status).toBe(201);
+  const systemId = (known.body as { id: string }).id;
+  await call('POST', api('/dicom/remotes'), {
+    token: admin,
+    body: { ...system, name: PATIENT.name, aeTitle: ABSENT_PATIENT, mayStore: true },
+  });
+  await call('POST', api(`/dicom/remotes/${systemId}/echo`), { token: admin });
+  await call('POST', api(`/dicom/remotes/${ABSENT_PATIENT}/echo`), { token: admin });
+  await call('PUT', api(`/dicom/remotes/${systemId}`), {
+    token: admin,
+    body: { ...system, name: `${SYSTEM_NAME} 2`, mayStore: true },
+  });
+  await call('PUT', api(`/dicom/remotes/${ABSENT_PATIENT}`), { token: admin, body: system });
+  await call('DELETE', api(`/dicom/remotes/${systemId}`), { token: admin });
+  await call('DELETE', api(`/dicom/remotes/${ABSENT_PATIENT}`), { token: admin });
+
   // The audit log, read and exported, and asked for wrongly.
   await call('GET', api(`/audit?patientId=${PATIENT.id}&actor=${USER.name}`), { token: admin });
   await call('GET', api(`/audit?from=${PATIENT.id}`), { token: admin });
@@ -358,6 +393,7 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     'a name that is no account': 'no-such-account-here',
     'what was typed as a name': TYPED_AS_NAME,
     'the name of a timepoint': TIMEPOINT_NAME,
+    'the name of a DICOM system': SYSTEM_NAME,
     'the administrator’s password': ADMIN.password,
     'the user’s password': USER.password,
     'a new password': NEW_PASSWORD,
@@ -388,6 +424,8 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     ...['instance-download', 'instance-upload', 'timepoints-read', 'timepoints-write'],
     ...['accounts-list', 'account-create', 'account-change', 'account-remove'],
     ...['job-start', 'job-read', 'job-cancel', 'audit-read'],
+    ...['dicom-settings-read', 'dicom-settings-change', 'dicom-echo'],
+    ...['dicom-remote-add', 'dicom-remote-change', 'dicom-remote-remove'],
   ]) {
     expect(actions.has(action as AuditRecord['action']), action).toBe(true);
   }

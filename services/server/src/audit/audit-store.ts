@@ -30,6 +30,12 @@ export const AUDIT_ACTIONS = [
   'audit-read',
   'audit-export',
   'audit-clear',
+  'dicom-settings-read',
+  'dicom-settings-change',
+  'dicom-remote-add',
+  'dicom-remote-change',
+  'dicom-remote-remove',
+  'dicom-echo',
   'request',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

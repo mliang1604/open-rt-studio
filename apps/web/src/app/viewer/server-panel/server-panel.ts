@@ -20,6 +20,7 @@ import { connectToServer, ServerSource } from '../../data-source/server-source';
 import { PreferencesStore } from '../../preferences-store';
 import { AccountsPanel } from '../accounts-panel/accounts-panel';
 import { AuditPanel } from '../audit-panel/audit-panel';
+import { DicomPanel } from '../dicom-panel/dicom-panel';
 import { ServerBrowser } from '../server-browser/server-browser';
 import { confirmLeavePatient } from '../viewer-dom';
 
@@ -27,7 +28,7 @@ import { confirmLeavePatient } from '../viewer-dom';
 export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
 
 /** What the card holds once a server is connected. */
-type ServerView = 'studies' | 'audit' | 'accounts';
+type ServerView = 'studies' | 'audit' | 'dicom' | 'accounts';
 
 /**
  * The card for reading from a server instead of opened files: its address,
@@ -47,7 +48,7 @@ type ServerView = 'studies' | 'audit' | 'accounts';
 @Component({
   selector: 'app-server-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AccountsPanel, AuditPanel, ServerBrowser],
+  imports: [AccountsPanel, AuditPanel, DicomPanel, ServerBrowser],
   templateUrl: './server-panel.html',
   styleUrls: ['../panel-card.css', './server-panel.css'],
   host: {
@@ -126,6 +127,8 @@ export class ServerPanel {
   protected readonly view = signal<ServerView>('studies');
   /** Whether the audit log is offered: to an administrator, not to a user. */
   protected readonly mayAudit = computed(() => this.server()?.mayReadAudit() ?? false);
+  /** Whether the DICOM settings are offered: to an administrator, not to a user. */
+  protected readonly mayDicom = computed(() => this.server()?.mayManageDicom() ?? false);
   /** Whether every account is this user's to manage, and not their own password only. */
   protected readonly manages = computed(() => this.server()?.mayManageAccounts() ?? false);
   /**
@@ -141,6 +144,7 @@ export class ServerPanel {
   protected readonly shown = computed<ServerView>(() => {
     const view = this.view();
     if (view === 'audit' && !this.mayAudit()) return 'studies';
+    if (view === 'dicom' && !this.mayDicom()) return 'studies';
     if (view === 'accounts' && this.accountsLabel() === null) return 'studies';
     return view;
   });

@@ -85,6 +85,15 @@
         Audit log
       </button>
     }
+    @if (mayDicom() && shown() !== 'dicom') {
+      <button
+        type="button"
+        (click)="onView('dicom')"
+        title="How this server is reached by DICOM, and the systems it knows. For administrators"
+      >
+        DICOM
+      </button>
+    }
     @if (accountsLabel() && shown() !== 'accounts') {
       <button
         type="button"
@@ -101,6 +110,8 @@
   </div>
   @if (shown() === 'audit') {
     <app-audit-panel [server]="connected" />
+  } @else if (shown() === 'dicom') {
+    <app-dicom-panel [server]="connected" />
   } @else if (shown() === 'accounts') {
     <app-accounts-panel [server]="connected" />
   } @else {

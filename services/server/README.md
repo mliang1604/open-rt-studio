@@ -122,6 +122,8 @@ changed).
 | `job-start`, `job-cancel`, `job-read`                   | A job is submitted, cancelled, followed                           |
 | `audit-read`, `audit-export`                            | The audit log itself is read                                      |
 | `audit-clear`                                           | The server clears records that have outlived the retention period |
+| `dicom-settings-read`, `dicom-settings-change`          | The DICOM settings are read, or the listener or AE title changed  |
+| `dicom-remote-add`, `-change`, `-remove`, `dicom-echo`  | A system is added, changed, forgotten or asked for a C-ECHO       |
 
 What to know about it:
 
@@ -283,7 +285,7 @@ npm start -w @open-rt-studio/server
 ```
 
 - **Who is let in** is decided by the AE title the caller gives, which must
-  be on `dicomCallers`, and by the AE title it addresses, which must be the
+  be on `dicomCallers` (or be a system that [may send](#changed-while-the-server-runs)), and by the AE title it addresses, which must be the
   server's (`dicomAeTitle`). The list is empty by default, and an empty list
   lets nobody in (the log says `dicom-no-callers`).
 - **DICOM has no login.** An AE title is a name, not a proof of who is
@@ -326,10 +328,49 @@ npm start -w @open-rt-studio/server -- dicom-echo 192.0.2.10 104 THEIR_AE
 It calls under the server's AE title and exits with 0 when the other system
 answers. The other system has to know that title.
 
-Not there yet: sending (#50), query and retrieve (#51, #52), AE titles
-managed from the client (#53), TLS (#57) and audit records for associations
-(#212). Until #212, who sent what is not in the audit log; the file header
-of each received object names the AE title that sent it.
+### Changed while the server runs
+
+An administrator can change all of this from the viewer (the server card's
+"DICOM") or through the API, and a change takes effect at once, with no
+restart:
+
+| Request                               | What it does                                                             |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| `GET /api/v1/dicom`                   | The settings, the systems the server knows, and where it listens now     |
+| `PUT /api/v1/dicom/local`             | Listener on or off, its port and the server's AE title                   |
+| `POST /api/v1/dicom/remotes`          | Add a system: `{ "name", "aeTitle", "host", "port", "mayStore" }`        |
+| `PUT /api/v1/dicom/remotes/:id`       | Replace what is known of one                                             |
+| `DELETE /api/v1/dicom/remotes/:id`    | Forget one                                                               |
+| `POST /api/v1/dicom/remotes/:id/echo` | C-ECHO to one: `ok`, `rejected`, `unreachable` or `failed` with a status |
+
+- **A system** has a name for people, its AE title, where it listens (a
+  host and a port, or neither for a system that only calls this server),
+  and whether it may send objects here (`mayStore`). The systems that may
+  are the list of callers that are let in. No two have one AE title.
+- **At once** means at the next association: the listener asks for its AE
+  title and its callers each time one is made. A new port is opened before
+  the old one is closed, and when it cannot be had nothing changes (`409`,
+  `port-unavailable`). The listener stays at the server's own address
+  (`host`); that is not changed here.
+- **The changes are kept** in `dicom.json` in the data directory, and from
+  the first change on that file is what the server goes by: the three
+  `dicom...` settings are then only what a server that has kept nothing
+  starts from, and the log says `dicom-settings-kept` when they are not
+  asked. Delete the file to go back to them. Without a data directory the
+  changes last as long as the server runs. A server whose listener is on
+  and cannot have its port does not start (exit code 1), whether the port
+  is from the file or from the configuration: free the port, or delete the
+  file.
+- **Who may**: an administrator, or anyone on a server run with `auth` set
+  to `none`. Each change and each echo is in the audit log, with the AE
+  title of the system as its `object`. An echo makes the server open a
+  connection to the address it was given, which is why it is not for every
+  user.
+
+Not there yet: sending (#50), query and retrieve (#51, #52), TLS (#57) and
+audit records for associations (#212). Until #212, who sent what is not in
+the audit log; the file header of each received object names the AE title
+that sent it.
 
 The library underneath is `dcmjs-dimse`, which only `src/dimse/library.ts`
 imports; [docs/dimse-library.md](../../docs/dimse-library.md) says why it
@@ -385,24 +426,23 @@ set them, and an environment variable wins over the file. A wrong or misspelt
 setting stops the server from starting, with a message that names it (exit
 code 2).
 
-| Setting              | Environment variable                  | Default     | Meaning                                                                                                                                                                              |
-| -------------------- | ------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `host`               | `OPEN_RT_STUDIO_HOST`                 | `127.0.0.1` | Address to listen on                                                                                                                                                                 |
-| `auth`               | `OPEN_RT_STUDIO_AUTH`                 | `accounts`  | `accounts`: only whoever logs in is answered; needs `dataDir`. `none`: no login, and only for an address of this machine                                                             |
-| `port`               | `OPEN_RT_STUDIO_PORT`                 | `4300`      | Port to listen on; `0` takes a free one, which the log then names                                                                                                                    |
-| `logLevel`           | `OPEN_RT_STUDIO_LOG_LEVEL`            | `info`      | `debug`, `info`, `warn`, `error` or `silent`                                                                                                                                         |
-| `shutdownTimeoutMs`  | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS`  | `10000`     | How long a stop waits for requests, and then for the core's work                                                                                                                     |
-| `dataDir`            | `OPEN_RT_STUDIO_DATA_DIR`             | none        | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops                                                             |
-| `maxUploadBytes`     | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`     | `536870912` | The largest instance an upload may hold                                                                                                                                              |
-| `jobConcurrency`     | `OPEN_RT_STUDIO_JOB_CONCURRENCY`      | `1`         | How many jobs run at once; the rest wait their turn                                                                                                                                  |
-| `allowedOrigins`     | `OPEN_RT_STUDIO_ALLOWED_ORIGINS`      | none        | The web origins whose pages may use the server from a browser, such as `http://localhost:4200`. A list in the file; separated by commas in the environment. No patterns and no "any" |
-| `tlsCert`            | `OPEN_RT_STUDIO_TLS_CERT`             | none        | File with the server's certificate (PEM, any intermediates after it). With `tlsKey`, the server speaks HTTPS; see [HTTPS](#https)                                                    |
-| `tlsKey`             | `OPEN_RT_STUDIO_TLS_KEY`              | none        | File with the certificate's private key (PEM, no passphrase)                                                                                                                         |
-| `auditRetentionDays` | `OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS` | none        | How many days an audit record is kept. Without it every record is kept for good; see [The audit log](#the-audit-log)                                                                 |
-
-| `dicomPort` | `OPEN_RT_STUDIO_DICOM_PORT` | none | Port for DICOM associations, at `host`. Without one there is no DICOM listener; see [DICOM](#dicom) |
-| `dicomAeTitle` | `OPEN_RT_STUDIO_DICOM_AE_TITLE` | `OPENRTSTUDIO` | The AE title other systems must address, and the one the server calls under |
-| `dicomCallers` | `OPEN_RT_STUDIO_DICOM_CALLERS` | none | The calling AE titles that are let in. A list in the file; separated by commas in the environment. None lets nobody in |
+| Setting              | Environment variable                  | Default        | Meaning                                                                                                                                                                              |
+| -------------------- | ------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `host`               | `OPEN_RT_STUDIO_HOST`                 | `127.0.0.1`    | Address to listen on                                                                                                                                                                 |
+| `auth`               | `OPEN_RT_STUDIO_AUTH`                 | `accounts`     | `accounts`: only whoever logs in is answered; needs `dataDir`. `none`: no login, and only for an address of this machine                                                             |
+| `port`               | `OPEN_RT_STUDIO_PORT`                 | `4300`         | Port to listen on; `0` takes a free one, which the log then names                                                                                                                    |
+| `logLevel`           | `OPEN_RT_STUDIO_LOG_LEVEL`            | `info`         | `debug`, `info`, `warn`, `error` or `silent`                                                                                                                                         |
+| `shutdownTimeoutMs`  | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS`  | `10000`        | How long a stop waits for requests, and then for the core's work                                                                                                                     |
+| `dataDir`            | `OPEN_RT_STUDIO_DATA_DIR`             | none           | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops                                                             |
+| `maxUploadBytes`     | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`     | `536870912`    | The largest instance an upload may hold                                                                                                                                              |
+| `jobConcurrency`     | `OPEN_RT_STUDIO_JOB_CONCURRENCY`      | `1`            | How many jobs run at once; the rest wait their turn                                                                                                                                  |
+| `allowedOrigins`     | `OPEN_RT_STUDIO_ALLOWED_ORIGINS`      | none           | The web origins whose pages may use the server from a browser, such as `http://localhost:4200`. A list in the file; separated by commas in the environment. No patterns and no "any" |
+| `tlsCert`            | `OPEN_RT_STUDIO_TLS_CERT`             | none           | File with the server's certificate (PEM, any intermediates after it). With `tlsKey`, the server speaks HTTPS; see [HTTPS](#https)                                                    |
+| `tlsKey`             | `OPEN_RT_STUDIO_TLS_KEY`              | none           | File with the certificate's private key (PEM, no passphrase)                                                                                                                         |
+| `auditRetentionDays` | `OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS` | none           | How many days an audit record is kept. Without it every record is kept for good; see [The audit log](#the-audit-log)                                                                 |
+| `dicomPort`          | `OPEN_RT_STUDIO_DICOM_PORT`           | none           | Port for DICOM associations, at `host`. Without one there is no DICOM listener; see [DICOM](#dicom)                                                                                  |
+| `dicomAeTitle`       | `OPEN_RT_STUDIO_DICOM_AE_TITLE`       | `OPENRTSTUDIO` | The AE title other systems must address, and the one the server calls under                                                                                                          |
+| `dicomCallers`       | `OPEN_RT_STUDIO_DICOM_CALLERS`        | none           | The calling AE titles that are let in. A list in the file; separated by commas in the environment. None lets nobody in                                                               |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -504,12 +544,15 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
 - `src/api/`: the routes of the API (`api-routes.ts`), the JSON Schemas of
   its answers (`schemas.ts`) and the OpenAPI document made from both
   (`openapi.ts`).
-- `src/dimse/`: DICOM networking (#49). `listener.ts` is the listener
+- `src/dimse/`: DICOM networking (#49). `dicom-service.ts` is the server's
+  DICOM side as one thing that is changed while it runs (#53), and
+  `dicom-settings.ts` what it keeps. `listener.ts` is the listener
   (C-ECHO and C-STORE), `echo.ts` asks another system for a C-ECHO,
   `part10.ts` writes the file header in front of a received data set, and
   `sop-classes.ts` is what the listener agrees to. `library.ts` is the only
   file that imports the DIMSE library (a lint rule holds the rest to that).
-  The server loads the folder only when it has a DICOM port.
+  The library is loaded only by a server that listens or is asked for an
+  echo.
 - `src/store/`: where DICOM instances are kept (#42). `DicomStore` is the
   interface (`put`, `get` as a stream, `stat`, `exists`, `delete`, `verify`,
   all by SOP Instance UID); `openFileStore(directory)` is the one on disk and

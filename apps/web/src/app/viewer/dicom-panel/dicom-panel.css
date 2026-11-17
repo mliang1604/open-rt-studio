@@ -1,0 +1,187 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* The whole of it scrolls when the card is too short for it: a part that
+   shrank instead would let what it holds spill over the next. */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+:host > * {
+  flex: none;
+}
+
+p,
+h3 {
+  margin: 0;
+}
+
+h3 {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A form's fields side by side, wrapping where the card is narrow. */
+.dicom-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 130px;
+  min-width: 0;
+}
+
+.field.narrow {
+  flex: 0 1 80px;
+}
+
+label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* A box and what it says, on the line of the fields' own boxes. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.dicom-note,
+.muted {
+  color: var(--muted);
+}
+
+/* Said in words; the colour only draws the eye to them. */
+.dicom-note.warned,
+.dicom-problem {
+  color: #ff9d8a;
+}
+
+.dicom-done,
+.dicom-listening {
+  color: var(--text);
+}
+
+/* A long list scrolls in its own frame, and sideways when the card is too
+   narrow for it. */
+.dicom-scroll {
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* The corner both stay by: above the names that pass under it. */
+thead th:first-child {
+  left: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+
+tbody tr {
+  border-top: 1px solid var(--glass-border);
+}
+
+/* The name stays in sight when the table is scrolled sideways, and a long
+   one is cut (whole in its title). */
+.dicom-name {
+  position: sticky;
+  left: 0;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Not glass: what scrolls under a name must not show through it. */
+  background: var(--panel);
+  font-weight: 500;
+}
+
+.dicom-ae,
+.dicom-address {
+  font-variant-numeric: tabular-nums;
+}
+
+/* What an echo came to is said in the word; the weight sets apart the one that went well. */
+.dicom-echo {
+  min-width: 64px;
+  color: var(--muted);
+}
+
+.dicom-echo[data-outcome='ok'] {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.dicom-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.dicom-actions button {
+  padding: 3px 8px;
+}
+
+.unseen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

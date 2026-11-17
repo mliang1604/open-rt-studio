@@ -1,0 +1,207 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (problem(); as message) {
+  <p class="dicom-problem" role="alert">{{ message }}</p>
+}
+@if (done(); as message) {
+  <p class="dicom-done" role="status">{{ message }}</p>
+}
+
+@if (state(); as now) {
+  <section aria-labelledby="dicom-local-title">
+    <h3 id="dicom-local-title">This server</h3>
+    <p class="dicom-listening">{{ listeningLine() }}</p>
+    <form class="dicom-form" (submit)="onSaveLocal($event)">
+      <label class="check">
+        <input type="checkbox" [checked]="enabled()" (change)="onEnabled($event)" />
+        Listen for DICOM
+      </label>
+      <div class="field">
+        <label for="dicom-local-ae">AE title</label>
+        <input
+          id="dicom-local-ae"
+          type="text"
+          maxlength="16"
+          spellcheck="false"
+          autocomplete="off"
+          [value]="aeTitle()"
+          (input)="onLocalText('aeTitle', $event)"
+        />
+      </div>
+      <div class="field narrow">
+        <label for="dicom-local-port">Port</label>
+        <input
+          id="dicom-local-port"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          [value]="port()"
+          (input)="onLocalText('port', $event)"
+        />
+      </div>
+      <button type="submit" [disabled]="busy()">Save</button>
+    </form>
+    <p class="dicom-note" [class.warned]="exposed()">
+      DICOM asks for no login. A system that can reach the port and gives an AE title that may send
+      here can store objects on this server.
+      @if (exposed()) {
+        This server is reached from other machines.
+      }
+    </p>
+  </section>
+
+  <section aria-labelledby="dicom-remotes-title">
+    <h3 id="dicom-remotes-title">Other systems</h3>
+    @if (now.remotes.length > 0) {
+      <div class="dicom-scroll">
+        <table [attr.aria-busy]="busy()">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">AE title</th>
+              <th scope="col">Address</th>
+              <th scope="col">May send here</th>
+              <th scope="col">Echo</th>
+              <th scope="col"><span class="unseen">What to do</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (remote of now.remotes; track remote.id) {
+              <tr>
+                <th scope="row" class="dicom-name" [title]="remote.name">{{ remote.name }}</th>
+                <td class="dicom-ae">{{ remote.aeTitle }}</td>
+                <td class="dicom-address">
+                  @if (remote.host !== null) {
+                    {{ remote.host }}:{{ remote.port }}
+                  } @else {
+                    <span class="muted">Only calls</span>
+                  }
+                </td>
+                <td class="dicom-may">{{ remote.mayStore ? 'Yes' : 'No' }}</td>
+                <td class="dicom-echo" [attr.data-outcome]="echoes()[remote.id] ?? null">
+                  {{ echoWord(remote.id) }}
+                </td>
+                <td class="dicom-actions">
+                  @if (remote.host !== null) {
+                    <button
+                      type="button"
+                      [disabled]="busy()"
+                      [attr.aria-label]="'Test ' + remote.name + ' with a C-ECHO'"
+                      title="Ask the system whether it is there (C-ECHO)"
+                      (click)="onEcho(remote)"
+                    >
+                      Test
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    [disabled]="busy()"
+                    [attr.aria-label]="'Change ' + remote.name"
+                    [attr.aria-expanded]="form()?.id === remote.id"
+                    [attr.data-edit]="remote.id"
+                    aria-controls="dicom-system-form"
+                    (click)="onEdit(remote)"
+                  >
+                    Change…
+                  </button>
+                  <button
+                    type="button"
+                    [disabled]="busy()"
+                    [attr.aria-label]="'Forget ' + remote.name"
+                    (click)="onRemove(remote)"
+                  >
+                    Forget
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="dicom-note">This server knows no other system, and lets none in.</p>
+    }
+
+    <!-- Under the table and not in it: the table scrolls sideways where the
+         card is narrow, and a form in it would scroll out of sight. -->
+    @if (form(); as typed) {
+      <form
+        class="dicom-form"
+        id="dicom-system-form"
+        [attr.aria-label]="formTitle()"
+        (submit)="onSaveSystem($event)"
+      >
+        <div class="field">
+          <label for="dicom-system-name">Name</label>
+          <input
+            id="dicom-system-name"
+            type="text"
+            maxlength="64"
+            autocomplete="off"
+            [value]="typed.name"
+            (input)="onFormText('name', $event)"
+          />
+        </div>
+        <div class="field">
+          <label for="dicom-system-ae">Its AE title</label>
+          <input
+            id="dicom-system-ae"
+            type="text"
+            maxlength="16"
+            spellcheck="false"
+            autocomplete="off"
+            [value]="typed.aeTitle"
+            (input)="onFormText('aeTitle', $event)"
+          />
+        </div>
+        <div class="field">
+          <label for="dicom-system-host">Host, if it can be called</label>
+          <input
+            id="dicom-system-host"
+            type="text"
+            spellcheck="false"
+            autocapitalize="none"
+            autocomplete="off"
+            [value]="typed.host"
+            (input)="onFormText('host', $event)"
+          />
+        </div>
+        <div class="field narrow">
+          <label for="dicom-system-port">Port</label>
+          <input
+            id="dicom-system-port"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            [value]="typed.port"
+            (input)="onFormText('port', $event)"
+          />
+        </div>
+        <label class="check">
+          <input type="checkbox" [checked]="typed.mayStore" (change)="onFormMayStore($event)" />
+          May send objects here
+        </label>
+        <button type="submit" [disabled]="busy()">
+          {{ typed.id === null ? 'Add system' : 'Save' }}
+        </button>
+        <button type="button" (click)="onCancel()">Cancel</button>
+      </form>
+    } @else {
+      <div>
+        <button
+          type="button"
+          id="dicom-add"
+          aria-expanded="false"
+          aria-controls="dicom-system-form"
+          (click)="onEdit(null)"
+        >
+          Add a system…
+        </button>
+      </div>
+    }
+  </section>
+} @else if (busy()) {
+  <p class="dicom-note" role="status">Asking the server…</p>
+}
