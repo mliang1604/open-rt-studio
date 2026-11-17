@@ -149,6 +149,36 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # The DIMSE proof of concept against DCMTK's command-line tools (#40): echo
+  # and store both ways, with and without TLS. DCMTK is a test peer only, from
+  # the runner's package archive; it is never bundled. Not a required check.
+  # REQUIRE_DCMTK makes a missing DCMTK a failure here and not a skip.
+  dimse-interop:
+    name: DIMSE interop
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install DCMTK
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends dcmtk
+
+      - name: DIMSE tests against DCMTK
+        working-directory: services/server
+        env:
+          REQUIRE_DCMTK: '1'
+        run: npx vitest run src/dimse
+
   # The server's container image: built, started as compose.yaml starts it,
   # and checked from outside (healthy, closed without a login, open to an
   # account made by its command, not root, data kept, a clean stop). Not a
