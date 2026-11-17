@@ -567,16 +567,15 @@ describe('parseFileAsync — files it cannot read', () => {
     return error as UnsupportedDicomError;
   };
 
-  it('names JPEG Lossless, which no bundled codec decodes', async () => {
-    for (const syntax of ['1.2.840.10008.1.2.4.57', '1.2.840.10008.1.2.4.70']) {
-      const error = await failure('ljpeg.dcm', encapsulatedCt(syntax, jpegStart(0xc3, 16)));
-      expect(error.message).toBe(
-        `Unsupported transfer syntax ${syntax}, JPEG Lossless (ljpeg.dcm).`,
-      );
-      // The same without the file name, for a list that shows the name beside it.
-      expect(error.reason).toBe(`Unsupported transfer syntax ${syntax}, JPEG Lossless`);
-      expect(error.name).toBe('UnsupportedDicomError');
-    }
+  it('names a transfer syntax no bundled codec decodes', async () => {
+    const syntax = '1.2.840.10008.1.2.4.201';
+    const error = await failure('htj2k.dcm', encapsulatedCt(syntax, [0, 0]));
+    expect(error.message).toBe(
+      `Unsupported transfer syntax ${syntax}, High-Throughput JPEG 2000 (htj2k.dcm).`,
+    );
+    // The same without the file name, for a list that shows the name beside it.
+    expect(error.reason).toBe(`Unsupported transfer syntax ${syntax}, High-Throughput JPEG 2000`);
+    expect(error.name).toBe('UnsupportedDicomError');
   });
 
   it('quotes the UID alone for a transfer syntax it has no name for', async () => {
@@ -601,8 +600,81 @@ describe('parseFileAsync — files it cannot read', () => {
   });
 
   it('sync parseFile reports the same unsupported transfer syntax', () => {
-    const buffer = encapsulatedCt('1.2.840.10008.1.2.4.70', jpegStart(0xc3, 16));
-    expect(() => parseFile('ljpeg.dcm', buffer)).toThrow(/JPEG Lossless \(ljpeg\.dcm\)/);
+    const buffer = encapsulatedCt('1.2.840.10008.1.2.4.201', [0, 0]);
+    expect(() => parseFile('htj2k.dcm', buffer)).toThrow(
+      /High-Throughput JPEG 2000 \(htj2k\.dcm\)/,
+    );
+  });
+});
+
+/**
+ * A JPEG Lossless stream of a 2×2 16-bit image, worked out by hand from ITU-T
+ * T.81 (see jpeg-lossless.spec.ts): the table, then the scan with `predictor`
+ * and `data`.
+ */
+function jpegLossless(data: readonly number[], predictor = 1, restartInterval = 0): number[] {
+  return [
+    ...[0xff, 0xd8, 0xff, 0xc3, 0, 11, 16, 0, 2, 0, 2, 1, 1, 0x11, 0],
+    ...[0xff, 0xc4, 0, 36, 0x00, 0, 1, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+    ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+    ...(restartInterval ? [0xff, 0xdd, 0, 4, 0, restartInterval] : []),
+    ...[0xff, 0xda, 0, 8, 1, 1, 0, predictor, 0, 0],
+    ...data,
+    ...[0xff, 0xd9],
+  ];
+}
+
+describe('parseFileAsync — JPEG Lossless', () => {
+  const SYNTAXES = ['1.2.840.10008.1.2.4.57', '1.2.840.10008.1.2.4.70'];
+
+  it('decodes both transfer syntaxes to the exact samples', async () => {
+    for (const syntax of SYNTAXES) {
+      // Differences 0, +1, -1, +1: 00 0101 0100 0101 and two fill bits.
+      const buffer = encapsulatedCt(syntax, jpegLossless([0b00010101, 0b00010111]));
+      const slices = await parseFileAsync('ljpeg.dcm', buffer);
+      expect(slices).toHaveLength(1);
+      expect(Array.from(slices[0].pixels)).toEqual([32768, 32769, 32767, 32768]);
+    }
+  });
+
+  it('keeps the last sample of a stream that ends on a byte boundary', async () => {
+    const buffer = encapsulatedCt(SYNTAXES[1], jpegLossless([0x00]));
+    const slices = await parseFileAsync('flat.dcm', buffer);
+    expect(Array.from(slices[0].pixels)).toEqual([32768, 32768, 32768, 32768]);
+  });
+
+  it('names the streams it does not decode', async () => {
+    const reason = async (frame: number[]): Promise<string> => {
+      const error: unknown = await parseFileAsync(
+        'ljpeg.dcm',
+        encapsulatedCt(SYNTAXES[0], frame),
+      ).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(UnsupportedDicomError);
+      return (error as UnsupportedDicomError).reason;
+    };
+    expect(await reason(jpegLossless([0x00], 1, 2))).toBe(
+      'JPEG Lossless with restart markers is not supported',
+    );
+    expect(await reason(jpegLossless([0x00], 7))).toBe(
+      'JPEG Lossless with predictor 7 at 16 bits is not supported',
+    );
+  });
+
+  it('reports a stream with no image in it, or cut short', async () => {
+    const undecodable =
+      'The pixel data could not be decoded (transfer syntax 1.2.840.10008.1.2.4.70)';
+    for (const frame of [jpegStart(0xc3, 16), jpegLossless([0x00]).slice(0, -2)]) {
+      const error: unknown = await parseFileAsync(
+        'broken.dcm',
+        encapsulatedCt(SYNTAXES[1], frame),
+      ).catch((e: unknown) => e);
+      expect((error as UnsupportedDicomError).reason).toBe(undecodable);
+    }
+  });
+
+  it('is not decoded by the sync parseFile, which says to use the async one', () => {
+    const buffer = encapsulatedCt(SYNTAXES[1], jpegLossless([0x00]));
+    expect(() => parseFile('ljpeg.dcm', buffer)).toThrow(/requires async decoding/);
   });
 });
 

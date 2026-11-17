@@ -48,3 +48,25 @@ declare module '@cornerstonejs/codec-openjpeg' {
   const factory: CodecModuleFactory;
   export default factory;
 }
+
+// jpeg-lossless-decoder-js names a declaration file its package does not hold.
+declare module 'jpeg-lossless-decoder-js' {
+  export class Decoder {
+    /** Lines decoded so far: the frame's rows when the whole image was. */
+    yLoc: number;
+    /** Pixels decoded so far of the line it is on. */
+    xLoc: number;
+    /** What it reads from; `index` is how many bytes it has asked for. */
+    stream: { index: number } | null;
+    /**
+     * Decode `length` bytes of `buffer` from `offset`. `numBytes` is the bytes
+     * an output sample takes, 1 or 2.
+     */
+    decode(
+      buffer: ArrayBuffer,
+      offset: number,
+      length: number,
+      numBytes?: number,
+    ): Uint8Array | Uint16Array;
+  }
+}

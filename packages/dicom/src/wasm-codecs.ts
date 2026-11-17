@@ -47,8 +47,8 @@ const OPENJPEG: CodecPackage = {
 
 /**
  * Transfer syntaxes decodable by a bundled wasm codec. JPEG Lossless
- * (…4.57 / …4.70) is intentionally absent: libjpeg-turbo decodes only
- * DCT-based JPEG, so those would need a separate predictive-JPEG decoder.
+ * (…4.57 / …4.70) is not among them: libjpeg-turbo's 8-bit build decodes only
+ * DCT-based JPEG. It has a decoder of its own, in jpeg-lossless.ts.
  */
 const PACKAGE_BY_SYNTAX: Record<string, CodecPackage> = {
   '1.2.840.10008.1.2.4.50': LIBJPEG_TURBO, // JPEG Baseline (Process 1)

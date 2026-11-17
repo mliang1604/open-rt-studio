@@ -25,14 +25,22 @@ export {
   type SyntheticStudy,
 } from './identity.js';
 export {
+  JPEG_LOSSLESS_ANY_SYNTAX,
+  JPEG_LOSSLESS_SYNTAX,
   syntheticCtSeries,
   syntheticCtValue,
   syntheticMrSeries,
   syntheticMrValue,
   writeImageSeries,
+  type ImageEncoding,
   type ImageSeriesOptions,
   type ImageSeriesSpec,
 } from './image-series.js';
+export {
+  encodeJpegLossless,
+  type JpegLosslessOptions,
+  type JpegLosslessPredictor,
+} from './jpeg-lossless.js';
 export {
   SYNTHETIC_DEFORMATION,
   SYNTHETIC_FOLDING,
@@ -110,8 +118,8 @@ export {
   syntheticSecondDoseGy,
 } from './retreatment.js';
 export {
+  HTJ2K_LOSSLESS_SYNTAX,
   JPEG_EXTENDED_SYNTAX,
-  JPEG_LOSSLESS_SYNTAX,
   SYNTHETIC_UNREADABLE,
   syntheticUnreadableFiles,
   type UnreadableFile,

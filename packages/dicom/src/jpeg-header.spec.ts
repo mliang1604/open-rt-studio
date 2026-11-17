@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { jpegFrameHeader } from './jpeg-header.js';
+import { jpegFrameHeader, jpegScanHeader } from './jpeg-header.js';
 
 const SOI = [0xff, 0xd8];
 /** An APP0 segment with `n` bytes of payload. */
@@ -73,5 +73,39 @@ describe('jpegFrameHeader', () => {
       jpegFrameHeader(Uint8Array.from([...SOI, ...sof(0xc0, 8, 2, 2)].slice(0, 9))),
     ).toBeNull();
     expect(jpegFrameHeader(Uint8Array.from([...SOI, 0xff, 0xda, 0x00, 0x02]))).toBeNull();
+  });
+});
+
+describe('jpegScanHeader', () => {
+  /** A scan header for one component: predictor (Ss), then Ah and Al. */
+  const sos = (predictor: number, al: number) => [0xff, 0xda, 0, 8, 1, 1, 0, predictor, 0, al];
+  const dri = (interval: number) => [0xff, 0xdd, 0, 4, interval >> 8, interval & 0xff];
+
+  it('reads the predictor and the point transform of the first scan', () => {
+    const bytes = Uint8Array.from([...SOI, ...sof(0xc3, 16, 2, 4), ...sos(4, 0x02), 0x55]);
+    expect(jpegScanHeader(bytes)).toEqual({ restartInterval: 0, predictor: 4, pointTransform: 2 });
+  });
+
+  it('reads a restart interval defined before the scan', () => {
+    const bytes = Uint8Array.from([...SOI, ...sof(0xc3, 16, 2, 4), ...dri(513), ...sos(1, 0)]);
+    expect(jpegScanHeader(bytes)).toEqual({
+      restartInterval: 513,
+      predictor: 1,
+      pointTransform: 0,
+    });
+  });
+
+  it('reads the scan of three components', () => {
+    const scan = [0xff, 0xda, 0, 12, 3, 1, 0, 2, 0, 3, 0, 6, 0, 0];
+    expect(jpegScanHeader(Uint8Array.from([...SOI, ...app0(5), ...scan]))?.predictor).toBe(6);
+  });
+
+  it('is null without a scan, or when the scan header is cut short', () => {
+    expect(
+      jpegScanHeader(Uint8Array.from([...SOI, ...sof(0xc3, 16, 2, 4), 0xff, 0xd9])),
+    ).toBeNull();
+    expect(jpegScanHeader(Uint8Array.from([...SOI, ...sos(1, 0).slice(0, 6)]))).toBeNull();
+    expect(jpegScanHeader(Uint8Array.of(1, 2, 3, 4, 5, 6))).toBeNull();
+    expect(jpegScanHeader(new Uint8Array(0))).toBeNull();
   });
 });
