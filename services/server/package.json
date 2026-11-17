@@ -24,7 +24,8 @@
   },
   "devDependencies": {
     "@open-rt-studio/testdata": "^0.0.0",
-    "@types/node": "^24.19.2"
+    "@types/node": "^24.19.2",
+    "dcmjs-dimse": "0.3.4"
   },
   "dependencies": {
     "@open-rt-studio/dicom": "^0.0.0"

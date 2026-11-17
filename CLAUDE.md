@@ -89,7 +89,11 @@ checks on `main`. Keep both job names stable. A third job, `End-to-end`, runs
 the whole Playwright suite; it is not required by the ruleset, so wait for it
 yourself before merging. A fourth, `Container`, builds the server's image and
 runs `scripts/container-check.sh` against it; wait for it too when a change
-touches the server, the Dockerfile or `compose.yaml`.
+touches the server, the Dockerfile or `compose.yaml`. A fifth, `DIMSE
+interop`, runs `services/server/src/dimse` against DCMTK's command-line
+tools, which it installs on the runner as a test peer; those tests are
+skipped where DCMTK is not installed, so wait for the job when a change
+touches DICOM networking.
 
 ## Patterns
 
