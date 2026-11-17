@@ -180,6 +180,19 @@ Viewer (`src/app/viewer`):
   It says that DICOM asks for no login, and says so in the warning colour
   when the listener is reached from other machines. `e2e/dicom-settings.spec.ts`
   turns the real server's listener on and has the server echo itself.
+- `send-panel/`: send to another system (the server card's "Send…", for
+  everyone who is logged in). It lists what the patient in the timeline has
+  on the server (every series, and the structure sets, plans and
+  registrations as objects of their own), a destination among the systems
+  the server's administrator has given an address, and a "Send" button for
+  each. The server does the sending; the panel asks after a send until it
+  is done and says what became of it in a sentence: how many arrived, how
+  many failed and why, and how many were written anew in another transfer
+  syntax. "Send failed again" sends what did not arrive. The sends are the
+  server's and are there for a panel opened anew. Choosing a patient shuts
+  the server card, so the way to it is "Server…" in the history bar, then
+  "Send…". `e2e/dicom-send.spec.ts` sends between two real servers and
+  compares what arrived byte for byte.
 - `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
   the data source and then built. A fetch that takes time shows progress, and
   is abandoned by a later pick, by Cancel or by an import.

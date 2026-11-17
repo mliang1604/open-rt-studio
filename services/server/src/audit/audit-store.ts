@@ -36,6 +36,9 @@ export const AUDIT_ACTIONS = [
   'dicom-remote-change',
   'dicom-remote-remove',
   'dicom-echo',
+  'dicom-destinations-read',
+  'dicom-send',
+  'dicom-send-read',
   'request',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

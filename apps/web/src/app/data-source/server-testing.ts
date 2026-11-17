@@ -105,6 +105,34 @@ export interface FakeDicom {
   readonly there: Map<string, { aeTitle: string; knows: string[]; status?: number }>;
   /** Ports the server cannot listen on. */
   readonly taken: Set<number>;
+  /** The sends it remembers, the earliest first. */
+  sends: FakeSend[];
+  /** While true, a send that is asked for stays under way, with every instance waiting. */
+  holdSends: boolean;
+  /**
+   * SOP Instance UIDs the systems do not store: each is answered with this
+   * status. A spec may empty it, to let a second try go through.
+   */
+  readonly refusedInstances: Map<string, number>;
+}
+
+/** A send as the stand-in holds it. */
+export interface FakeSend {
+  id: string;
+  destination: { id: string; name: string; aeTitle: string };
+  studyInstanceUid: string;
+  seriesInstanceUid: string;
+  state: 'waiting' | 'running' | 'done';
+  askedAt: string;
+  finishedAt: string | null;
+  retryOf: string | null;
+  instances: {
+    sopInstanceUid: string;
+    state: 'waiting' | 'sent' | 'failed';
+    rewritten: boolean;
+    status: number | null;
+    failure: string | null;
+  }[];
 }
 
 /** An account of a stand-in server that has them. */
@@ -180,6 +208,118 @@ export function fakeServer(
     host: '127.0.0.1',
     there: new Map(),
     taken: new Set(),
+    sends: [],
+    holdSends: false,
+    refusedInstances: new Map(),
+  };
+  /** Carry a send out, unless sends are held: each instance as the system at the address takes it. */
+  const carryOut = (send: FakeSend): void => {
+    if (dicom.holdSends) {
+      send.state = 'running';
+      return;
+    }
+    const remote = dicom.remotes.find((one) => one.id === send.destination.id);
+    const there = remote ? dicom.there.get(`${remote.host}:${remote.port}`) : undefined;
+    const failure = !there
+      ? 'unreachable'
+      : there.aeTitle !== remote!.aeTitle || !there.knows.includes(dicom.local.aeTitle)
+        ? 'rejected'
+        : null;
+    send.instances = send.instances.map((instance) => {
+      const status = dicom.refusedInstances.get(instance.sopInstanceUid);
+      if (failure) return { ...instance, state: 'failed', failure };
+      if (status !== undefined) return { ...instance, state: 'failed', failure: 'refused', status };
+      return { ...instance, state: 'sent' };
+    });
+    send.state = 'done';
+    send.finishedAt = '2026-01-01T00:00:01.000Z';
+  };
+  const waiting = (sopInstanceUid: string): FakeSend['instances'][number] => ({
+    sopInstanceUid,
+    state: 'waiting',
+    rewritten: false,
+    status: null,
+    failure: null,
+  });
+  /** A request about sending, answered as the server answers it. */
+  const answerSend = (path: string, verb: string, body: () => unknown): Response => {
+    const refuse = (error: string, message: string, status: number): Response =>
+      json({ error, message }, status);
+    if (path === '/dicom/destinations' && verb === 'GET') {
+      return json({
+        items: dicom.remotes
+          .filter((one) => one.host !== null)
+          .map(({ id, name, aeTitle }) => ({ id, name, aeTitle })),
+      });
+    }
+    const start = (destinationId: string, of: Held[], retryOf: string | null): Response => {
+      const remote = dicom.remotes.find((one) => one.id === destinationId);
+      if (!remote) return refuse('not-found', 'The server knows no such system.', 404);
+      if (remote.host === null) {
+        return refuse(
+          'no-address',
+          'That system has no address: it can call this server and cannot be called.',
+          409,
+        );
+      }
+      if (of.length === 0) return refuse('no-such-series', 'The server has no such series.', 404);
+      const send: FakeSend = {
+        id: `send-${dicom.sends.length + 1}`,
+        destination: { id: remote.id, name: remote.name, aeTitle: remote.aeTitle },
+        studyInstanceUid: of[0].header.study.uid,
+        seriesInstanceUid: of[0].header.series.uid,
+        state: 'waiting',
+        askedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+        retryOf,
+        instances: of.map((one) => waiting(one.header.sopInstanceUid)),
+      };
+      dicom.sends.push(send);
+      carryOut(send);
+      return json(send, 202);
+    };
+    if (path === '/dicom/sends' && verb === 'GET')
+      return json({ items: [...dicom.sends].reverse() });
+    if (path === '/dicom/sends' && verb === 'POST') {
+      const asked = body() as { destination: string; seriesUid?: string; sopInstanceUid?: string };
+      return start(
+        asked.destination,
+        held.filter(
+          (one) =>
+            (asked.seriesUid === undefined || one.header.series.uid === asked.seriesUid) &&
+            (asked.sopInstanceUid === undefined ||
+              one.header.sopInstanceUid === asked.sopInstanceUid),
+        ),
+        null,
+      );
+    }
+    const [, , , id, retry] = path.split('/');
+    const send = dicom.sends.find((one) => one.id === id);
+    if (!send) return refuse('not-found', 'The server has no such send.', 404);
+    if (retry === undefined && verb === 'GET') {
+      // A send that was held ends once sends are no longer held.
+      if (send.state !== 'done') carryOut(send);
+      return json(send);
+    }
+    if (retry === 'retry' && verb === 'POST') {
+      if (send.state !== 'done') return refuse('not-done', 'That send is not done yet.', 409);
+      const failed = new Set(
+        send.instances.filter((one) => one.state === 'failed').map((one) => one.sopInstanceUid),
+      );
+      if (failed.size === 0) {
+        return refuse(
+          'nothing-to-send',
+          'Every instance of that send arrived: there is nothing to send again.',
+          409,
+        );
+      }
+      return start(
+        send.destination.id,
+        held.filter((one) => failed.has(one.header.sopInstanceUid)),
+        send.id,
+      );
+    }
+    return missing();
   };
   let systems = 0;
   /** A request about the DICOM settings, answered as the server answers it. */
@@ -353,6 +493,9 @@ export function fakeServer(
       }
       if (accounts && !who) {
         return json({ error: 'unauthenticated', message: 'Log in to use this server.' }, 401);
+      }
+      if (path === '/dicom/destinations' || path.startsWith('/dicom/sends')) {
+        return answerSend(path, init?.method ?? 'GET', () => JSON.parse(String(init?.body)));
       }
       if (path === '/dicom' || path.startsWith('/dicom/')) {
         if (who && who.role !== 'admin') {

@@ -25,7 +25,7 @@ application. Never commit patient data or real DICOM files
   (`src/app/viewer`) with controllers and stores beside it; newer pieces are
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
   `metadata-panel/`, `dvr-panel/`, `shortcut-help/`, `server-panel/`,
-  `server-browser/`, `audit-panel/`, `accounts-panel/`, `dicom-panel/`, `derived-series/`,
+  `server-browser/`, `audit-panel/`, `accounts-panel/`, `dicom-panel/`, `send-panel/`, `derived-series/`,
   `structure-propagation/`, `provenance/`, `dose-display/`, `dvh/`,
   `alpha-beta/`, `dose-sum/`, `contour-tools/`). Every tool that changes
   painted structures is a contouring tool on the framework in
@@ -49,7 +49,9 @@ application. Never commit patient data or real DICOM files
   is off unless it is given a port, lets in the calling AE titles on a list,
   and keeps a received data set as it came; its AE title, port and callers
   are changed while it runs through `src/dimse/dicom-service.ts`, never by
-  starting a listener elsewhere; only `src/dimse/library.ts`
+  starting a listener elsewhere; what it sends goes out as the stored
+  bytes (`storedDataset`), never read and written again unless the other
+  system takes no other; only `src/dimse/library.ts`
   imports the DIMSE library, and the listener logs AE titles and outcomes,
   never a UID. `src/audit` is who did what: the
   host writes an audit record for every request unless the route says

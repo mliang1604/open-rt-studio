@@ -390,4 +390,221 @@ describe('the DICOM settings of the API', () => {
       ['dicom-remote-add', 'ada', 'refused', null, null],
     ]);
   });
+
+  describe('sending through the API', () => {
+    interface Send {
+      id: string;
+      state: string;
+      retryOf: string | null;
+      seriesInstanceUid: string;
+      destination: { id: string; name: string; aeTitle: string };
+      instances: { sopInstanceUid: string; state: string; failure: string | null }[];
+    }
+
+    /** A server that holds a CT series and knows another system, which takes what it is sent. */
+    async function sender() {
+      const other = await startTestListener({ aeTitle: 'PLANNING', callers: ['OPENRTSTUDIO'] });
+      closing.push(() => other.close());
+      const made = await make();
+      for (const file of syntheticCtSeries(3, 16)) {
+        await made.server.core.pacs!.ingest.ingest(file.bytes);
+      }
+      const held = await made.server.core.pacs!.index.findInstances();
+      const there = { ...PEER, host: '127.0.0.1', port: other.port, mayStore: false };
+      const added = await made.call('POST', '/dicom/remotes', { token: made.admin, body: there });
+      const destination = (added.body as { id: string }).id;
+      /** The record of a send once it is done, as a user reads it. */
+      const done = (id: string): Promise<Send> =>
+        vi.waitFor(
+          async () => {
+            const record = held200<Send>(
+              await made.call('GET', `/dicom/sends/${id}`, { token: made.user }),
+            );
+            expect(record.state).toBe('done');
+            return record;
+          },
+          { timeout: 5_000, interval: 20 },
+        );
+      return {
+        ...made,
+        other,
+        there,
+        destination,
+        done,
+        seriesUid: held[0].seriesInstanceUid,
+        uids: held.map((instance) => instance.sopInstanceUid),
+      };
+    }
+    const held200 = <T>(answer: Answer): T => held<T>(answer, 200, 'DicomSend');
+
+    // The issue's first "done when", by a user who is no administrator.
+    it('sends a series to a system a user picks from the destinations', async () => {
+      const { call, user, other, destination, done, seriesUid, uids } = await sender();
+      const offered = held<{ items: Send['destination'][] }>(
+        await call('GET', '/dicom/destinations', { token: user }),
+        200,
+        'DicomDestinations',
+      );
+      expect(offered.items).toEqual([{ id: destination, name: 'Planning', aeTitle: 'PLANNING' }]);
+
+      const asked = held<Send>(
+        await call('POST', '/dicom/sends', { token: user, body: { destination, seriesUid } }),
+        202,
+        'DicomSend',
+      );
+      expect(asked.instances.map((one) => one.sopInstanceUid)).toEqual(uids);
+      const record = await done(asked.id);
+      expect(record.instances.map((one) => one.state)).toEqual(['sent', 'sent', 'sent']);
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: 3 });
+
+      const listed = held<{ items: Send[] }>(
+        await call('GET', '/dicom/sends', { token: user }),
+        200,
+        'DicomSends',
+      );
+      expect(listed.items).toEqual([record]);
+    });
+
+    it('sends one object, and says what cannot be sent', async () => {
+      const { call, user, admin, other, destination, done, seriesUid, uids } = await sender();
+      const one = held<Send>(
+        await call('POST', '/dicom/sends', {
+          token: user,
+          body: { destination, seriesUid, sopInstanceUid: uids[2] },
+        }),
+        202,
+        'DicomSend',
+      );
+      await done(one.id);
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: 1 });
+      // An object says which series it is of.
+      const alone = held<Send>(
+        await call('POST', '/dicom/sends', {
+          token: user,
+          body: { destination, sopInstanceUid: uids[0] },
+        }),
+        202,
+        'DicomSend',
+      );
+      expect(alone.seriesInstanceUid).toBe(seriesUid);
+      expect((await done(alone.id)).instances.map((i) => i.sopInstanceUid)).toEqual([uids[0]]);
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: 2 });
+
+      const caller = await call('POST', '/dicom/remotes', {
+        token: admin,
+        body: { ...PEER, name: 'A caller', aeTitle: 'CALLER' },
+      });
+      const refusal = async (body: unknown): Promise<[number, string]> => {
+        const answer = await call('POST', '/dicom/sends', { token: user, body });
+        expect(violations(answer.body, SCHEMAS['Error'], SCHEMAS)).toEqual([]);
+        return [answer.status, (answer.body as { error: string }).error];
+      };
+      expect(await refusal({ seriesUid })).toEqual([400, 'invalid-request']);
+      expect(await refusal({ destination })).toEqual([400, 'invalid-request']);
+      expect(await refusal({ destination, sopInstanceUid: '1.2.3.999' })).toEqual([
+        404,
+        'no-such-series',
+      ]);
+      expect(await refusal({ destination, seriesUid: 'not a uid' })).toEqual([
+        400,
+        'invalid-request',
+      ]);
+      expect(await refusal({ destination, seriesUid, sopInstanceUid: 7 })).toEqual([
+        400,
+        'invalid-request',
+      ]);
+      expect(await refusal({ destination, seriesUid, host: '192.0.2.1' })).toEqual([
+        400,
+        'invalid-request',
+      ]);
+      expect(await refusal({ destination: 'nobody', seriesUid })).toEqual([404, 'not-found']);
+      expect(await refusal({ destination, seriesUid: '1.2.3.999' })).toEqual([
+        404,
+        'no-such-series',
+      ]);
+      expect(await refusal({ destination, seriesUid, sopInstanceUid: '1.2.3.999' })).toEqual([
+        409,
+        'nothing-to-send',
+      ]);
+      expect(await refusal({ destination: (caller.body as { id: string }).id, seriesUid })).toEqual(
+        [409, 'no-address'],
+      );
+      expect((await call('GET', '/dicom/sends/nothing', { token: user })).status).toBe(404);
+      expect((await call('POST', '/dicom/sends/nothing/retry', { token: user })).status).toBe(404);
+      // No login, no sending, and nothing of the destinations.
+      expect(
+        (await call('POST', '/dicom/sends', { body: { destination, seriesUid } })).status,
+      ).toBe(401);
+      expect((await call('GET', '/dicom/destinations')).status).toBe(401);
+    });
+
+    // The issue's second "done when".
+    it('reports a failure for each instance, and sends them again when asked', async () => {
+      const { call, user, admin, other, there, destination, done, seriesUid, uids } =
+        await sender();
+      // The system is first known at an address where nothing is.
+      await call('PUT', `/dicom/remotes/${destination}`, {
+        token: admin,
+        body: { ...there, port: await freePort() },
+      });
+      const asked = await call('POST', '/dicom/sends', {
+        token: user,
+        body: { destination, seriesUid },
+      });
+      const first = await done((asked.body as Send).id);
+      expect(first.instances.map((one) => [one.sopInstanceUid, one.state, one.failure])).toEqual(
+        uids.map((uid) => [uid, 'failed', 'unreachable']),
+      );
+
+      await call('PUT', `/dicom/remotes/${destination}`, { token: admin, body: there });
+      const again = held<Send>(
+        await call('POST', `/dicom/sends/${first.id}/retry`, { token: user }),
+        202,
+        'DicomSend',
+      );
+      expect(again.retryOf).toBe(first.id);
+      const second = await done(again.id);
+      expect(second.instances.map((one) => one.state)).toEqual(['sent', 'sent', 'sent']);
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: 3 });
+
+      const nothing = await call('POST', `/dicom/sends/${second.id}/retry`, { token: user });
+      expect([nothing.status, (nothing.body as { error: string }).error]).toEqual([
+        409,
+        'nothing-to-send',
+      ]);
+    });
+
+    it('is in the audit log: who sent whose series where', async () => {
+      const { call, user, destination, done, seriesUid, records } = await sender();
+      const asked = await call('POST', '/dicom/sends', {
+        token: user,
+        body: { destination, seriesUid },
+      });
+      await done((asked.body as Send).id);
+      await call('POST', '/dicom/sends', {
+        token: user,
+        body: { destination: 'nobody', seriesUid },
+      });
+      await call('GET', '/dicom/destinations', { token: user });
+
+      const sends = records().filter((record) => record.action === 'dicom-send');
+      expect(sends).toMatchObject([
+        {
+          actor: 'ada',
+          outcome: 'ok',
+          seriesUid,
+          object: 'PLANNING',
+          detail: '3 instances',
+        },
+        { actor: 'ada', outcome: 'not-found', seriesUid, object: null },
+      ]);
+      expect(sends[0].patientId).toBeTruthy();
+      expect(sends[0].studyUid).toBeTruthy();
+      // Following a send is one record, however often it is asked.
+      const read = records().filter((record) => record.action === 'dicom-send-read');
+      expect(read.at(-1)).toMatchObject({ actor: 'ada', seriesUid, object: 'PLANNING' });
+      expect(read.at(-1)!.detail).toBe('done: 3 of 3 sent, 0 failed');
+      expect(records().some((record) => record.action === 'dicom-destinations-read')).toBe(true);
+    });
+  });
 });

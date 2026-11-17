@@ -21,6 +21,7 @@ import { PreferencesStore } from '../../preferences-store';
 import { AccountsPanel } from '../accounts-panel/accounts-panel';
 import { AuditPanel } from '../audit-panel/audit-panel';
 import { DicomPanel } from '../dicom-panel/dicom-panel';
+import { SendPanel } from '../send-panel/send-panel';
 import { ServerBrowser } from '../server-browser/server-browser';
 import { confirmLeavePatient } from '../viewer-dom';
 
@@ -28,7 +29,7 @@ import { confirmLeavePatient } from '../viewer-dom';
 export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
 
 /** What the card holds once a server is connected. */
-type ServerView = 'studies' | 'audit' | 'dicom' | 'accounts';
+type ServerView = 'studies' | 'send' | 'audit' | 'dicom' | 'accounts';
 
 /**
  * The card for reading from a server instead of opened files: its address,
@@ -48,7 +49,7 @@ type ServerView = 'studies' | 'audit' | 'dicom' | 'accounts';
 @Component({
   selector: 'app-server-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AccountsPanel, AuditPanel, DicomPanel, ServerBrowser],
+  imports: [AccountsPanel, AuditPanel, DicomPanel, SendPanel, ServerBrowser],
   templateUrl: './server-panel.html',
   styleUrls: ['../panel-card.css', './server-panel.css'],
   host: {

@@ -402,7 +402,13 @@ describe('ServerPanel', () => {
 
     it('is offered to an administrator, and shown in place of the studies', async () => {
       const { click, host, text } = await loggedIn(ROOT);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Audit log', 'DICOM', 'Accounts']);
+      expect(labels(host)).toEqual([
+        'Log out and disconnect',
+        'Send…',
+        'Audit log',
+        'DICOM',
+        'Accounts',
+      ]);
       expect(host.querySelector('app-audit-panel')).toBeNull();
       await click('Audit log');
       expect(host.querySelector('app-audit-panel')).not.toBeNull();
@@ -410,7 +416,13 @@ describe('ServerPanel', () => {
       expect(text('td.audit-action')).toEqual(['login']);
       // The card keeps the room it took for the studies.
       expect(host.classList.contains('wide')).toBe(true);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'DICOM', 'Accounts']);
+      expect(labels(host)).toEqual([
+        'Log out and disconnect',
+        'Studies',
+        'Send…',
+        'DICOM',
+        'Accounts',
+      ]);
       await click('Studies');
       expect(host.querySelector('app-audit-panel')).toBeNull();
       expect(text('.study-patient')).toHaveLength(2);
@@ -418,7 +430,7 @@ describe('ServerPanel', () => {
 
     it('is not offered to a user', async () => {
       const { host, server } = await loggedIn(ADA);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Your password']);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Send…', 'Your password']);
       expect(server.asked.some((path) => path.startsWith('/audit'))).toBe(false);
     });
 
@@ -428,7 +440,13 @@ describe('ServerPanel', () => {
       expect(host.querySelector('app-accounts-panel')).not.toBeNull();
       expect(host.querySelector('app-server-browser')).toBeNull();
       expect(text('app-accounts-panel tbody th')).toEqual(['ada', 'root you']);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Audit log', 'DICOM']);
+      expect(labels(host)).toEqual([
+        'Log out and disconnect',
+        'Studies',
+        'Send…',
+        'Audit log',
+        'DICOM',
+      ]);
       await click('Audit log');
       expect(host.querySelector('app-accounts-panel')).toBeNull();
       expect(host.querySelector('app-audit-panel')).not.toBeNull();
@@ -446,7 +464,13 @@ describe('ServerPanel', () => {
       expect(host.querySelector('app-dicom-panel .dicom-listening')!.textContent.trim()).toBe(
         'Not listening for DICOM.',
       );
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Audit log', 'Accounts']);
+      expect(labels(host)).toEqual([
+        'Log out and disconnect',
+        'Studies',
+        'Send…',
+        'Audit log',
+        'Accounts',
+      ]);
       await click('Audit log');
       expect(host.querySelector('app-dicom-panel')).toBeNull();
       await click('DICOM');
@@ -466,7 +490,7 @@ describe('ServerPanel', () => {
       expect(host.querySelector('app-accounts-panel #own-password-title')).not.toBeNull();
       expect(host.querySelector('app-accounts-panel table')).toBeNull();
       expect(server.asked.some((path) => path.startsWith('/accounts'))).toBe(false);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies']);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Send…']);
     });
 
     it('goes back to the studies when the accounts are left by disconnecting', async () => {
@@ -480,7 +504,7 @@ describe('ServerPanel', () => {
     it('is offered on a server without accounts, whose one user is every role', async () => {
       const { click, host, text } = await render(true, [], undefined, LOG);
       await click('Connect');
-      expect(labels(host)).toEqual(['Disconnect', 'Audit log', 'DICOM']);
+      expect(labels(host)).toEqual(['Disconnect', 'Send…', 'Audit log', 'DICOM']);
       await click('Audit log');
       expect(text('td.audit-who')).toEqual(['ada']);
     });

@@ -26,6 +26,8 @@ import {
 } from './dicom-settings.js';
 import type { EchoResult } from './echo.js';
 import type { DicomListener } from './listener.js';
+import { createSendManager, type SendManager, type SendRecord } from './send-manager.js';
+import type { sendObjects } from './send.js';
 
 export interface DicomServiceOptions {
   readonly pacs: Pacs;
@@ -46,6 +48,12 @@ export interface DicomServiceOptions {
   readonly closeTimeoutMs?: number;
   /** How long an echo waits. */
   readonly echoTimeoutMs?: number;
+  /** How long a send waits for the connection, the association and each answer. */
+  readonly sendTimeoutMs?: number;
+  /** How many instances a send puts on one association, for a test. */
+  readonly sendInstancesAtOnce?: number;
+  /** In place of the sender, for a test. */
+  readonly sender?: typeof sendObjects;
   readonly logger?: Logger;
 }
 
@@ -72,8 +80,44 @@ export interface DicomService {
   removeRemote(id: string): Promise<boolean>;
   /** C-ECHO to a system, under the server's AE title. Rejects with `not-found` or `no-address`. */
   echo(id: string): Promise<EchoResult>;
-  /** Close the listener. True when no association had to be cut off. */
+  /** The systems that can be sent to: those with an address. */
+  destinations(): Destination[];
+  /**
+   * Send a series, or one object of it, to a system. Answered at once with
+   * the send's record, which {@link DicomService.sendOf} then follows.
+   * Rejects with `not-found`, `no-address`, `no-such-series` or
+   * `nothing-to-send`.
+   */
+  send(what: SendOf): Promise<SendRecord>;
+  /** A send's record as it is now; null for one there is none of. */
+  sendOf(id: string): SendRecord | null;
+  /** The sends kept, the latest first. */
+  sends(): SendRecord[];
+  /**
+   * Send again what did not arrive, as a send of its own. Null for a send
+   * there is none of; rejects with `not-done`, `nothing-to-send`,
+   * `not-found` or `no-address`.
+   */
+  retrySend(id: string): Promise<SendRecord | null>;
+  /** Close the listener, once the send under way has ended. True when nothing had to be cut off. */
   close(): Promise<boolean>;
+}
+
+/** A system that can be sent to. */
+export interface Destination {
+  readonly id: string;
+  readonly name: string;
+  readonly aeTitle: string;
+}
+
+/** What to send, and where. */
+export interface SendOf {
+  /** The id of the system it goes to. */
+  readonly destination: string;
+  /** The series to send; may be left out when one object is named. */
+  readonly seriesInstanceUid?: string;
+  /** One object; without, the whole of the series. */
+  readonly sopInstanceUid?: string;
 }
 
 export function createDicomService(options: DicomServiceOptions): DicomService {
@@ -98,6 +142,40 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       maxObjectBytes: options.maxObjectBytes,
       ...(options.logger ? { logger: options.logger } : {}),
     });
+  };
+
+  // Made by the first send.
+  let manager: SendManager | null = null;
+  const sending = (): SendManager =>
+    (manager ??= createSendManager({
+      pacs: options.pacs,
+      ...(options.logger ? { logger: options.logger } : {}),
+      ...(options.sendInstancesAtOnce === undefined
+        ? {}
+        : { instancesAtOnce: options.sendInstancesAtOnce }),
+      ...(options.sender ? { send: options.sender } : {}),
+    }));
+
+  /** The system to send to, as it is now, with where it is. */
+  const destinationOf = (id: string) => {
+    const remote = settings.remotes.find((r) => r.id === id);
+    if (!remote) throw new DicomSettingsError('not-found', 'The server knows no such system.');
+    if (remote.host === null || remote.port === null) {
+      throw new DicomSettingsError(
+        'no-address',
+        'That system has no address: it can call this server and cannot be called.',
+      );
+    }
+    return {
+      destination: { id: remote.id, name: remote.name, aeTitle: remote.aeTitle },
+      target: {
+        host: remote.host,
+        port: remote.port,
+        calledAeTitle: remote.aeTitle,
+        callingAeTitle: settings.local.aeTitle,
+        ...(options.sendTimeoutMs === undefined ? {} : { timeoutMs: options.sendTimeoutMs }),
+      },
+    };
   };
 
   // One change at a time: each waits for the one before it.
@@ -224,11 +302,100 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       return result;
     },
 
-    close: () =>
-      inTurn(async () => {
+    destinations: () =>
+      settings.remotes
+        .filter((r) => r.host !== null)
+        .map((r) => ({ id: r.id, name: r.name, aeTitle: r.aeTitle })),
+
+    async send(what) {
+      const to = destinationOf(what.destination);
+      const { index } = options.pacs;
+      // One object says which series it is of, when the request does not.
+      const seriesUid =
+        what.seriesInstanceUid ??
+        (what.sopInstanceUid === undefined
+          ? undefined
+          : (await index.getInstance(what.sopInstanceUid))?.seriesInstanceUid);
+      const series = seriesUid === undefined ? null : await index.getSeries(seriesUid);
+      if (!series) {
+        throw new DicomSettingsError(
+          'no-such-series',
+          what.seriesInstanceUid === undefined
+            ? 'The server has no such object.'
+            : 'The server has no such series.',
+        );
+      }
+      const sopInstanceUids: string[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const part = await index.findInstances({
+          seriesInstanceUid: series.seriesInstanceUid,
+          ...(what.sopInstanceUid === undefined ? {} : { sopInstanceUid: what.sopInstanceUid }),
+          limit: 500,
+          offset,
+        });
+        sopInstanceUids.push(...part.map((instance) => instance.sopInstanceUid));
+        if (part.length < 500) break;
+      }
+      if (sopInstanceUids.length === 0) {
+        throw new DicomSettingsError(
+          'nothing-to-send',
+          'The series holds no such object: there is nothing to send.',
+        );
+      }
+      return sending().start({
+        ...to,
+        studyInstanceUid: series.studyInstanceUid,
+        seriesInstanceUid: series.seriesInstanceUid,
+        sopInstanceUids,
+      });
+    },
+
+    sendOf: (id) => manager?.get(id) ?? null,
+    sends: () => manager?.list() ?? [],
+
+    async retrySend(id) {
+      const before = manager?.get(id);
+      const failed = manager?.failed(id);
+      if (!before || !failed) return null;
+      if (before.state !== 'done') {
+        throw new DicomSettingsError('not-done', 'That send is not done yet.');
+      }
+      if (failed.length === 0) {
+        throw new DicomSettingsError(
+          'nothing-to-send',
+          'Every instance of that send arrived: there is nothing to send again.',
+        );
+      }
+      // To the system as it is now: its address may be what was put right.
+      return sending().start({
+        ...destinationOf(before.destination.id),
+        studyInstanceUid: before.studyInstanceUid,
+        seriesInstanceUid: before.seriesInstanceUid,
+        sopInstanceUids: failed,
+        retryOf: before.id,
+      });
+    },
+
+    async close() {
+      // The send under way ends the association it is on, as far as the time allows.
+      let late: NodeJS.Timeout | undefined;
+      const ended =
+        manager === null
+          ? true
+          : await Promise.race([
+              manager.close().then(() => true),
+              new Promise<boolean>((resolve) => {
+                late = setTimeout(() => resolve(false), closeTimeoutMs);
+                late.unref();
+              }),
+            ]);
+      clearTimeout(late);
+      const released = await inTurn(async () => {
         const old = listener;
         listener = null;
         return old ? old.close({ timeoutMs: closeTimeoutMs }) : true;
-      }),
+      });
+      return ended && released;
+    },
   };
 }

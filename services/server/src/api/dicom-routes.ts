@@ -12,7 +12,10 @@ import {
   REMOTES_AT_MOST,
 } from '../dimse/dicom-settings.js';
 import type { DicomService } from '../dimse/dicom-service.js';
+import type { SendRecord } from '../dimse/send-manager.js';
 import { HttpError, type ParameterDoc, type Route, type RouteRequest } from '../host/routes.js';
+import type { PacsIndex } from '../pacs-index/pacs-index.js';
+import { isUid } from '../uid.js';
 import { API_PREFIX, queryOf } from './api-routes.js';
 
 const MAX_BODY_BYTES = 4096;
@@ -24,6 +27,9 @@ const STATUS: Record<DicomSettingsError['code'], number> = {
   'too-many': 409,
   'port-unavailable': 409,
   'no-address': 409,
+  'no-such-series': 404,
+  'nothing-to-send': 409,
+  'not-done': 409,
 };
 
 /** A refusal of the settings, as the answer it is. */
@@ -73,8 +79,69 @@ const aeTitleIn = (body: unknown): string | null => {
   return typeof title === 'string' && /^[\x20-\x5b\x5d-\x7e]{1,16}$/.test(title) ? title : null;
 };
 
-export function dicomRoutes(dicom: DicomService): Route[] {
+const SEND_PARAMETER: ParameterDoc = {
+  name: 'id',
+  in: 'path',
+  description: "The send's id, as it was given when the send was asked for.",
+};
+
+const NO_SUCH_SEND = { description: 'The server has no such send.', schema: 'Error' } as const;
+
+/** What to send, as a request's body gives it. */
+function sendOf(body: unknown): {
+  destination: string;
+  seriesUid?: string;
+  sopInstanceUid?: string;
+} {
+  const invalid = (message: string): HttpError => new HttpError(400, 'invalid-request', message);
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw invalid('The body is not a JSON object.');
+  }
+  const { destination, seriesUid, sopInstanceUid, ...more } = body as Record<string, unknown>;
+  if (Object.keys(more).length > 0) {
+    throw invalid('The body holds destination, seriesUid and, for one object, sopInstanceUid.');
+  }
+  if (typeof destination !== 'string' || destination.length === 0 || destination.length > 64) {
+    throw invalid('destination is the id of a system, as the list of destinations gives it.');
+  }
+  if (seriesUid !== undefined && (typeof seriesUid !== 'string' || !isUid(seriesUid))) {
+    throw invalid('seriesUid is a Series Instance UID.');
+  }
+  if (seriesUid === undefined && sopInstanceUid === undefined) {
+    throw invalid('Say what to send: seriesUid for a series, sopInstanceUid for one object.');
+  }
+  if (
+    sopInstanceUid !== undefined &&
+    (typeof sopInstanceUid !== 'string' || !isUid(sopInstanceUid))
+  ) {
+    throw invalid('sopInstanceUid is a SOP Instance UID.');
+  }
+  return {
+    destination,
+    ...(seriesUid === undefined ? {} : { seriesUid }),
+    ...(sopInstanceUid === undefined ? {} : { sopInstanceUid }),
+  };
+}
+
+/** "3 of 5 sent, 2 failed", for the audit record of a send that was looked at. */
+const counted = (record: SendRecord): string => {
+  const sent = record.instances.filter((one) => one.state === 'sent').length;
+  const failed = record.instances.filter((one) => one.state === 'failed').length;
+  return `${record.state}: ${sent} of ${record.instances.length} sent, ${failed} failed`;
+};
+
+export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
   const remote = (id: string) => dicom.state().remotes.find((one) => one.id === id);
+  /** Tell the audit record whose data a send carries, and where to. */
+  const auditSend = async (request: RouteRequest, record: SendRecord): Promise<void> => {
+    const study = await index.getStudy(record.studyInstanceUid);
+    request.audit({
+      patientId: study?.patientId ?? null,
+      studyUid: record.studyInstanceUid,
+      seriesUid: record.seriesInstanceUid,
+      object: record.destination.aeTitle,
+    });
+  };
   return [
     {
       method: 'GET',
@@ -261,6 +328,152 @@ export function dicomRoutes(dicom: DicomService): Route[] {
           403: ERRORS[403],
           404: ERRORS[404],
           409: { description: 'The system has no address to call.', schema: 'Error' },
+        },
+      },
+    },
+    {
+      method: 'GET',
+      path: `${API_PREFIX}/dicom/destinations`,
+      audit: 'dicom-destinations-read',
+      handle(request) {
+        queryOf(request, []);
+        return { status: 200, body: { items: dicom.destinations() } };
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'The systems a series can be sent to',
+        description:
+          'The systems the server knows that have an address, by the name an administrator gave each. For everyone who is logged in.',
+        responses: {
+          200: { description: 'The destinations.', schema: 'DicomDestinations' },
+          401: ERRORS[401],
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: `${API_PREFIX}/dicom/sends`,
+      audit: 'dicom-send',
+      async handle(request) {
+        const what = sendOf(await jsonOf(request));
+        request.audit({
+          seriesUid: what.seriesUid ?? null,
+          object: remote(what.destination)?.aeTitle ?? null,
+        });
+        try {
+          const record = await dicom.send({
+            destination: what.destination,
+            ...(what.seriesUid === undefined ? {} : { seriesInstanceUid: what.seriesUid }),
+            ...(what.sopInstanceUid === undefined ? {} : { sopInstanceUid: what.sopInstanceUid }),
+          });
+          await auditSend(request, record);
+          request.audit({ detail: `${record.instances.length} instances` });
+          return { status: 202, body: record };
+        } catch (error) {
+          return refused(error);
+        }
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'Send a series, or one object of it, to another system (C-STORE)',
+        description:
+          'Send `{ "destination", "seriesUid" }` as JSON for a series, or `{ "destination", "sopInstanceUid" }` for one object. The answer comes at once, with the send’s record; ask for the record again to follow it. One send runs at a time and the rest wait. An object goes out as the bytes it is stored in; where the other system takes only the other uncompressed transfer syntax it is written anew in that (`rewritten`), and an object with compressed pixel data is sent as it is or not at all.',
+        requestBody: 'application/json',
+        responses: {
+          202: { description: 'Asked for: the record of the send.', schema: 'DicomSend' },
+          400: ERRORS[400],
+          401: ERRORS[401],
+          404: {
+            description: 'The server has no such system, or no such series.',
+            schema: 'Error',
+          },
+          409: {
+            description: 'The system has no address, or there is nothing to send.',
+            schema: 'Error',
+          },
+          415: ERRORS[415],
+        },
+      },
+    },
+    {
+      method: 'GET',
+      path: `${API_PREFIX}/dicom/sends`,
+      audit: 'dicom-send-read',
+      handle(request) {
+        queryOf(request, []);
+        return { status: 200, body: { items: dicom.sends() } };
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'The sends the server remembers, the latest first',
+        description:
+          'The records are kept while the server runs, the latest hundred of them, and are gone when it stops.',
+        responses: {
+          200: { description: 'The sends.', schema: 'DicomSends' },
+          401: ERRORS[401],
+        },
+      },
+    },
+    {
+      method: 'GET',
+      path: `${API_PREFIX}/dicom/sends/:id`,
+      audit: 'dicom-send-read',
+      async handle(request) {
+        queryOf(request, []);
+        const record = dicom.sendOf(request.params['id']);
+        if (!record) throw new HttpError(404, 'not-found', 'The server has no such send.');
+        await auditSend(request, record);
+        request.audit({ detail: counted(record) });
+        return { status: 200, body: record };
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'One send: how far it is, and what became of each instance',
+        description:
+          'An instance is `waiting`, `sent` or `failed`. One that failed says why in `failure`: `refused` (with the `status` the other system answered), `kind-not-taken`, `transfer-syntax-not-taken`, `rejected`, `unreachable`, `broken`, `missing` or `stopped`.',
+        parameters: [SEND_PARAMETER],
+        responses: {
+          200: { description: 'The record of the send.', schema: 'DicomSend' },
+          401: ERRORS[401],
+          404: NO_SUCH_SEND,
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: `${API_PREFIX}/dicom/sends/:id/retry`,
+      audit: 'dicom-send',
+      async handle(request) {
+        queryOf(request, []);
+        const before = dicom.sendOf(request.params['id']);
+        if (before) await auditSend(request, before);
+        try {
+          const record = await dicom.retrySend(request.params['id']);
+          if (!record) throw new HttpError(404, 'not-found', 'The server has no such send.');
+          request.audit({ detail: `${record.instances.length} instances, again` });
+          return { status: 202, body: record };
+        } catch (error) {
+          return refused(error);
+        }
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'Send again the instances of a send that did not arrive',
+        description:
+          'A send of its own, of the failed instances alone, to the same system as it is known now. Its record names the send it follows in `retryOf`.',
+        parameters: [SEND_PARAMETER],
+        responses: {
+          202: { description: 'Asked for: the record of the new send.', schema: 'DicomSend' },
+          401: ERRORS[401],
+          404: {
+            description: 'The server has no such send, or no longer the system.',
+            schema: 'Error',
+          },
+          409: {
+            description:
+              'The send is not done, every instance arrived, or the system has no address.',
+            schema: 'Error',
+          },
         },
       },
     },

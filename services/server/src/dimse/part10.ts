@@ -7,7 +7,10 @@
 // behind a preamble, `DICM` and a File Meta Information group that says what
 // they are and who wrote the file.
 
+import { readInstanceHeader } from '@open-rt-studio/dicom';
+
 import { SERVER_VERSION } from '../version.js';
+import { IMPLICIT_VR_LE } from './sop-classes.js';
 
 /**
  * This server as the writer of a file's meta information. The UID is under
@@ -78,4 +81,34 @@ export function dataSetOf(file: Uint8Array): Uint8Array | null {
   if (view.getUint16(132, true) !== 0x0002 || view.getUint16(134, true) !== 0x0000) return null;
   const start = 144 + view.getUint32(140, true);
   return start <= file.length ? file.subarray(start) : null;
+}
+
+/** An object to send. */
+export interface OutgoingObject {
+  readonly sopClassUid: string;
+  readonly sopInstanceUid: string;
+  /** The transfer syntax its bytes are in. */
+  readonly transferSyntax: string;
+  /** The data set as it is stored: the file without its header. */
+  readonly dataSet: Uint8Array;
+}
+
+/**
+ * A stored file as an object to send: its data set, and what its header
+ * says it is. Null for bytes that are not a Part 10 file with the UIDs an
+ * object has.
+ */
+export function outgoingFrom(file: Uint8Array): OutgoingObject | null {
+  const read = readInstanceHeader(file);
+  const dataSet = dataSetOf(file);
+  if (!read.ok || !dataSet) return null;
+  const { sopClassUid, sopInstanceUid, transferSyntaxUid } = read.header;
+  if (!sopClassUid || !sopInstanceUid) return null;
+  return {
+    sopClassUid,
+    sopInstanceUid,
+    // A file that does not say is in the default transfer syntax.
+    transferSyntax: transferSyntaxUid ?? IMPLICIT_VR_LE,
+    dataSet,
+  };
 }

@@ -348,7 +348,7 @@ export async function startServer(
     closeTimeoutMs: config.shutdownTimeoutMs,
     logger,
   });
-  const dicomApi = dicomRoutes(dicom);
+  const dicomApi = dicomRoutes(dicom, core.pacs!.index);
   const routes = [
     ...sessionApi,
     ...auditApi,

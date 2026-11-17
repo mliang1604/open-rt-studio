@@ -332,6 +332,39 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     body: { ...system, name: `${SYSTEM_NAME} 2`, mayStore: true },
   });
   await call('PUT', api(`/dicom/remotes/${ABSENT_PATIENT}`), { token: admin, body: system });
+  // A send to it, of a series of the patient: asked for, followed, sent
+  // again, and each asked for wrongly. Nothing is at its address.
+  await call('GET', api('/dicom/destinations'), { token: user });
+  const sendable = studies.items[0];
+  const ofStudy = await call('GET', api(`/studies/${sendable.studyInstanceUid}/series`), {
+    token: user,
+  });
+  const seriesToSend = (ofStudy.body as { items: { seriesInstanceUid: string }[] }).items[0];
+  const asked = await call('POST', api('/dicom/sends'), {
+    token: user,
+    body: { destination: systemId, seriesUid: seriesToSend.seriesInstanceUid },
+  });
+  expect(asked.status).toBe(202);
+  const sendId = (asked.body as { id: string }).id;
+  await vi.waitFor(
+    async () => {
+      const followed = await call('GET', api(`/dicom/sends/${sendId}`), { token: user });
+      expect((followed.body as { state: string }).state).toBe('done');
+    },
+    { timeout: 15_000, interval: 50 },
+  );
+  await call('GET', api('/dicom/sends'), { token: user });
+  await call('POST', api(`/dicom/sends/${sendId}/retry`), { token: user });
+  await call('POST', api('/dicom/sends'), {
+    token: user,
+    body: { destination: ABSENT_PATIENT, seriesUid: ABSENT_UID },
+  });
+  await call('POST', api('/dicom/sends'), {
+    token: user,
+    body: { destination: systemId, seriesUid: ABSENT_UID, sopInstanceUid: PATIENT.id },
+  });
+  await call('GET', api(`/dicom/sends/${ABSENT_PATIENT}`), { token: user });
+  await call('POST', api(`/dicom/sends/${ABSENT_PATIENT}/retry`), { token: user });
   await call('DELETE', api(`/dicom/remotes/${systemId}`), { token: admin });
   await call('DELETE', api(`/dicom/remotes/${ABSENT_PATIENT}`), { token: admin });
 
@@ -426,6 +459,7 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     ...['job-start', 'job-read', 'job-cancel', 'audit-read'],
     ...['dicom-settings-read', 'dicom-settings-change', 'dicom-echo'],
     ...['dicom-remote-add', 'dicom-remote-change', 'dicom-remote-remove'],
+    ...['dicom-destinations-read', 'dicom-send', 'dicom-send-read'],
   ]) {
     expect(actions.has(action as AuditRecord['action']), action).toBe(true);
   }
