@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import {
   SYNTHETIC_UNREADABLE,
   syntheticCtSeries,
+  syntheticCtValue,
   syntheticMrSeries,
   syntheticPatient,
   syntheticThoraxPatient,
@@ -146,6 +147,58 @@ test('importing more files leaves the displayed series on screen', async ({ page
   await expect(page.locator('div.status')).toContainText('volume 32 × 32 × 12');
   await expect(page.getByRole('button', { name: /layout/i })).toBeEnabled();
   await expect(page.locator('.pane-overlay .pane')).toHaveCount(3);
+});
+
+// JPEG Lossless files used to be skipped and named (#183).
+test.describe('a JPEG Lossless series', () => {
+  const size = 32;
+  // Predictor 1 is the first-order transfer syntax (…4.70), 4 the general one (…4.57).
+  for (const predictor of [1, 4] as const) {
+    test(`is imported whole and shows the values written, predictor ${predictor}`, async ({
+      page,
+    }) => {
+      const problems = watchProblems(page);
+      await importFiles(
+        page,
+        syntheticCtSeries(12, size, { encoding: { jpegLossless: predictor } }),
+      );
+
+      await expect(page.locator('.study-tile').first()).toContainText('1 series');
+      await expect(page.locator('app-import-report')).toHaveCount(0);
+      await expect(await seriesChip(page, 'CT')).toContainText('12 img');
+
+      await requireWebGpu(page);
+      await pickSeries(page, 'CT');
+      await expect(page.locator('div.status')).toContainText(`volume ${size} × ${size} × 12`);
+      // The probe reads what the generator's formula gives, at places across the
+      // image, which is in the middle of a pane wider than it. None is the
+      // middle of the pane, where the crosshair's handle is.
+      const pane = page.locator('.pane-overlay .pane').first();
+      const box = (await pane.boundingBox())!;
+      const seen = new Set<number>();
+      let last = '';
+      for (const [fx, fy] of [
+        [0.42, 0.4],
+        [0.47, 0.62],
+        [0.57, 0.35],
+      ]) {
+        await page.mouse.move(box.x + box.width * fx, box.y + box.height * fy);
+        // The readout follows the pointer a frame later: wait for it to change.
+        const probe = page.locator('.probe');
+        await expect(probe).toBeVisible();
+        await expect(probe).not.toHaveText(last);
+        const text = await probe.innerText();
+        last = text;
+        const match = /voxel \((\d+), (\d+), (\d+)\).* · value (-?\d+) HU/.exec(text);
+        expect(match, `unexpected probe text: ${text}`).not.toBeNull();
+        const [x, , z, value] = match!.slice(1).map(Number);
+        expect(value).toBe(syntheticCtValue(x, z, size));
+        seen.add(value);
+      }
+      expect(seen.size).toBe(3);
+      expectNoProblems(problems);
+    });
+  }
 });
 
 // One file the application cannot read used to fail the whole import (#144).

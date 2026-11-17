@@ -57,6 +57,11 @@ say "nothing is answered without a login"
 [ "$(docker compose exec -T server id -u)" != 0 ] || fail "the server runs as root"
 say "the server does not run as root"
 
+# A dependency publishes sample DICOM files with its tests; the Dockerfile takes them out.
+[ -z "$(docker compose exec -T server find /app -name '*.dcm' -print -quit)" ] ||
+  fail "the image has a DICOM file in it"
+say "the image has no DICOM file in it"
+
 # The first account, as the README says to make it: the password on standard input.
 printf '%s\n' "$password" | docker compose run --rm -T server account add "$name" --admin
 token="$(log_in || true)"

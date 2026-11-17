@@ -157,7 +157,7 @@ are not regressions. Each has an issue.
 | Issue | What is missing                                                                                                                                                                              | Mentioned in |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
 | #143  | Cancelling a load (added since)                                                                                                                                                              | #20          |
-| #144  | One unreadable file failed the batch (such files are skipped and named since). JPEG Lossless and 12-bit JPEG are reported, not decoded (#183)                                                | #20          |
+| #144  | One unreadable file failed the batch (such files are skipped and named since). JPEG Lossless is decoded since #183; 12-bit JPEG is reported, not decoded                                     | #20          |
 | #145  | Selecting, moving and deleting one measurement (added since)                                                                                                                                 | #27          |
 | #146  | Cine direction and loop mode (added since)                                                                                                                                                   | #28          |
 | #147  | Whole-layout capture; overlays in captures; spin video of the 3D pane only (all added since)                                                                                                 | #29          |

@@ -23,8 +23,8 @@ import {
 
 const CT_IMAGE_STORAGE = '1.2.840.10008.5.1.4.1.1.2';
 
-/** JPEG Lossless, Non-Hierarchical, First-Order Prediction. */
-export const JPEG_LOSSLESS_SYNTAX = '1.2.840.10008.1.2.4.70';
+/** High-Throughput JPEG 2000 (Lossless Only): no codec for it is bundled. */
+export const HTJ2K_LOSSLESS_SYNTAX = '1.2.840.10008.1.2.4.201';
 /** JPEG Extended (Process 2 & 4): DCT-based, 8 or 12 bits. */
 export const JPEG_EXTENDED_SYNTAX = '1.2.840.10008.1.2.4.51';
 
@@ -48,8 +48,8 @@ export interface UnreadableFile {
 /** The files of {@link syntheticUnreadableFiles}, with the reason each is refused. */
 export const SYNTHETIC_UNREADABLE: readonly UnreadableFile[] = [
   {
-    name: 'synthetic-jpeg-lossless.dcm',
-    reason: `Unsupported transfer syntax ${JPEG_LOSSLESS_SYNTAX}, JPEG Lossless`,
+    name: 'synthetic-htj2k.dcm',
+    reason: `Unsupported transfer syntax ${HTJ2K_LOSSLESS_SYNTAX}, High-Throughput JPEG 2000`,
   },
   { name: 'synthetic-jpeg-12bit.dcm', reason: '12-bit JPEG is not supported' },
 ];
@@ -94,7 +94,8 @@ function unreadableCt(
 
 /**
  * Two CT files the application cannot read, in the order of
- * {@link SYNTHETIC_UNREADABLE}: one declared JPEG Lossless, one JPEG Extended
+ * {@link SYNTHETIC_UNREADABLE}: one declared High-Throughput JPEG 2000 (its
+ * pixel data is never looked at), one JPEG Extended
  * with a 12-bit frame header. Same patient and study as the other generators
  * by default, so they can go into one import with a readable series.
  */
@@ -105,7 +106,7 @@ export function syntheticUnreadableFiles(study: SyntheticStudy = SYNTHETIC_STUDY
       study,
       1,
       SYNTHETIC_UNREADABLE[0].name,
-      JPEG_LOSSLESS_SYNTAX,
+      HTJ2K_LOSSLESS_SYNTAX,
       jpegStart(0xc3, 16, size),
       size,
     ),

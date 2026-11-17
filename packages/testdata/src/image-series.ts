@@ -7,7 +7,17 @@
 // what the probe or a statistic should read. Ported from dicom-workspace
 // e2e/fixtures/synthetic-dicom.ts.
 
-import { el, numbers, part10, pixelData16, text, u16le, uid } from './dicom-writer.js';
+import {
+  el,
+  encapsulatedPixelData,
+  numbers,
+  part10,
+  pixelData16,
+  text,
+  u16le,
+  uid,
+} from './dicom-writer.js';
+import { encodeJpegLossless, type JpegLosslessPredictor } from './jpeg-lossless.js';
 import {
   frameOfReferenceUid,
   identityElements,
@@ -20,6 +30,19 @@ import {
 
 const CT_IMAGE_STORAGE = '1.2.840.10008.5.1.4.1.1.2';
 const MR_IMAGE_STORAGE = '1.2.840.10008.5.1.4.1.1.4';
+
+/** JPEG Lossless, Non-Hierarchical, First-Order Prediction (Selection Value 1). */
+export const JPEG_LOSSLESS_SYNTAX = '1.2.840.10008.1.2.4.70';
+/** JPEG Lossless, Non-Hierarchical (Process 14): any of the seven predictors. */
+export const JPEG_LOSSLESS_ANY_SYNTAX = '1.2.840.10008.1.2.4.57';
+
+/**
+ * How a series' pixel data is stored: as it is (Explicit VR Little Endian), or
+ * each slice as a JPEG Lossless frame with the given predictor, under the
+ * first-order transfer syntax for predictor 1 and the general one otherwise.
+ * The values are the same either way.
+ */
+export type ImageEncoding = 'native' | { readonly jpegLossless: JpegLosslessPredictor };
 
 export interface ImageSeriesOptions {
   /** Number of axial slices. Default 12. */
@@ -35,6 +58,8 @@ export interface ImageSeriesOptions {
   readonly origin?: readonly [number, number, number];
   /** Prefix of the generated file names. */
   readonly namePrefix?: string;
+  /** How the pixel data is stored. Default `'native'`: uncompressed. */
+  readonly encoding?: ImageEncoding;
 }
 
 /**
@@ -82,6 +107,8 @@ export interface ImageSeriesSpec {
   readonly rescaleIntercept?: number;
   /** The stored (unsigned 16-bit) value at a column, row and slice. */
   readonly stored: (column: number, row: number, slice: number) => number;
+  /** How the pixel data is stored. Default `'native'`: uncompressed. */
+  readonly encoding?: ImageEncoding;
 }
 
 const SOP_CLASS = { CT: CT_IMAGE_STORAGE, MR: MR_IMAGE_STORAGE } as const;
@@ -93,6 +120,13 @@ const SOP_CLASS = { CT: CT_IMAGE_STORAGE, MR: MR_IMAGE_STORAGE } as const;
 export function writeImageSeries(spec: ImageSeriesSpec): SyntheticFile[] {
   const { study, seriesIndex, rows, columns } = spec;
   const [ox, oy, oz] = spec.origin;
+  const encoding = spec.encoding ?? 'native';
+  const transferSyntax =
+    encoding === 'native'
+      ? undefined
+      : encoding.jpegLossless === 1
+        ? JPEG_LOSSLESS_SYNTAX
+        : JPEG_LOSSLESS_ANY_SYNTAX;
   const files: SyntheticFile[] = [];
   for (let z = 0; z < spec.count; z++) {
     const samples = new Uint16Array(rows * columns);
@@ -106,7 +140,13 @@ export function writeImageSeries(spec: ImageSeriesSpec): SyntheticFile[] {
             el(0x0028, 0x1052, 'DS', numbers([spec.rescaleIntercept])), // RescaleIntercept
             el(0x0028, 0x1053, 'DS', numbers([1])), // RescaleSlope
           ];
-    const bytes = part10(SOP_CLASS[spec.modality], instanceUid(study, seriesIndex, z + 1), [
+    const pixelData =
+      encoding === 'native'
+        ? pixelData16(samples)
+        : encapsulatedPixelData([
+            encodeJpegLossless(samples, columns, rows, { predictor: encoding.jpegLossless }),
+          ]);
+    const elements = [
       ...identityElements(study),
       el(0x0008, 0x0060, 'CS', text(spec.modality)), // Modality
       el(0x0008, 0x103e, 'LO', text(spec.description)), // SeriesDescription
@@ -128,8 +168,14 @@ export function writeImageSeries(spec: ImageSeriesSpec): SyntheticFile[] {
       el(0x0028, 0x1050, 'DS', numbers([spec.window[0]])), // WindowCenter
       el(0x0028, 0x1051, 'DS', numbers([spec.window[1]])), // WindowWidth
       ...rescale,
-      pixelData16(samples),
-    ]);
+      pixelData,
+    ];
+    const bytes = part10(
+      SOP_CLASS[spec.modality],
+      instanceUid(study, seriesIndex, z + 1),
+      elements,
+      transferSyntax,
+    );
     files.push({
       name: `${spec.namePrefix}-${String(z + 1).padStart(3, '0')}.dcm`,
       mimeType: 'application/dicom',
@@ -185,6 +231,7 @@ function imageSeries(kind: Kind, options: ImageSeriesOptions): SyntheticFile[] {
     origin: options.origin ?? [0, 0, 0],
     window: kind.window,
     stored: (x, y, z) => kind.value(x, y, z, size),
+    ...(options.encoding ? { encoding: options.encoding } : {}),
   });
 }
 

@@ -6,6 +6,11 @@ import dicomParser from 'dicom-parser';
 import type { DataSet, Element as DicomElement } from 'dicom-parser';
 import { readTextByCharacterSet } from './character-set.js';
 import { jpegFrameHeader } from './jpeg-header.js';
+import {
+  decodeJpegLosslessFrame,
+  isJpegLosslessSyntax,
+  jpegLosslessProblem,
+} from './jpeg-lossless.js';
 import { describeTransferSyntax, isDctJpegSyntax } from './transfer-syntax.js';
 import { decodeWasmFrame, isWasmTransferSyntax, type DecodedFrame } from './wasm-codecs.js';
 import {
@@ -128,8 +133,11 @@ interface FileContext {
   readonly pixelElement: DicomElement;
   /** Sync (pure-JS) frame codec for a compressed transfer syntax, or null. */
   readonly codec: FrameCodec | null;
-  /** Transfer syntax UID needing an async wasm codec (JPEG/JPEG-LS/JP2K), or null. */
-  readonly wasmTransferSyntax: string | null;
+  /**
+   * Transfer syntax UID needing a codec that is loaded on first use, so async
+   * (JPEG, JPEG Lossless, JPEG-LS, JPEG 2000), or null.
+   */
+  readonly lazyTransferSyntax: string | null;
   /** Byte offset of frame 0's first sample within {@link buffer} (uncompressed only). */
   readonly pixelOffset: number;
 }
@@ -153,9 +161,9 @@ export function parseFile(name: string, buffer: ArrayBuffer): Slice[] {
   if (!setup) return [];
   const { ctx, frames } = setup;
   if (ctx.isDose) return parseDose(ctx, frames);
-  if (ctx.wasmTransferSyntax) {
+  if (ctx.lazyTransferSyntax) {
     throw new UnsupportedDicomError(
-      `Transfer syntax ${ctx.wasmTransferSyntax} requires async decoding; use parseFileAsync`,
+      `Transfer syntax ${ctx.lazyTransferSyntax} requires async decoding; use parseFileAsync`,
       name,
     );
   }
@@ -202,8 +210,8 @@ function setupFile(name: string, buffer: ArrayBuffer): FileSetup | null {
 
   const transferSyntax = dataSet.string('x00020010') ?? '1.2.840.10008.1.2';
   const codec = FRAME_CODECS[transferSyntax] ?? null;
-  const wasm = isWasmTransferSyntax(transferSyntax);
-  if (!codec && !wasm && !UNCOMPRESSED_LE.has(transferSyntax)) {
+  const lazy = isWasmTransferSyntax(transferSyntax) || isJpegLosslessSyntax(transferSyntax);
+  if (!codec && !lazy && !UNCOMPRESSED_LE.has(transferSyntax)) {
     throw new UnsupportedDicomError(
       `Unsupported transfer syntax ${describeTransferSyntax(transferSyntax)}`,
       name,
@@ -259,7 +267,7 @@ function setupFile(name: string, buffer: ArrayBuffer): FileSetup | null {
     isDose,
     pixelElement,
     codec,
-    wasmTransferSyntax: wasm ? transferSyntax : null,
+    lazyTransferSyntax: lazy ? transferSyntax : null,
     pixelOffset: pixelElement.dataOffset,
   };
 
@@ -301,7 +309,7 @@ function parseDose(ctx: FileContext, frames: number): Slice[] {
   };
   const read = <T extends object | number>(value: T | DoseProblem): T =>
     typeof value === 'object' && isDoseProblem(value) ? unread(value.problem) : (value as T);
-  if (ctx.codec || ctx.wasmTransferSyntax) {
+  if (ctx.codec || ctx.lazyTransferSyntax) {
     throw new UnsupportedDicomError('Compressed RT Dose is not supported', ctx.name);
   }
   const { dataSet } = ctx;
@@ -651,36 +659,47 @@ function readFrameSamples(ctx: FileContext, frameIndex: number, count: number): 
   return convertFrame(ctx, raw, count);
 }
 
-/** Read one frame's raw samples, awaiting a wasm codec for compressed syntaxes. */
+/** Read one frame's raw samples, awaiting a codec loaded on first use where one is needed. */
 async function readFrameSamplesAsync(
   ctx: FileContext,
   frameIndex: number,
   count: number,
 ): Promise<FramePixels> {
-  if (!ctx.wasmTransferSyntax) return readFrameSamples(ctx, frameIndex, count);
+  const syntax = ctx.lazyTransferSyntax;
+  if (!syntax) return readFrameSamples(ctx, frameIndex, count);
   const frame = encapsulatedFrame(ctx.dataSet, ctx.pixelElement, frameIndex);
+  const lossless = isJpegLosslessSyntax(syntax);
   // The bundled libjpeg-turbo is the 8-bit build. Say so for a 12-bit stream
   // instead of handing it over to fail, or to decode as something it is not.
-  if (isDctJpegSyntax(ctx.wasmTransferSyntax)) {
+  if (isDctJpegSyntax(syntax)) {
     const precision = jpegFrameHeader(frame)?.precision ?? 8;
     if (precision > 8) {
       throw new UnsupportedDicomError(`${precision}-bit JPEG is not supported`, ctx.name);
     }
   }
+  // The kinds of JPEG Lossless its decoder gets wrong are named, not tried.
+  if (lossless) {
+    const problem = jpegLosslessProblem(frame);
+    if (problem) throw new UnsupportedDicomError(problem, ctx.name);
+  }
   let decoded: DecodedFrame;
   try {
-    decoded = await decodeWasmFrame(ctx.wasmTransferSyntax, frame);
+    decoded = lossless
+      ? await decodeJpegLosslessFrame(frame, ctx.bitsAllocated <= 8 ? 1 : 2)
+      : await decodeWasmFrame(syntax, frame);
   } catch {
-    // A codec throws whatever its wasm build throws, often a bare number.
+    // A codec throws whatever its build throws, often a bare number.
     throw new UnsupportedDicomError(
-      `The pixel data could not be decoded (transfer syntax ${ctx.wasmTransferSyntax})`,
+      `The pixel data could not be decoded (transfer syntax ${syntax})`,
       ctx.name,
     );
   }
-  // A colour codec output (componentCount ≥ 3) is interleaved 8-bit RGB after the
-  // decoder's own colour transform; reduce it to luminance like the colour path.
   if (decoded.componentCount >= 3) {
-    return colorFrameToLuma(decoded.bytes, count, false, asRgb);
+    // The wasm codecs give interleaved 8-bit RGB after their own colour
+    // transform. JPEG Lossless has none: its samples are what the file's
+    // photometric interpretation says they are.
+    const convert = lossless && isYbr(ctx.photometric) ? ybrFullToRgb : asRgb;
+    return colorFrameToLuma(decoded.bytes, count, false, convert);
   }
   const raw = reinterpretSamples(decoded.bytes, ctx.bitsAllocated, ctx.pixelRepresentation);
   return convertFrame(ctx, raw, count);

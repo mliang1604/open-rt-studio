@@ -10,8 +10,6 @@
 const UNSUPPORTED_NAMES: Readonly<Record<string, string>> = {
   '1.2.840.10008.1.2.1.99': 'Deflated Explicit VR Little Endian',
   '1.2.840.10008.1.2.2': 'Explicit VR Big Endian',
-  '1.2.840.10008.1.2.4.57': 'JPEG Lossless',
-  '1.2.840.10008.1.2.4.70': 'JPEG Lossless',
   '1.2.840.10008.1.2.4.92': 'JPEG 2000 Multi-component',
   '1.2.840.10008.1.2.4.93': 'JPEG 2000 Multi-component',
   '1.2.840.10008.1.2.4.100': 'MPEG-2 video',
@@ -38,7 +36,8 @@ export function isDctJpegSyntax(transferSyntax: string): boolean {
 
 /**
  * A transfer syntax UID with its name when it is a known one this package
- * cannot decode: `1.2.840.10008.1.2.4.70, JPEG Lossless`. Otherwise the UID.
+ * cannot decode: `1.2.840.10008.1.2.4.201, High-Throughput JPEG 2000`.
+ * Otherwise the UID.
  */
 export function describeTransferSyntax(transferSyntax: string): string {
   const name = UNSUPPORTED_NAMES[transferSyntax];

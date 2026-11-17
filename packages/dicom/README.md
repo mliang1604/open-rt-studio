@@ -21,9 +21,13 @@ with Node's own test runner, to prove that Node can import it.
 
 - Parsing (`parseFile`, `parseFileAsync`) on top of `dicom-parser`, with pixel
   decoding for uncompressed data, RLE, and JPEG, JPEG-LS and JPEG 2000 through
-  WebAssembly codecs that load on first use. JPEG Lossless and 12-bit JPEG are
-  not decoded: such a file raises an `UnsupportedDicomError` that names the
-  file and says why (`reason` is the same without the file name)
+  WebAssembly codecs that load on first use. JPEG Lossless (both transfer
+  syntaxes) is decoded by `jpeg-lossless-decoder-js`, loaded on first use too;
+  `jpeg-lossless.ts` says which streams that decoder gets wrong and how each
+  is kept from it. 12-bit JPEG, and JPEG Lossless with restart markers, a
+  point transform or predictor 7 at 16 bits, are not decoded: such a file
+  raises an `UnsupportedDicomError` that names the file and says why
+  (`reason` is the same without the file name)
 - Metadata and a tag dictionary, series grouping, slice ordering, volume
   building, photometric handling, the patient catalog
 - RT structure sets: reading, contour rasterization, label volumes, marching

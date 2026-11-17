@@ -26,6 +26,7 @@
     "@cornerstonejs/codec-charls": "^1.2.3",
     "@cornerstonejs/codec-libjpeg-turbo-8bit": "^1.2.2",
     "@cornerstonejs/codec-openjpeg": "^1.3.0",
-    "dicom-parser": "^1.8.21"
+    "dicom-parser": "^1.8.21",
+    "jpeg-lossless-decoder-js": "^2.1.2"
   }
 }

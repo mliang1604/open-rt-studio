@@ -23,6 +23,15 @@ const files = [...syntheticCtSeries(12, 32), syntheticRtStruct(12)];
 | `syntheticBeamDoses`           | One plan of two beams whose dose series holds three objects: the plan's dose and a dose to each beam. The doses are `syntheticBeamDoseGy` and `syntheticBeamPlanDoseGy`, the plan's being the two beams' added up. |
 | `syntheticCharacterSetPatient` | A CT and a structure set of a patient whose name is outside ASCII: `SYNTHETIC_UTF8_PATIENT` (ISO_IR 192) or `SYNTHETIC_LATIN1_PATIENT` (ISO_IR 100). Any patient given a `characterSet` is written in it.          |
 
+`syntheticCtSeries` and `syntheticMrSeries` store their slices uncompressed
+unless asked for `encoding: { jpegLossless: predictor }`, which writes each as
+a JPEG Lossless frame holding the same values, under the transfer syntax for
+that predictor. The encoder (`encodeJpegLossless`) is this package's own,
+written from ITU-T T.81: the decoder the application uses is somebody else's,
+and is tried here on streams it did not make. `syntheticUnreadableFiles` are
+two files the application refuses, with the reason for each in
+`SYNTHETIC_UNREADABLE`.
+
 `syntheticThoraxPatient` is the one made for looking at: a geometric thorax
 phantom (body, lungs, heart, spine, a target) with a planning CT in Hounsfield
 units, an MR, a matching structure set, a dose on the target and a follow-up

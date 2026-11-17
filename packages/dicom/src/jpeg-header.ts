@@ -53,3 +53,46 @@ export function jpegFrameHeader(bytes: Uint8Array): JpegFrameHeader | null {
   }
   return null;
 }
+
+/**
+ * What a JPEG stream says before its first scan, beyond the frame header:
+ * read to tell what a lossless stream asks of its decoder.
+ */
+export interface JpegScanHeader {
+  /** Samples between restart markers (DRI), 0 when there are none. */
+  readonly restartInterval: number;
+  /** The scan's Ss: in a lossless stream, the predictor, 1 to 7. */
+  readonly predictor: number;
+  /** The scan's Al: in a lossless stream, the point transform. */
+  readonly pointTransform: number;
+}
+
+/**
+ * Read up to the first scan header (SOS) of a JPEG stream. Returns null when
+ * the bytes are not a JPEG stream or end before a scan.
+ */
+export function jpegScanHeader(bytes: Uint8Array): JpegScanHeader | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null; // no SOI
+  let restartInterval = 0;
+  let at = 2;
+  while (at + 4 <= bytes.length) {
+    if (bytes[at] !== 0xff) return null;
+    const marker = bytes[at + 1];
+    if (marker === 0xff) {
+      at++; // a fill byte before the marker
+      continue;
+    }
+    if (marker === 0xd9) return null; // the image ends before a scan
+    const length = (bytes[at + 2] << 8) | bytes[at + 3];
+    if (length < 2 || at + 2 + length > bytes.length) return null;
+    if (marker === 0xdd && length >= 4) restartInterval = (bytes[at + 4] << 8) | bytes[at + 5];
+    if (marker === 0xda) {
+      const components = bytes[at + 4];
+      const rest = at + 5 + 2 * components; // Ss, Se, Ah and Al
+      if (rest + 3 > at + 2 + length) return null;
+      return { restartInterval, predictor: bytes[rest], pointTransform: bytes[rest + 2] & 0x0f };
+    }
+    at += 2 + length;
+  }
+  return null;
+}

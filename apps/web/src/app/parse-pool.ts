@@ -11,7 +11,7 @@ export type LoadProgress = (loaded: number, total: number) => void;
 /** A file of a batch that could not be read, and why. */
 export interface SkippedFile {
   readonly name: string;
-  /** Why, without the file's name: "Unsupported transfer syntax …, JPEG Lossless". */
+  /** Why, without the file's name: "Unsupported transfer syntax …, JPEG XL". */
   readonly reason: string;
 }
 

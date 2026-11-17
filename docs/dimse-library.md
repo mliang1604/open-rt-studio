@@ -139,9 +139,10 @@ already do, at the cost of DCMTK having to be installed beside the server.
 ## One more thing it would bring
 
 `dcmjs-dimse` transcodes with `dcmjs-codecs`, by the same author and also
-MIT, which decodes JPEG Lossless (Process 14, Selection Value 1). That is the
-syntax the viewer cannot read yet (#183). It is a separate decision, and the
-codecs were not evaluated here beyond their licence and that they exist.
+MIT, which decodes JPEG Lossless (Process 14, Selection Value 1). When this
+was written the viewer could not read that syntax; since #183 it does, with
+`jpeg-lossless-decoder-js`. The codecs were not evaluated here beyond their
+licence and that they exist.
 
 ## Not verified
 

@@ -45,7 +45,11 @@ COPY packages/testdata/package.json packages/testdata/
 COPY services/server/package.json services/server/
 COPY apps/web/package.json apps/web/
 COPY apps/desktop/package.json apps/desktop/
-RUN npm ci --omit=dev --workspace @open-rt-studio/server --ignore-scripts --no-audit --no-fund
+RUN npm ci --omit=dev --workspace @open-rt-studio/server --ignore-scripts --no-audit --no-fund \
+    # jpeg-lossless-decoder-js publishes its tests with their sample DICOM
+    # files, and a build tool's binary as an optional dependency. Neither is
+    # anything the server runs, and the image holds no DICOM file of anyone's.
+    && rm -rf node_modules/jpeg-lossless-decoder-js/tests node_modules/@rollup
 
 FROM node:${NODE_VERSION}-bookworm-slim
 ENV NODE_ENV=production
