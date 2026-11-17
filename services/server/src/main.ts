@@ -5,7 +5,8 @@
 // The server as a process: configuration from the environment, logs on
 // standard output, and a clean stop on SIGTERM or SIGINT. With `account` as
 // its first argument it is the command that makes and changes accounts; with
-// `health`, the one that asks the running server whether it is well.
+// `health`, the one that asks the running server whether it is well; with
+// `dicom-echo`, the one that asks another DICOM system whether it is there.
 
 import { mkdirSync } from 'node:fs';
 import { userInfo } from 'node:os';
@@ -15,6 +16,7 @@ import { runAccountCommand, terminalPasswords } from './account-cli.js';
 import { openSqliteAccountStore } from './accounts/account-store.js';
 import { createAccounts } from './accounts/accounts.js';
 import { ConfigError, ENVIRONMENT_VARIABLES, loadConfig, type ServerConfig } from './config.js';
+import { isAeTitle } from './dimse/sop-classes.js';
 import { askHealth } from './health-check.js';
 import { createLogger, errorFields } from './logger.js';
 import { ACCOUNTS_FILE, openAudit, startServer } from './server.js';
@@ -73,6 +75,45 @@ if (process.argv[2] === 'account') {
     audit?.close();
   }
   process.exit(code);
+}
+
+if (process.argv[2] === 'dicom-echo') {
+  // C-ECHO to another system, under this server's AE title: is it there, and
+  // does it let this server in? 0 when it answers, 1 when it does not.
+  const [host, portText = '', calledAeTitle = ''] = process.argv.slice(3);
+  const port = /^\d{1,5}$/.test(portText) ? Number(portText) : 0;
+  if (!host || port < 1 || port > 65535 || !isAeTitle(calledAeTitle)) {
+    process.stderr.write('Usage: dicom-echo <host> <port> <AE title of the other system>\n');
+    process.exit(2);
+  }
+  const { dicomEcho } = await import('./dimse/echo.js');
+  const result = await dicomEcho({
+    host,
+    port,
+    calledAeTitle,
+    callingAeTitle: config.dicomAeTitle,
+  });
+  const where = `${calledAeTitle} at ${host}:${port}`;
+  switch (result.outcome) {
+    case 'ok':
+      process.stdout.write(`${where} answered.\n`);
+      break;
+    case 'rejected':
+      process.stderr.write(
+        `${where} refused the association. It may not know this server's AE title, ` +
+          `${config.dicomAeTitle}, or may go by another title itself.\n`,
+      );
+      break;
+    case 'unreachable':
+      process.stderr.write(`No DICOM system answered at ${host}:${port}.\n`);
+      break;
+    case 'failed':
+      process.stderr.write(
+        `${where} answered the echo with status 0x${result.status.toString(16).padStart(4, '0')}.\n`,
+      );
+      break;
+  }
+  process.exit(result.outcome === 'ok' ? 0 : 1);
 }
 
 const logger = createLogger({ level: config.logLevel });

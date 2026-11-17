@@ -67,6 +67,9 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_TLS_CERT: ' /etc/open-rt-studio/cert.pem ',
       OPEN_RT_STUDIO_TLS_KEY: '/etc/open-rt-studio/key.pem',
       OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS: '365',
+      OPEN_RT_STUDIO_DICOM_PORT: '11112',
+      OPEN_RT_STUDIO_DICOM_AE_TITLE: ' ORS ',
+      OPEN_RT_STUDIO_DICOM_CALLERS: 'PLANNING, Linac 2,PLANNING',
     });
     // Port 0 asks the operating system for a free port; it is a valid setting.
     expect(config).toEqual({
@@ -82,7 +85,41 @@ describe('resolveConfig', () => {
       tlsCert: '/etc/open-rt-studio/cert.pem',
       tlsKey: '/etc/open-rt-studio/key.pem',
       auditRetentionDays: 365,
+      dicomPort: 11112,
+      dicomAeTitle: 'ORS',
+      dicomCallers: ['PLANNING', 'Linac 2'],
     });
+  });
+
+  it('has no DICOM listener unless it is given a port, and lets no caller in unless told to', () => {
+    expect(resolveConfig(undefined)).toMatchObject({
+      dicomPort: null,
+      dicomAeTitle: 'OPENRTSTUDIO',
+      dicomCallers: [],
+    });
+    expect(
+      resolveConfig({ dicomPort: 0, dicomAeTitle: 'ORS', dicomCallers: ['A', ' B '] }),
+    ).toMatchObject({ dicomPort: 0, dicomAeTitle: 'ORS', dicomCallers: ['A', 'B'] });
+    expect(resolveConfig({ dicomPort: 104 }, { OPEN_RT_STUDIO_DICOM_PORT: '' }).dicomPort).toBe(
+      104,
+    );
+
+    const title = '1 to 16 printable ASCII characters, with no backslash';
+    expect(() => resolveConfig({ dicomPort: 70_000 })).toThrow(
+      new ConfigError(
+        'The config file\'s "dicomPort" must be a whole number from 0 to 65535, or null for no DICOM listener.',
+      ),
+    );
+    expect(() =>
+      resolveConfig(undefined, { OPEN_RT_STUDIO_DICOM_AE_TITLE: 'SEVENTEEN-LETTERS' }),
+    ).toThrow(new ConfigError(`OPEN_RT_STUDIO_DICOM_AE_TITLE must be an AE title: ${title}.`));
+    expect(() =>
+      resolveConfig(undefined, { OPEN_RT_STUDIO_DICOM_CALLERS: 'GOOD,BAD\\ONE' }),
+    ).toThrow(
+      new ConfigError(`OPEN_RT_STUDIO_DICOM_CALLERS must be a list of AE titles, each ${title}.`),
+    );
+    expect(() => resolveConfig({ dicomCallers: 'PLANNING' })).not.toThrow();
+    expect(() => resolveConfig({ dicomCallers: [7] })).toThrow(ConfigError);
   });
 
   it('keeps every audit record unless it is given a number of days', () => {
@@ -214,7 +251,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey, auditRetentionDays.',
+        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey, auditRetentionDays, dicomPort, dicomAeTitle, dicomCallers.',
       ),
     );
   });

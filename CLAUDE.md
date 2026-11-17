@@ -45,7 +45,11 @@ application. Never commit patient data or real DICOM files
   server: accounts, roles and sessions. A route answers only a logged-in
   user unless it sets `access` (`public` or `admin`); leave it out for
   anything that reads or changes what the server holds. Account names,
-  passwords and tokens are never logged. `src/audit` is who did what: the
+  passwords and tokens are never logged. `src/dimse` is DICOM networking: a listener that
+  is off unless it is given a port, lets in the calling AE titles on a list,
+  and keeps a received data set as it came; only `src/dimse/library.ts`
+  imports the DIMSE library, and the listener logs AE titles and outcomes,
+  never a UID. `src/audit` is who did what: the
   host writes an audit record for every request unless the route says
   `audit: false`; a new route names its `audit` action, tells the record
   whose data it touched with `request.audit(...)`, and gets a call in

@@ -4,6 +4,7 @@
 
 import { readFileSync } from 'node:fs';
 
+import { isAeTitle } from './dimse/sop-classes.js';
 import { LOG_LEVELS, type LogLevel } from './logger.js';
 
 /** What the server is told at start. Every value has a default. */
@@ -56,6 +57,21 @@ export interface ServerConfig {
    * cleared unless this is set.
    */
   readonly auditRetentionDays: number | null;
+  /**
+   * The port other systems reach the server on by DICOM (C-ECHO and C-STORE),
+   * at the address `host`. Null, the default: there is no DICOM listener. 0
+   * lets the operating system choose a free port.
+   */
+  readonly dicomPort: number | null;
+  /** The AE title other systems must address the server by. */
+  readonly dicomAeTitle: string;
+  /**
+   * The calling AE titles that are let in. None by default, which lets
+   * nobody in. An AE title is a name and not a proof of who is calling:
+   * whoever can reach the port and gives a name on this list may store
+   * objects, with no login.
+   */
+  readonly dicomCallers: readonly string[];
 }
 
 export const AUTH_MODES = ['accounts', 'none'] as const;
@@ -74,6 +90,9 @@ export const DEFAULT_CONFIG: ServerConfig = {
   tlsCert: null,
   tlsKey: null,
   auditRetentionDays: null,
+  dicomPort: null,
+  dicomAeTitle: 'OPENRTSTUDIO',
+  dicomCallers: [],
 };
 
 /** The environment variable naming a JSON config file. */
@@ -93,6 +112,9 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   tlsCert: 'OPEN_RT_STUDIO_TLS_CERT',
   tlsKey: 'OPEN_RT_STUDIO_TLS_KEY',
   auditRetentionDays: 'OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS',
+  dicomPort: 'OPEN_RT_STUDIO_DICOM_PORT',
+  dicomAeTitle: 'OPEN_RT_STUDIO_DICOM_AE_TITLE',
+  dicomCallers: 'OPEN_RT_STUDIO_DICOM_CALLERS',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -101,6 +123,8 @@ export class ConfigError extends Error {
 }
 
 type Environment = Readonly<Record<string, string | undefined>>;
+
+const AE_TITLE_RULE = '1 to 16 printable ASCII characters, with no backslash';
 
 /** A checked value, or what is wrong with it (the end of a sentence). */
 type Checked<T> = { readonly value: T } | { readonly wrong: string };
@@ -170,6 +194,30 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 36_500)
         ? { value }
         : { wrong: 'must be a whole number of days from 1 to 36500, or null to keep every record' },
+    dicomPort: (value) =>
+      value === null ||
+      (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 65535)
+        ? { value }
+        : { wrong: 'must be a whole number from 0 to 65535, or null for no DICOM listener' },
+    dicomAeTitle: (value) =>
+      typeof value === 'string' && isAeTitle(value.trim())
+        ? { value: value.trim() }
+        : { wrong: `must be an AE title: ${AE_TITLE_RULE}` },
+    dicomCallers: (value) => {
+      // The environment gives one text, with commas between the titles.
+      const given = typeof value === 'string' ? value.split(',') : value;
+      const wrong = { wrong: `must be a list of AE titles, each ${AE_TITLE_RULE}` };
+      if (!Array.isArray(given)) return wrong;
+      const titles: string[] = [];
+      for (const one of given as unknown[]) {
+        if (typeof one !== 'string') return wrong;
+        const title = one.trim();
+        if (title === '') continue;
+        if (!isAeTitle(title)) return wrong;
+        if (!titles.includes(title)) titles.push(title);
+      }
+      return { value: titles };
+    },
   };
 
 /** Whether a text is a web origin as a browser writes one in an `Origin` header. */
@@ -194,6 +242,7 @@ const NUMERIC: ReadonlySet<keyof ServerConfig> = new Set([
   'maxUploadBytes',
   'jobConcurrency',
   'auditRetentionDays',
+  'dicomPort',
 ]);
 
 const KEYS = Object.keys(DEFAULT_CONFIG) as (keyof ServerConfig)[];

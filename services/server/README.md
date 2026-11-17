@@ -267,8 +267,74 @@ address, and a certificate the browser trusts; a self-signed one has to be
 trusted in the browser first, or the viewer can only say that the server
 could not be reached.
 
-Not there: TLS for DIMSE (with #49), a certificate re-read without a
-restart, client certificates.
+Not there: TLS for DICOM associations (#57), a certificate re-read without
+a restart, client certificates.
+
+## DICOM
+
+Other systems can verify that the server is there (C-ECHO) and send it
+objects (C-STORE). The listener is off unless it is given a port:
+
+```sh
+OPEN_RT_STUDIO_DICOM_PORT=11112 \
+OPEN_RT_STUDIO_DICOM_AE_TITLE=OPENRTSTUDIO \
+OPEN_RT_STUDIO_DICOM_CALLERS=PLANNING,LINAC2 \
+npm start -w @open-rt-studio/server
+```
+
+- **Who is let in** is decided by the AE title the caller gives, which must
+  be on `dicomCallers`, and by the AE title it addresses, which must be the
+  server's (`dicomAeTitle`). The list is empty by default, and an empty list
+  lets nobody in (the log says `dicom-no-callers`).
+- **DICOM has no login.** An AE title is a name, not a proof of who is
+  calling: whoever can reach the port and gives a name on the list can store
+  objects, accounts or no accounts. The listener is on the server's own
+  address (`host`), which is this machine alone by default. On any other
+  address the log says `dicom-without-login`; reach for a network that only
+  the systems on the list are on. Associations are not encrypted (#57).
+- **What it takes**: CT, MR, PET and nuclear medicine images (the enhanced
+  kinds too), secondary captures, RT Image, RT Dose, RT Structure Set, RT
+  Plan, RT Ion Plan, and both kinds of registration
+  (`src/dimse/sop-classes.ts`). Anything else is refused when the
+  association is made. Uncompressed, RLE, JPEG, JPEG Lossless, JPEG-LS and
+  JPEG 2000 are taken, uncompressed for preference; nothing is transcoded.
+- **What it keeps** is the data set exactly as it arrived, behind a file
+  header of the server's own, and it goes through [ingest](#ingest) like an
+  upload. An object no larger than `maxUploadBytes` is taken.
+- **Limits**: 32 associations at once, and a connection that passes nothing
+  either way for two minutes is closed.
+- **An object it already has** is answered with success and not written
+  again, also when it was uploaded as a file before: the two differ in their
+  file headers and not in their data. Other content under a UID it has is
+  refused (status `0111`, duplicate SOP instance), like an upload.
+
+| Answer to a C-STORE | When                                                                         |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `0000` success      | Stored, or already there with the same data                                  |
+| `0111`              | The server holds other content under this SOP Instance UID                   |
+| `0110`              | The object puts a study, series or instance the server knows somewhere else  |
+| `A700`              | Larger than the server takes, or the server is stopping                      |
+| `A900`              | The data set is not the object the request named                             |
+| `C000`              | The data cannot be read as a DICOM object, or lacks what an object must have |
+
+To ask another system whether it is there and lets this server in:
+
+```sh
+npm start -w @open-rt-studio/server -- dicom-echo 192.0.2.10 104 THEIR_AE
+```
+
+It calls under the server's AE title and exits with 0 when the other system
+answers. The other system has to know that title.
+
+Not there yet: sending (#50), query and retrieve (#51, #52), AE titles
+managed from the client (#53), TLS (#57) and audit records for associations
+(#212). Until #212, who sent what is not in the audit log; the file header
+of each received object names the AE title that sent it.
+
+The library underneath is `dcmjs-dimse`, which only `src/dimse/library.ts`
+imports; [docs/dimse-library.md](../../docs/dimse-library.md) says why it
+was chosen, what was found by running it, and why the listener is Node's own
+and not the library's.
 
 ## In a container
 
@@ -308,7 +374,9 @@ health`), which asks the server with the same settings, on the same
   outside; CI runs it (the `Container` job). It needs Docker.
 
 Not there yet: the image is not published anywhere, and the compose file has
-no PostgreSQL (#44) and no DICOM port (#49).
+no PostgreSQL (#44) and does not turn the [DICOM](#dicom) listener on: that
+takes `OPEN_RT_STUDIO_DICOM_PORT` and `_CALLERS` in its `environment`, a
+second line under `ports`, and a network you trust the callers on.
 
 ## Settings
 
@@ -331,6 +399,10 @@ code 2).
 | `tlsCert`            | `OPEN_RT_STUDIO_TLS_CERT`             | none        | File with the server's certificate (PEM, any intermediates after it). With `tlsKey`, the server speaks HTTPS; see [HTTPS](#https)                                                    |
 | `tlsKey`             | `OPEN_RT_STUDIO_TLS_KEY`              | none        | File with the certificate's private key (PEM, no passphrase)                                                                                                                         |
 | `auditRetentionDays` | `OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS` | none        | How many days an audit record is kept. Without it every record is kept for good; see [The audit log](#the-audit-log)                                                                 |
+
+| `dicomPort` | `OPEN_RT_STUDIO_DICOM_PORT` | none | Port for DICOM associations, at `host`. Without one there is no DICOM listener; see [DICOM](#dicom) |
+| `dicomAeTitle` | `OPEN_RT_STUDIO_DICOM_AE_TITLE` | `OPENRTSTUDIO` | The AE title other systems must address, and the one the server calls under |
+| `dicomCallers` | `OPEN_RT_STUDIO_DICOM_CALLERS` | none | The calling AE titles that are let in. A list in the file; separated by commas in the environment. None lets nobody in |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -432,6 +504,12 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
 - `src/api/`: the routes of the API (`api-routes.ts`), the JSON Schemas of
   its answers (`schemas.ts`) and the OpenAPI document made from both
   (`openapi.ts`).
+- `src/dimse/`: DICOM networking (#49). `listener.ts` is the listener
+  (C-ECHO and C-STORE), `echo.ts` asks another system for a C-ECHO,
+  `part10.ts` writes the file header in front of a received data set, and
+  `sop-classes.ts` is what the listener agrees to. `library.ts` is the only
+  file that imports the DIMSE library (a lint rule holds the rest to that).
+  The server loads the folder only when it has a DICOM port.
 - `src/store/`: where DICOM instances are kept (#42). `DicomStore` is the
   interface (`put`, `get` as a stream, `stat`, `exists`, `delete`, `verify`,
   all by SOP Instance UID); `openFileStore(directory)` is the one on disk and
@@ -697,6 +775,8 @@ everything the API can be asked, rightly and wrongly, to synthetic data with
 known identifiers, and then searches the whole log, at its most talkative,
 for each of them: Patient ID, name, every UID, account names, passwords,
 tokens, what was searched for. When you add a route, add a call to it there.
+It sends the same objects by DICOM too. The DICOM listener logs AE titles,
+which name systems, and what came of each object; nothing of the object.
 Who did what belongs in [the audit log](#the-audit-log).
 
 ## Tests
@@ -705,3 +785,6 @@ Who did what belongs in [the audit log](#the-audit-log).
 They use ports of `127.0.0.1` that the operating system hands out, and
 `main.spec.ts` runs the built server as a process and stops it with a signal
 (skipped on Windows, which has no `SIGTERM` to catch).
+`src/dimse/dcmtk.spec.ts` tries the DICOM listener against DCMTK's
+command-line tools as another system; it is skipped where DCMTK is not
+installed, and CI's `DIMSE interop` job installs it.

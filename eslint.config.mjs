@@ -73,6 +73,11 @@ export default tseslint.config(
               group: ['@open-rt-studio/render', '@open-rt-studio/web'],
               message: 'The server draws nothing: packages/render and the web client stay out.',
             },
+            {
+              group: ['dcmjs-dimse', 'dcmjs', 'dcmjs-codecs'],
+              message:
+                'Only src/dimse/library.ts imports the DIMSE library (docs/dimse-library.md).',
+            },
           ],
         },
       ],

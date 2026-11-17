@@ -14,6 +14,7 @@ import { syntheticCtSeries } from '@open-rt-studio/testdata';
 
 import { openSqliteAuditStore } from './audit/audit-store.js';
 import { createAuditLog } from './audit/audit.js';
+import { LISTENER_AE, PEER_AE, sendFiles } from './dimse/testing/peer.js';
 import { testCertificate } from './tls-testing.js';
 import { SERVER_VERSION } from './version.js';
 
@@ -368,6 +369,92 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
     server.child.kill('SIGTERM');
     await server.exited;
     expect(await run(asked, ['health']).exited).toBe(1);
+  }, 20_000);
+
+  /** The port the process says it listens on for DICOM. */
+  const dicomPort = async (server: Running): Promise<number> => {
+    const line = await vi.waitFor(
+      () => {
+        const found = server.log().find((entry) => entry['event'] === 'dicom-listening');
+        if (!found) throw new Error(`no DICOM listener yet: ${server.stderr()}`);
+        return found;
+      },
+      { timeout: 10_000, interval: 25 },
+    );
+    return line['port'] as number;
+  };
+
+  it('has no DICOM listener unless it is given a port', async () => {
+    const server = run(OPEN);
+    await listeningPort(server);
+    server.child.kill('SIGTERM');
+    expect(await server.exited).toBe(0);
+    expect(server.log().some((entry) => String(entry['event']).startsWith('dicom'))).toBe(false);
+  }, 20_000);
+
+  it('takes objects by DICOM from a caller on its list, and serves them over HTTP', async () => {
+    const server = run({
+      ...OPEN,
+      OPEN_RT_STUDIO_DICOM_PORT: '0',
+      OPEN_RT_STUDIO_DICOM_AE_TITLE: LISTENER_AE,
+      OPEN_RT_STUDIO_DICOM_CALLERS: PEER_AE,
+    });
+    const port = await listeningPort(server);
+    const dicom = await dicomPort(server);
+    expect(server.log().find((entry) => entry['event'] === 'dicom-listening')).toMatchObject({
+      host: '127.0.0.1',
+      aeTitle: LISTENER_AE,
+      callers: 1,
+    });
+
+    const files = syntheticCtSeries(3, 16);
+    const paths: string[] = [];
+    for (const file of files) {
+      paths.push(join(temporary, file.name));
+      await writeFile(paths.at(-1)!, file.bytes);
+    }
+    const sent = await sendFiles(dicom, paths);
+    expect(sent.statuses).toEqual([0, 0, 0]);
+
+    const counted = await fetch(`http://127.0.0.1:${port}/api/v1/patients`);
+    const patients = (await counted.json()) as { items: unknown[] };
+    expect(patients.items).toHaveLength(1);
+
+    // The echo command of another server, which this one knows, is answered.
+    const asking = { OPEN_RT_STUDIO_DICOM_AE_TITLE: PEER_AE };
+    const echoed = run(asking, ['dicom-echo', '127.0.0.1', String(dicom), LISTENER_AE]);
+    expect(await echoed.exited).toBe(0);
+    expect(echoed.stdout()).toBe(`${LISTENER_AE} at 127.0.0.1:${dicom} answered.\n`);
+    // One it does not know is refused, and told what to look at.
+    const stranger = run({}, ['dicom-echo', '127.0.0.1', String(dicom), LISTENER_AE]);
+    expect(await stranger.exited).toBe(1);
+    expect(stranger.stderr()).toContain('refused the association');
+    expect(stranger.stderr()).toContain('OPENRTSTUDIO');
+
+    server.child.kill('SIGTERM');
+    expect(await server.exited).toBe(0);
+    // With the listener gone, nothing answers.
+    const nobody = run(asking, ['dicom-echo', '127.0.0.1', String(dicom), LISTENER_AE]);
+    expect(await nobody.exited).toBe(1);
+    expect(nobody.stderr()).toBe(`No DICOM system answered at 127.0.0.1:${dicom}.\n`);
+  }, 30_000);
+
+  it('says what the echo command takes', async () => {
+    for (const args of [[], ['127.0.0.1'], ['127.0.0.1', 'port', 'AE'], ['127.0.0.1', '104', '']]) {
+      const asked = run({}, ['dicom-echo', ...args]);
+      expect(await asked.exited).toBe(2);
+      expect(asked.stderr()).toBe(
+        'Usage: dicom-echo <host> <port> <AE title of the other system>\n',
+      );
+    }
+  }, 20_000);
+
+  it('exits with 1 when it cannot have its DICOM port, and leaves nothing listening', async () => {
+    const first = run({ ...OPEN, OPEN_RT_STUDIO_DICOM_PORT: '0' });
+    const taken = await dicomPort(first);
+    const second = run({ ...OPEN, OPEN_RT_STUDIO_DICOM_PORT: String(taken) });
+    expect(await second.exited).toBe(1);
+    expect(second.log().at(-1)).toMatchObject({ level: 'error', event: 'start-failed' });
   }, 20_000);
 
   it('does not start on a wrong setting: it says which, and exits with 2', async () => {

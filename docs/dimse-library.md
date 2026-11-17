@@ -200,8 +200,19 @@ receiver in processes of their own on one machine; they are not tests.
 - The Part 10 header in front of a received data set is ours to write. The
   proof writes the least an ingest needs; #49 has to add the Implementation
   Class UID, which the standard requires.
-- It is a development dependency for now, pinned to 0.3.4: nothing the
-  server runs imports it until #49.
+- It was a development dependency, pinned to 0.3.4, until the listener of
+  #49 imported it.
+
+### What #49 did with this
+
+The listener (`services/server/src/dimse/listener.ts`) is Node's own, at the
+server's address, and loads the library only when it has a port. It gathers
+an object in memory up to the size an upload may have (`maxUploadBytes`),
+which bounds what one association can make it hold at a time, and answers
+"out of resources" for more. It writes the Implementation Class UID. The
+server's image leaves `adm-zip` out, and the container check runs the
+library in the image without it. The DCMTK tests are now of the listener
+itself; the TLS ones went with the proof, and come back with #57.
 
 ## One more thing it would bring
 
