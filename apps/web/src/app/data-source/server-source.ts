@@ -269,6 +269,12 @@ export const AUDIT_ACTIONS = [
     'audit-read',
     'audit-export',
     'audit-clear',
+    'dicom-settings-read',
+    'dicom-settings-change',
+    'dicom-remote-add',
+    'dicom-remote-change',
+    'dicom-remote-remove',
+    'dicom-echo',
     'request',
   ],
 ] as const;
@@ -282,6 +288,44 @@ export interface ServerAccount {
   readonly disabled: boolean;
   /** ISO 8601. */
   readonly createdAt: string;
+}
+
+/** How a server is reached by DICOM. */
+export interface DicomLocal {
+  /** Whether it listens for DICOM associations. */
+  readonly enabled: boolean;
+  readonly port: number;
+  /** The AE title it is addressed by, and calls under. */
+  readonly aeTitle: string;
+}
+
+/** Another system a server knows, without the server's own name for it. */
+export interface DicomRemoteInput {
+  readonly name: string;
+  readonly aeTitle: string;
+  /** Where it listens; null, with the port, for a system that only calls. */
+  readonly host: string | null;
+  readonly port: number | null;
+  /** Whether it may send objects to the server. */
+  readonly mayStore: boolean;
+}
+
+export interface DicomRemote extends DicomRemoteInput {
+  readonly id: string;
+}
+
+/** A server's DICOM settings, and where it listens now. */
+export interface DicomState {
+  readonly local: DicomLocal;
+  readonly remotes: readonly DicomRemote[];
+  readonly listening: { readonly host: string; readonly port: number } | null;
+}
+
+/** What came of asking a system for a C-ECHO. */
+export interface DicomEcho {
+  readonly outcome: 'ok' | 'rejected' | 'unreachable' | 'failed';
+  /** The status of an echo that failed. */
+  readonly status: number | null;
 }
 
 /** What to change of an account. What is left out stays as it is. */
@@ -682,6 +726,47 @@ export class ServerSource implements DataSource {
   /** Remove an account, and end its logins. */
   async removeAccount(name: string): Promise<void> {
     await this.send('DELETE', `/accounts/${encodeURIComponent(name)}`);
+  }
+
+  /**
+   * Whether the server's DICOM settings are this user's: an administrator's,
+   * or anyone's on a server without accounts.
+   */
+  readonly mayManageDicom = computed(() => {
+    const login = this.loginState();
+    return login.kind === 'none' || (login.kind === 'in' && login.role === 'admin');
+  });
+
+  /** How the server is reached by DICOM, and the systems it knows. */
+  dicomState(signal?: AbortSignal): Promise<DicomState> {
+    return this.json<DicomState>('/dicom', signal);
+  }
+
+  /** Change how the server is reached by DICOM. It takes effect at once. */
+  async setDicomLocal(local: DicomLocal): Promise<DicomState> {
+    return (await (await this.send('PUT', '/dicom/local', local)).json()) as DicomState;
+  }
+
+  /** Add a system the server knows. */
+  async addDicomRemote(remote: DicomRemoteInput): Promise<DicomRemote> {
+    return (await (await this.send('POST', '/dicom/remotes', remote)).json()) as DicomRemote;
+  }
+
+  /** Replace what the server knows of a system. */
+  async changeDicomRemote(id: string, remote: DicomRemoteInput): Promise<DicomRemote> {
+    const path = `/dicom/remotes/${encodeURIComponent(id)}`;
+    return (await (await this.send('PUT', path, remote)).json()) as DicomRemote;
+  }
+
+  /** Have the server forget a system. */
+  async removeDicomRemote(id: string): Promise<void> {
+    await this.send('DELETE', `/dicom/remotes/${encodeURIComponent(id)}`);
+  }
+
+  /** Have the server ask a system whether it is there (C-ECHO). */
+  async echoDicomRemote(id: string): Promise<DicomEcho> {
+    const path = `/dicom/remotes/${encodeURIComponent(id)}/echo`;
+    return (await (await this.send('POST', path)).json()) as DicomEcho;
   }
 
   /**

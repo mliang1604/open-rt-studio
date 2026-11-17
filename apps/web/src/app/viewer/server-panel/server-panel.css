@@ -38,6 +38,16 @@
   justify-content: space-between;
 }
 
+/* What the card offers goes onto a second line where it is narrow, each
+   button whole. */
+.server-actions {
+  flex-wrap: wrap;
+}
+
+.server-actions button {
+  white-space: nowrap;
+}
+
 h2 {
   margin: 0;
   font-size: 13px;

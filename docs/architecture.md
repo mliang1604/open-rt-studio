@@ -710,6 +710,14 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   server's, and goes through ingest. DICOM has no login, and an AE title
   proves nothing: the README says so, and the log does when the listener is
   on another address than this machine's. One file imports the library.
+- The DICOM settings are changed while the server runs (#53): its AE
+  title, its port, and the systems it knows, by an administrator through
+  the API and the viewer. The listener asks for its AE title and its
+  callers at each association, so a change needs no new listener; a new
+  port is opened before the old one is closed. Changes are kept in a JSON
+  file in the data directory, which from then on is what the server goes
+  by, and the configuration is what a server that has kept nothing starts
+  from.
 - Logs are JSON lines and carry no patient identifiers: an event is a fixed
   word, a request is logged by its route and not by the address asked for,
   and a field whose name says it identifies a person is written as

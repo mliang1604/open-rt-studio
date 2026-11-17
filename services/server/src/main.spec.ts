@@ -439,6 +439,63 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
     expect(nobody.stderr()).toBe(`No DICOM system answered at 127.0.0.1:${dicom}.\n`);
   }, 30_000);
 
+  it('calls under the AE title that was set while the server ran', async () => {
+    const PASSWORD = 'correct horse battery staple';
+    const dataDir = join(temporary, 'renamed');
+    const settings = { OPEN_RT_STUDIO_DATA_DIR: dataDir, OPEN_RT_STUDIO_PORT: '0' };
+    const made = run(settings, ['account', 'add', 'root', '--admin'], `${PASSWORD}\n`);
+    expect(await made.exited).toBe(0);
+    const server = run({ ...settings, OPEN_RT_STUDIO_DICOM_PORT: '0' });
+    const origin = `http://127.0.0.1:${await listeningPort(server)}/api/v1`;
+    const dicom = await dicomPort(server);
+    const session = await fetch(`${origin}/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'root', password: PASSWORD }),
+    });
+    const { token } = (await session.json()) as { token: string };
+    const put = (path: string, method: string, body: unknown) =>
+      fetch(`${origin}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    // Renamed, and told that it may be called by a system of its own name.
+    const renamed = await put('/dicom/local', 'PUT', {
+      enabled: true,
+      port: dicom,
+      aeTitle: 'RENAMED',
+    });
+    expect(renamed.status).toBe(200);
+    const known = await put('/dicom/remotes', 'POST', {
+      name: 'Itself',
+      aeTitle: 'RENAMED',
+      host: null,
+      port: null,
+      mayStore: true,
+    });
+    expect(known.status).toBe(201);
+
+    const echoed = run(settings, ['dicom-echo', '127.0.0.1', String(dicom), 'RENAMED']);
+    expect(await echoed.exited).toBe(0);
+    // Without the data directory it goes by its configuration, and is a stranger.
+    const stranger = run({}, ['dicom-echo', '127.0.0.1', String(dicom), 'RENAMED']);
+    expect(await stranger.exited).toBe(1);
+    expect(stranger.stderr()).toContain('OPENRTSTUDIO');
+
+    // Started again, with a configuration that says otherwise: as it was left.
+    server.child.kill('SIGTERM');
+    expect(await server.exited).toBe(0);
+    const again = run({ ...settings, OPEN_RT_STUDIO_DICOM_AE_TITLE: 'CONFIGURED' });
+    await listeningPort(again);
+    expect(await dicomPort(again)).toBe(dicom);
+    expect(again.log().find((entry) => entry['event'] === 'dicom-listening')).toMatchObject({
+      aeTitle: 'RENAMED',
+      callers: 1,
+    });
+    expect(again.log().some((entry) => entry['event'] === 'dicom-settings-kept')).toBe(true);
+  }, 30_000);
+
   it('says what the echo command takes', async () => {
     for (const args of [[], ['127.0.0.1'], ['127.0.0.1', 'port', 'AE'], ['127.0.0.1', '104', '']]) {
       const asked = run({}, ['dicom-echo', ...args]);

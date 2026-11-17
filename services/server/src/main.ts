@@ -16,10 +16,11 @@ import { runAccountCommand, terminalPasswords } from './account-cli.js';
 import { openSqliteAccountStore } from './accounts/account-store.js';
 import { createAccounts } from './accounts/accounts.js';
 import { ConfigError, ENVIRONMENT_VARIABLES, loadConfig, type ServerConfig } from './config.js';
+import { openFileSettingsStore } from './dimse/dicom-settings.js';
 import { isAeTitle } from './dimse/sop-classes.js';
 import { askHealth } from './health-check.js';
 import { createLogger, errorFields } from './logger.js';
-import { ACCOUNTS_FILE, openAudit, startServer } from './server.js';
+import { ACCOUNTS_FILE, DICOM_SETTINGS_FILE, openAudit, startServer } from './server.js';
 
 let config: ServerConfig;
 try {
@@ -86,13 +87,14 @@ if (process.argv[2] === 'dicom-echo') {
     process.stderr.write('Usage: dicom-echo <host> <port> <AE title of the other system>\n');
     process.exit(2);
   }
+  // The title the server goes by now: what was set while it ran, if anything was.
+  const kept =
+    config.dataDir === null
+      ? null
+      : openFileSettingsStore(join(config.dataDir, DICOM_SETTINGS_FILE)).read();
+  const ownAeTitle = kept?.local.aeTitle ?? config.dicomAeTitle;
   const { dicomEcho } = await import('./dimse/echo.js');
-  const result = await dicomEcho({
-    host,
-    port,
-    calledAeTitle,
-    callingAeTitle: config.dicomAeTitle,
-  });
+  const result = await dicomEcho({ host, port, calledAeTitle, callingAeTitle: ownAeTitle });
   const where = `${calledAeTitle} at ${host}:${port}`;
   switch (result.outcome) {
     case 'ok':
@@ -101,7 +103,7 @@ if (process.argv[2] === 'dicom-echo') {
     case 'rejected':
       process.stderr.write(
         `${where} refused the association. It may not know this server's AE title, ` +
-          `${config.dicomAeTitle}, or may go by another title itself.\n`,
+          `${ownAeTitle}, or may go by another title itself.\n`,
       );
       break;
     case 'unreachable':

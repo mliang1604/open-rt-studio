@@ -85,10 +85,16 @@ export interface DicomListenerOptions {
   readonly host: string;
   /** The port; 0 lets the operating system choose. */
   readonly port: number;
-  /** The AE title callers must address. */
-  readonly aeTitle: string;
-  /** The calling AE titles that are let in. An empty list lets nobody in. */
-  readonly callers: readonly string[];
+  /**
+   * The AE title callers must address. A function is asked at each
+   * association, so the title can change while the listener runs.
+   */
+  readonly aeTitle: string | (() => string);
+  /**
+   * The calling AE titles that are let in. An empty list lets nobody in. A
+   * function is asked at each association.
+   */
+  readonly callers: readonly string[] | (() => readonly string[]);
   /** The largest object taken, in bytes: the data set as it arrives. */
   readonly maxObjectBytes: number;
   /** In place of {@link IDLE_TIMEOUT_MS}, for a test. */
@@ -198,7 +204,11 @@ export async function takeObject(
 /** Start listening for DICOM associations. Rejects when the port cannot be had. */
 export async function startDicomListener(options: DicomListenerOptions): Promise<DicomListener> {
   const logger = (options.logger ?? SILENT_LOGGER).child({ part: 'dicom' });
-  const { pacs, aeTitle, callers, maxObjectBytes } = options;
+  const { pacs, maxObjectBytes } = options;
+  const aeTitle = (): string =>
+    typeof options.aeTitle === 'function' ? options.aeTitle() : options.aeTitle;
+  const callers = (): readonly string[] =>
+    typeof options.callers === 'function' ? options.callers() : options.callers;
   const sockets = new Set<Socket>();
 
   class Association extends Scp {
@@ -214,8 +224,8 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         logger.warn('association-rejected', { why, callingAe: this.calling });
         this.sendAssociationReject(RejectResult.Permanent, RejectSource.ServiceUser, reason);
       };
-      if (called !== aeTitle) return reject(RejectReason.CalledAeNotRecognized, 'called-ae');
-      if (!callers.includes(this.calling)) {
+      if (called !== aeTitle()) return reject(RejectReason.CalledAeNotRecognized, 'called-ae');
+      if (!callers().includes(this.calling)) {
         return reject(RejectReason.CallingAeNotRecognized, 'calling-ae');
       }
       for (const proposed of association.getPresentationContexts()) {
@@ -340,8 +350,13 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
       resolve(typeof address === 'object' && address ? address.port : options.port);
     });
   });
-  if (callers.length === 0) logger.warn('dicom-no-callers');
-  logger.info('dicom-listening', { host: options.host, port, aeTitle, callers: callers.length });
+  if (callers().length === 0) logger.warn('dicom-no-callers');
+  logger.info('dicom-listening', {
+    host: options.host,
+    port,
+    aeTitle: aeTitle(),
+    callers: callers().length,
+  });
 
   let closed: Promise<boolean> | null = null;
   return {

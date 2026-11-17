@@ -348,9 +348,15 @@ describe('roles', () => {
     const forAdmins = all.filter((one) => one.admin);
     expect(forAdmins.map((one) => `${one.method} ${one.path}`).sort()).toEqual([
       `DELETE ${API_PREFIX}/accounts/1.2.3`,
+      `DELETE ${API_PREFIX}/dicom/remotes/1.2.3`,
       `GET ${API_PREFIX}/accounts`,
+      `GET ${API_PREFIX}/dicom`,
       `POST ${API_PREFIX}/accounts`,
+      `POST ${API_PREFIX}/dicom/remotes`,
+      `POST ${API_PREFIX}/dicom/remotes/1.2.3/echo`,
       `PUT ${API_PREFIX}/accounts/1.2.3`,
+      `PUT ${API_PREFIX}/dicom/local`,
+      `PUT ${API_PREFIX}/dicom/remotes/1.2.3`,
     ]);
     for (const one of forAdmins) {
       // A body where the method takes one, so that it is the door that refuses and not the reading.
@@ -367,6 +373,7 @@ describe('roles', () => {
     }
     // Nothing a user was refused took effect.
     expect(made.accounts.list().map((account) => account.name)).toEqual(['ada', 'root']);
+    expect(made.server.dicom).toBeNull();
   });
 
   it('lets a user do everything else a logged-in caller may', async () => {
