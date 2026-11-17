@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { syntheticCtSeries } from '@open-rt-studio/testdata';
+
 import { createCore, type ServerCore } from '../core/core.js';
 import { createLogger } from '../logger.js';
 import { openSqliteIndex } from '../pacs-index/sqlite-index.js';
@@ -46,7 +48,8 @@ async function make(
     maxObjectBytes: 1024 * 1024,
     store,
     defaults,
-    closeTimeoutMs: 500,
+    closeTimeoutMs: 2_000,
+    sendTimeoutMs: 2_000,
     echoTimeoutMs: 2_000,
     logger: createLogger({ level: 'debug', write: (line) => lines.push(line) }),
   });
@@ -276,5 +279,151 @@ describe('the DICOM service', () => {
     const text = JSON.stringify(log());
     expect(text).not.toContain('Nobody');
     expect(text).not.toContain('linac.example.org');
+  });
+
+  describe('sending', () => {
+    /** A service whose PACS holds a CT series, and another system that takes what it is sent. */
+    async function sender(count = 3) {
+      const other = await startTestListener({ aeTitle: 'OTHER', callers: ['MYSELF'] });
+      closing.push(() => other.close());
+      const made = await make({ ...OFF, local: { ...OFF.local, aeTitle: 'MYSELF' } });
+      const core = cores.at(-1)!;
+      for (const file of syntheticCtSeries(count, 8)) await core.pacs!.ingest.ingest(file.bytes);
+      // As the index has them: by instance number.
+      const held = await core.pacs!.index.findInstances();
+      const there = {
+        name: 'Other',
+        aeTitle: 'OTHER',
+        host: '127.0.0.1',
+        port: other.port,
+        mayStore: false,
+      };
+      const remote = await made.service.addRemote(there);
+      /** The record of a send once it is done. */
+      const done = async (id: string) =>
+        vi.waitFor(
+          () => {
+            const record = made.service.sendOf(id)!;
+            expect(record.state).toBe('done');
+            return record;
+          },
+          { timeout: 5_000, interval: 10 },
+        );
+      return {
+        ...made,
+        other,
+        remote,
+        there,
+        done,
+        seriesInstanceUid: held[0].seriesInstanceUid,
+        studyInstanceUid: held[0].studyInstanceUid,
+        uids: held.map((instance) => instance.sopInstanceUid),
+      };
+    }
+
+    it('offers the systems that have an address, by name', async () => {
+      const { service, remote } = await sender();
+      await service.addRemote(CALLER);
+      expect(service.destinations()).toEqual([{ id: remote.id, name: 'Other', aeTitle: 'OTHER' }]);
+      expect(service.sends()).toEqual([]);
+      expect(service.sendOf('0000000000000000')).toBeNull();
+    });
+
+    // The issue's first "done when".
+    it('sends a series to a system, under its own AE title', async () => {
+      const { service, remote, other, done, seriesInstanceUid, studyInstanceUid, uids } =
+        await sender();
+      const asked = await service.send({ destination: remote.id, seriesInstanceUid });
+      expect(asked).toMatchObject({
+        destination: { id: remote.id, name: 'Other', aeTitle: 'OTHER' },
+        seriesInstanceUid,
+        studyInstanceUid,
+        retryOf: null,
+      });
+      // In the order of the series.
+      expect(asked.instances.map((one) => one.sopInstanceUid)).toEqual(uids);
+      const record = await done(asked.id);
+      expect(record.instances.every((one) => one.state === 'sent' && !one.rewritten)).toBe(true);
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: uids.length });
+      expect(service.sends()).toEqual([record]);
+    });
+
+    it('sends one object of a series', async () => {
+      const { service, remote, other, done, seriesInstanceUid, uids } = await sender();
+      const asked = await service.send({
+        destination: remote.id,
+        seriesInstanceUid,
+        sopInstanceUid: uids[1],
+      });
+      expect(asked.instances.map((one) => one.sopInstanceUid)).toEqual([uids[1]]);
+      await done(asked.id);
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: 1 });
+    });
+
+    it('refuses what cannot be sent, before anything is', async () => {
+      const { service, remote, seriesInstanceUid } = await sender();
+      const caller = await service.addRemote(CALLER);
+      expect(await refusal(service.send({ destination: 'nobody', seriesInstanceUid }))).toBe(
+        'not-found',
+      );
+      expect(await refusal(service.send({ destination: caller.id, seriesInstanceUid }))).toBe(
+        'no-address',
+      );
+      expect(
+        await refusal(service.send({ destination: remote.id, seriesInstanceUid: '1.2.3.999' })),
+      ).toBe('no-such-series');
+      expect(
+        await refusal(
+          service.send({ destination: remote.id, seriesInstanceUid, sopInstanceUid: '1.2.3.999' }),
+        ),
+      ).toBe('nothing-to-send');
+      expect(service.sends()).toEqual([]);
+      expect(await service.retrySend('0000000000000000')).toBeNull();
+    });
+
+    // The issue's second "done when": failures are per instance, and can be retried.
+    it('sends again what did not arrive, to the system as it is now', async () => {
+      const { service, remote, there, other, done, seriesInstanceUid, uids } = await sender();
+      // The system is first known at an address where nothing is.
+      await service.changeRemote(remote.id, { ...there, port: await freePort() });
+      const first = await done(
+        (await service.send({ destination: remote.id, seriesInstanceUid })).id,
+      );
+      expect(first.instances.map((one) => [one.state, one.failure])).toEqual(
+        uids.map(() => ['failed', 'unreachable']),
+      );
+
+      await service.changeRemote(remote.id, there);
+      const again = (await service.retrySend(first.id))!;
+      expect(again.retryOf).toBe(first.id);
+      expect(again.instances.map((one) => one.sopInstanceUid)).toEqual(uids);
+      const second = await done(again.id);
+      expect(second.instances.every((one) => one.state === 'sent')).toBe(true);
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: uids.length });
+
+      // Nothing of it failed: there is nothing to send again.
+      expect(await refusal(service.retrySend(second.id))).toBe('nothing-to-send');
+      // Forgotten, the system cannot be sent to again.
+      await service.removeRemote(remote.id);
+      expect(await refusal(service.retrySend(first.id))).toBe('not-found');
+      expect(service.sends().map((record) => record.id)).toEqual([second.id, first.id]);
+    });
+
+    it('is refused by a system that does not know this server, of every instance', async () => {
+      const { service, remote, done, seriesInstanceUid, uids } = await sender();
+      await service.setLocal({ ...service.state().local, aeTitle: 'STRANGER' });
+      const record = await done(
+        (await service.send({ destination: remote.id, seriesInstanceUid })).id,
+      );
+      expect(record.instances.map((one) => one.failure)).toEqual(uids.map(() => 'rejected'));
+    });
+
+    it('lets the send under way end before it closes', async () => {
+      const { service, remote, other, seriesInstanceUid, uids } = await sender();
+      const asked = await service.send({ destination: remote.id, seriesInstanceUid });
+      expect(await service.close()).toBe(true);
+      expect(service.sendOf(asked.id)!.state).toBe('done');
+      expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: uids.length });
+    });
   });
 });

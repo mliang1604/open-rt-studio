@@ -659,11 +659,16 @@ describe('the API description', () => {
           'PUT /dicom/remotes/{id}',
           'DELETE /dicom/remotes/{id}',
           'POST /dicom/remotes/{id}/echo',
+          'GET /dicom/destinations',
+          'POST /dicom/sends',
+          'GET /dicom/sends',
+          'GET /dicom/sends/{id}',
+          'POST /dicom/sends/{id}/retry',
         ].map((line) => line.replace(' /', ` ${API_PREFIX}/`)),
       ].sort(),
     );
     // Nothing is described that is not served.
-    expect(described).toHaveLength(28);
+    expect(described).toHaveLength(33);
   });
 
   it('names every part of a path as a parameter, and only schemas that exist', async () => {

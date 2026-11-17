@@ -16,17 +16,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { readInstanceHeader } from '@open-rt-studio/dicom';
 import { syntheticCtSeries, syntheticRtCourse, type SyntheticFile } from '@open-rt-studio/testdata';
 
 import { sopInstanceUidOf } from '../store/testing.js';
 import { dicomEcho } from './echo.js';
-import { STORE_STATUS } from './listener.js';
-import { dataSetOf } from './part10.js';
+import { dataSetOf, outgoingFrom } from './part10.js';
+import { sendObjects } from './send.js';
+import { IMPLICIT_VR_LE } from './sop-classes.js';
 import {
   freePort,
   LISTENER_AE,
   PEER_AE,
-  sendFiles,
   startTestListener,
   type TestListener,
 } from './testing/peer.js';
@@ -87,12 +88,12 @@ const echo = (port: number, called: string) =>
   });
 
 /** Start DCMTK's storescp writing into a folder, and wait until it answers. */
-async function storescp(): Promise<{ port: number; folder: string }> {
+async function storescp(more: readonly string[] = []): Promise<{ port: number; folder: string }> {
   const port = await freePort();
   const folder = await mkdtemp(join(directory, 'storescp-'));
   const child = spawn(
     'storescp',
-    ['--aetitle', 'DCMTK', '--output-directory', folder, String(port)],
+    ['--aetitle', 'DCMTK', '--output-directory', folder, ...more, String(port)],
     { stdio: 'ignore' },
   );
   children.push(child);
@@ -153,26 +154,70 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
     expect(await echo(port, 'DCMTK')).toEqual({ outcome: 'ok' });
   });
 
-  it('storescp takes what the library sends, an image as it is in our file', async () => {
-    // The server does not send yet (#50); this keeps the ground under it.
-    const { port, folder } = await storescp();
-    const files = syntheticCtSeries(3, 32);
-    const result = await sendFiles(port, await onDisk(files), { calledAeTitle: 'DCMTK' });
-    expect(result.statuses).toEqual(files.map(() => STORE_STATUS.success));
+  /** What storescp wrote: each object as a Part 10 file of its own making. */
+  const written = async (folder: string): Promise<Buffer[]> =>
+    Promise.all((await readdir(folder)).map((name) => readFile(join(folder, name))));
 
-    // storescp writes each object as a Part 10 file of its own making.
-    const written = await readdir(folder);
-    expect(written).toHaveLength(files.length);
-    const dataSets = await Promise.all(
-      written.map(async (name) => Buffer.from(dataSetOf(await readFile(join(folder, name)))!)),
+  const target = (port: number) => ({
+    host: '127.0.0.1',
+    port,
+    calledAeTitle: 'DCMTK',
+    callingAeTitle: PEER_AE,
+    timeoutMs: 10_000,
+  });
+
+  // The first "done when" of #50: a series and a structure set arrive intact.
+  it('storescp takes what the server sends, each data set byte for byte', async () => {
+    // Bit-preserving: it writes what it received, and not its own writing of it.
+    const { port, folder } = await storescp(['--bit-preserving']);
+    // A CT, an MR, a structure set, a plan, a dose and a registration.
+    const files = syntheticRtCourse();
+    const objects = files.map((file) => outgoingFrom(file.bytes)!);
+    expect(await sendObjects(target(port), objects)).toEqual(
+      objects.map(() => ({ outcome: 'stored', status: 0, rewritten: false })),
     );
-    for (const file of files) {
-      const ours = Buffer.from(dataSetOf(file.bytes)!);
+
+    const theirs = (await written(folder)).map((file) => Buffer.from(dataSetOf(file)!));
+    expect(theirs).toHaveLength(files.length);
+    for (const [i, object] of objects.entries()) {
+      const ours = Buffer.from(object.dataSet);
       expect(
-        dataSets.some((theirs) => theirs.equals(ours)),
-        file.name,
+        theirs.some((one) => one.equals(ours)),
+        files[i].name,
       ).toBe(true);
     }
+  });
+
+  it('storescp that takes only Implicit VR has each object written anew, and reads it', async () => {
+    const { port, folder } = await storescp(['--implicit']);
+    const files = syntheticRtCourse();
+    const objects = files.map((file) => outgoingFrom(file.bytes)!);
+    expect(await sendObjects(target(port), objects)).toEqual(
+      objects.map(() => ({ outcome: 'stored', status: 0, rewritten: true })),
+    );
+    // The same objects, as the server's own reader finds them in what DCMTK wrote.
+    const there = (await written(folder)).map((file) => {
+      const read = readInstanceHeader(file);
+      if (!read.ok) throw new Error('the server cannot read what DCMTK wrote');
+      return read.header;
+    });
+    expect(there.map((header) => header.transferSyntaxUid)).toEqual(
+      objects.map(() => IMPLICIT_VR_LE),
+    );
+    expect(there.map((header) => header.sopInstanceUid).sort()).toEqual(
+      objects.map((object) => object.sopInstanceUid).sort(),
+    );
+  });
+
+  it('storescp is not sent compressed pixel data it does not take', async () => {
+    // Uncompressed only, which is how storescp starts.
+    const { port, folder } = await storescp();
+    const compressed = syntheticCtSeries(2, 16, { encoding: { jpegLossless: 1 } });
+    const objects = compressed.map((file) => outgoingFrom(file.bytes)!);
+    expect(await sendObjects(target(port), objects)).toEqual(
+      objects.map(() => ({ outcome: 'not-taken', why: 'transfer-syntax' })),
+    );
+    expect(await readdir(folder)).toEqual([]);
   });
 });
 

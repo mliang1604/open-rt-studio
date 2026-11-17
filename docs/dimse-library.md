@@ -214,6 +214,46 @@ server's image leaves `adm-zip` out, and the container check runs the
 library in the image without it. The DCMTK tests are now of the listener
 itself; the TLS ones went with the proof, and come back with #57.
 
+### What #50 did with this
+
+It sends the bytes itself, without leaving the library. The library writes
+a request's data set by asking the data set for its bytes
+(`getDenaturalizedDataset`), and reads the whole of it (`getElements`) only
+to write it in another transfer syntax. `storedDataset` in
+`services/server/src/dimse/library.ts` is a data set that answers the first
+with the stored bytes and does the second only when it is asked to. So what
+goes out is what the server holds, and an object sent out and sent back is
+the same object: DCMTK's `storescp --bit-preserving` writes each data set
+of the synthetic course byte for byte as the server has it, the structure
+set among them.
+
+For that to happen the other system has to accept the object's own transfer
+syntax, so the association proposes a presentation context in that syntax
+alone for each kind of object, beside the library's own (Implicit and
+Explicit VR Little Endian together, of which the other system picks one).
+Where only the other uncompressed syntax is accepted, the library writes
+the object anew, as it always did, and the send's record says `rewritten`.
+Compressed pixel data is never written anew.
+
+Memory, one run each on this Mac, one object, the sender in a process of
+its own (the figure is how much the process grew while sending, over a
+baseline that held the object already):
+
+| Object | Sent as stored | As the library's client sends a file |
+| ------ | -------------- | ------------------------------------ |
+| 64 MB  | no growth seen | 261 MB                               |
+| 256 MB | 277 MB         | 762 MB                               |
+
+About the object's size once more, where it was three to four times it. It
+is not flat: the library still hands the whole object to the socket in
+parts and keeps them until they are written. The send manager bounds the
+rest: it reads 25 instances or 64 MB for an association, whichever is
+less, and sends one send at a time.
+
+Still as the library has it: requests on an association go one after
+another, and a request's bytes must be in memory before the association is
+made, which is why a long series goes on several associations.
+
 ## One more thing it would bring
 
 `dcmjs-dimse` transcodes with `dcmjs-codecs`, by the same author and also

@@ -305,6 +305,47 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
       additionalProperties: false,
     },
   }),
+  DicomDestination: object({
+    id: { type: 'string', description: 'What a send names the system by.' },
+    name: { type: 'string', maxLength: 64 },
+    aeTitle: { type: 'string', maxLength: 16 },
+  }),
+  DicomDestinations: object({ items: { type: 'array', items: ref('DicomDestination') } }),
+  DicomSendInstance: object({
+    sopInstanceUid: uid,
+    state: { type: 'string', enum: ['waiting', 'sent', 'failed'] },
+    rewritten: {
+      type: 'boolean',
+      description:
+        'Of one that was sent: whether it went in another transfer syntax than it is stored in.',
+    },
+    status: {
+      type: ['integer', 'null'],
+      description: 'The status the other system answered with, when it was not plain success.',
+    },
+    failure: {
+      type: ['string', 'null'],
+      enum: [
+        ...['refused', 'kind-not-taken', 'transfer-syntax-not-taken', 'rejected'],
+        ...['unreachable', 'broken', 'missing', 'stopped', null],
+      ],
+    },
+  }),
+  DicomSend: object({
+    id: text,
+    destination: ref('DicomDestination'),
+    studyInstanceUid: uid,
+    seriesInstanceUid: uid,
+    state: { type: 'string', enum: ['waiting', 'running', 'done'] },
+    askedAt: text,
+    finishedAt: nullableText,
+    retryOf: {
+      type: ['string', 'null'],
+      description: 'The send whose failures this one sends again.',
+    },
+    instances: { type: 'array', items: ref('DicomSendInstance') },
+  }),
+  DicomSends: object({ items: { type: 'array', items: ref('DicomSend') } }),
   DicomEcho: object({
     outcome: { type: 'string', enum: ['ok', 'rejected', 'unreachable', 'failed'] },
     status: { type: ['integer', 'null'], description: 'The status of an echo that failed.' },

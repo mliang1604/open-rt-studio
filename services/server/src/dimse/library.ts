@@ -18,6 +18,7 @@ import dimse from 'dcmjs-dimse';
 dimse.log.setLevel('silent');
 
 export const { Client, Dataset, Scp } = dimse;
+export const { PresentationContext } = dimse.association;
 export const { CEchoRequest, CStoreRequest } = dimse.requests;
 export const { CEchoResponse, CStoreResponse } = dimse.responses;
 
@@ -42,3 +43,51 @@ export type LibraryEchoRequest = InstanceType<typeof dimse.requests.CEchoRequest
 export type LibraryEchoResponse = InstanceType<typeof dimse.responses.CEchoResponse>;
 export type LibraryStoreRequest = InstanceType<typeof dimse.requests.CStoreRequest>;
 export type LibraryStoreResponse = InstanceType<typeof dimse.responses.CStoreResponse>;
+
+/** What a data set that is sent as it is stored is made from. */
+export interface StoredObject {
+  readonly sopClassUid: string;
+  readonly sopInstanceUid: string;
+  /** The transfer syntax its bytes are in. */
+  readonly transferSyntax: string;
+  /** The data set as it is stored: the file without its header. */
+  readonly dataSet: Uint8Array;
+  /**
+   * Whether the library may write it anew in another transfer syntax when
+   * the other system takes it in no other: true only for what holds no
+   * compressed pixel data.
+   */
+  readonly rewritable: boolean;
+}
+
+/**
+ * A data set for a C-STORE request that goes out as the bytes it is stored
+ * in, where the library's own would read the object and write it again
+ * (docs/dimse-library.md: its writing changes the bytes of an object with
+ * sequences, and takes several times the object's size in memory).
+ *
+ * The library writes a request's data set with `getDenaturalizedDataset`,
+ * and reads the whole of it with `getElements` only to write it in another
+ * transfer syntax, when the other system accepted no context in the one it
+ * has. The first is given the stored bytes; the second reads them then, and
+ * not before.
+ */
+export function storedDataset(object: StoredObject): LibraryDataset {
+  class StoredDataset extends dimse.Dataset {
+    override getDenaturalizedDataset(): Buffer {
+      const { dataSet } = object;
+      return Buffer.from(dataSet.buffer, dataSet.byteOffset, dataSet.byteLength);
+    }
+
+    override getElements(): Record<string, unknown> {
+      if (!object.rewritable) {
+        throw new Error('The object is sent as it is stored, or not at all.');
+      }
+      return new dimse.Dataset(this.getDenaturalizedDataset(), object.transferSyntax).getElements();
+    }
+  }
+  return new StoredDataset(
+    { SOPClassUID: object.sopClassUid, SOPInstanceUID: object.sopInstanceUid },
+    object.transferSyntax,
+  );
+}

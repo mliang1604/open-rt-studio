@@ -52,7 +52,15 @@ export class DicomSettingsError extends Error {
   override readonly name = 'DicomSettingsError';
   constructor(
     readonly code:
-      'invalid' | 'not-found' | 'ae-title-taken' | 'too-many' | 'port-unavailable' | 'no-address',
+      | 'invalid'
+      | 'not-found'
+      | 'ae-title-taken'
+      | 'too-many'
+      | 'port-unavailable'
+      | 'no-address'
+      | 'no-such-series'
+      | 'nothing-to-send'
+      | 'not-done',
     message: string,
   ) {
     super(message);

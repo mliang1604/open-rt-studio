@@ -124,6 +124,8 @@ changed).
 | `audit-clear`                                           | The server clears records that have outlived the retention period |
 | `dicom-settings-read`, `dicom-settings-change`          | The DICOM settings are read, or the listener or AE title changed  |
 | `dicom-remote-add`, `-change`, `-remove`, `dicom-echo`  | A system is added, changed, forgotten or asked for a C-ECHO       |
+| `dicom-destinations-read`                               | The systems that can be sent to are listed                        |
+| `dicom-send`, `dicom-send-read`                         | A series or an object is sent to a system; a send is followed     |
 
 What to know about it:
 
@@ -367,10 +369,56 @@ restart:
   connection to the address it was given, which is why it is not for every
   user.
 
-Not there yet: sending (#50), query and retrieve (#51, #52), TLS (#57) and
-audit records for associations (#212). Until #212, who sent what is not in
-the audit log; the file header of each received object names the AE title
-that sent it.
+### Sending
+
+Anyone who is logged in can have the server send a series, or one object,
+to a system on the list that has an address (C-STORE). From the viewer it
+is the server card's "Send…"; through the API:
+
+| Request                              | What it does                                                         |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `GET /api/v1/dicom/destinations`     | The systems that can be sent to: id, name and AE title               |
+| `POST /api/v1/dicom/sends`           | Send `{ "destination", "seriesUid" }`, or `"sopInstanceUid"` for one |
+| `GET /api/v1/dicom/sends`            | The sends the server remembers, the latest first                     |
+| `GET /api/v1/dicom/sends/:id`        | One send: how far it is, and what became of each instance            |
+| `POST /api/v1/dicom/sends/:id/retry` | Send again the instances that did not arrive, as a send of its own   |
+
+- **A send is answered at once** (`202`) with its record, and is carried
+  out after that: ask for the record again to follow it. One send runs at a
+  time and the rest wait their turn.
+- **An object goes out as the bytes it is stored in.** The library's own
+  client reads an object and writes it again, which changes the bytes of
+  anything with a sequence in it; the server hands it the stored data set
+  instead (`storedDataset` in `src/dimse/library.ts`). For each kind of
+  object the association proposes a presentation context in the transfer
+  syntax the object has. Where the other system takes only the other
+  uncompressed syntax (Implicit for Explicit VR Little Endian, or the other
+  way), the object is written anew in that by the library, and the record
+  says so (`rewritten`). An object with compressed pixel data is never
+  written anew: it is sent as it is, or fails as `transfer-syntax-not-taken`.
+- **Each instance says what became of it**: `sent`, or `failed` with why.
+  `refused` carries the status the other system answered; `kind-not-taken`
+  and `transfer-syntax-not-taken` are what the association did not agree;
+  `rejected` is a refused association (the other system does not know this
+  server's AE title, or goes by another itself); `unreachable` and `broken`
+  are the network; `missing` is an instance the server no longer holds;
+  `stopped` is a server that stopped first.
+- **Bounded in memory**: instances are read from the store 25 at a time, or
+  64 MB of them, and each such part goes on an association of its own. An
+  association that carries nothing (refused, unreachable) ends the send:
+  the rest is not tried, and is recorded as having failed the same way.
+- **The records are kept while the server runs**, the latest hundred, and
+  are gone when it stops. Who asked for a send, of whose series and where
+  to, is in the audit log (`dicom-send`); what became of it there is the
+  `detail` of the last time its record was read (`dicom-send-read`).
+- **Whom it goes to is the administrator's choice.** A user picks among the
+  systems on the list and cannot name an address.
+
+Not there yet: query and retrieve (#51, #52), TLS (#57) and audit records
+for associations (#212). Until #212 the audit log has the request for a
+send and not the associations it made, and nothing of what other systems
+send here; the file header of each received object names the AE title that
+sent it.
 
 The library underneath is `dcmjs-dimse`, which only `src/dimse/library.ts`
 imports; [docs/dimse-library.md](../../docs/dimse-library.md) says why it
@@ -546,7 +594,9 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   (`openapi.ts`).
 - `src/dimse/`: DICOM networking (#49). `dicom-service.ts` is the server's
   DICOM side as one thing that is changed while it runs (#53), and
-  `dicom-settings.ts` what it keeps. `listener.ts` is the listener
+  `dicom-settings.ts` what it keeps. `send.ts` is C-STORE to another
+  system on one association and `send-manager.ts` the sends under way and
+  made (#50). `listener.ts` is the listener
   (C-ECHO and C-STORE), `echo.ts` asks another system for a C-ECHO,
   `part10.ts` writes the file header in front of a received data set, and
   `sop-classes.ts` is what the listener agrees to. `library.ts` is the only

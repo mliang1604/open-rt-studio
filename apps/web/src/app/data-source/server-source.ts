@@ -275,6 +275,9 @@ export const AUDIT_ACTIONS = [
     'dicom-remote-change',
     'dicom-remote-remove',
     'dicom-echo',
+    'dicom-destinations-read',
+    'dicom-send',
+    'dicom-send-read',
     'request',
   ],
 ] as const;
@@ -326,6 +329,45 @@ export interface DicomEcho {
   readonly outcome: 'ok' | 'rejected' | 'unreachable' | 'failed';
   /** The status of an echo that failed. */
   readonly status: number | null;
+}
+
+/** A system a server can send to. */
+export interface DicomDestination {
+  readonly id: string;
+  readonly name: string;
+  readonly aeTitle: string;
+}
+
+/** Why an instance of a send did not arrive, as the server names it. */
+export const DICOM_SEND_FAILURES = [
+  ...(['refused', 'kind-not-taken', 'transfer-syntax-not-taken', 'rejected'] as const),
+  ...(['unreachable', 'broken', 'missing', 'stopped'] as const),
+] as const;
+export type DicomSendFailure = (typeof DICOM_SEND_FAILURES)[number];
+
+export interface DicomSendInstance {
+  readonly sopInstanceUid: string;
+  readonly state: 'waiting' | 'sent' | 'failed';
+  /** Of one that was sent: whether it went in another transfer syntax than it is stored in. */
+  readonly rewritten: boolean;
+  /** The status the other system answered with, when it was not plain success. */
+  readonly status: number | null;
+  /** Why it failed. A server may know reasons this viewer does not. */
+  readonly failure: string | null;
+}
+
+/** A send of a series, or of one object, to another system: how far it is. */
+export interface DicomSend {
+  readonly id: string;
+  readonly destination: DicomDestination;
+  readonly studyInstanceUid: string;
+  readonly seriesInstanceUid: string;
+  readonly state: 'waiting' | 'running' | 'done';
+  readonly askedAt: string;
+  readonly finishedAt: string | null;
+  /** The send whose failures this one sends again. */
+  readonly retryOf: string | null;
+  readonly instances: readonly DicomSendInstance[];
 }
 
 /** What to change of an account. What is left out stays as it is. */
@@ -767,6 +809,50 @@ export class ServerSource implements DataSource {
   async echoDicomRemote(id: string): Promise<DicomEcho> {
     const path = `/dicom/remotes/${encodeURIComponent(id)}/echo`;
     return (await (await this.send('POST', path)).json()) as DicomEcho;
+  }
+
+  /** The systems the server can send to. For everyone who is logged in. */
+  async dicomDestinations(signal?: AbortSignal): Promise<DicomDestination[]> {
+    return (await this.json<{ items: DicomDestination[] }>('/dicom/destinations', signal)).items;
+  }
+
+  /**
+   * Have the server send a series to a system, or one object of it. The
+   * series goes by its key: one dose of a series that holds several is sent
+   * alone. Answered at once; {@link dicomSend} follows it.
+   */
+  async startDicomSend(
+    destination: string,
+    what: { readonly seriesKey: string } | { readonly sopInstanceUid: string },
+  ): Promise<DicomSend> {
+    let body: Record<string, string>;
+    if ('seriesKey' in what) {
+      const { seriesInstanceUid, doseObjectUid } = seriesKeyParts(what.seriesKey);
+      body = {
+        destination,
+        seriesUid: seriesInstanceUid,
+        ...(doseObjectUid === null ? {} : { sopInstanceUid: doseObjectUid }),
+      };
+    } else {
+      body = { destination, sopInstanceUid: what.sopInstanceUid };
+    }
+    return (await (await this.send('POST', '/dicom/sends', body)).json()) as DicomSend;
+  }
+
+  /** A send as it is now. */
+  dicomSend(id: string, signal?: AbortSignal): Promise<DicomSend> {
+    return this.json<DicomSend>(`/dicom/sends/${encodeURIComponent(id)}`, signal);
+  }
+
+  /** The sends the server remembers, the latest first. */
+  async dicomSends(signal?: AbortSignal): Promise<DicomSend[]> {
+    return (await this.json<{ items: DicomSend[] }>('/dicom/sends', signal)).items;
+  }
+
+  /** Have the server send again what did not arrive, as a send of its own. */
+  async retryDicomSend(id: string): Promise<DicomSend> {
+    const path = `/dicom/sends/${encodeURIComponent(id)}/retry`;
+    return (await (await this.send('POST', path)).json()) as DicomSend;
   }
 
   /**

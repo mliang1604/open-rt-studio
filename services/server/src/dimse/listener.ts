@@ -97,6 +97,12 @@ export interface DicomListenerOptions {
   readonly callers: readonly string[] | (() => readonly string[]);
   /** The largest object taken, in bytes: the data set as it arrives. */
   readonly maxObjectBytes: number;
+  /**
+   * The transfer syntaxes taken, the one it would rather have first. All
+   * that the server stores, unless a test stands in for a system that takes
+   * fewer.
+   */
+  readonly transferSyntaxes?: readonly string[];
   /** In place of {@link IDLE_TIMEOUT_MS}, for a test. */
   readonly idleTimeoutMs?: number;
   readonly logger?: Logger;
@@ -235,7 +241,10 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
           context.setResult(PresentationContextResult.RejectAbstractSyntaxNotSupported);
           continue;
         }
-        const syntax = chooseTransferSyntax(context.getTransferSyntaxUids());
+        const offered = context.getTransferSyntaxUids();
+        const syntax = options.transferSyntaxes
+          ? (options.transferSyntaxes.find((one) => offered.includes(one)) ?? null)
+          : chooseTransferSyntax(offered);
         if (syntax) context.setResult(PresentationContextResult.Accept, syntax);
         else context.setResult(PresentationContextResult.RejectTransferSyntaxesNotSupported);
       }

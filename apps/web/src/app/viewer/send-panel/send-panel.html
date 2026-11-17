@@ -1,0 +1,101 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (problem(); as message) {
+  <p class="send-problem" role="alert">{{ message }}</p>
+}
+
+<section aria-labelledby="send-title">
+  <h3 id="send-title">Send to another system</h3>
+  @if (destinations(); as list) {
+    @if (list.length === 0) {
+      <p class="send-note">
+        This server knows no system to send to. An administrator adds one under “DICOM”, with the
+        address it listens at.
+      </p>
+    } @else {
+      <div class="field">
+        <label for="send-destination">Destination</label>
+        <select id="send-destination" [value]="chosen()" (change)="onDestination($event)">
+          @for (one of list; track one.id) {
+            <option [value]="one.id" [selected]="one.id === chosen()">
+              {{ one.name }} ({{ one.aeTitle }})
+            </option>
+          }
+        </select>
+      </div>
+      @if (items().length === 0) {
+        <p class="send-note">
+          Choose a patient among the studies first. What the patient has on the server is then
+          listed here.
+        </p>
+      } @else {
+        <div class="send-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">What</th>
+                <th scope="col">Kind</th>
+                <th scope="col"><span class="unseen">Send it</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (item of items(); track item.key) {
+                <tr>
+                  <th scope="row" class="send-name" [title]="item.label">{{ item.label }}</th>
+                  <td class="send-kind">{{ item.kind }}</td>
+                  <td class="send-actions">
+                    <button
+                      type="button"
+                      [disabled]="busy()"
+                      [attr.aria-label]="
+                        'Send ' + item.label + ' (' + item.kind + ') to ' + destination()?.name
+                      "
+                      (click)="onSend(item)"
+                    >
+                      Send
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    }
+  } @else if (busy()) {
+    <p class="send-note" role="status">Asking the server…</p>
+  }
+</section>
+
+<section aria-labelledby="sends-title">
+  <h3 id="sends-title">Sends</h3>
+  <ul class="send-list" aria-live="polite">
+    @for (row of rows(); track row.send.id) {
+      <li [class.failed]="row.failed > 0" [class.under-way]="!row.done">
+        <span class="send-what">
+          {{ row.label }}
+          <span class="send-to"
+            >to {{ row.send.destination.name }}{{ row.send.retryOf ? ', again' : '' }}</span
+          >
+        </span>
+        <span class="send-said">{{ row.said }}</span>
+        @if (row.done && row.failed > 0) {
+          <button
+            type="button"
+            [disabled]="busy()"
+            [attr.aria-label]="
+              'Send again what failed of ' + row.label + ' to ' + row.send.destination.name
+            "
+            (click)="onRetry(row.send)"
+          >
+            Send failed again
+          </button>
+        }
+      </li>
+    } @empty {
+      <li class="send-note">Nothing was sent since the server started.</li>
+    }
+  </ul>
+</section>
