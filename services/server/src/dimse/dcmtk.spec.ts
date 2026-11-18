@@ -267,6 +267,12 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
     }
     return started;
   }
+  /**
+   * A value as a DCMTK tool prints one: in brackets, with the NUL a UID of
+   * odd length is padded with, or the space of other text.
+   */
+  const shown = (value: string): RegExp =>
+    new RegExp(`\\[${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\0 ]?\\]`);
   const asking = (port: number, calling = PEER_AE): string[] => [
     ...['--verbose', '--aetitle', calling, '--call', LISTENER_AE],
     ...['127.0.0.1', String(port)],
@@ -302,9 +308,9 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
       ...asking(port),
     ]);
     expect(studies.ok, studies.text).toBe(true);
-    expect(studies.text).toContain(`[${SYNTHETIC_RT_COURSE.planningStudy}]`);
-    expect(studies.text).toContain(`[${SYNTHETIC_RT_COURSE.followUpStudy}]`);
-    expect(studies.text).toContain(`[${patient.patientId}]`);
+    expect(studies.text).toMatch(shown(SYNTHETIC_RT_COURSE.planningStudy));
+    expect(studies.text).toMatch(shown(SYNTHETIC_RT_COURSE.followUpStudy));
+    expect(studies.text).toMatch(shown(patient.patientId));
     expect(studies.text.match(/Find Response: \d+ \(Pending\)/g)).toHaveLength(2);
 
     const series = await said('findscu', [
@@ -314,8 +320,8 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
       ...asking(port),
     ]);
     expect(series.ok, series.text).toBe(true);
-    expect(series.text).toContain(`[${SYNTHETIC_RT_COURSE.ct}]`);
-    expect(series.text).not.toContain(`[${SYNTHETIC_RT_COURSE.mr}]`);
+    expect(series.text).toMatch(shown(SYNTHETIC_RT_COURSE.ct));
+    expect(series.text).not.toMatch(shown(SYNTHETIC_RT_COURSE.mr));
   });
 
   it('movescu has a study sent to storescp, each data set byte for byte', async () => {
@@ -389,7 +395,7 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
         ...study,
         ...asking(port, calling),
       ]);
-      expect(found.text, calling).not.toContain(`[${SYNTHETIC_RT_COURSE.planningStudy}]`);
+      expect(found.text, calling).not.toMatch(shown(SYNTHETIC_RT_COURSE.planningStudy));
       expect(found.text, calling).not.toMatch(/Find Response: \d+ \(Pending\)/);
       const moved = await said('movescu', [
         ...['--study', '--move', 'DCMTK', ...level, ...study],
