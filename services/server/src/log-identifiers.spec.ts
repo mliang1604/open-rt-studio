@@ -5,6 +5,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   SYNTHETIC_FOLLOW_UP_STUDY,
@@ -25,10 +26,15 @@ import type { Job } from './jobs/job.js';
 import { createLogger } from './logger.js';
 import { POSTGRES, testSchemas, type TestSchemas } from './pacs-index/postgres-testing.js';
 import {
+  DEFORMABLE_REGISTRATION_KIND,
+  deformableRegistrationKind,
+} from './registration/deformable-registration.js';
+import { readPresets } from './registration/presets.js';
+import {
   RIGID_REGISTRATION_KIND,
   rigidRegistrationKind,
 } from './registration/rigid-registration.js';
-import { standInProgram } from './registration/testing/stand-in.js';
+import { deformableStandInProgram, standInProgram } from './registration/testing/stand-in.js';
 import { startServer, type RunningServer } from './server.js';
 
 // The guard the audit log asks for (#56): everything the server can be asked
@@ -43,6 +49,10 @@ const WRONG_PASSWORD = 'a wrong guess at the password';
 const TYPED_AS_NAME = 'a-secret-typed-as-a-name';
 const TIMEPOINT_NAME = 'Fraction ten of Zennor';
 const FILES = syntheticRtCourse();
+/** The presets of the repository, for the deformable registration job. */
+const PRESETS = readPresets(
+  fileURLToPath(new URL('../../../native/presets/deformable', import.meta.url)),
+);
 const PATIENT = SYNTHETIC_STUDY.patient;
 /** Asked for and not there: it must not be logged either. */
 const ABSENT_UID = '1.2.826.0.1.3680043.999.77';
@@ -102,7 +112,15 @@ it.each(INDEXES)(
       logger,
       {
         accounts,
-        jobKinds: (pacs) => [rigidRegistrationKind({ pacs, program: standInProgram() })],
+        registrationPresets: PRESETS,
+        jobKinds: (pacs) => [
+          rigidRegistrationKind({ pacs, program: standInProgram() }),
+          deformableRegistrationKind({
+            pacs,
+            program: deformableStandInProgram(),
+            presets: PRESETS,
+          }),
+        ],
       },
     );
     const origin = `http://127.0.0.1:${server.address.port}`;
@@ -572,6 +590,48 @@ it.each(INDEXES)(
     for (const name of ['sopInstanceUid', 'seriesInstanceUid']) {
       seen.add(String(registered.result![name]));
     }
+    // The same deformably (#81), with a preset the server lists.
+    const presets = await call('GET', api('/registration-presets'), { token: admin });
+    expect((presets.body as { items: { name: string }[] }).items.map((one) => one.name)).toContain(
+      'ct-ct',
+    );
+    const deforming = await call('POST', api('/jobs'), {
+      token: admin,
+      body: {
+        kind: DEFORMABLE_REGISTRATION_KIND,
+        inputs: {
+          fixedSeriesUid: SYNTHETIC_RT_COURSE.ct,
+          movingSeriesUid: SYNTHETIC_RT_COURSE.followUpCt,
+          preset: 'ct-ct',
+        },
+      },
+    });
+    expect(deforming.status).toBe(202);
+    const deformed = await vi.waitFor(
+      async () => {
+        const job = (
+          await call('GET', api(`/jobs/${(deforming.body as Job).id}`), { token: admin })
+        ).body as Job;
+        if (job.endedAt === null) throw new Error('not yet');
+        return job;
+      },
+      { timeout: 20_000, interval: 50 },
+    );
+    expect(deformed).toMatchObject({ status: 'succeeded' });
+    for (const name of ['sopInstanceUid', 'seriesInstanceUid']) {
+      seen.add(String(deformed.result![name]));
+    }
+    await call('POST', api('/jobs'), {
+      token: admin,
+      body: {
+        kind: DEFORMABLE_REGISTRATION_KIND,
+        inputs: {
+          fixedSeriesUid: SYNTHETIC_RT_COURSE.ct,
+          movingSeriesUid: SYNTHETIC_RT_COURSE.followUpCt,
+          preset: PATIENT.id,
+        },
+      },
+    });
     const unregistered = await call('POST', api('/jobs'), {
       token: admin,
       body: {

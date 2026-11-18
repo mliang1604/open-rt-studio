@@ -39,6 +39,12 @@ import { errorFields, type LogFields, type Logger } from './logger.js';
 import { IndexVersionError } from './pacs-index/migrations.js';
 import { IndexDatabaseError, type PacsIndex } from './pacs-index/pacs-index.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
+import { registrationRoutes } from './api/registration-routes.js';
+import {
+  DEFORMABLE_REGISTRATION_TOOL,
+  deformableRegistrationKind,
+} from './registration/deformable-registration.js';
+import { readPresets, type RegistrationPreset } from './registration/presets.js';
 import {
   RIGID_REGISTRATION_TOOL,
   rigidRegistrationKind,
@@ -128,6 +134,12 @@ export interface ServerParts {
    * way to the server's PACS, to ask when a job runs and not before.
    */
   readonly jobKinds?: readonly JobKind[] | ((pacs: () => Pacs) => readonly JobKind[]);
+  /**
+   * The presets the API lists for deformable registration, in place of those
+   * beside the native tools: for a test, whose registration job is one of
+   * its `jobKinds`.
+   */
+  readonly registrationPresets?: readonly RegistrationPreset[];
   /**
    * The accounts of a server whose `auth` is `accounts`, in place of the ones
    * kept in the data directory: for a test, which keeps them in memory. The
@@ -428,16 +440,45 @@ export function keepAuditRetention(
  * tools are. Throws {@link ConfigError} when a tool is not there: a server
  * that offers a job it cannot run is found out at the first job otherwise.
  */
-function nativeJobKinds(config: ServerConfig, pacs: () => Pacs): JobKind[] {
+function nativeJobKinds(
+  config: ServerConfig,
+  pacs: () => Pacs,
+  presets: readonly RegistrationPreset[],
+): JobKind[] {
   if (config.nativeTools === null) return [];
-  const program = join(config.nativeTools, RIGID_REGISTRATION_TOOL);
-  if (!existsSync(program)) {
+  const program = (tool: string): [string] => {
+    const file = join(config.nativeTools!, tool);
+    if (!existsSync(file)) {
+      throw new ConfigError(
+        `The directory ${ENVIRONMENT_VARIABLES.nativeTools} names holds no ${tool}. ` +
+          `Build the native tools (native/README.md) and name the directory they are in.`,
+      );
+    }
+    return [file];
+  };
+  const rigid = program(RIGID_REGISTRATION_TOOL);
+  const deformable = program(DEFORMABLE_REGISTRATION_TOOL);
+  if (presets.length === 0) {
     throw new ConfigError(
-      `The directory ${ENVIRONMENT_VARIABLES.nativeTools} names holds no ${RIGID_REGISTRATION_TOOL}. ` +
-        `Build the native tools (native/README.md) and name the directory they are in.`,
+      `There are no presets for deformable registration beside the directory ` +
+        `${ENVIRONMENT_VARIABLES.nativeTools} names: they are expected in ` +
+        `"${PRESETS_BESIDE_TOOLS.join('/')}" from it, as the build of the native tools puts them.`,
     );
   }
-  return [rigidRegistrationKind({ pacs, program: [program] })];
+  return [
+    rigidRegistrationKind({ pacs, program: rigid }),
+    deformableRegistrationKind({ pacs, program: deformable, presets }),
+  ];
+}
+
+/** Where the presets of the deformable registration are, from the directory of the tools. */
+const PRESETS_BESIDE_TOOLS = ['..', 'presets', 'deformable'] as const;
+
+/** The presets a server has: those a test gave it, or those beside its native tools, or none. */
+function presetsOf(config: ServerConfig, parts: ServerParts): readonly RegistrationPreset[] {
+  if (parts.registrationPresets) return parts.registrationPresets;
+  if (config.nativeTools === null) return [];
+  return readPresets(join(config.nativeTools, ...PRESETS_BESIDE_TOOLS));
 }
 
 /** The job manager the configuration asks for, and how to clear up after it. */
@@ -488,15 +529,16 @@ async function assemble(
   const stopClearing = keepAuditRetention(audit, config.auditRetentionDays, logger);
   const pacs = await openPacs(config, logger);
   // The kinds are named before the core is made, and ask for its PACS when a job runs.
+  const presets = presetsOf(config, parts);
   const made: { core: ServerCore | null } = { core: null };
   const ownPacs = (): Pacs => made.core!.pacs!;
   const { jobs, clear } = await openJobs(config, logger, [
     ...(typeof parts.jobKinds === 'function' ? parts.jobKinds(ownPacs) : (parts.jobKinds ?? [])),
-    ...nativeJobKinds(config, ownPacs),
+    ...nativeJobKinds(config, ownPacs, presets),
   ]);
   const core = createCore({ logger, pacs, jobs });
   made.core = core;
-  const jobApi = jobRoutes(jobs);
+  const jobApi = [...jobRoutes(jobs), ...registrationRoutes(presets)];
   const sessionApi = accounts ? accountRoutes(accounts) : [openSessionRoute()];
   const auditApi = audit ? auditRoutes(audit) : [];
   const timepointApi = timepointRoutes(core.pacs!.index);

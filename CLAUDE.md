@@ -51,10 +51,12 @@ application. Never commit patient data or real DICOM files
   reads a patient's data does it in `prepare`, stores what was made in
   `finish`, has its directory removed, and says whose data it is with
   `subject`; what a step throws is never logged, only a fixed word given
-  with `JobStepError`); `src/registration` is the job that runs the native
-  registration tool (`nativeTools` says where the tools are; specs run a
-  stand-in from `src/registration/testing`, and the tool itself only in the
-  `Native tools` workflow);
+  with `JobStepError`); `src/registration` is the jobs that run the native
+  registration tools, rigid and deformable (`nativeTools` says where the
+  tools are, with the deformable presets beside them; what the two share is
+  in `pair.ts`; a request names a preset and never a file; specs run
+  stand-ins from `src/registration/testing`, and the tools themselves only
+  in the `Native tools` workflow);
   `src/host` is HTTP on `node:http` and `src/api` the routes it serves
   (`src/host/dispatch.ts` is which route answers, who may have the answer and
   its audit record, with no HTTP in it: the host and the embedded server of
@@ -112,7 +114,9 @@ application. Never commit patient data or real DICOM files
   prints one line of JSON, and a failure never names a file; a tool that
   takes long reports as a job's worker does (`common/ors_common.h`), and
   lets nothing else reach standard output. A matrix a tool gives says in
-  its name which way it maps (`fixedToMoving`). Nothing GPL or
+  its name which way it maps (`fixedToMoving`). `presets/` holds elastix
+  parameter files a tool is run with; what a tool decides itself (the kind
+  of transform, the seed, what is written where) no preset sets. Nothing GPL or
   LGPL is built in: a new module of ITK or component of elastix is written
   down in `cmake/itk_modules.cmake` and `THIRD-PARTY.md` with its licence
   first. Tests make their volumes from `tests/synthetic_volume.h`.
@@ -193,8 +197,9 @@ its run when a change touches the Dockerfile or `compose.yaml`. Another,
 five jobs (`Native (Linux)`, `(macOS arm64)`, `(macOS x86_64)`, `(Windows)`,
 then `(macOS universal)`) build ITK, elastix and the tools and run the
 tools' tests; wait for all five. With ITK and elastix in the cache it takes
-a minute or two; after a change to `native/deps` or the versions, up to
-half an hour, and the macOS arm64 runner can be long in coming.
+five to ten minutes, most of it the registrations the tools' tests run;
+after a change to `native/deps` or the versions, up to half an hour more,
+and the macOS arm64 runner can be long in coming.
 
 ## Patterns
 

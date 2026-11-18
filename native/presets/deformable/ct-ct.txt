@@ -1,0 +1,39 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
+// title: CT to CT
+// description: Two CT images of one patient. Compares grey values directly, which CT numbers allow; a 16 mm grid; mildly stiff.
+//
+// A preset of ors-register-deformable: an elastix parameter file. The tool
+// decides the kind of transform (a B-spline), the seed and what is written
+// where; the rest is here.
+//
+// Not tuned on real images. The numbers are elastix's usual ones for a
+// B-spline registration, and were only ever run on a synthetic phantom.
+
+(Registration "MultiMetricMultiResolutionRegistration")
+(FixedImagePyramid "FixedSmoothingImagePyramid")
+(MovingImagePyramid "MovingSmoothingImagePyramid")
+(Interpolator "LinearInterpolator")
+(Optimizer "AdaptiveStochasticGradientDescent")
+(AutomaticParameterEstimation "true")
+(ImageSampler "RandomCoordinate")
+(NewSamplesEveryIteration "true")
+(CheckNumberOfSamples "true")
+(ErodeMask "false")
+
+// Two CTs measure the same thing in the same units: how alike the grey
+// values are is asked directly.
+(Metric "AdvancedNormalizedCorrelation" "TransformBendingEnergyPenalty")
+(Metric0Weight 1.0)
+// How much a bent field costs beside a bad match.
+(Metric1Weight 1.0)
+
+(NumberOfResolutions 4)
+(MaximumNumberOfIterations 300)
+(NumberOfSpatialSamples 4096)
+
+// Control points 16 mm apart at the end, and 8, 4 and 2 times that before.
+(FinalGridSpacingInPhysicalUnits 16.0 16.0 16.0)
+(GridSpacingSchedule 8.0 4.0 2.0 1.0)

@@ -1,0 +1,39 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
+// title: MR to CT
+// description: An MR and a CT of one patient. Asks only that the grey values of the two go together; a 24 mm grid; stiff.
+//
+// A preset of ors-register-deformable: an elastix parameter file. The tool
+// decides the kind of transform (a B-spline), the seed and what is written
+// where; the rest is here.
+//
+// Not tuned on real images. The numbers are elastix's usual ones for a
+// B-spline registration, and were only ever run on a synthetic phantom.
+
+(Registration "MultiMetricMultiResolutionRegistration")
+(FixedImagePyramid "FixedSmoothingImagePyramid")
+(MovingImagePyramid "MovingSmoothingImagePyramid")
+(Interpolator "LinearInterpolator")
+(Optimizer "AdaptiveStochasticGradientDescent")
+(AutomaticParameterEstimation "true")
+(ImageSampler "RandomCoordinate")
+(NewSamplesEveryIteration "true")
+(CheckNumberOfSamples "true")
+(ErodeMask "false")
+
+// Bone is bright in one and dark in the other: mutual information.
+(Metric "AdvancedMattesMutualInformation" "TransformBendingEnergyPenalty")
+(NumberOfHistogramBins 32)
+(Metric0Weight 1.0)
+// Stiff: where the two images show different things there is little to
+// go by, and the field should not invent detail.
+(Metric1Weight 10.0)
+
+(NumberOfResolutions 4)
+(MaximumNumberOfIterations 300)
+(NumberOfSpatialSamples 4096)
+
+(FinalGridSpacingInPhysicalUnits 24.0 24.0 24.0)
+(GridSpacingSchedule 8.0 4.0 2.0 1.0)

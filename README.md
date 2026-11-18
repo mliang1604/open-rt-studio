@@ -193,11 +193,12 @@ npm test              # unit tests
 The workspaces are `packages/dicom`, `packages/render`, `packages/testdata`,
 `packages/desktop-bridge`, `apps/web`, `apps/desktop` and `services/server`;
 `native/` holds the C++ tools, which have a build of their own
-([native/README.md](native/README.md)). The first that does real work
-registers two image series rigidly; a server that is told where the tools
-are runs it as a job and stores the result as a DICOM Spatial Registration
-object ([services/server/README.md](services/server/README.md#rigid-registration)).
-The viewer has no button for it yet.
+([native/README.md](native/README.md)). Two of them register image series,
+rigidly and deformably; a server that is told where the tools are runs them
+as jobs and stores the results as DICOM Spatial Registration and Deformable
+Spatial Registration objects
+([services/server/README.md](services/server/README.md#rigid-registration)).
+The viewer has no button for them yet.
 
 ## License
 

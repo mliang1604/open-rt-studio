@@ -795,7 +795,7 @@ code 2).
 | `dicomTlsCert`       | `OPEN_RT_STUDIO_DICOM_TLS_CERT`       | none           | File with the certificate the server shows over DICOM (PEM). With `dicomTlsKey`, the listener can speak TLS; see [TLS for DICOM](#tls-for-dicom)                                     |
 | `dicomTlsKey`        | `OPEN_RT_STUDIO_DICOM_TLS_KEY`        | none           | File with that certificate's private key (PEM, no passphrase)                                                                                                                        |
 | `dicomTlsCa`         | `OPEN_RT_STUDIO_DICOM_TLS_CA`         | none           | File with the certificates of the authorities other DICOM systems are trusted by (PEM). With it, a system that calls with TLS must show a certificate of theirs                      |
-| `nativeTools`        | `OPEN_RT_STUDIO_NATIVE_TOOLS`         | none           | Directory that holds the native tools. With it the server has the jobs that run them; see [Rigid registration](#rigid-registration)                                                  |
+| `nativeTools`        | `OPEN_RT_STUDIO_NATIVE_TOOLS`         | none           | Directory that holds the native tools (`bin` of their build, with `presets` beside it). With it the server has the jobs that run them; see [Rigid registration](#rigid-registration) |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -834,6 +834,7 @@ routes, so what is served is what is described.
 | `GET /api/v1/jobs/{id}`                 | One job: status, progress, result                                          |
 | `GET /api/v1/jobs/{id}/log`             | The last lines its worker wrote                                            |
 | `POST /api/v1/jobs/{id}/cancel`         | Stop it                                                                    |
+| `GET /api/v1/registration-presets`      | The presets a deformable registration can be run with                      |
 
 ```sh
 curl -X POST -H 'Content-Type: application/dicom' --data-binary @slice.dcm \
@@ -1025,9 +1026,10 @@ it is added to the index with the references it makes to other objects.
 ## Jobs
 
 Heavy work (registration first, in M3) is done by command-line programs that
-the server starts as child processes and watches. The framework is here; the
-server has **no job kinds of its own yet**, so `GET /api/v1/job-kinds`
-answers an empty list until the native tools register theirs.
+the server starts as child processes and watches. A server has the job
+kinds of the native tools it is told of ([rigid](#rigid-registration) and
+[deformable](#deformable-registration) registration); without them
+`GET /api/v1/job-kinds` answers an empty list.
 
 - **A kind is code, not a request.** A `JobKind` has a name, checks the
   inputs it is given and turns them into a program and its arguments. Kinds
@@ -1088,9 +1090,10 @@ only the kind of a job and how it ended.
 
 ### Rigid registration
 
-A server that is told where the native tools are (`nativeTools`, see
-[native/README.md](../../native/README.md) for building them) has the job
-kind `rigid-registration`. The container image does not hold the tools
+A server that is told where the native tools are (`nativeTools`: the `bin`
+directory of their build, see [native/README.md](../../native/README.md))
+has the job kind `rigid-registration`. It does not start when a tool, or
+the presets beside them, is missing from there. The container image does not hold the tools
 yet, and neither does the desktop application.
 
 ```sh
@@ -1135,6 +1138,56 @@ curl -X POST http://127.0.0.1:4300/api/jobs -H 'Content-Type: application/json' 
 - **Limits**: both volumes are held in memory while they are written; the
   tool is run with four threads; registering the same two series again
   stores another object and replaces none.
+
+### Deformable registration
+
+The same server has the job kind `deformable-registration`, which runs
+`ors-register-deformable` with one of the presets that the build of the
+native tools puts beside them (`presets/deformable`, next to `bin`).
+
+```sh
+curl http://127.0.0.1:4300/api/v1/registration-presets
+curl -X POST http://127.0.0.1:4300/api/v1/jobs -H 'Content-Type: application/json' -d '{
+  "kind": "deformable-registration",
+  "inputs": { "fixedSeriesUid": "1.2.3...", "movingSeriesUid": "1.2.4...", "preset": "ct-ct" }
+}'
+```
+
+- **Presets** are listed by `GET /api/v1/registration-presets`: a `name`
+  to give a job, a `title` and a `description`. They are files of the
+  server, read when it starts; a request names one and cannot define one,
+  and is never told where one is kept. `ct-ct`, `cbct-ct` and `mr-ct` come
+  with the tools. None was tuned on real images
+  ([native/README.md](../../native/README.md#ors-register-deformable)).
+- **Inputs**: `fixedSeriesUid`, `movingSeriesUid` and `preset`. Optionally
+  `initial` (a matrix that only turns and moves, to start from: give it the
+  `fixedToMoving` of a rigid registration job's result, which is how the
+  two are meant to be used one after the other), `roi`, `seed`, and
+  `parameters`: elastix parameters set over the preset, for whoever knows
+  them, as `{ "MaximumNumberOfIterations": 500, "GridSpacingSchedule": [4, 2, 1] }`.
+  What the tool decides itself (the kind of transform, the seed, what is
+  written where) cannot be set.
+- **Refused at submission** as a rigid registration is, and for a preset
+  the server does not have or a parameter that cannot be set.
+- **What it does**: as the rigid job, and stores a DICOM Deformable Spatial
+  Registration object in the study of the fixed series.
+- **Which way.** The object is in the fixed image's frame of reference,
+  its grid of vectors is laid out there, and it maps into the moving
+  image's frame: for each place of the fixed image, where to look in the
+  moving one, with the matrix the registration started from as its Post
+  Deformation matrix. That is how the tool gives it and how the standard
+  has such an object, so nothing is turned round. It is the other way from
+  the rigid job's object, which maps the moving frame into the fixed one.
+- **The result** names the object and says what the tool said of the
+  field: `fieldSize`, `largestMm` (its longest vector) and `foldedPoints`
+  (at how many points it folds space over itself, which no anatomy does).
+  More than a few folded points says the registration went wrong
+  somewhere; the job stores the object all the same and judges nothing.
+- **When it fails**: as the rigid job, and `could-not-finish` with
+  `no-field` or `bad-field` when what the tool wrote is not a field that
+  can be stored; `timed-out` after an hour.
+- **Limits**: as the rigid job. The field of a whole CT at 4 mm between
+  vectors is some tens of megabytes, in memory once while it is stored.
 
 ## The index
 
