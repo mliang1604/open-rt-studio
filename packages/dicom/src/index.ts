@@ -457,6 +457,15 @@ export {
 export { add, cross, dot, length, normalize, scale, sub } from './vec3.js';
 export { VolumeBuildError, buildVolume, patientToVoxel, voxelToPatient } from './volume.js';
 export {
+  METAIMAGE_SQUARE_TOLERANCE,
+  MetaImageError,
+  metaImageHeader,
+  metaImageHeaderText,
+  writeMetaImage,
+  type MetaImageHeader,
+  type MetaImageProblem,
+} from './metaimage.js';
+export {
   type DoseInfo,
   type DoseOf,
   type DoseSumMade,

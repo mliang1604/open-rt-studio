@@ -4,13 +4,14 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
 import {
   ENDED,
+  JobStepError,
   JobsStoppedError,
   readWorkerLine,
   UnknownJobKindError,
@@ -18,6 +19,7 @@ import {
   type JobFailure,
   type JobKind,
   type JobLogLine,
+  type JobSubject,
   type JsonObject,
 } from './job.js';
 import type { JobQuery, JobStore } from './job-store.js';
@@ -62,6 +64,12 @@ export interface JobManager {
    * `InvalidJobInputError`; then nothing was taken in.
    */
   submit(kind: string, inputs: JsonObject): Promise<Job>;
+  /**
+   * Whose data a job of this kind with these inputs would touch, for an
+   * audit record. Null when the kind does not say, when there is no such
+   * kind, or when the inputs are not ones it takes.
+   */
+  subject(kind: string, inputs: JsonObject): Promise<JobSubject | null>;
   get(id: string): Job | null;
   /** The latest first. */
   list(query?: JobQuery): Job[];
@@ -83,14 +91,23 @@ export interface JobManager {
   shutdown(): Promise<void>;
 }
 
-/** A job that is running: its worker, and why it is being stopped, if it is. */
+/** A job that is running: its worker, once it has one, and why it is being stopped, if it is. */
 interface Running {
   job: Job;
-  readonly child: ChildProcess;
+  /** Null while the kind prepares, and again while it finishes. */
+  child: ChildProcess | null;
+  /** Tells the kind's own steps to give up. */
+  readonly abort: AbortController;
   stopping: 'cancelled' | JobFailure | null;
   timers: ReturnType<typeof setTimeout>[];
   pending: Omit<JobLogLine, 'sequence'>[];
 }
+
+/** What kind of error it was, and nothing it says. */
+const nameOf = (error: unknown): string => (error instanceof Error ? error.name : typeof error);
+/** The kind's own word for why a step failed, when it gave one. */
+const reasonOf = (error: unknown): string | undefined =>
+  error instanceof JobStepError ? error.reason : undefined;
 
 export async function createJobManager(options: JobManagerOptions): Promise<JobManager> {
   const { store, workRoot } = options;
@@ -140,8 +157,19 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
   const stop = (entry: Running, why: Running['stopping']): void => {
     if (entry.stopping) return;
     entry.stopping = why;
-    entry.child.kill('SIGTERM');
-    entry.timers.push(setTimeout(() => entry.child.kill('SIGKILL'), killGraceMs));
+    entry.abort.abort();
+    const child = entry.child;
+    if (!child) return;
+    child.kill('SIGTERM');
+    entry.timers.push(setTimeout(() => child.kill('SIGKILL'), killGraceMs));
+  };
+
+  /** A kind that puts a patient's data in its directory leaves none behind. */
+  const tidy = async (kind: JobKind | undefined, workDir: string): Promise<void> => {
+    if (!kind?.removeWorkDir) return;
+    await rm(workDir, { recursive: true, force: true }).catch((error: unknown) => {
+      logger.error('job-directory-not-removed', { kind: kind.name, error: nameOf(error) });
+    });
   };
 
   const start = async (id: string): Promise<void> => {
@@ -150,15 +178,76 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
     if (!queued || queued.status !== 'queued') return;
     const kind = kinds.get(queued.kind);
     const workDir = join(workRoot, id);
+    const couldNotStart = (error: unknown): void => {
+      logger.error('job-could-not-start', { kind: queued.kind, ...errorFields(error) });
+      save({
+        ...queued,
+        status: 'failed',
+        failure: 'could-not-start',
+        endedAt: now().toISOString(),
+      });
+    };
+    if (!kind) return couldNotStart(new UnknownJobKindError());
+    try {
+      await mkdir(workDir, { recursive: true });
+    } catch (error) {
+      return couldNotStart(error);
+    }
+    // The manager was stopped meanwhile: the job waits for the next start.
+    if (stopped) return;
+    // It was cancelled meanwhile: it has left the queue, and is in no list of
+    // running jobs yet, so the cancellation wrote it down and that stands.
+    if (store.get(id)?.status !== 'queued') return;
+
+    const entry: Running = {
+      job: save({ ...queued, status: 'running', startedAt: now().toISOString() }),
+      child: null,
+      abort: new AbortController(),
+      stopping: null,
+      timers: [],
+      pending: [],
+    };
+    running.set(id, entry);
+
+    /** The job ends here without a worker having ended it. */
+    const endWithout = async (failure: JobFailure): Promise<void> => {
+      for (const timer of entry.timers) clearTimeout(timer);
+      flush(entry);
+      const ended = { ...entry.job, endedAt: now().toISOString() };
+      const done: Job =
+        entry.stopping === 'cancelled'
+          ? { ...ended, status: 'cancelled' }
+          : { ...ended, status: 'failed', failure: entry.stopping ?? failure };
+      await tidy(kind, workDir);
+      running.delete(id);
+      save(done);
+      logger.info('job-ended', {
+        kind: done.kind,
+        status: done.status,
+        failure: done.failure ?? undefined,
+      });
+    };
+
+    const context = { workDir, signal: entry.abort.signal };
+    if (kind.prepare) {
+      try {
+        await kind.prepare(queued.inputs, context);
+      } catch (error) {
+        // What a kind throws may say whose data it was after: only its name is
+        // logged, and the word it has for why, when it has one.
+        if (!entry.stopping) {
+          const reason = reasonOf(error);
+          logger.error('job-could-not-prepare', { kind: kind.name, error: nameOf(error), reason });
+          if (reason) entry.job = { ...entry.job, message: reason };
+        }
+        return endWithout('could-not-prepare');
+      }
+      // Cancelled, or the server stopped, while it prepared: no worker is started.
+      if (entry.stopping) return endWithout('interrupted');
+    }
+
     let child: ChildProcess;
     try {
-      if (!kind) throw new UnknownJobKindError();
-      await mkdir(workDir, { recursive: true });
-      // The manager was stopped meanwhile: the job waits for the next start.
-      if (stopped) return;
-      // It was cancelled meanwhile: it has left the queue, and is in no list of
-      // running jobs yet, so the cancellation wrote it down and that stands.
-      if (store.get(id)?.status !== 'queued') return;
       const command = kind.command(queued.inputs, { workDir });
       child = spawn(command.file, [...command.args], {
         cwd: workDir,
@@ -170,23 +259,9 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
       });
     } catch (error) {
       logger.error('job-could-not-start', { kind: queued.kind, ...errorFields(error) });
-      save({
-        ...queued,
-        status: 'failed',
-        failure: 'could-not-start',
-        endedAt: now().toISOString(),
-      });
-      return;
+      return endWithout('could-not-start');
     }
-
-    const entry: Running = {
-      job: save({ ...queued, status: 'running', startedAt: now().toISOString() }),
-      child,
-      stopping: null,
-      timers: [],
-      pending: [],
-    };
-    running.set(id, entry);
+    entry.child = child;
     logger.info('job-started', { kind: queued.kind });
     if (kind.timeoutMs !== undefined) {
       entry.timers.push(setTimeout(() => stop(entry, 'timed-out'), kind.timeoutMs));
@@ -228,15 +303,40 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
     clearInterval(writer);
     for (const timer of entry.timers) clearTimeout(timer);
     flush(entry);
-    running.delete(id);
+    entry.child = null;
+
+    // The worker ended well and nobody asked for the job to stop: the kind
+    // takes what it made. Until that is done the job is still running.
+    let finished: { readonly result: JsonObject | null } | 'failed' | null = null;
+    if (!entry.stopping && !failed && code === 0 && kind.finish) {
+      try {
+        finished = {
+          result: await kind.finish(queued.inputs, { ...context, result: entry.job.result }),
+        };
+      } catch (error) {
+        finished = 'failed';
+        if (!entry.stopping) {
+          const reason = reasonOf(error);
+          logger.error('job-could-not-finish', { kind: kind.name, error: nameOf(error), reason });
+          if (reason) entry.job = { ...entry.job, message: reason };
+        }
+      }
+    }
 
     const ended = { ...entry.job, exitCode: code, endedAt: now().toISOString() };
     let done: Job;
-    if (entry.stopping === 'cancelled') done = { ...ended, status: 'cancelled' };
+    // What was taken is taken: a request to stop that came after it changes nothing.
+    if (finished !== null && finished !== 'failed') {
+      done = { ...ended, status: 'succeeded', progress: 1, result: finished.result };
+    } else if (entry.stopping === 'cancelled') done = { ...ended, status: 'cancelled' };
     else if (entry.stopping) done = { ...ended, status: 'failed', failure: entry.stopping };
-    else if (failed) done = { ...ended, status: 'failed', failure: 'could-not-start' };
+    else if (finished === 'failed') {
+      done = { ...ended, status: 'failed', failure: 'could-not-finish' };
+    } else if (failed) done = { ...ended, status: 'failed', failure: 'could-not-start' };
     else if (code === 0) done = { ...ended, status: 'succeeded', progress: 1 };
     else done = { ...ended, status: 'failed', failure: 'exit-code' };
+    await tidy(kind, workDir);
+    running.delete(id);
     save(done);
     logger.info('job-ended', {
       kind: done.kind,
@@ -273,6 +373,9 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
       if (!kind) throw new UnknownJobKindError();
       // Checked now, so that a job that cannot run is refused and not queued.
       kind.command(inputs, { workDir: join(workRoot, 'check') });
+      await kind.check?.(inputs);
+      // It took a moment: the manager may have been stopped meanwhile.
+      if (stopped) throw new JobsStoppedError();
       const job = save({
         id: randomUUID(),
         kind: kindName,
@@ -291,6 +394,15 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
       logger.info('job-submitted', { kind: kindName });
       pump();
       return job;
+    },
+
+    async subject(kindName, inputs) {
+      try {
+        return (await kinds.get(kindName)?.subject?.(inputs)) ?? null;
+      } catch {
+        // Inputs the kind does not take: `submit` says so.
+        return null;
+      }
     },
 
     get(id) {

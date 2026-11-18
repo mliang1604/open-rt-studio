@@ -22,9 +22,10 @@ endforeach()
 set(TOLERANCE_MM 1.0)
 # From a start that is the answer already, with one step taken at each
 # resolution. The steps are drawn from random points, so it does not stay
-# exactly there; were the start not taken at all, the corners would be more
-# than 10 mm off, by the turn that one step cannot find.
-set(TOLERANCE_FROM_TRUTH_MM 3.0)
+# exactly there (0.3 mm off on the first runner that ran it); were the start
+# not taken at all, the corners would be more than 10 mm off, by the turn
+# that one step cannot find.
+set(TOLERANCE_FROM_TRUTH_MM 1.0)
 
 # A folder whose name is not ASCII, as a user's folder may be.
 set(folder "${WORK}/régistration-登録")

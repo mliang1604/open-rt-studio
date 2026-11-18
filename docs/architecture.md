@@ -2206,12 +2206,55 @@ Decided in #79, the toolchain:
 - **Volumes go to the tools as files of a plain format** (MetaImage, NRRD,
   NIfTI), in millimetres and patient coordinates. The tools read no DICOM:
   what a DICOM series' geometry is stays decided in one place,
-  `packages/dicom`. How the server writes those files is #80's.
+  `packages/dicom`. The server writes those files (#80, below).
 - **Tests make their data** from a formula, as everywhere else. One of them
   runs elastix itself on two synthetic volumes with a known shift, to say
   that the libraries work on each system.
 - **Not built on a developer's machine by anything else.** `npm run build`
   and `npm test` do not touch `native/`; `node scripts/native.mjs` does.
+
+Decided in #80, automatic rigid registration:
+
+- **The tool, `ors-register-rigid`,** registers two volume files with
+  elastix: mutual information on points drawn at random, from coarse to
+  fine in four steps, a transform that only turns and moves. It takes a
+  matrix to start from, a box of the fixed volume to compare in, a seed and
+  a number of threads. The same seed and threads give the same matrix.
+- **It gives `fixedToMoving`**, the way a registration is computed: where
+  a point of the fixed volume is in the moving one. The matrix is read off
+  what the found transform does to four points, so that no convention of
+  angles or of a centre of rotation is taken on trust.
+- **It reports as a job's worker does** (`@progress`, `@result`), and
+  nothing else reaches standard output: elastix's log is read for how far
+  along it is and dropped.
+- **The job, `rigid-registration`** (`services/server/src/registration`),
+  is there on a server that is told where the tools are (`nativeTools`).
+  The program is the one of that directory; a request names two series.
+  It writes the two series as MetaImage files (`writeMetaImage` in
+  `packages/dicom`, from the volume `buildVolume` makes), runs the tool,
+  and stores what it found as a Spatial Registration object through
+  ingest.
+- **The object is in the fixed image's frame** and maps the moving image's
+  frame into it: the inverse of what the tool gave, turned round in one
+  place. The job's result gives the matrix both ways, each under its name.
+- **A registration is between two frames of reference.** Two series in one
+  frame are refused: the frame says they are registered, and the object
+  cannot say otherwise. So are series of two patients.
+- **A job kind has steps of its own** for this: `check` at submission,
+  `prepare` before the worker, `finish` after it, and a directory that is
+  removed when the job ends, since the volumes in it are a patient's.
+  Whose data a job is about goes into the audit record of the request that
+  started it. What a step throws is logged by its name and a fixed word
+  only.
+- **Tested twice.** Everywhere, with a stand-in for the tool that reads
+  the files it is given, so that the job is tested where nothing native is
+  built. In the `Native tools` workflow, with the tool itself: two series
+  with a known offset go in as DICOM and the stored object is held against
+  it. The tool's own test is on a phantom that is turned as well as moved.
+- **Not there**: the tools are not in the container image or the desktop
+  application yet (#70); a volume whose axes are not at right angles (a
+  tilted gantry) is refused, not resampled; nothing judges how good a
+  registration is.
 
 Status: **decided, and Michael's to overturn**.
 
@@ -2229,9 +2272,11 @@ Status: **decided, and Michael's to overturn**.
 - A merge to `main` deploys the web client to GitHub Pages
   (`.github/workflows/deploy.yml`).
 - `Native tools` (`.github/workflows/native.yml`) is a workflow of its own
-  that runs when `native/` or its build script changes: it builds ITK,
-  elastix and the tools on Linux, macOS (each processor, then joined) and
-  Windows, runs the tools' tests and uploads the tools. Not required.
+  that runs when `native/`, its build script or the server's registration
+  job changes: it builds ITK, elastix and the tools on Linux, macOS (each
+  processor, then joined) and Windows, runs the tools' tests and uploads
+  the tools. On Linux it then runs the server's registration job with the
+  tool it built. Not required.
 
 The job names `Build & test` and `End-to-end smoke` are what the `main`
 ruleset requires. Keep them stable.

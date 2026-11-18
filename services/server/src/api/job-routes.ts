@@ -154,6 +154,10 @@ export function jobRoutes(jobs: JobManager): Route[] {
           throw invalid();
         }
         request.audit({ detail: kind });
+        // Whose data the job is about, said before it is known whether it is taken in:
+        // a job that is refused was still asked for.
+        const subject = await jobs.subject(kind, inputs as JsonObject);
+        if (subject) request.audit(subject);
         try {
           const job = await jobs.submit(kind, inputs as JsonObject);
           request.audit({ object: job.id });

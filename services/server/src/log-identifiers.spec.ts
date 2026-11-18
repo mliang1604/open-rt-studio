@@ -8,6 +8,7 @@ import { join } from 'node:path';
 
 import {
   SYNTHETIC_FOLLOW_UP_STUDY,
+  SYNTHETIC_RT_COURSE,
   SYNTHETIC_STUDY,
   SYNTHETIC_UID_ROOT,
   syntheticRtCourse,
@@ -20,8 +21,14 @@ import type { AuditRecord } from './audit/audit-store.js';
 import { DEFAULT_CONFIG } from './config.js';
 import { dicomEcho } from './dimse/echo.js';
 import { converse, findRequest, getRequest, moveRequest, sendFiles } from './dimse/testing/peer.js';
+import type { Job } from './jobs/job.js';
 import { createLogger } from './logger.js';
 import { POSTGRES, testSchemas, type TestSchemas } from './pacs-index/postgres-testing.js';
+import {
+  RIGID_REGISTRATION_KIND,
+  rigidRegistrationKind,
+} from './registration/rigid-registration.js';
+import { standInProgram } from './registration/testing/stand-in.js';
 import { startServer, type RunningServer } from './server.js';
 
 // The guard the audit log asks for (#56): everything the server can be asked
@@ -93,7 +100,10 @@ it.each(INDEXES)(
         dicomCallers: [DICOM_PEER],
       },
       logger,
-      { accounts },
+      {
+        accounts,
+        jobKinds: (pacs) => [rigidRegistrationKind({ pacs, program: standInProgram() })],
+      },
     );
     const origin = `http://127.0.0.1:${server.address.port}`;
     let calls = 0;
@@ -533,6 +543,43 @@ it.each(INDEXES)(
     // The audit log once more, now that things were done by DICOM (#212).
     const afterDicom = await call('GET', api('/audit/export?format=ndjson'), { token: admin });
     expect(afterDicom.status).toBe(200);
+
+    // A registration job on two series of the patient (#80): taken in, run
+    // by a stand-in for the tool, and its result stored; and one that is
+    // refused for a series that is not there.
+    const registering = await call('POST', api('/jobs'), {
+      token: admin,
+      body: {
+        kind: RIGID_REGISTRATION_KIND,
+        inputs: {
+          fixedSeriesUid: SYNTHETIC_RT_COURSE.ct,
+          movingSeriesUid: SYNTHETIC_RT_COURSE.followUpCt,
+        },
+      },
+    });
+    expect(registering.status).toBe(202);
+    const registered = await vi.waitFor(
+      async () => {
+        const job = (
+          await call('GET', api(`/jobs/${(registering.body as Job).id}`), { token: admin })
+        ).body as Job;
+        if (job.endedAt === null) throw new Error('not yet');
+        return job;
+      },
+      { timeout: 20_000, interval: 50 },
+    );
+    expect(registered).toMatchObject({ status: 'succeeded' });
+    for (const name of ['sopInstanceUid', 'seriesInstanceUid']) {
+      seen.add(String(registered.result![name]));
+    }
+    const unregistered = await call('POST', api('/jobs'), {
+      token: admin,
+      body: {
+        kind: RIGID_REGISTRATION_KIND,
+        inputs: { fixedSeriesUid: SYNTHETIC_RT_COURSE.ct, movingSeriesUid: ABSENT_UID },
+      },
+    });
+    expect(unregistered.status).toBe(400);
 
     await server.stop();
     server = null;

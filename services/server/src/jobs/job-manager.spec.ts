@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +13,7 @@ import { createJobManager, type JobManager, type JobManagerOptions } from './job
 import { openSqliteJobStore } from './job-store.js';
 import {
   InvalidJobInputError,
+  JobStepError,
   JobsStoppedError,
   readWorkerLine,
   UnknownJobKindError,
@@ -396,6 +397,248 @@ describe('across a restart', () => {
       status: 'failed',
       failure: 'could-not-start',
     });
+  });
+});
+
+describe('a kind with steps of its own (#80)', () => {
+  /** The dummy kind, with what a real kind does before and after its worker. */
+  const withSteps = (steps: Partial<JobKind>): JobKind => ({ ...dummyKind(), ...steps });
+  const exists = (path: string): Promise<boolean> =>
+    stat(path).then(
+      () => true,
+      () => false,
+    );
+
+  it("prepares before its worker starts, in the job's directory, as a running job", async () => {
+    const seen: string[] = [];
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const { jobs } = await manager({
+      kinds: [
+        withSteps({
+          async prepare(inputs, { workDir }) {
+            seen.push(`prepare ${String(inputs['steps'])}`);
+            await writeFile(join(workDir, 'input.txt'), 'put there before the worker');
+            await held;
+          },
+        }),
+      ],
+    });
+    const job = await jobs.submit('dummy', { steps: 1, echo: true });
+    // While it prepares the job is running, and no worker has said anything.
+    const preparing = await until(jobs, job.id, (now) => now.status === 'running');
+    expect(preparing.startedAt).not.toBeNull();
+    await vi.waitFor(() => expect(seen).toEqual(['prepare 1']));
+    expect(jobs.log(job.id)).toEqual([]);
+    release();
+
+    const done = await jobs.whenEnded(job.id);
+    expect(done.status).toBe('succeeded');
+    // The worker ran where the kind had put its input.
+    const directory = jobs
+      .log(job.id)!
+      .find((line) => line.text.startsWith('directory '))!
+      .text.slice('directory '.length);
+    expect(await readFile(join(directory, 'input.txt'), 'utf8')).toBe(
+      'put there before the worker',
+    );
+  });
+
+  it('fails as could-not-prepare when that fails, starts no worker, and logs no word of why', async () => {
+    const { jobs, log } = await manager({
+      kinds: [
+        withSteps({
+          prepare: () => Promise.reject(new RangeError('series 1.2.840.99999.1 of DOE^JANE')),
+        }),
+      ],
+    });
+    const job = await jobs.submit('dummy', { steps: 1, writeFile: 'made.txt' });
+    const done = await jobs.whenEnded(job.id);
+    expect(done).toMatchObject({ status: 'failed', failure: 'could-not-prepare', exitCode: null });
+    expect(jobs.log(job.id)).toEqual([]);
+    expect(await exists(join(scratch, 'work', job.id, 'made.txt'))).toBe(false);
+    const written = JSON.stringify(log());
+    expect(written).toContain('"event":"job-could-not-prepare"');
+    expect(written).toContain('RangeError');
+    expect(written).not.toContain('1.2.840.99999.1');
+    expect(written).not.toContain('DOE');
+  });
+
+  it('is cancelled while it prepares: the step is told to give up, and no worker is started', async () => {
+    let told = false;
+    const { jobs } = await manager({
+      kinds: [
+        withSteps({
+          prepare: (_inputs, { signal }) =>
+            new Promise<void>((_resolve, reject) => {
+              signal.addEventListener('abort', () => {
+                told = true;
+                reject(new Error('gave up'));
+              });
+            }),
+        }),
+      ],
+    });
+    const job = await jobs.submit('dummy', { steps: 1, writeFile: 'made.txt' });
+    await until(jobs, job.id, (now) => now.status === 'running');
+    jobs.cancel(job.id);
+    const done = await jobs.whenEnded(job.id);
+    expect(done).toMatchObject({ status: 'cancelled', failure: null });
+    expect(told).toBe(true);
+    expect(await exists(join(scratch, 'work', job.id, 'made.txt'))).toBe(false);
+  });
+
+  it('fails as interrupted when the server stops while it prepares', async () => {
+    const path = join(scratch, 'jobs.sqlite');
+    const { jobs } = await manager({
+      store: openSqliteJobStore(path),
+      kinds: [
+        withSteps({
+          prepare: (_inputs, { signal }) =>
+            new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve())),
+        }),
+      ],
+    });
+    const job = await jobs.submit('dummy', { steps: 1 });
+    await until(jobs, job.id, (now) => now.status === 'running');
+    await jobs.shutdown();
+    const store = openSqliteJobStore(path);
+    expect(store.get(job.id)).toMatchObject({ status: 'failed', failure: 'interrupted' });
+    store.close();
+  });
+
+  it('finishes after its worker ended well, with what the worker reported, and gives the result', async () => {
+    const { jobs } = await manager({
+      kinds: [
+        withSteps({
+          async finish(inputs, { workDir, result }) {
+            const made = await readFile(join(workDir, 'made.txt'), 'utf8');
+            return { ...result, steps: inputs['steps'] ?? null, made: made.trim(), stored: true };
+          },
+        }),
+      ],
+    });
+    const job = await jobs.submit('dummy', {
+      steps: 2,
+      writeFile: 'made.txt',
+      result: { metric: -0.83 },
+    });
+    const done = await jobs.whenEnded(job.id);
+    expect(done).toMatchObject({ status: 'succeeded', exitCode: 0, progress: 1 });
+    expect(done.result).toEqual({
+      metric: -0.83,
+      steps: 2,
+      made: 'made by the dummy worker',
+      stored: true,
+    });
+    expect(jobs.get(job.id)!.result).toEqual(done.result);
+  });
+
+  it('does not finish a job whose worker failed or that was cancelled', async () => {
+    let finished = 0;
+    const { jobs } = await manager({
+      kinds: [
+        withSteps({
+          finish: () => {
+            finished += 1;
+            return Promise.resolve(null);
+          },
+        }),
+      ],
+    });
+    const failing = await jobs.submit('dummy', { steps: 1, exitCode: 3 });
+    expect(await jobs.whenEnded(failing.id)).toMatchObject({
+      status: 'failed',
+      failure: 'exit-code',
+    });
+    const cancelled = await jobs.submit('dummy', { steps: 50, delayMs: 100 });
+    await until(jobs, cancelled.id, (now) => now.progress !== null);
+    jobs.cancel(cancelled.id);
+    expect(await jobs.whenEnded(cancelled.id)).toMatchObject({ status: 'cancelled' });
+    expect(finished).toBe(0);
+  });
+
+  it('keeps the word a step has for why it failed, and logs it', async () => {
+    const { jobs, log } = await manager({
+      kinds: [
+        withSteps({ prepare: () => Promise.reject(new JobStepError('not-an-image')) }),
+        withSteps({
+          name: 'unfinished',
+          finish: () => Promise.reject(new JobStepError('Not stored: 1.2.3 DOE^JANE')),
+        }),
+      ],
+    });
+    const unprepared = await jobs.whenEnded((await jobs.submit('dummy', { steps: 1 })).id);
+    expect(unprepared).toMatchObject({ failure: 'could-not-prepare', message: 'not-an-image' });
+    // A reason that is not a plain word is not kept: it could be anything.
+    const unfinished = await jobs.whenEnded((await jobs.submit('unfinished', { steps: 1 })).id);
+    expect(unfinished).toMatchObject({ failure: 'could-not-finish', message: 'failed' });
+    const written = JSON.stringify(log());
+    expect(written).toContain('"reason":"not-an-image"');
+    expect(written).not.toContain('DOE');
+  });
+
+  it('asks its kind about the inputs at submission, and takes nothing in when it says no', async () => {
+    const { jobs } = await manager({
+      kinds: [
+        withSteps({
+          check: (inputs) =>
+            inputs['steps'] === 3
+              ? Promise.reject(new InvalidJobInputError('There is no such series.'))
+              : Promise.resolve(),
+        }),
+      ],
+    });
+    await expect(jobs.submit('dummy', { steps: 3 })).rejects.toThrow('There is no such series.');
+    expect(jobs.list()).toEqual([]);
+    const taken = await jobs.submit('dummy', { steps: 1 });
+    expect((await jobs.whenEnded(taken.id)).status).toBe('succeeded');
+  });
+
+  it('fails as could-not-finish when that fails, and keeps what the worker reported', async () => {
+    const { jobs, log } = await manager({
+      kinds: [withSteps({ finish: () => Promise.reject(new TypeError('instance 1.2.3.4')) })],
+    });
+    const job = await jobs.submit('dummy', { steps: 1, result: { metric: 1 } });
+    const done = await jobs.whenEnded(job.id);
+    expect(done).toMatchObject({
+      status: 'failed',
+      failure: 'could-not-finish',
+      exitCode: 0,
+      result: { metric: 1 },
+    });
+    const written = JSON.stringify(log());
+    expect(written).toContain('"event":"job-could-not-finish"');
+    expect(written).not.toContain('1.2.3.4');
+  });
+
+  it('removes the directory of a kind that asks for it, however the job ended', async () => {
+    const { jobs } = await manager({
+      kinds: [
+        dummyKind(),
+        withSteps({ name: 'tidy', removeWorkDir: true }),
+        withSteps({
+          name: 'tidy-unprepared',
+          removeWorkDir: true,
+          async prepare(_inputs, { workDir }) {
+            await writeFile(join(workDir, 'patient.bin'), 'pixels');
+            throw new Error('no');
+          },
+        }),
+      ],
+    });
+    const well = await jobs.submit('tidy', { steps: 1, writeFile: 'made.txt' });
+    const badly = await jobs.submit('tidy', { steps: 1, writeFile: 'made.txt', exitCode: 2 });
+    const unprepared = await jobs.submit('tidy-unprepared', { steps: 1 });
+    for (const job of [well, badly, unprepared]) {
+      await jobs.whenEnded(job.id);
+      // Gone by the time the job is called ended.
+      expect(await exists(join(scratch, 'work', job.id))).toBe(false);
+    }
+    // And kept for a kind that does not ask.
+    const kept = await jobs.submit('dummy', { steps: 1, writeFile: 'made.txt' });
+    await jobs.whenEnded(kept.id);
+    expect(await exists(join(scratch, 'work', kept.id, 'made.txt'))).toBe(true);
   });
 });
 

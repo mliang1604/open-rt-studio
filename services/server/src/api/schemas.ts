@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { JOB_FAILURES } from '../jobs/job.js';
+
 // What the API's answers look like, as JSON Schema, for the API description.
 // The specs hold every answer of the API against these, so that the
 // description and the server cannot drift apart.
@@ -505,7 +507,7 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     result: { type: ['object', 'null'], description: 'What the worker reported as its result.' },
     failure: {
       type: ['string', 'null'],
-      enum: ['exit-code', 'timed-out', 'interrupted', 'could-not-start', null],
+      enum: [...JOB_FAILURES, null],
       description: 'Why the job failed; null unless it did.',
     },
     exitCode: nullableInteger,

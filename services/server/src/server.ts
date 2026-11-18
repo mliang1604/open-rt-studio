@@ -18,7 +18,7 @@ import { timepointRoutes } from './api/timepoint-routes.js';
 import { openSqliteAuditStore } from './audit/audit-store.js';
 import { createAuditLog, type AuditLog } from './audit/audit.js';
 import { ConfigError, DEFAULT_CONFIG, ENVIRONMENT_VARIABLES, type ServerConfig } from './config.js';
-import { CoreStoppingError, createCore, type ServerCore } from './core/core.js';
+import { CoreStoppingError, createCore, type Pacs, type ServerCore } from './core/core.js';
 import { createDispatcher } from './host/dispatch.js';
 import { createHost, type HostAddress } from './host/host.js';
 import { healthRoute, HttpError, type Route, type RouteResponse } from './host/routes.js';
@@ -39,6 +39,10 @@ import { errorFields, type LogFields, type Logger } from './logger.js';
 import { IndexVersionError } from './pacs-index/migrations.js';
 import { IndexDatabaseError, type PacsIndex } from './pacs-index/pacs-index.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
+import {
+  RIGID_REGISTRATION_TOOL,
+  rigidRegistrationKind,
+} from './registration/rigid-registration.js';
 import { openFileStore } from './store/file-store.js';
 import { createMemoryStore } from './store/memory-store.js';
 
@@ -119,10 +123,11 @@ export async function openIndex(
 /** What an embedder or a test adds to a server. */
 export interface ServerParts {
   /**
-   * The kinds of job the server runs. None by default: the registration and
-   * resampling tools register theirs when they exist (M3).
+   * Kinds of job the server runs, besides those its configuration gives it
+   * (`nativeTools`). None by default. As a function, the kinds are given a
+   * way to the server's PACS, to ask when a job runs and not before.
    */
-  readonly jobKinds?: readonly JobKind[];
+  readonly jobKinds?: readonly JobKind[] | ((pacs: () => Pacs) => readonly JobKind[]);
   /**
    * The accounts of a server whose `auth` is `accounts`, in place of the ones
    * kept in the data directory: for a test, which keeps them in memory. The
@@ -418,6 +423,23 @@ export function keepAuditRetention(
   return () => clearInterval(timer);
 }
 
+/**
+ * The jobs that run the native tools, for a server that is told where the
+ * tools are. Throws {@link ConfigError} when a tool is not there: a server
+ * that offers a job it cannot run is found out at the first job otherwise.
+ */
+function nativeJobKinds(config: ServerConfig, pacs: () => Pacs): JobKind[] {
+  if (config.nativeTools === null) return [];
+  const program = join(config.nativeTools, RIGID_REGISTRATION_TOOL);
+  if (!existsSync(program)) {
+    throw new ConfigError(
+      `The directory ${ENVIRONMENT_VARIABLES.nativeTools} names holds no ${RIGID_REGISTRATION_TOOL}. ` +
+        `Build the native tools (native/README.md) and name the directory they are in.`,
+    );
+  }
+  return [rigidRegistrationKind({ pacs, program: [program] })];
+}
+
 /** The job manager the configuration asks for, and how to clear up after it. */
 async function openJobs(config: ServerConfig, logger: Logger, kinds: readonly JobKind[]) {
   // Without a data directory, jobs work in a temporary one that goes when the server stops.
@@ -465,8 +487,15 @@ async function assemble(
   const audit = openAudit(config.dataDir, parts.audit);
   const stopClearing = keepAuditRetention(audit, config.auditRetentionDays, logger);
   const pacs = await openPacs(config, logger);
-  const { jobs, clear } = await openJobs(config, logger, parts.jobKinds ?? []);
+  // The kinds are named before the core is made, and ask for its PACS when a job runs.
+  const made: { core: ServerCore | null } = { core: null };
+  const ownPacs = (): Pacs => made.core!.pacs!;
+  const { jobs, clear } = await openJobs(config, logger, [
+    ...(typeof parts.jobKinds === 'function' ? parts.jobKinds(ownPacs) : (parts.jobKinds ?? [])),
+    ...nativeJobKinds(config, ownPacs),
+  ]);
   const core = createCore({ logger, pacs, jobs });
+  made.core = core;
   const jobApi = jobRoutes(jobs);
   const sessionApi = accounts ? accountRoutes(accounts) : [openSessionRoute()];
   const auditApi = audit ? auditRoutes(audit) : [];
