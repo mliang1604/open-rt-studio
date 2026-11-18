@@ -24,6 +24,9 @@ playwright/.cache/
 !.vscode/extensions.json
 .history/
 
+# What compose reads its variables from: a password of yours may be in it.
+.env
+
 # System files
 .DS_Store
 Thumbs.db

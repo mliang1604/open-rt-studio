@@ -1,0 +1,80 @@
+name: Publish the server image
+
+# Publishes the server's container image to the GitHub Container Registry
+# whenever main advances with a change to what is in it (#59):
+#
+#   ghcr.io/<owner>/open-rt-studio-server:main          the latest of main
+#   ghcr.io/<owner>/open-rt-studio-server:sha-<commit>   that one commit
+#
+# The image is checked first, with the script the "Container" job runs, and
+# what is pushed is the image that was checked. Not for clinical use.
+#
+# A package is private when it is first made. To let anyone pull it, its
+# visibility has to be changed once, in the package's settings on GitHub.
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/server/**
+      - packages/dicom/**
+      - package.json
+      - package-lock.json
+      - tsconfig.base.json
+      - compose.yaml
+      - compose.https.yaml
+      - scripts/container-check.sh
+      - .dockerignore
+      - .github/workflows/publish-image.yml
+  workflow_dispatch:
+
+# Least privilege: read the repository, and write this repository's packages.
+permissions:
+  contents: read
+  packages: write
+
+# One at a time, and none cancelled: every commit that gets here is published.
+concurrency:
+  group: publish-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the server image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Builds the image as compose.yaml names it (open-rt-studio-server),
+      # and leaves it on the runner when the checks have passed.
+      - name: Build and check the image
+        run: scripts/container-check.sh
+
+      - name: Log in to the registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+
+      - name: Push
+        id: push
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/open-rt-studio-server"
+          for tag in main "sha-${GITHUB_SHA::12}"; do
+            docker tag open-rt-studio-server "$image:$tag"
+            docker push "$image:$tag"
+          done
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      # What the README says to do with a published image, done: the local
+      # copies are removed, and compose is told to run the one in the registry.
+      - name: Run the published image
+        env:
+          IMAGE: ${{ steps.push.outputs.image }}
+        run: |
+          export OPEN_RT_STUDIO_IMAGE="$IMAGE:sha-${GITHUB_SHA::12}"
+          docker image rm --force open-rt-studio-server "$IMAGE:main" "$OPEN_RT_STUDIO_IMAGE"
+          docker compose up --no-build --detach --wait
+          curl --silent --fail http://127.0.0.1:4300/health
+          docker compose down --volumes

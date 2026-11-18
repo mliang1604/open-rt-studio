@@ -79,6 +79,12 @@ USER node
 ENV OPEN_RT_STUDIO_HOST=0.0.0.0 \
     OPEN_RT_STUDIO_PORT=4300 \
     OPEN_RT_STUDIO_DATA_DIR=/data
+# What a registry shows of the image, and the repository it belongs to.
+LABEL org.opencontainers.image.title="Open RT Studio server" \
+      org.opencontainers.image.description="The Open RT Studio server, a small PACS for radiotherapy imaging. Not for clinical use." \
+      org.opencontainers.image.source="https://github.com/mliang1604/open-rt-studio" \
+      org.opencontainers.image.licenses="MPL-2.0"
+
 EXPOSE 4300
 
 # The server's own `health` command: over HTTPS when the server was given a

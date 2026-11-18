@@ -15,7 +15,10 @@ services:
     build:
       context: .
       dockerfile: services/server/Dockerfile
-    image: open-rt-studio-server
+    # The image this project builds, under this name. To run a published
+    # image in its place, name it here and start with --no-build:
+    #   OPEN_RT_STUDIO_IMAGE=ghcr.io/mliang1604/open-rt-studio-server:main docker compose up --no-build --detach
+    image: ${OPEN_RT_STUDIO_IMAGE:-open-rt-studio-server}
     ports:
       # Reached from this machine only. The server speaks plain HTTP unless it
       # is given a certificate: before this line is widened to other machines,

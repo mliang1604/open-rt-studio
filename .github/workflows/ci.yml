@@ -235,3 +235,31 @@ jobs:
 
       - name: Build, run and check the container
         run: scripts/container-check.sh
+
+  # The server as it is deployed, end to end (#59): its container with its
+  # index in PostgreSQL, and DCMTK and Orthanc as other DICOM systems that
+  # send to it, ask it and are sent to, asked and retrieved from. Both are
+  # test peers: DCMTK is installed on the runner, Orthanc is pulled as its
+  # own image, and neither is bundled or linked. Not a required check.
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install DCMTK
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends dcmtk
+
+      - name: Server, PostgreSQL, DCMTK and Orthanc, end to end
+        run: scripts/integration-check.sh
