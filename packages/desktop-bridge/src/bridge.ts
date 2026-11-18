@@ -22,7 +22,7 @@
 export const BRIDGE_GLOBAL = 'openRtStudioDesktop';
 
 /** Raised when a call changes what it takes or gives. */
-export const BRIDGE_VERSION = 4;
+export const BRIDGE_VERSION = 5;
 
 /** The systems the desktop application runs on, as Node names them. */
 export const DESKTOP_PLATFORMS = ['darwin', 'win32', 'linux'] as const;
@@ -40,6 +40,13 @@ export interface DesktopInfo {
   readonly arch: string;
   /** Whether it runs as an installed application, and not from the repository. */
   readonly packaged: boolean;
+  /**
+   * Whether the application was told to draw in software (#69): a setting
+   * for tests and for working on it. Without it the viewer on Linux takes no
+   * software adapter, which Chromium offers there by itself and which does
+   * not hold.
+   */
+  readonly softwareGpu: boolean;
 }
 
 /**
@@ -409,7 +416,8 @@ export function isDesktopInfo(value: unknown): value is DesktopInfo {
     isText(info['chromium']) &&
     (DESKTOP_PLATFORMS as readonly unknown[]).includes(info['platform']) &&
     isText(info['arch']) &&
-    typeof info['packaged'] === 'boolean'
+    typeof info['packaged'] === 'boolean' &&
+    typeof info['softwareGpu'] === 'boolean'
   );
 }
 

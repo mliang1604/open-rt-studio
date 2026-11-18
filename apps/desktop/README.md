@@ -131,6 +131,33 @@ to a server…**, then **Open the library on this computer**.
 - Its DICOM listener is off. It can be turned on under **DICOM** on the
   library's card, and then listens on this computer only.
 
+## Linux
+
+The viewer draws with WebGPU, which on Linux runs on **Vulkan**. The
+application asks Chromium for both at start; nothing has to be set.
+
+What the computer needs is a Vulkan driver for its graphics card: Mesa for
+Intel and AMD, or NVIDIA's own driver. To see what Vulkan can use:
+
+```sh
+vulkaninfo --summary        # in the package vulkan-tools
+```
+
+If that lists no graphics card, or only a software one such as `llvmpipe`,
+the application has none to draw with. It then shows a notice that says so,
+with these steps, in place of the images. It does not draw on the processor
+by itself: the software adapter Chromium offers on such a machine stops
+working soon after it starts, so the viewer does not take it. The same goes for a virtual
+machine, a container or a remote desktop session without a graphics card,
+and for a card whose driver Chromium does not use because it is known to
+draw wrongly.
+
+This has been run in CI on a machine with no graphics card, drawing in
+software, which the tests ask for
+(`OPEN_RT_STUDIO_DESKTOP_SOFTWARE_GPU=1`, a setting for working on the
+application that an installed one does not read). It has not been run on a Linux
+machine with a graphics card.
+
 ## Layout
 
 ```
@@ -191,7 +218,9 @@ It gives Chromium a stand-in for the keychain, so that a test writes nothing
 into yours. A fourth (`e2e/library.spec.ts`) has no server at all: it
 imports a folder into the library, browses it, views a series, saves a
 painted structure, and finds all of it after a restart. `E2E_NO_WEBGPU=1` takes the GPU away, to see on a machine that
-has one what a runner without one sees.
+has one what a runner without one sees. `E2E_SOFTWARE_GPU=1` has the
+application draw in software, which is how the Linux job draws without a
+graphics card (on macOS Electron has no such adapter to give).
 
 It needs a display. On Linux without one: `xvfb-run --auto-servernum npm run
 e2e:desktop`.

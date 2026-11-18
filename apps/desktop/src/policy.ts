@@ -102,3 +102,63 @@ export function mayHave(
   if (asked.isMainFrame === false) return false;
   return asked.fileAccessType !== 'writable';
 }
+
+/** Something Chromium is told as the application starts. */
+export interface StartSwitch {
+  readonly name: string;
+  readonly value?: string;
+}
+
+/**
+ * What Chromium is told at start so that the viewer has WebGPU (#69).
+ *
+ * On macOS and Windows nothing: WebGPU is on there by itself. On Linux
+ * Chromium offers it by itself only for some graphics cards, and for the
+ * rest wants to be told twice: that WebGPU may be used where it has not
+ * been released (`enable-unsafe-webgpu`), and that Vulkan, which WebGPU
+ * runs on there, may be used (`enable-features=Vulkan`). The page these
+ * apply to is the application's own and no other.
+ *
+ * A graphics card that Chromium has blocked stays blocked: that list is of
+ * drivers that draw wrongly or crash. The viewer then says what is missing.
+ *
+ * `enabledFeatures` is what `enable-features` already holds (from the
+ * command line), which is kept.
+ *
+ * `software` is the setting to draw without a graphics card, on any system.
+ * Nothing is drawn in software unless it is asked for: on Linux Chromium
+ * offers a software adapter by itself once WebGPU is on, and the viewer
+ * does not take it (`refuseSoftware` in the renderer).
+ */
+export function gpuSwitches(
+  platform: string,
+  enabledFeatures = '',
+  software = false,
+): readonly StartSwitch[] {
+  if (platform !== 'linux' && !software) return [];
+  const features = enabledFeatures
+    .split(',')
+    .map((feature) => feature.trim())
+    .filter((feature) => feature !== '');
+  if (!features.includes('Vulkan')) features.push('Vulkan');
+  const told: StartSwitch[] = [
+    { name: 'enable-unsafe-webgpu' },
+    { name: 'enable-features', value: features.join(',') },
+  ];
+  if (software) told.push(...SOFTWARE_GPU);
+  return told;
+}
+
+/**
+ * Draw in software: Chromium's own rasterizer (SwiftShader) for WebGPU, and
+ * for the rest of the GPU process too. All three are needed: without the
+ * last, on Linux, the picture a WebGPU canvas shows cannot be made and the
+ * device is lost soon after it starts (#173, and #69 saw the same in the
+ * application). It is slow, and is for tests and for working on the
+ * application on a machine with no graphics card.
+ */
+const SOFTWARE_GPU: readonly StartSwitch[] = [
+  { name: 'use-webgpu-adapter', value: 'swiftshader' },
+  { name: 'use-angle', value: 'swiftshader' },
+  { name: 'use-vulkan', value: 'swiftshader' },
+];

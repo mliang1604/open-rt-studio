@@ -27,6 +27,7 @@ const INFO: DesktopInfo = {
   platform: 'darwin',
   arch: 'arm64',
   packaged: false,
+  softwareGpu: false,
 };
 
 const FILES: DesktopFiles = {

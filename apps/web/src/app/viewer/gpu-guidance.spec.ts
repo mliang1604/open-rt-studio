@@ -131,3 +131,103 @@ describe('gpuGuidance', () => {
     });
   });
 });
+
+describe('gpuGuidance in the desktop application (#69)', () => {
+  const desktop = (os: HostOs): GpuEnvironment => ({ ...env(os, 'chrome'), desktop: true });
+  const PROBLEMS: GpuProblem[] = [
+    'no-api',
+    'no-adapter',
+    'software-adapter',
+    'no-device',
+    'no-context',
+    'device-lost',
+  ];
+  const OSES: HostOs[] = ['linux', 'windows', 'mac', 'other'];
+
+  it('speaks of the computer and the application, never of a browser to change', () => {
+    for (const os of OSES) {
+      for (const problem of PROBLEMS) {
+        const guidance = guide(problem, desktop(os), 'the device went away');
+        const all = `${guidance.title}\n${text(guidance)}`;
+        // There is no browser to update, no settings page and no flags.
+        for (const word of [
+          'browser',
+          'Browser',
+          'chrome://',
+          'edge://',
+          'flags',
+          'https',
+          'tab',
+        ]) {
+          expect(all, `${os} ${problem}: ${word}`).not.toContain(word);
+        }
+        expect(guidance.steps.length, `${os} ${problem}`).toBeGreaterThan(0);
+        expect(guidance.reloadLabel).toBe('Start the viewer again');
+      }
+    }
+  });
+
+  it('says on Linux that WebGPU runs on Vulkan, which driver gives it, and how to check', () => {
+    for (const problem of ['no-api', 'no-adapter'] as const) {
+      const guidance = guide(problem, desktop('linux'));
+      const all = text(guidance);
+      expect(all).toContain('On Linux, WebGPU runs on Vulkan');
+      expect(all).toContain('Mesa for Intel and AMD');
+      expect(all).toContain('NVIDIA');
+      expect(all).toContain('vulkaninfo --summary');
+      expect(all).toContain('llvmpipe');
+      expect(all).toContain('virtual machine');
+      expect(all).toContain('start it again after changing a driver');
+    }
+    expect(guide('no-adapter', desktop('linux')).title).toBe(
+      'No graphics adapter is available for WebGPU',
+    );
+    expect(guide('no-api', desktop('linux')).title).toBe(
+      'WebGPU is not available on this computer',
+    );
+  });
+
+  it('says so when only a software adapter was found, with its name and the same way out', () => {
+    const guidance = guide('software-adapter', desktop('linux'), 'llvmpipe (LLVM 19.1.1)');
+    expect(guidance.title).toBe('Only a software graphics adapter was found');
+    expect(guidance.cause).toContain('draws on the processor (llvmpipe (LLVM 19.1.1))');
+    expect(guidance.cause).toContain('stops working soon after it starts');
+    const all = text(guidance);
+    expect(all).toContain('On Linux, WebGPU runs on Vulkan');
+    expect(all).toContain('vulkaninfo --summary');
+    expect(guidance.reloadLabel).toBe('Start the viewer again');
+    // With no name, none is given.
+    expect(guide('software-adapter', desktop('linux')).cause).toContain(
+      'draws on the processor, which',
+    );
+    // A browser refuses none; were it told of one, it says what it says of no adapter.
+    expect(guide('software-adapter', env('linux', 'chrome')).title).toBe(
+      guide('no-adapter', env('linux', 'chrome')).title,
+    );
+  });
+
+  it('says what applies on Windows and on a Mac, and nothing of Vulkan there', () => {
+    expect(text(guide('no-adapter', desktop('windows')))).toContain('Update the graphics driver');
+    expect(text(guide('no-adapter', desktop('mac')))).toContain('Update macOS');
+    for (const os of ['windows', 'mac'] as const) {
+      expect(text(guide('no-adapter', desktop(os)))).not.toContain('Vulkan');
+    }
+  });
+
+  it('passes on what was reported, and keeps the series for a retry', () => {
+    const lost = guide('device-lost', desktop('linux'), 'the device went away.');
+    expect(lost.cause).toContain('The application lost its connection to the GPU');
+    expect(lost.cause).toContain('What was reported: the device went away.');
+    expect(lost.retryLabel).toBe('Reinitialize');
+    expect(lost.keepsData).toBe(true);
+    expect(guide('no-device', desktop('linux')).steps).toContain(
+      'Quit the application and start it again.',
+    );
+  });
+
+  it('leaves a browser its own guidance and its own button', () => {
+    const browser = guide('no-adapter', env('linux', 'chrome'));
+    expect(text(browser)).toContain('chrome://flags');
+    expect(browser.reloadLabel).toBeUndefined();
+  });
+});

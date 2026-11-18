@@ -3,7 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { describe, expect, it, vi } from 'vitest';
-import { initWebGpu, WebGpuUnavailableError, type GpuHandlers } from './device.js';
+import {
+  initWebGpu,
+  softwareAdapterName,
+  WebGpuUnavailableError,
+  type GpuHandlers,
+} from './device.js';
 
 /**
  * A canvas stub whose WebGPU context records its `configure` call; everything
@@ -135,6 +140,45 @@ describe('initWebGpu', () => {
     });
   });
 
+  it('reports "software-adapter" for an adapter on the processor when that was refused, and asks it for nothing', async () => {
+    const requestDevice = vi.fn(async () => {
+      throw new Error('never asked');
+    });
+    const software = {
+      info: { vendor: 'google', architecture: 'swiftshader', isFallbackAdapter: true },
+      requestDevice,
+    };
+    await withGpu({ requestAdapter: async () => software }, async () => {
+      const error = (await initWebGpu(fakeCanvas(), {}, { refuseSoftware: true }).then(
+        () => null,
+        (e: unknown) => e,
+      )) as WebGpuUnavailableError;
+      expect(error).toBeInstanceOf(WebGpuUnavailableError);
+      expect(error.reason).toBe('software-adapter');
+      expect(error.adapterName).toBe('swiftshader');
+      expect(requestDevice).not.toHaveBeenCalled();
+      // Not refused, it is an adapter like any other: it is asked for a device.
+      expect((await failure()).reason).toBe('no-device');
+      expect(requestDevice).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('takes a graphics card whether or not software was refused', async () => {
+    const card = {
+      info: { vendor: 'intel', architecture: 'gen-12lp', isFallbackAdapter: false },
+      requestDevice: async () => {
+        throw new Error('busy');
+      },
+    };
+    await withGpu({ requestAdapter: async () => card }, async () => {
+      const error = (await initWebGpu(fakeCanvas(), {}, { refuseSoftware: true }).then(
+        () => null,
+        (e: unknown) => e,
+      )) as WebGpuUnavailableError;
+      expect(error.reason).toBe('no-device');
+    });
+  });
+
   it('reports "no-adapter" when requesting an adapter rejects', async () => {
     const requestAdapter = async () => {
       throw new Error('GPU process unavailable');
@@ -162,5 +206,40 @@ describe('initWebGpu', () => {
     await withGpu(gpu, async () => {
       expect((await failure(canvas)).reason).toBe('no-context');
     });
+  });
+});
+
+describe('a software adapter (#69)', () => {
+  const adapter = (info: Record<string, unknown> | undefined, more: object = {}): GPUAdapter =>
+    ({ info, ...more }) as unknown as GPUAdapter;
+
+  it('is known by what the browser says of it, or by the name of its rasterizer', () => {
+    expect(
+      softwareAdapterName(
+        adapter({ vendor: 'google', architecture: 'swiftshader', isFallbackAdapter: true }),
+      ),
+    ).toBe('swiftshader');
+    expect(
+      softwareAdapterName(
+        adapter({ vendor: 'mesa', description: 'llvmpipe (LLVM 19.1.1, 256 bits)' }),
+      ),
+    ).toBe('llvmpipe (LLVM 19.1.1, 256 bits)');
+    // Said to be one, with no name to go by.
+    expect(softwareAdapterName(adapter({ isFallbackAdapter: true }))).toBe('a software adapter');
+    // An older browser says it on the adapter itself.
+    expect(softwareAdapterName(adapter(undefined, { isFallbackAdapter: true }))).toBe(
+      'a software adapter',
+    );
+  });
+
+  it('is not what a graphics card is taken for', () => {
+    expect(
+      softwareAdapterName(
+        adapter({ vendor: 'intel', architecture: 'gen-12lp', isFallbackAdapter: false }),
+      ),
+    ).toBeNull();
+    expect(softwareAdapterName(adapter({ vendor: 'nvidia', description: 'RTX' }))).toBeNull();
+    expect(softwareAdapterName(adapter(undefined))).toBeNull();
+    expect(softwareAdapterName(adapter({}))).toBeNull();
   });
 });

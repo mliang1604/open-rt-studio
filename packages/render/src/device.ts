@@ -16,18 +16,55 @@ export interface GpuContext {
  * - `no-adapter`: the API is there but no graphics adapter was offered
  * - `no-device`: an adapter was found but refused to create a device
  * - `no-context`: the canvas could not provide a WebGPU context
+ * - `software-adapter`: the only adapter offered draws on the processor, and
+ *   the application asked not to be given one ({@link GpuOptions.refuseSoftware})
  */
-export type GpuUnavailableReason = 'no-api' | 'no-adapter' | 'no-device' | 'no-context';
+export type GpuUnavailableReason =
+  'no-api' | 'no-adapter' | 'no-device' | 'no-context' | 'software-adapter';
 
 export class WebGpuUnavailableError extends Error {
   constructor(
     message: string,
     /** Which step of start-up failed. */
     readonly reason: GpuUnavailableReason,
+    /** What the adapter that was refused calls itself, when one was. */
+    readonly adapterName: string | null = null,
   ) {
     super(message);
     this.name = 'WebGpuUnavailableError';
   }
+}
+
+/** How a device is asked for. */
+export interface GpuOptions {
+  /**
+   * Take no adapter that draws on the processor. For where such an adapter
+   * is offered without having been asked for and does not hold: the desktop
+   * application on Linux, on a machine with no usable graphics driver (#69).
+   */
+  readonly refuseSoftware?: boolean;
+}
+
+/** The software rasterizers an adapter may name itself after. */
+const SOFTWARE_RASTERIZER = /swiftshader|llvmpipe|lavapipe|softpipe/i;
+
+/**
+ * What a software adapter calls itself, or null for one that draws on a
+ * graphics card. The browser says which it is (`isFallbackAdapter`); a
+ * rasterizer that is known by name is taken for one whatever it says.
+ */
+export function softwareAdapterName(adapter: GPUAdapter): string | null {
+  // Read as it comes: an older browser has no `info`, or says less in it.
+  const loose = adapter as unknown as {
+    info?: Record<string, unknown>;
+    isFallbackAdapter?: unknown;
+  };
+  const info = loose.info ?? {};
+  const text = (name: string): string => (typeof info[name] === 'string' ? info[name] : '');
+  const named = [text('description'), text('device'), text('architecture'), text('vendor')];
+  const fallback = info['isFallbackAdapter'] === true || loose.isFallbackAdapter === true;
+  if (!fallback && !named.some((name) => SOFTWARE_RASTERIZER.test(name))) return null;
+  return named.find((name) => name !== '') ?? 'a software adapter';
 }
 
 /** Hooks for runtime device events surfaced after a successful init. */
@@ -51,6 +88,7 @@ export interface GpuHandlers {
 export async function initWebGpu(
   canvas: HTMLCanvasElement,
   handlers: GpuHandlers = {},
+  options: GpuOptions = {},
 ): Promise<GpuContext> {
   if (!navigator.gpu) {
     throw new WebGpuUnavailableError(
@@ -69,6 +107,16 @@ export async function initWebGpu(
   }
   if (!adapter) {
     throw new WebGpuUnavailableError('No suitable GPU adapter was found.', 'no-adapter');
+  }
+  if (options.refuseSoftware) {
+    const software = softwareAdapterName(adapter);
+    if (software !== null) {
+      throw new WebGpuUnavailableError(
+        'Only a software GPU adapter was found.',
+        'software-adapter',
+        software,
+      );
+    }
   }
 
   let device: GPUDevice;

@@ -650,7 +650,31 @@ Decided for the shell (#61):
   version: a new Chromium is a change to look at, not one to drift into.
   Its Node has `node:sqlite`, which the library uses.
 - **WebGPU** is on in that Chromium on macOS and Windows with nothing set.
-  Linux is #69.
+  On Linux (#69) Chromium offers it by itself for some graphics cards only,
+  so the shell tells it at start that WebGPU and Vulkan, which WebGPU runs
+  on there, may be used (`enable-unsafe-webgpu`, `enable-features=Vulkan`;
+  `gpuSwitches` in `policy.ts`). The page this applies to is the
+  application's own and no other. A graphics card Chromium has blocked
+  stays blocked (no `ignore-gpu-blocklist`), and nothing is drawn in
+  software by itself: without a usable Vulkan driver the viewer says so,
+  with what to install and how to check (`vulkaninfo --summary`).
+  - **A software adapter that was not asked for is refused.** With those
+    switches Chromium offers one on a Linux machine that has no Vulkan
+    driver for a graphics card, and its device is lost soon after the first
+    picture (seen on the CI runner). The viewer asks the renderer to take
+    none there (`refuseSoftware`, `desktop-gpu.ts`) and shows the notice.
+  - **Drawing in software is a setting** for tests and for working on the
+    application (`OPEN_RT_STUDIO_DESKTOP_SOFTWARE_GPU=1`, not read by an
+    installed one): the shell then asks for Chromium's rasterizer
+    throughout, which holds, and tells the page so (`softwareGpu`).
+  - The notice for a missing GPU is written for the application when it is
+    one (`GpuEnvironment.desktop`): there is no browser to update and no
+    flags page, so it speaks of the driver and the computer.
+  - **Checked in CI in software**, which is how the Linux job runs the
+    tests (`E2E_SOFTWARE_GPU=1`): the viewer draws there. The same job
+    then starts the application as the runner comes, and with the GPU
+    taken away, and reads the notice. No Linux machine with a graphics
+    card has run it.
 
 Status: **decided, and Michael's to overturn**: the scheme, that the web
 build gives up inlined critical styles for the policy, that a server is

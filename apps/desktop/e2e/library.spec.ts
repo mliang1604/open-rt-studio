@@ -35,6 +35,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { draws, gpuArgs, gpuEnv, gpuOffer } from './gpu.js';
+
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CT = syntheticCtSeries(6, 24);
 const THORAX = syntheticThoraxPatient({ size: 48, slices: 16 });
@@ -53,12 +55,11 @@ async function start(): Promise<void> {
   for (const [name, value] of Object.entries(process.env)) {
     if (value !== undefined) env[name] = value;
   }
-  const args = [DESKTOP];
-  if (process.env['E2E_NO_WEBGPU']) args.push('--disable-gpu');
+  const args = [DESKTOP, ...gpuArgs()];
   application = await electron.launch({
     args,
     cwd: DESKTOP,
-    env: { ...env, OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
+    env: { ...env, ...gpuEnv(), OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
   });
   page = await application.firstWindow();
   await expect(page.locator('app-root')).toBeAttached();
@@ -78,14 +79,8 @@ async function answerDialogs(paths: readonly string[]): Promise<void> {
 const dialogsShown = (): Promise<number> =>
   application.evaluate(() => (globalThis as Record<string, unknown>)['__dialogs'] as number);
 
-const hasGpu = (): Promise<boolean> =>
-  page.evaluate(async () => {
-    try {
-      return !!navigator.gpu && (await navigator.gpu.requestAdapter()) !== null;
-    } catch {
-      return false;
-    }
-  });
+/** Whether the viewer draws here: a GPU, or software that was asked for. */
+const hasGpu = async (): Promise<boolean> => draws(await gpuOffer(page));
 
 interface Asked {
   readonly status: number | null;

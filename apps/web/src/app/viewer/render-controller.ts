@@ -35,6 +35,7 @@ import {
   maskColorLut,
   MASK_LUT_SIZE,
 } from '@open-rt-studio/render';
+import { refusesSoftwareGpu } from '../desktop-gpu';
 import type { GpuProblemState } from './gpu-guidance';
 import type { Volume } from '@open-rt-studio/dicom';
 import { LayersController } from './layers-controller';
@@ -249,10 +250,15 @@ export class RenderController {
     d.renderer()?.dispose();
     d.renderer.set(null);
     try {
-      this.gpu = await initWebGpu(canvas, {
-        onDeviceLost: (info) => this.onDeviceLost(info),
-        onUncapturedError: (error) => console.error('WebGPU error:', error.message),
-      });
+      this.gpu = await initWebGpu(
+        canvas,
+        {
+          onDeviceLost: (info) => this.onDeviceLost(info),
+          onUncapturedError: (error) => console.error('WebGPU error:', error.message),
+        },
+        // The desktop application on Linux takes no software adapter it did not ask for (#69).
+        { refuseSoftware: await refusesSoftwareGpu() },
+      );
       const renderer = new SliceRenderer(this.gpu);
       // A retry after a device loss comes back with the data that was loaded.
       // The base volume has to be uploaded here, because otherwise it is only
@@ -273,7 +279,11 @@ export class RenderController {
       // as "found an adapter but could not start", with the message as detail.
       d.gpuProblem.set(
         error instanceof WebGpuUnavailableError
-          ? { problem: error.reason, detail: error.reason === 'no-device' ? error.message : null }
+          ? {
+              problem: error.reason,
+              // What went wrong, or for a software adapter what it calls itself.
+              detail: error.reason === 'no-device' ? error.message : error.adapterName,
+            }
           : {
               problem: 'no-device',
               detail: error instanceof Error ? error.message : String(error),

@@ -46,6 +46,7 @@ import {
   APP_SCHEME,
   contentSecurityPolicy,
   devServerSite,
+  gpuSwitches,
   mayHave,
   mayNavigate,
 } from './policy.js';
@@ -60,7 +61,10 @@ const LIBRARY_DIRECTORY = 'library';
 /** Settings for working on the application. An installed one reads none of them. */
 const DEV_SERVER = 'OPEN_RT_STUDIO_DESKTOP_DEV_SERVER';
 const USER_DATA = 'OPEN_RT_STUDIO_DESKTOP_USER_DATA';
+const SOFTWARE_GPU = 'OPEN_RT_STUDIO_DESKTOP_SOFTWARE_GPU';
 const settings: NodeJS.ProcessEnv = app.isPackaged ? {} : process.env;
+/** Whether the application was told to draw in software, for want of a graphics card. */
+const softwareGpu = settings[SOFTWARE_GPU] === '1';
 
 function fail(message: string): never {
   dialog.showErrorBox(NAME, message);
@@ -110,6 +114,7 @@ function desktopInfo(): DesktopInfo {
     platform: process.platform as DesktopPlatform,
     arch: process.arch,
     packaged: app.isPackaged,
+    softwareGpu,
   };
 }
 
@@ -326,6 +331,16 @@ async function start(): Promise<void> {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();
   });
+}
+
+// Before Chromium starts: what it needs to be told for WebGPU on this system.
+for (const told of gpuSwitches(
+  process.platform,
+  app.commandLine.getSwitchValue('enable-features'),
+  softwareGpu,
+)) {
+  if (told.value === undefined) app.commandLine.appendSwitch(told.name);
+  else app.commandLine.appendSwitch(told.name, told.value);
 }
 
 if (!(DESKTOP_PLATFORMS as readonly string[]).includes(process.platform)) {

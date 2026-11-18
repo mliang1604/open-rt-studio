@@ -22,6 +22,7 @@ const INFO: DesktopInfo = {
   platform: 'linux',
   arch: 'x64',
   packaged: false,
+  softwareGpu: false,
 };
 
 type Listener = (event: CallEvent, ...args: unknown[]) => unknown;

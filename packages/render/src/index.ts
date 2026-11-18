@@ -30,8 +30,10 @@ export { buildCenterline, type Centerline, type CprImage, straightenedCpr } from
 export { focusPanePoint, focusPatientPoint, focusSliceIndex } from './crosshair.js';
 export {
   type GpuContext,
+  type GpuOptions,
   type GpuUnavailableReason,
   initWebGpu,
+  softwareAdapterName,
   WebGpuUnavailableError,
 } from './device.js';
 export { DEFAULT_DVR_LIGHTING, type DvrLighting } from './dvr.js';

@@ -101,7 +101,8 @@ npm run build
 npm run desktop
 ```
 
-It shows the same notice and is not for clinical use either. It opens
+It shows the same notice and is not for clinical use either. On Linux it
+needs a Vulkan driver for the graphics card. It opens
 folders and files with the system's dialogs, and a recent folder opens again
 after a restart without picking it. It works without a server: it has a
 library of its own on the computer, which folders are imported into and
