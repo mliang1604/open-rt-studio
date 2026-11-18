@@ -717,6 +717,7 @@ code 2).
 | `logLevel`           | `OPEN_RT_STUDIO_LOG_LEVEL`            | `info`         | `debug`, `info`, `warn`, `error` or `silent`                                                                                                                                         |
 | `shutdownTimeoutMs`  | `OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS`  | `10000`        | How long a stop waits for requests, and then for the core's work                                                                                                                     |
 | `dataDir`            | `OPEN_RT_STUDIO_DATA_DIR`             | none           | Directory for the stored instances and the index. Without one they are kept in memory and are gone when the server stops                                                             |
+| `databaseUrl`        | `OPEN_RT_STUDIO_DATABASE_URL`         | none           | A PostgreSQL database to keep [the index in](#in-postgresql), as `postgresql://user@host:5432/database`. Without one the index is a SQLite file in the data directory                |
 | `maxUploadBytes`     | `OPEN_RT_STUDIO_MAX_UPLOAD_BYTES`     | `536870912`    | The largest instance an upload may hold                                                                                                                                              |
 | `jobConcurrency`     | `OPEN_RT_STUDIO_JOB_CONCURRENCY`      | `1`            | How many jobs run at once; the rest wait their turn                                                                                                                                  |
 | `allowedOrigins`     | `OPEN_RT_STUDIO_ALLOWED_ORIGINS`      | none           | The web origins whose pages may use the server from a browser, such as `http://localhost:4200`. A list in the file; separated by commas in the environment. No patterns and no "any" |
@@ -1043,7 +1044,8 @@ without asking for each.
   dates follow the latest entry.
 - **A patient is a Patient ID and its issuer.** A study whose files give no
   Patient ID gets a patient of its own.
-- **Migrations.** The schema has a version (`PRAGMA user_version`). Opening an
+- **Migrations.** The schema has a version (`PRAGMA user_version` in
+  SQLite). Opening an
   index applies the steps it is missing, each in a transaction. A step is
   never edited after it is released; a change is a new step in
   `migrations.ts`. An index from a newer version, or a SQLite file that is
@@ -1084,7 +1086,65 @@ without asking for each.
   each instance and fetches each by its own file. A dose filed before
   version 6 has none until its file is ingested again.
 - The index holds patient names and IDs. That is its purpose; protect the
-  file as you would the data. Its errors and log lines carry none of them.
+  file, or the database, as you would the data. Its errors and log lines
+  carry none of them.
+
+### In PostgreSQL
+
+The index is a SQLite file in the data directory unless the server is given
+a PostgreSQL database for it:
+
+```sh
+export OPEN_RT_STUDIO_DATA_DIR=./data
+export OPEN_RT_STUDIO_DATABASE_URL=postgresql://ors@db.example:5432/open_rt_studio
+export PGPASSWORD=...   # or a ~/.pgpass file; or in the address itself
+```
+
+That is for a server with many users. SQLite answers inside the server's
+one thread, so a long question holds every other request up; PostgreSQL
+answers beside it, and is backed up and looked after with its own tools.
+
+- **It answers as the index in SQLite does.** The rules above are tests in
+  `src/pacs-index/index-suite.ts`, and both indexes run all of them: the
+  same matches, in the same order. For that, text is kept `COLLATE "C"`:
+  compared by its bytes, with A to Z and nothing else taken without regard
+  to case, whatever the database's own collation is.
+- **What is where.** Only the index moves. The instances stay in the data
+  directory, which is still needed, and so do the accounts, the audit log,
+  the jobs and the DICOM settings, each in its own file there.
+- **A database, or a schema, of its own.** A schema with no tables becomes
+  an index. One that holds anything else is refused and left as it is.
+- **Migrations of its own** (`postgres-migrations.ts`), with the version in
+  a table, `open_rt_studio_index`. Its history begins where the SQLite
+  index was when it was written; a change to what the index keeps is from
+  then on a step in each, and a test holds the two to the same tables and
+  columns.
+- **One writer at a time**, as in SQLite: each change takes an advisory
+  lock to the end of its transaction, so servers on one database do not
+  cross. Readers are not held up. (Servers on one database must also share
+  the data directory; nothing else of running several has been tried.)
+- **The address may hold a password.** It is never logged. What PostgreSQL
+  or the network says of a failure is kept as its code alone (`28P01`,
+  `ECONNREFUSED`), because its messages quote what they were given: an
+  address, a name, a Patient ID.
+- **TLS to the database** is as node-postgres reads the address:
+  `?sslmode=verify-full`, with `sslrootcert` for an authority of your own.
+  Read [its notes](https://github.com/brianc/node-postgres/tree/master/packages/pg-connection-string#tcp-connections)
+  on what the other modes do and do not check.
+- A server that cannot reach the database, or is refused by it, does not
+  start, and says which setting to look at.
+
+Not there:
+
+- **Moving an index.** A server that is given a database starts with an
+  empty index, whatever its data directory holds; it says so in its log
+  (`index-in-sqlite-not-used`) and what is in the store is then not listed.
+  There is no command yet that fills an index from the store, or copies one
+  index into the other.
+- **Other versions.** It is tested against PostgreSQL 17 and uses nothing
+  that 13 does not have; older versions have not been tried.
+- The character U+0000 in a name or a description, which PostgreSQL keeps
+  in no text, is left out.
 
 ## Logs
 
@@ -1129,6 +1189,12 @@ They use ports of `127.0.0.1` that the operating system hands out, and
 `src/dimse/dcmtk.spec.ts` tries the DICOM listener against DCMTK's
 command-line tools as another system, with TLS and without; it is skipped
 where DCMTK is not installed, and CI's `DIMSE interop` job installs it.
+The index in PostgreSQL is tested where `OPEN_RT_STUDIO_TEST_POSTGRES`
+names a PostgreSQL to test against
+(`OPEN_RT_STUDIO_TEST_POSTGRES=postgresql://postgres:...@127.0.0.1/postgres npx vitest run src/pacs-index`);
+each test works in a schema of its own there, which is dropped at the end.
+Elsewhere those tests are skipped, and CI's `PostgreSQL index` job starts a
+PostgreSQL for them.
 Certificates for the TLS specs are made on the spot (`src/tls-testing.ts`);
 none is kept in the repository. `src/dimse/conformance.spec.ts` reads
 [the conformance statement](../../docs/dicom-conformance.md) and fails when

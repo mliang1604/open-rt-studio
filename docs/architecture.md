@@ -730,8 +730,7 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   machine only, because the server speaks plain HTTP until it is given a
   certificate. CI builds the image and checks it from outside
   (`scripts/container-check.sh`); it publishes nothing. Not there: a
-  published image, PostgreSQL in the compose file (#44), DICOM test peers
-  (#49). Status: **decided, and Michael's to overturn**: the base image, and
+  published image and PostgreSQL in the compose file (#59). Status: **decided, and Michael's to overturn**: the base image, and
   whether and where an image is published.
 
 - The file store (#42) names an instance's files by the SHA-256 of its SOP
@@ -749,6 +748,40 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   has it is to be checked in #64. If it does not, the alternative is
   `better-sqlite3` (MIT), behind the same interface. Status: **decided for
   the server, to be confirmed for the desktop application.**
+- The index in PostgreSQL (#44) is a second implementation of the same
+  interface, on **node-postgres (`pg`, MIT)**, for a server that is given
+  `OPEN_RT_STUDIO_DATABASE_URL`. It is loaded only then, so the desktop
+  application does not carry it into use.
+  - **Two implementations, one suite.** The SQL is written twice, and what
+    is not SQL is shared (`entries.ts`). The tests of the index are one
+    suite (`index-suite.ts`) that both run, so that a rule cannot hold in
+    one and not the other; CI runs it against a PostgreSQL service
+    container (`PostgreSQL index`). One implementation over two dialects was
+    the alternative: SQLite's calls are synchronous and PostgreSQL's are
+    not, and the index in SQLite would have had to queue its transactions
+    to be shared.
+  - **The same answers.** Text is `COLLATE "C"`, so that matching and order
+    are by bytes with A to Z folded, as in SQLite, and not by the
+    database's own collation.
+  - **One writer at a time**, by an advisory lock held to the end of each
+    change's transaction. It is SQLite's rule, it makes the check-then-write
+    of an entry safe from any number of connections and servers, and it is
+    a limit on how fast instances are filed. Locking by study would lift
+    it; nothing has shown the need.
+  - **Its own migrations**, which begin at the schema SQLite had reached.
+    A change to what the index keeps is a step in each.
+  - **Nothing of a database's error leaves the driver but its code**
+    (`postgres.ts`, the one file that imports `pg`): PostgreSQL's messages
+    quote the values they were given, and the log holds no identifiers. The
+    log guard (`log-identifiers.spec.ts`) runs over both indexes.
+  - Only the index moves: accounts, the audit log, jobs and DICOM settings
+    stay in files of the data directory, with the instances.
+
+  Not there: filling an index from the store, or copying one index into
+  the other, so a server cannot yet be moved from SQLite to PostgreSQL with
+  what it holds. Status: **decided, and Michael's to overturn**: the lock,
+  and that an existing index is not moved.
+
 - RT relationships are rows of one `reference` table: from an instance, by a
   named relation, to the UID of an instance, a series or a frame of
   reference. The target has no foreign key, because objects arrive in any
