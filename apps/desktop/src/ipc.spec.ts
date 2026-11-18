@@ -4,6 +4,8 @@
 
 import { BRIDGE_CHANNELS, type DesktopInfo } from '@open-rt-studio/desktop-bridge';
 
+import { fileAnswers } from './files.js';
+import { openGrants } from './grants.js';
 import { BridgeRefusedError, serveBridge, type CallEvent } from './ipc.js';
 import { APP_HOME, mayNavigate } from './policy.js';
 
@@ -18,7 +20,8 @@ const INFO: DesktopInfo = {
 
 type Listener = (event: CallEvent, ...args: unknown[]) => unknown;
 
-function served() {
+async function served() {
+  const grants = await openGrants({ file: null });
   const listeners = new Map<string, Listener>();
   let asked = 0;
   serveBridge(
@@ -32,6 +35,7 @@ function served() {
           return INFO;
         },
       },
+      ...fileAnswers(grants, { folder: async () => null, files: async () => null }),
     },
   );
   return { listeners, asked: () => asked };
@@ -40,12 +44,12 @@ function served() {
 const from = (url: string, parent: unknown = null): CallEvent => ({ senderFrame: { url, parent } });
 
 describe("the main process's side of the bridge", () => {
-  it('serves every declared call, and no other channel', () => {
-    expect([...served().listeners.keys()].sort()).toEqual([...BRIDGE_CHANNELS].sort());
+  it('serves every declared call, and no other channel', async () => {
+    expect([...(await served()).listeners.keys()].sort()).toEqual([...BRIDGE_CHANNELS].sort());
   });
 
   it("answers the application's own page", async () => {
-    const { listeners, asked } = served();
+    const { listeners, asked } = await served();
     const info = listeners.get('desktop:info')!;
     expect(await info(from(APP_HOME))).toEqual(INFO);
     expect(await info(from(`${APP_HOME}disclaimer`))).toEqual(INFO);
@@ -53,7 +57,7 @@ describe("the main process's side of the bridge", () => {
   });
 
   it('refuses a page from elsewhere, a frame inside the page, and a frame that is gone', async () => {
-    const { listeners, asked } = served();
+    const { listeners, asked } = await served();
     const info = listeners.get('desktop:info')!;
     for (const event of [
       from('https://example.org/'),
@@ -69,7 +73,7 @@ describe("the main process's side of the bridge", () => {
   });
 
   it('refuses a call with what it does not take, and says nothing of why', async () => {
-    const { listeners, asked } = served();
+    const { listeners, asked } = await served();
     const info = listeners.get('desktop:info')!;
     await expect(info(from(APP_HOME), '/etc/passwd')).rejects.toThrow('The call was refused.');
     await expect(info(from(APP_HOME), undefined)).rejects.toBeInstanceOf(BridgeRefusedError);

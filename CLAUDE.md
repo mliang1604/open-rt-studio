@@ -81,8 +81,10 @@ application. Never commit patient data or real DICOM files
   build, served under `app://open-rt-studio/`, sandboxed and with no Node.
   What the shell allows is decided in `src/policy.ts` (where the page may
   go, its content security policy, its permissions), `src/content.ts` (its
-  files) and `src/ipc.ts` (its calls), which need no Electron and are unit
-  tested; only `src/main.ts` and `src/preload.cts` import Electron. Do not
+  files), `src/ipc.ts` (its calls) and `src/grants.ts` (what it may read of
+  the disk: the folders and files the user chose in the system's dialog, by
+  an id the main process makes; the page never names a place on the disk and
+  is never told one), which need no Electron and are unit tested; only `src/main.ts` and `src/preload.cts` import Electron. Do not
   loosen the policy to make something work: a server is reached from the
   desktop application in #63, files through the bridge in #62. Electron is
   pinned to an exact version.

@@ -50,14 +50,19 @@ export function serveBridge(
   answers: Answers,
 ): void {
   for (const channel of BRIDGE_CHANNELS) {
-    const served = answers[channel];
+    // What each call takes is held to its declaration where `answers` is
+    // written; here they are one sort of thing.
+    const served = answers[channel] as {
+      accepts(args: readonly unknown[]): boolean;
+      answer(...args: unknown[]): unknown;
+    };
     ipc.handle(channel, async (event, ...args) => {
       const frame = event.senderFrame;
       if (frame === null || frame.parent !== null || !trusted(frame.url)) {
         throw new BridgeRefusedError();
       }
       if (!served.accepts(args)) throw new BridgeRefusedError();
-      return served.answer(...(args as unknown as BridgeCalls[typeof channel]['args']));
+      return served.answer(...args);
     });
   }
 }

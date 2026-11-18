@@ -551,12 +551,35 @@ Decided for the shell (#61):
   is compiled against the same types and exposes one function per call,
   never `ipcRenderer`; the page reads it with `desktopBridge()`, null in a
   browser. A call is answered only from the top frame of a window that
-  shows the application, with exactly what it takes. It starts with one
-  call, `info()`.
+  shows the application, with exactly what it takes. It started with one
+  call, `info()`; the calls about files came with #62.
   - A sandboxed preload script can load `electron` and nothing else, so it
     takes the declaration's types and no code; there is no bundler.
+- **Folders and files go through the bridge** (#62). The page asks for the
+  system's dialog and gets a **grant**: an id the main process makes, the
+  folder's name, and nothing of where it is. It lists and reads what is
+  under the grant by a path that is checked to stay there.
+  - **The page never names a place on the disk.** The only way a place
+    becomes a grant is the dialog, which the user answers; the calls that ask
+    for it take nothing.
+  - **A link is not followed out of what was chosen**, and is not listed.
+  - **Files are read when they are parsed, in pieces of 4 MB**: the page
+    holds a `File` for each with its name and size, and the bytes cross the
+    bridge at that file's turn. A folder of a large study is never in memory
+    whole.
+  - **A grant lasts for the run; the Recent list keeps it.** A kept grant is
+    written to `file-grants.json` in the profile (the folder's place, for
+    the user alone), and the page keeps its id in the database where a
+    browser keeps a handle. A recent folder opens in a later run with no
+    dialog and no prompt. When an entry leaves the list the grant is given
+    up; at most 32 are kept.
+  - In the page a grant is the same `AccessHandle` a browser's handle is, so
+    loading and the Recent list are one code path
+    (`apps/web/src/app/desktop-files.ts`).
+  - A file or folder **dropped** on the window still comes as the browser's
+    own handle, which is why the page keeps the one permission it has.
 - **What the shell decides needs no Electron** (`policy.ts`, `content.ts`,
-  `ipc.ts`), so each rule has a unit test; only `main.ts` and `preload.cts`
+  `ipc.ts`, `grants.ts`, `files.ts`), so each rule has a unit test; only `main.ts` and `preload.cts`
   import Electron, and a lint rule holds the rest to it.
 - **Development** runs the shell on the web client's development server
   (`npm run desktop:dev`), with the same policy plus that server's socket for

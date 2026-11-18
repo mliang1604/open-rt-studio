@@ -11,7 +11,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { BRIDGE_GLOBAL, isDesktopInfo, type DesktopInfo } from '@open-rt-studio/desktop-bridge';
+import {
+  BRIDGE_GLOBAL,
+  BRIDGE_VERSION,
+  isDesktopInfo,
+  type DesktopInfo,
+} from '@open-rt-studio/desktop-bridge';
 import {
   _electron as electron,
   expect,
@@ -107,10 +112,16 @@ test('the bridge is the declared calls and nothing more', async () => {
   const seen = await page.evaluate(async (name) => {
     const bridge = (globalThis as Record<string, unknown>)[name] as Record<string, unknown>;
     const info = await (bridge['info'] as () => Promise<unknown>)();
-    return { keys: Object.keys(bridge).sort(), version: bridge['version'], info };
+    return {
+      keys: Object.keys(bridge).sort(),
+      files: Object.keys(bridge['files'] as object).sort(),
+      version: bridge['version'],
+      info,
+    };
   }, BRIDGE_GLOBAL);
-  expect(seen.keys).toEqual(['info', 'version']);
-  expect(seen.version).toBe(1);
+  expect(seen.keys).toEqual(['files', 'info', 'version']);
+  expect(seen.files).toEqual(['forget', 'keep', 'list', 'pickFiles', 'pickFolder', 'read']);
+  expect(seen.version).toBe(BRIDGE_VERSION);
   expect(isDesktopInfo(seen.info)).toBe(true);
 
   const main = await application.evaluate(({ app }) => ({

@@ -101,8 +101,9 @@ npm run build
 npm run desktop
 ```
 
-It shows the same notice and is not for clinical use either. For now it
-opens files and the demo patient; connecting to a server from it comes
+It shows the same notice and is not for clinical use either. It opens
+folders and files with the system's dialogs, and a recent folder opens again
+after a restart without picking it; connecting to a server from it comes
 later. See [apps/desktop/README.md](apps/desktop/README.md).
 
 ### What the viewer does

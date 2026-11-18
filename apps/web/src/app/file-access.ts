@@ -11,6 +11,10 @@
 // The types are written out here because TypeScript's DOM library has only
 // part of the API: not the pickers, and not the permission methods.
 
+import { desktopBridge } from '@open-rt-studio/desktop-bridge';
+
+import { desktopPickers } from './desktop-files';
+
 /** A file or directory the user picked or dropped. */
 export interface AccessHandle {
   readonly kind: 'file' | 'directory';
@@ -36,8 +40,13 @@ interface PickerWindow {
   showOpenFilePicker?: (options?: object) => Promise<AccessHandle[]>;
 }
 
-/** The pickers of `host` (the window). Both null where the API is missing. */
+/**
+ * The pickers of `host` (the window). Both null where the API is missing. In
+ * the desktop application they are the system's dialogs, through the bridge.
+ */
 export function filePickers(host: unknown = globalThis): FilePickers {
+  const bridge = desktopBridge(host);
+  if (bridge) return desktopPickers(bridge.files);
   const win = host as PickerWindow;
   const directory = typeof win.showDirectoryPicker === 'function' ? win.showDirectoryPicker : null;
   const files = typeof win.showOpenFilePicker === 'function' ? win.showOpenFilePicker : null;
