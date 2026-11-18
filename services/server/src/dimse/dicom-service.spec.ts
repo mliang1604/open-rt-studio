@@ -2,7 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { syntheticCtSeries } from '@open-rt-studio/testdata';
+import {
+  SYNTHETIC_RT_COURSE,
+  syntheticCtSeries,
+  syntheticRtCourse,
+} from '@open-rt-studio/testdata';
 
 import { createCore, type ServerCore } from '../core/core.js';
 import { createLogger } from '../logger.js';
@@ -515,5 +519,198 @@ describe('querying and retrieving', () => {
     expect(await move(PEER_AE)).toMatchObject({ status: RETRIEVE_STATUS.destinationUnknown });
     await service.changeRemote(listed.id, { ...archive, host: null, port: null });
     expect(await move('ARCHIVE')).toMatchObject({ status: RETRIEVE_STATUS.destinationUnknown });
+  });
+});
+
+// #51: the server asks another system what it holds, and has it sent here.
+describe('asking another system', () => {
+  const THEIRS = 'THEIR-PACS';
+  const LISTENING = { ...OFF, local: { ...OFF.local, enabled: true } };
+
+  /** Another system that holds the synthetic course and lets this server ask and retrieve. */
+  async function theirPacs(ourPort: number | null) {
+    const peer = await startTestListener({
+      aeTitle: THEIRS,
+      callers: [],
+      retrievers: [LISTENER_AE],
+      destinationOf: (aeTitle) =>
+        ourPort !== null && aeTitle === LISTENER_AE ? { host: '127.0.0.1', port: ourPort } : null,
+      moveTimeoutMs: 2_000,
+    });
+    closing.push(() => peer.close());
+    for (const file of syntheticRtCourse()) await peer.core.pacs!.ingest.ingest(file.bytes);
+    return peer;
+  }
+  const known = (port: number, mayStore = true) => ({
+    name: 'Their PACS',
+    aeTitle: THEIRS,
+    host: '127.0.0.1',
+    port,
+    mayStore,
+    mayRetrieve: false,
+  });
+
+  // The issue's "done when".
+  it('finds a study there and retrieves it into its own PACS', async () => {
+    const { service, core, log } = await make(LISTENING);
+    const peer = await theirPacs(service.state().listening!.port);
+    const source = await service.addRemote(known(peer.port));
+    expect(service.sources()).toEqual([
+      { id: source.id, name: 'Their PACS', aeTitle: THEIRS, canRetrieve: true },
+    ]);
+
+    const answer = await service.query({
+      source: source.id,
+      level: 'study',
+      keys: { patientName: 'SYNTH*', modality: 'RTDOSE' },
+    });
+    expect(answer).toMatchObject({
+      level: 'study',
+      outcome: 'answered',
+      status: 0,
+      complete: true,
+    });
+    if (answer.outcome !== 'answered') return;
+    expect(answer.matches).toMatchObject([
+      { studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy, instances: 8 },
+    ]);
+    const series = await service.query({
+      source: source.id,
+      level: 'series',
+      keys: { studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy },
+    });
+    expect(series.outcome === 'answered' && series.matches).toHaveLength(5);
+
+    expect(await core.pacs!.index.counts()).toMatchObject({ instances: 0 });
+    const record = await service.retrieve({
+      source: source.id,
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+    });
+    expect(record).toMatchObject({
+      source: { id: source.id, name: 'Their PACS', aeTitle: THEIRS },
+      seriesInstanceUid: null,
+      state: 'waiting',
+    });
+    await vi.waitFor(() => expect(service.retrieveOf(record.id)?.state).toBe('done'), 5_000);
+    expect(service.retrieveOf(record.id)).toMatchObject({
+      result: 'retrieved',
+      failure: null,
+      status: 0,
+      counts: { remaining: 0, completed: 8, failed: 0, warning: 0 },
+      held: 8,
+    });
+    expect(service.retrieves().map((one) => one.id)).toEqual([record.id]);
+    expect(await core.pacs!.index.counts()).toMatchObject({ studies: 1, instances: 8 });
+    // The log has a line for the question and one for the retrieve, and names nothing.
+    const events = log().map((line) => line['event']);
+    expect(events).toEqual(expect.arrayContaining(['dicom-query', 'dicom-retrieve']));
+    const said = JSON.stringify(log());
+    expect(said).not.toContain(SYNTHETIC_RT_COURSE.planningStudy);
+    expect(said).not.toContain('SYNTH');
+  });
+
+  it('retrieves one series, and says what came of a retrieve that brought nothing', async () => {
+    const { service, core } = await make(LISTENING);
+    // This other system does not know where this server is.
+    const unknowing = await theirPacs(null);
+    const source = await service.addRemote(known(unknowing.port));
+    const lost = await service.retrieve({
+      source: source.id,
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+    });
+    await vi.waitFor(() => expect(service.retrieveOf(lost.id)?.state).toBe('done'), 5_000);
+    expect(service.retrieveOf(lost.id)).toMatchObject({
+      result: 'failed',
+      failure: 'destination-unknown',
+      status: 0xa801,
+      held: 0,
+    });
+
+    const peer = await theirPacs(service.state().listening!.port);
+    await service.changeRemote(source.id, known(peer.port));
+    const one = await service.retrieve({
+      source: source.id,
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+      seriesInstanceUid: SYNTHETIC_RT_COURSE.mr,
+    });
+    await vi.waitFor(() => expect(service.retrieveOf(one.id)?.state).toBe('done'), 5_000);
+    expect(service.retrieveOf(one.id)).toMatchObject({
+      seriesInstanceUid: SYNTHETIC_RT_COURSE.mr,
+      result: 'retrieved',
+      held: SYNTHETIC_RT_COURSE.mrSlices,
+    });
+    expect(await core.pacs!.index.counts()).toMatchObject({
+      instances: SYNTHETIC_RT_COURSE.mrSlices,
+    });
+    expect(service.retrieves().map((record) => record.id)).toEqual([one.id, lost.id]);
+  });
+
+  it('does not ask for what could not arrive', async () => {
+    const { service } = await make();
+    const peer = await theirPacs(null);
+    const study = { studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy };
+    const source = await service.addRemote(known(peer.port, false));
+    // Not listening: it can be asked, and a retrieve would have nowhere to arrive.
+    expect(service.sources()).toMatchObject([{ id: source.id, canRetrieve: false }]);
+    expect((await service.query({ source: source.id, level: 'patient', keys: {} })).outcome).toBe(
+      'answered',
+    );
+    expect(await refusal(service.retrieve({ source: source.id, ...study }))).toBe('not-listening');
+    // Listening, and the other system may not store here: what it sent would be refused.
+    await service.setLocal({ ...OFF.local, enabled: true });
+    expect(service.sources()).toMatchObject([{ canRetrieve: false }]);
+    expect(await refusal(service.retrieve({ source: source.id, ...study }))).toBe('may-not-store');
+    await service.changeRemote(source.id, known(peer.port, true));
+    expect(service.sources()).toMatchObject([{ canRetrieve: true }]);
+
+    // A system that only calls is no source, and cannot be asked.
+    const caller = await service.addRemote(CALLER);
+    expect(service.sources().map((one) => one.id)).toEqual([source.id]);
+    expect(await refusal(service.query({ source: caller.id, level: 'study', keys: {} }))).toBe(
+      'no-address',
+    );
+    expect(await refusal(service.retrieve({ source: caller.id, ...study }))).toBe('no-address');
+    expect(await refusal(service.query({ source: 'nobody', level: 'study', keys: {} }))).toBe(
+      'not-found',
+    );
+    expect(await refusal(service.retrieve({ source: 'nobody', ...study }))).toBe('not-found');
+    // And what is asked must be what can be asked.
+    const ask = (level: unknown, keys: unknown) =>
+      refusal(service.query({ source: source.id, level, keys }));
+    expect(await ask('image', {})).toBe('invalid');
+    expect(await ask('study', { studyDate: 'yesterday' })).toBe('invalid');
+    expect(await ask('study', { host: '10.0.0.1' })).toBe('invalid');
+    expect(await ask('series', {})).toBe('invalid');
+    expect(
+      await refusal(service.retrieve({ source: source.id, studyInstanceUid: 'not a uid' })),
+    ).toBe('invalid');
+    expect(service.retrieves()).toEqual([]);
+  });
+
+  it('says why a system gave no answer to a question', async () => {
+    const { service } = await make();
+    const peer = await theirPacs(null);
+    const source = await service.addRemote(known(peer.port));
+    const outcome = async () =>
+      (await service.query({ source: source.id, level: 'study', keys: {} })).outcome;
+    expect(await outcome()).toBe('answered');
+    await service.setLocal({ ...OFF.local, aeTitle: 'STRANGER' });
+    expect(await outcome()).toBe('rejected');
+    await service.setLocal(OFF.local);
+    await service.changeRemote(source.id, known(await freePort()));
+    expect(await outcome()).toBe('unreachable');
+  });
+
+  it('lets a retrieve under way end before it closes', async () => {
+    const { service, core } = await make(LISTENING);
+    const peer = await theirPacs(service.state().listening!.port);
+    const source = await service.addRemote(known(peer.port));
+    const record = await service.retrieve({
+      source: source.id,
+      studyInstanceUid: SYNTHETIC_RT_COURSE.followUpStudy,
+    });
+    expect(await service.close()).toBe(true);
+    expect(service.retrieveOf(record.id)).toMatchObject({ state: 'done', result: 'retrieved' });
+    expect(await core.pacs!.index.counts()).toMatchObject({ instances: 3 });
   });
 });

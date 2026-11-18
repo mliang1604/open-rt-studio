@@ -126,6 +126,8 @@ changed).
 | `dicom-remote-add`, `-change`, `-remove`, `dicom-echo`  | A system is added, changed, forgotten or asked for a C-ECHO       |
 | `dicom-destinations-read`                               | The systems that can be sent to are listed                        |
 | `dicom-send`, `dicom-send-read`                         | A series or an object is sent to a system; a send is followed     |
+| `dicom-sources-read`, `dicom-query`                     | The systems that can be asked are listed; one is asked (C-FIND)   |
+| `dicom-retrieve`, `dicom-retrieve-read`                 | A study or a series is retrieved from a system; that is followed  |
 
 What to know about it:
 
@@ -465,11 +467,66 @@ viewer, or through the API.
 - **A system that may retrieve and not store** is refused what it sends
   (`0124`).
 
-Not there yet: query and retrieve from other systems (#51, #54), TLS
-(#57) and audit records for associations (#212). Until #212 the audit log
-has the request for a send and not the associations it made, and nothing
-of what other systems send here or ask; the file header of each received
-object names the AE title that sent it.
+### Asking another system
+
+Anyone who is logged in can have the server ask a system on the list that
+has an address what it holds (C-FIND), and have a study or a series of it
+sent to the server (C-MOVE). The viewer has no screen for it yet (#54);
+through the API:
+
+| Request                           | What it does                                                           |
+| --------------------------------- | ---------------------------------------------------------------------- |
+| `GET /api/v1/dicom/sources`       | The systems that can be asked, and of each whether a retrieve arrives  |
+| `POST /api/v1/dicom/queries`      | Ask one: `{ "source", "level", "keys" }`                               |
+| `POST /api/v1/dicom/retrieves`    | Retrieve `{ "source", "studyUid" }`, with `"seriesUid"` for one series |
+| `GET /api/v1/dicom/retrieves`     | The retrieves the server remembers, the latest first                   |
+| `GET /api/v1/dicom/retrieves/:id` | One retrieve: how far it is, and how it ended                          |
+
+- **A question** is at the `patient`, `study` or `series` level, with the
+  keys of that level: Patient ID and name; at the study level also a study
+  date or a range of dates, accession number, description, modality and
+  Study Instance UID; at the series level the study, which must be named,
+  and modality. `*` and `?` are DICOM's wildcards. The server waits for
+  the answer and gives it: the matches, or why there are none
+  (`rejected`, `unreachable`, `broken`, `not-taken`).
+- **At most 200 matches** are taken; the other system is told to stop
+  after. `complete` is false when the list is not all there was, for that
+  reason or because the other system cut or failed its own answer.
+- **What another system answers is its own text.** It is taken as text and
+  no more: one line, cut to 256 characters, a UID only when it is one, a
+  number only when it is one. A match without the ID or UID that names it
+  is left out.
+- **A retrieve is a C-MOVE to the server's own AE title.** The objects do
+  not come back on the association that asks: the other system sends them
+  to the server's DICOM listener, like any that are sent to it, through
+  the same ingest. So three things have to be so, and the first two are
+  checked before anything is asked (`409`): the server listens for DICOM
+  (`not-listening`); the other system may send objects here
+  (`may-not-store`); and the other system knows this server's AE title and
+  address as a place to send to, which only it can say (a retrieve from
+  one that does not ends as `destination-unknown`).
+- **A retrieve is answered at once** (`202`) with its record, and is
+  carried out after that, one at a time. `counts` is what the other system
+  says it has sent so far. Once it is `done`, `result` is `retrieved`,
+  `partly` (some was not sent) or `failed`, and `held` is how many
+  instances of the study or the series the server then holds, from its own
+  index: what the other system says it sent and what arrived need not
+  agree, and `held` is the one to go by.
+- **An association that hears nothing for two minutes** is given up on
+  (`broken`), though the other system may still be sending.
+- **The records are kept while the server runs**, the latest hundred. The
+  audit log has who asked which system (`dicom-query`, with the level and
+  how many matches, and not the keys: a name that was typed is no one's
+  yet), who retrieved which study from where (`dicom-retrieve`), and, in
+  the record of following it, whose study it turned out to be.
+- **Whom it asks is the administrator's choice.** A user picks among the
+  systems on the list and cannot name an address.
+
+Not there yet: a screen for asking another system (#54), TLS (#57) and
+audit records for associations (#212). Until #212 the audit log has the
+request for a send or a retrieve and not the associations it made, and
+nothing of what other systems send here or ask; the file header of each
+received object names the AE title that sent it.
 
 The library underneath is `dcmjs-dimse`, which only `src/dimse/library.ts`
 imports; [docs/dimse-library.md](../../docs/dimse-library.md) says why it
@@ -651,7 +708,10 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   (C-ECHO, C-STORE, and C-FIND, C-MOVE and C-GET for those that may),
   `query.ts` turns what is asked into questions to the index and answers,
   `retrieve.ts` sends what a retrieve names a part at a time and counts,
-  `parts.ts` reads stored instances a few at a time, `echo.ts` asks another system for a C-ECHO,
+  `parts.ts` reads stored instances a few at a time, `ask.ts` asks another
+  system (C-FIND, C-MOVE) and `ask-keys.ts` is what may be asked and what is
+  read of an answer, `retrieve-manager.ts` the retrieves under way and made
+  (#51), `echo.ts` asks another system for a C-ECHO,
   `part10.ts` writes the file header in front of a received data set, and
   `sop-classes.ts` is what the listener agrees to. `library.ts` is the only
   file that imports the DIMSE library (a lint rule holds the rest to that).

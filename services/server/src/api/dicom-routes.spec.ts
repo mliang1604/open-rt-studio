@@ -6,7 +6,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { syntheticCtSeries } from '@open-rt-studio/testdata';
+import {
+  SYNTHETIC_RT_COURSE,
+  syntheticCtSeries,
+  syntheticRtCourse,
+} from '@open-rt-studio/testdata';
 
 import { openSqliteAccountStore } from '../accounts/account-store.js';
 import { createAccounts } from '../accounts/accounts.js';
@@ -705,6 +709,308 @@ describe('the DICOM settings of the API', () => {
       expect(read.at(-1)).toMatchObject({ actor: 'ada', seriesUid, object: 'PLANNING' });
       expect(read.at(-1)!.detail).toBe('done: 3 of 3 sent, 0 failed');
       expect(records().some((record) => record.action === 'dicom-destinations-read')).toBe(true);
+    });
+  });
+
+  // #51: the server asks another system what it holds, and has it sent here.
+  describe('asking another system through the API', () => {
+    interface Retrieve {
+      id: string;
+      state: string;
+      result: string | null;
+      failure: string | null;
+      held: number | null;
+      counts: { completed: number; failed: number } | null;
+    }
+    interface Query {
+      outcome: string;
+      complete: boolean;
+      patients: { patientId: string }[];
+      studies: { studyInstanceUid: string; patientName: string | null; instances: number }[];
+      series: { seriesInstanceUid: string; modality: string }[];
+    }
+    const COURSE = SYNTHETIC_RT_COURSE;
+
+    /** A server that listens, and knows another system that holds the synthetic course. */
+    async function asker(known: { mayStore?: boolean; listening?: boolean } = {}) {
+      const made = await make(known.listening === false ? {} : { dicomPort: 0 });
+      const peer = await startTestListener({
+        aeTitle: 'ARCHIVE',
+        callers: [],
+        retrievers: [DEFAULT_CONFIG.dicomAeTitle],
+        destinationOf: (aeTitle) =>
+          made.server.dicom && aeTitle === DEFAULT_CONFIG.dicomAeTitle
+            ? { host: '127.0.0.1', port: made.server.dicom.port }
+            : null,
+        moveTimeoutMs: 2_000,
+      });
+      closing.push(() => peer.close());
+      for (const file of syntheticRtCourse()) await peer.core.pacs!.ingest.ingest(file.bytes);
+      const added = await made.call('POST', '/dicom/remotes', {
+        token: made.admin,
+        body: {
+          name: 'Archive',
+          aeTitle: 'ARCHIVE',
+          host: '127.0.0.1',
+          port: peer.port,
+          mayStore: known.mayStore ?? true,
+          mayRetrieve: false,
+        },
+      });
+      expect(added.status).toBe(201);
+      const source = (added.body as { id: string }).id;
+      /** The record of a retrieve once it is done, as a user reads it. */
+      const done = (id: string): Promise<Retrieve> =>
+        vi.waitFor(
+          async () => {
+            const record = held<Retrieve>(
+              await made.call('GET', `/dicom/retrieves/${id}`, { token: made.user }),
+              200,
+              'DicomRetrieve',
+            );
+            expect(record.state).toBe('done');
+            return record;
+          },
+          { timeout: 5_000, interval: 20 },
+        );
+      return { ...made, peer, source, done };
+    }
+
+    // The issue's "done when", by a user who is no administrator.
+    it('a user finds a study on another system and retrieves it into the server', async () => {
+      const { call, user, source, done } = await asker();
+      const offered = held<{ items: unknown[] }>(
+        await call('GET', '/dicom/sources', { token: user }),
+        200,
+        'DicomSources',
+      );
+      expect(offered.items).toEqual([
+        { id: source, name: 'Archive', aeTitle: 'ARCHIVE', canRetrieve: true },
+      ]);
+
+      const found = held<Query>(
+        await call('POST', '/dicom/queries', {
+          token: user,
+          body: { source, level: 'study', keys: { patientName: 'SYNTH*' } },
+        }),
+        200,
+        'DicomQueryAnswer',
+      );
+      expect(found).toMatchObject({
+        outcome: 'answered',
+        complete: true,
+        patients: [],
+        series: [],
+      });
+      expect(found.studies.map((study) => study.studyInstanceUid)).toEqual([
+        COURSE.followUpStudy,
+        COURSE.planningStudy,
+      ]);
+      const series = held<Query>(
+        await call('POST', '/dicom/queries', {
+          token: user,
+          body: { source, level: 'series', keys: { studyInstanceUid: COURSE.planningStudy } },
+        }),
+        200,
+        'DicomQueryAnswer',
+      );
+      expect(series.series.map((one) => one.modality).sort()).toEqual(
+        ['CT', 'MR', 'RTDOSE', 'RTPLAN', 'RTSTRUCT'].sort(),
+      );
+      const patients = held<Query>(
+        await call('POST', '/dicom/queries', { token: user, body: { source, level: 'patient' } }),
+        200,
+        'DicomQueryAnswer',
+      );
+      expect(patients.patients).toHaveLength(1);
+
+      // The server holds nothing of it yet.
+      expect((await call('GET', `/studies/${COURSE.planningStudy}`, { token: user })).status).toBe(
+        404,
+      );
+      const asked = held<Retrieve>(
+        await call('POST', '/dicom/retrieves', {
+          token: user,
+          body: { source, studyUid: COURSE.planningStudy },
+        }),
+        202,
+        'DicomRetrieve',
+      );
+      const record = await done(asked.id);
+      expect(record).toMatchObject({
+        result: 'retrieved',
+        failure: null,
+        held: 8,
+        counts: { completed: 8, failed: 0 },
+      });
+      // And now it does: the study is there for whoever browses the server.
+      const study = await call('GET', `/studies/${COURSE.planningStudy}`, { token: user });
+      expect(study.status).toBe(200);
+      expect(study.body).toMatchObject({ instances: 8 });
+
+      const one = held<Retrieve>(
+        await call('POST', '/dicom/retrieves', {
+          token: user,
+          body: { source, studyUid: COURSE.followUpStudy, seriesUid: COURSE.followUpCt },
+        }),
+        202,
+        'DicomRetrieve',
+      );
+      expect(await done(one.id)).toMatchObject({
+        result: 'retrieved',
+        held: COURSE.followUpCtSlices,
+      });
+      const listed = held<{ items: Retrieve[] }>(
+        await call('GET', '/dicom/retrieves', { token: user }),
+        200,
+        'DicomRetrieves',
+      );
+      expect(listed.items.map((item) => item.id)).toEqual([one.id, asked.id]);
+    });
+
+    it('says why another system gave no answer, as the answer', async () => {
+      const { call, user, admin, source, peer } = await asker();
+      await peer.close();
+      const gone = held<Query>(
+        await call('POST', '/dicom/queries', { token: user, body: { source, level: 'study' } }),
+        200,
+        'DicomQueryAnswer',
+      );
+      expect(gone).toMatchObject({ outcome: 'unreachable', complete: false, studies: [] });
+      // A retrieve from it is asked for all the same, and its record says what came of it.
+      const asked = held<Retrieve>(
+        await call('POST', '/dicom/retrieves', {
+          token: admin,
+          body: { source, studyUid: COURSE.planningStudy },
+        }),
+        202,
+        'DicomRetrieve',
+      );
+      await vi.waitFor(async () => {
+        const record = (await call('GET', `/dicom/retrieves/${asked.id}`, { token: user }))
+          .body as Retrieve;
+        expect(record).toMatchObject({
+          state: 'done',
+          result: 'failed',
+          failure: 'unreachable',
+          held: 0,
+        });
+      });
+    });
+
+    it('refuses what cannot be asked, and a retrieve that could not arrive', async () => {
+      const { call, user, source } = await asker({ mayStore: false });
+      const refusal = async (path: string, body: unknown): Promise<[number, string]> => {
+        const answer = await call('POST', path, { token: user, body });
+        return [answer.status, (answer.body as { error: string }).error];
+      };
+      const study = { source, studyUid: COURSE.planningStudy };
+      for (const body of [
+        [],
+        { level: 'study' },
+        { source, level: 'image' },
+        { source, level: 'study', keys: { studyDate: 'yesterday' } },
+        { source, level: 'study', keys: { host: '10.0.0.1' } },
+        { source, level: 'series', keys: {} },
+        { source, level: 'study', address: '10.0.0.1' },
+      ]) {
+        expect(await refusal('/dicom/queries', body), JSON.stringify(body)).toEqual([
+          400,
+          'invalid-request',
+        ]);
+      }
+      for (const body of [
+        { source },
+        { source, studyUid: 'not a uid' },
+        { ...study, seriesUid: '1.2.*' },
+        { ...study, host: '10.0.0.1' },
+      ]) {
+        expect(await refusal('/dicom/retrieves', body), JSON.stringify(body)).toEqual([
+          400,
+          'invalid-request',
+        ]);
+      }
+      expect(await refusal('/dicom/queries', { source: 'nobody', level: 'study' })).toEqual([
+        404,
+        'not-found',
+      ]);
+      expect(await refusal('/dicom/retrieves', { ...study, source: 'nobody' })).toEqual([
+        404,
+        'not-found',
+      ]);
+      // The other system may not send objects here.
+      expect(await refusal('/dicom/retrieves', study)).toEqual([409, 'may-not-store']);
+      // Not logged in: nothing.
+      for (const [method, path] of [
+        ['GET', '/dicom/sources'],
+        ['POST', '/dicom/queries'],
+        ['POST', '/dicom/retrieves'],
+        ['GET', '/dicom/retrieves'],
+        ['GET', '/dicom/retrieves/abc'],
+      ]) {
+        expect(
+          (await call(method, path, method === 'POST' ? { body: study } : {})).status,
+          path,
+        ).toBe(401);
+      }
+      expect((await call('GET', '/dicom/retrieves/abc', { token: user })).status).toBe(404);
+      expect(
+        held<{ items: unknown[] }>(
+          await call('GET', '/dicom/retrieves', { token: user }),
+          200,
+          'DicomRetrieves',
+        ).items,
+      ).toEqual([]);
+    });
+
+    it('does not ask for a retrieve when the server is not listening', async () => {
+      const { call, user, source } = await asker({ listening: false });
+      const offered = await call('GET', '/dicom/sources', { token: user });
+      expect(offered.body).toMatchObject({ items: [{ id: source, canRetrieve: false }] });
+      const answer = await call('POST', '/dicom/retrieves', {
+        token: user,
+        body: { source, studyUid: COURSE.planningStudy },
+      });
+      expect([answer.status, (answer.body as { error: string }).error]).toEqual([
+        409,
+        'not-listening',
+      ]);
+    });
+
+    it('is in the audit log: who asked which system, and whose study was retrieved', async () => {
+      const { call, user, source, done, records } = await asker();
+      await call('GET', '/dicom/sources', { token: user });
+      await call('POST', '/dicom/queries', {
+        token: user,
+        body: { source, level: 'study', keys: { patientName: 'SYNTH*' } },
+      });
+      await call('POST', '/dicom/queries', { token: user, body: { source: 'nobody' } });
+      const asked = await call('POST', '/dicom/retrieves', {
+        token: user,
+        body: { source, studyUid: COURSE.planningStudy },
+      });
+      await done((asked.body as Retrieve).id);
+
+      const of = (action: string) => records().filter((record) => record.action === action);
+      expect(of('dicom-sources-read')).toHaveLength(1);
+      expect(of('dicom-query')).toMatchObject([
+        { actor: 'ada', outcome: 'ok', object: 'ARCHIVE', detail: 'study: 2 matches' },
+        { actor: 'ada', outcome: 'not-found', object: null },
+      ]);
+      // What was asked for is not in the record: a name that was typed is no one's yet.
+      expect(JSON.stringify(of('dicom-query'))).not.toContain('SYNTH');
+      expect(of('dicom-retrieve')).toMatchObject([
+        { actor: 'ada', outcome: 'ok', object: 'ARCHIVE', studyUid: COURSE.planningStudy },
+      ]);
+      // Following a retrieve is one record, which in the end says whose study it was.
+      const read = of('dicom-retrieve-read').at(-1)!;
+      expect(read).toMatchObject({
+        actor: 'ada',
+        object: 'ARCHIVE',
+        studyUid: COURSE.planningStudy,
+        detail: 'done: retrieved, 8 sent, 0 failed, 8 held',
+      });
+      expect(read.patientId).toBeTruthy();
     });
   });
 });

@@ -12,6 +12,7 @@ import {
   REMOTES_AT_MOST,
 } from '../dimse/dicom-settings.js';
 import type { DicomService } from '../dimse/dicom-service.js';
+import type { RetrieveRecord } from '../dimse/retrieve-manager.js';
 import type { SendRecord } from '../dimse/send-manager.js';
 import { HttpError, type ParameterDoc, type Route, type RouteRequest } from '../host/routes.js';
 import type { PacsIndex } from '../pacs-index/pacs-index.js';
@@ -30,6 +31,8 @@ const STATUS: Record<DicomSettingsError['code'], number> = {
   'no-such-series': 404,
   'nothing-to-send': 409,
   'not-done': 409,
+  'not-listening': 409,
+  'may-not-store': 409,
 };
 
 /** A refusal of the settings, as the answer it is. */
@@ -122,6 +125,48 @@ function sendOf(body: unknown): {
     ...(sopInstanceUid === undefined ? {} : { sopInstanceUid }),
   };
 }
+
+const RETRIEVE_PARAMETER: ParameterDoc = {
+  name: 'id',
+  in: 'path',
+  description: "The retrieve's id, as it was given when the retrieve was asked for.",
+};
+
+const NO_SUCH_RETRIEVE = {
+  description: 'The server has no such retrieve.',
+  schema: 'Error',
+} as const;
+
+/** An object of a request's body, with the names it may have and no others. */
+function bodyOf(body: unknown, names: readonly string[]): Record<string, unknown> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new HttpError(400, 'invalid-request', 'The body is not a JSON object.');
+  }
+  if (Object.keys(body).some((name) => !names.includes(name))) {
+    throw new HttpError(400, 'invalid-request', `The body holds ${names.join(', ')}.`);
+  }
+  return body as Record<string, unknown>;
+}
+
+/** The id of a system, as a body names it. */
+function sourceOf(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 64) {
+    throw new HttpError(
+      400,
+      'invalid-request',
+      'source is the id of a system, as the list of sources gives it.',
+    );
+  }
+  return value;
+}
+
+/** "done: retrieved, 8 sent, 0 failed, 8 held", for the audit record of a retrieve that was looked at. */
+const retrieved = (record: RetrieveRecord): string =>
+  record.state !== 'done'
+    ? record.state
+    : `done: ${record.result ?? 'failed'}${record.failure ? ` (${record.failure})` : ''}, ${
+        record.counts?.completed ?? 0
+      } sent, ${record.counts?.failed ?? 0} failed, ${record.held ?? 0} held`;
 
 /** "3 of 5 sent, 2 failed", for the audit record of a send that was looked at. */
 const counted = (record: SendRecord): string => {
@@ -480,6 +525,178 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
               'The send is not done, every instance arrived, or the system has no address.',
             schema: 'Error',
           },
+        },
+      },
+    },
+    {
+      method: 'GET',
+      path: `${API_PREFIX}/dicom/sources`,
+      audit: 'dicom-sources-read',
+      handle(request) {
+        queryOf(request, []);
+        return { status: 200, body: { items: dicom.sources() } };
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'The systems that can be asked what they hold',
+        description:
+          'The systems the server knows that have an address. `canRetrieve` says whether what one sends would arrive: the server must listen for DICOM, and an administrator must have let that system send objects here. For everyone who is logged in.',
+        responses: {
+          200: { description: 'The sources.', schema: 'DicomSources' },
+          401: ERRORS[401],
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: `${API_PREFIX}/dicom/queries`,
+      audit: 'dicom-query',
+      async handle(request) {
+        const body = bodyOf(await jsonOf(request), ['source', 'level', 'keys']);
+        const source = sourceOf(body['source']);
+        request.audit({ object: remote(source)?.aeTitle ?? null });
+        try {
+          const answer = await dicom.query({ source, level: body['level'], keys: body['keys'] });
+          const matches = answer.outcome === 'answered' ? answer.matches : [];
+          request.audit({
+            detail:
+              answer.outcome === 'answered'
+                ? `${answer.level}: ${matches.length} matches${answer.complete ? '' : ', not all'}`
+                : `${answer.level}: ${answer.outcome}`,
+          });
+          return {
+            status: 200,
+            body: {
+              level: answer.level,
+              outcome: answer.outcome,
+              status: answer.outcome === 'answered' ? answer.status : null,
+              complete: answer.outcome === 'answered' && answer.complete,
+              patients: answer.level === 'patient' ? matches : [],
+              studies: answer.level === 'study' ? matches : [],
+              series: answer.level === 'series' ? matches : [],
+            },
+          };
+        } catch (error) {
+          return refused(error);
+        }
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'Ask another system for the patients, studies or series that match (C-FIND)',
+        description:
+          'Send `{ "source", "level", "keys" }` as JSON. `level` is `patient`, `study` or `series`. `keys` holds what to match, each a line of at most 64 characters: at the patient level `patientId` and `patientName`; at the study level those and `studyDate` (a day, or a range such as `20260101-20260131`), `accessionNumber`, `studyDescription`, `modality` and `studyInstanceUid`; at the series level `studyInstanceUid`, which must be there, and `modality`. `*` and `?` are DICOM’s wildcards. The server waits for the answer, takes 200 matches at most and says in `complete` whether that was all. What the other system answers is its own text: it is cut to a length, and a match without the ID or UID that names it is left out.',
+        requestBody: 'application/json',
+        responses: {
+          200: {
+            description: 'What the system answered, or why it did not.',
+            schema: 'DicomQueryAnswer',
+          },
+          400: ERRORS[400],
+          401: ERRORS[401],
+          404: ERRORS[404],
+          409: { description: 'The system has no address to call.', schema: 'Error' },
+          415: ERRORS[415],
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: `${API_PREFIX}/dicom/retrieves`,
+      audit: 'dicom-retrieve',
+      async handle(request) {
+        const body = bodyOf(await jsonOf(request), ['source', 'studyUid', 'seriesUid']);
+        const source = sourceOf(body['source']);
+        const { studyUid, seriesUid } = body;
+        if (typeof studyUid !== 'string' || !isUid(studyUid)) {
+          throw new HttpError(400, 'invalid-request', 'studyUid is a Study Instance UID.');
+        }
+        if (seriesUid !== undefined && (typeof seriesUid !== 'string' || !isUid(seriesUid))) {
+          throw new HttpError(400, 'invalid-request', 'seriesUid is a Series Instance UID.');
+        }
+        request.audit({
+          studyUid,
+          seriesUid: seriesUid ?? null,
+          object: remote(source)?.aeTitle ?? null,
+        });
+        try {
+          const record = await dicom.retrieve({
+            source,
+            studyInstanceUid: studyUid,
+            ...(seriesUid === undefined ? {} : { seriesInstanceUid: seriesUid }),
+          });
+          return { status: 202, body: record };
+        } catch (error) {
+          return refused(error);
+        }
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'Have another system send a study, or a series of one, to this server (C-MOVE)',
+        description:
+          'Send `{ "source", "studyUid" }` as JSON for a study, with `"seriesUid"` for one series of it. The server asks the other system to send to the server’s own AE title, and the objects arrive at its DICOM listener like any that are sent to it: so the server must be listening, the other system must be let in to send objects here, and it must know this server’s AE title and address as a place to send to. The answer comes at once, with the retrieve’s record; ask for the record again to follow it. One retrieve runs at a time and the rest wait.',
+        requestBody: 'application/json',
+        responses: {
+          202: { description: 'Asked for: the record of the retrieve.', schema: 'DicomRetrieve' },
+          400: ERRORS[400],
+          401: ERRORS[401],
+          404: ERRORS[404],
+          409: {
+            description:
+              'The system has no address (`no-address`), the server does not listen for DICOM (`not-listening`), or the system may not send objects here (`may-not-store`).',
+            schema: 'Error',
+          },
+          415: ERRORS[415],
+        },
+      },
+    },
+    {
+      method: 'GET',
+      path: `${API_PREFIX}/dicom/retrieves`,
+      audit: 'dicom-retrieve-read',
+      handle(request) {
+        queryOf(request, []);
+        return { status: 200, body: { items: dicom.retrieves() } };
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'The retrieves the server remembers, the latest first',
+        description:
+          'The records are kept while the server runs, the latest hundred of them, and are gone when it stops.',
+        responses: {
+          200: { description: 'The retrieves.', schema: 'DicomRetrieves' },
+          401: ERRORS[401],
+        },
+      },
+    },
+    {
+      method: 'GET',
+      path: `${API_PREFIX}/dicom/retrieves/:id`,
+      audit: 'dicom-retrieve-read',
+      async handle(request) {
+        queryOf(request, []);
+        const record = dicom.retrieveOf(request.params['id']);
+        if (!record) throw new HttpError(404, 'not-found', 'The server has no such retrieve.');
+        // Whose it is, once the server holds the study: before, it knows no patient of it.
+        const study = await index.getStudy(record.studyInstanceUid);
+        request.audit({
+          patientId: study?.patientId ?? null,
+          studyUid: record.studyInstanceUid,
+          seriesUid: record.seriesInstanceUid,
+          object: record.source.aeTitle,
+          detail: retrieved(record),
+        });
+        return { status: 200, body: record };
+      },
+      doc: {
+        tag: 'DICOM',
+        summary: 'One retrieve: how far it is, and how it ended',
+        description:
+          '`counts` is what the other system says it has sent so far. Once the retrieve is `done`, `result` is `retrieved` (all of it), `partly` (some was not sent) or `failed`, with why in `failure`: `rejected`, `unreachable`, `broken`, `not-taken`, `destination-unknown` (the other system does not know this server as a place to send to), `refused` (with the `status` it ended with) or `stopped`. `held` is how many instances of the study, or the series, the server then holds, which is what counts.',
+        parameters: [RETRIEVE_PARAMETER],
+        responses: {
+          200: { description: 'The record of the retrieve.', schema: 'DicomRetrieve' },
+          401: ERRORS[401],
+          404: NO_SUCH_RETRIEVE,
         },
       },
     },

@@ -386,6 +386,58 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   });
   await call('GET', api(`/dicom/sends/${ABSENT_PATIENT}`), { token: user });
   await call('POST', api(`/dicom/sends/${ABSENT_PATIENT}/retry`), { token: user });
+  // The same system asked what it holds, by the patient's name and ID, and
+  // to send a study here (#51): rightly, wrongly, and followed. Nothing is
+  // at its address, so each ends unanswered.
+  await call('GET', api('/dicom/sources'), { token: user });
+  const queried = await call('POST', api('/dicom/queries'), {
+    token: user,
+    body: {
+      source: systemId,
+      level: 'study',
+      keys: { patientName: PATIENT.name, patientId: PATIENT.id, accessionNumber: ABSENT_PATIENT },
+    },
+  });
+  expect(queried.status).toBe(200);
+  await call('POST', api('/dicom/queries'), {
+    token: user,
+    body: { source: systemId, level: 'patient', keys: { patientId: PATIENT.id } },
+  });
+  await call('POST', api('/dicom/queries'), {
+    token: user,
+    body: { source: ABSENT_PATIENT, level: 'study', keys: { patientName: PATIENT.name } },
+  });
+  await call('POST', api('/dicom/queries'), {
+    token: user,
+    body: { source: systemId, level: PATIENT.id, keys: { [PATIENT.id]: PATIENT.name } },
+  });
+  await call('POST', api('/dicom/queries'), {
+    token: user,
+    body: { source: systemId, level: 'series', keys: { studyInstanceUid: PATIENT.id } },
+  });
+  const retrieving = await call('POST', api('/dicom/retrieves'), {
+    token: user,
+    body: { source: systemId, studyUid: sendable.studyInstanceUid },
+  });
+  expect(retrieving.status).toBe(202);
+  const retrieveId = (retrieving.body as { id: string }).id;
+  await vi.waitFor(
+    async () => {
+      const followed = await call('GET', api(`/dicom/retrieves/${retrieveId}`), { token: user });
+      expect((followed.body as { state: string }).state).toBe('done');
+    },
+    { timeout: 15_000, interval: 50 },
+  );
+  await call('GET', api('/dicom/retrieves'), { token: user });
+  await call('POST', api('/dicom/retrieves'), {
+    token: user,
+    body: { source: ABSENT_PATIENT, studyUid: ABSENT_UID, seriesUid: ABSENT_UID },
+  });
+  await call('POST', api('/dicom/retrieves'), {
+    token: user,
+    body: { source: systemId, studyUid: PATIENT.id },
+  });
+  await call('GET', api(`/dicom/retrieves/${ABSENT_PATIENT}`), { token: user });
   await call('DELETE', api(`/dicom/remotes/${systemId}`), { token: admin });
   await call('DELETE', api(`/dicom/remotes/${ABSENT_PATIENT}`), { token: admin });
 
@@ -521,6 +573,7 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     ...['dicom-settings-read', 'dicom-settings-change', 'dicom-echo'],
     ...['dicom-remote-add', 'dicom-remote-change', 'dicom-remote-remove'],
     ...['dicom-destinations-read', 'dicom-send', 'dicom-send-read'],
+    ...['dicom-sources-read', 'dicom-query', 'dicom-retrieve', 'dicom-retrieve-read'],
   ]) {
     expect(actions.has(action as AuditRecord['action']), action).toBe(true);
   }
