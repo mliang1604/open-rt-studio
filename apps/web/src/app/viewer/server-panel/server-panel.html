@@ -53,10 +53,17 @@
       }
     </div>
   </form>
-  <p class="server-note">
-    Your password goes to the server and is not kept in this browser. You are logged out when you
-    disconnect or reload the page.
-  </p>
+  @if (inDesktop) {
+    <p class="server-note">
+      Your password goes to the server and is not kept. The login is kept by this application,
+      protected by this computer’s keychain where it has one, until you log out.
+    </p>
+  } @else {
+    <p class="server-note">
+      Your password goes to the server and is not kept in this browser. You are logged out when you
+      disconnect or reload the page.
+    </p>
+  }
 } @else if (server(); as connected) {
   <p class="server-state" role="status">{{ connectedLine() }}</p>
   <div class="server-actions">
@@ -154,15 +161,43 @@
         inputmode="url"
         spellcheck="false"
         autocomplete="off"
+        [attr.list]="saved().length ? 'server-saved' : null"
         [value]="address()"
         (input)="onAddress($event)"
       />
       <button type="submit" [disabled]="busy()">{{ busy() ? 'Connecting…' : 'Connect' }}</button>
+      @if (savedHere()) {
+        <button
+          type="button"
+          [disabled]="busy()"
+          (click)="onForget()"
+          title="Remove this server from the saved servers, with the login kept for it"
+        >
+          Forget
+        </button>
+      }
     </div>
+    @if (saved().length) {
+      <!-- The servers connected to before, offered as the address is typed. -->
+      <datalist id="server-saved">
+        @for (connection of saved(); track connection.id) {
+          <option [value]="connection.address">
+            {{ connection.loggedIn ? 'logged in' : 'saved' }}
+          </option>
+        }
+      </datalist>
+    }
   </form>
-  <p class="server-note">
-    Nothing is contacted until you connect. Files you open stay on this computer either way.
-  </p>
+  @if (inDesktop) {
+    <p class="server-note">
+      Nothing is contacted until you connect, and a server you have not connected to before is put
+      to you first. Files you open stay on this computer either way.
+    </p>
+  } @else {
+    <p class="server-note">
+      Nothing is contacted until you connect. Files you open stay on this computer either way.
+    </p>
+  }
 }
 
 @if (problem(); as message) {

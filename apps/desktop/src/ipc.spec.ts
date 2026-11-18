@@ -4,10 +4,12 @@
 
 import { BRIDGE_CHANNELS, type DesktopInfo } from '@open-rt-studio/desktop-bridge';
 
+import { openConnections } from './connections.js';
 import { fileAnswers } from './files.js';
 import { openGrants } from './grants.js';
 import { BridgeRefusedError, serveBridge, type CallEvent } from './ipc.js';
 import { APP_HOME, mayNavigate } from './policy.js';
+import { serverAnswers } from './server-calls.js';
 
 const INFO: DesktopInfo = {
   appVersion: '0.0.0',
@@ -36,6 +38,14 @@ async function served() {
         },
       },
       ...fileAnswers(grants, { folder: async () => null, files: async () => null }),
+      ...serverAnswers(
+        await openConnections({
+          file: null,
+          fetch: () => Promise.reject(new Error('no network in this spec')),
+          approve: async () => false,
+          seal: null,
+        }),
+      ),
     },
   );
   return { listeners, asked: () => asked };

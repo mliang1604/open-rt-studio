@@ -21,6 +21,8 @@ import {
   type FakeAccount,
   type FakeServer,
 } from '../../data-source/server-testing';
+import { DESKTOP_SERVER } from '../../desktop-server';
+import { fakeDesktopServer, type FakeDesktopServer } from '../../desktop-server-testing';
 import { PreferencesStore } from '../../preferences-store';
 import { studyDateLabel } from '../server-browser/server-browser';
 import { DEFAULT_SERVER_ADDRESS, ServerPanel } from './server-panel';
@@ -29,6 +31,8 @@ interface Rendered {
   readonly fixture: ComponentFixture<ServerPanel>;
   readonly host: HTMLElement;
   readonly server: FakeServer;
+  /** The stand-in for the desktop application's main process, when the panel is rendered in it. */
+  readonly desktop: FakeDesktopServer | null;
   /** What the panel asked of the viewer, in order. */
   readonly said: string[];
   /** The addresses a connection was tried to. */
@@ -50,19 +54,28 @@ async function render(
   more: readonly SyntheticFile[] = [],
   accounts?: readonly FakeAccount[],
   audit?: readonly AuditEntry[],
+  /** As in the desktop application: the panel reaches the server through its main process. */
+  inDesktop = false,
 ): Promise<Rendered> {
   const server = fakeServer([...syntheticRtCourse(), ...more], accounts, audit);
+  const desktop = inDesktop ? fakeDesktopServer(server.fetch) : null;
+  if (desktop) {
+    TestBed.configureTestingModule({ providers: [{ provide: DESKTOP_SERVER, useValue: desktop }] });
+  }
   const fixture = TestBed.createComponent(ServerPanel);
   const sources = TestBed.inject(ActiveDataSource);
   const said: string[] = [];
   const tried: string[] = [];
-  fixture.componentRef.setInput('connector', (address: string) => {
-    tried.push(address);
-    return connectToServer(address, {
-      fetch: reachable ? server.fetch : () => Promise.reject(new TypeError('Failed to fetch')),
-      parse: parseHere,
+  // In the desktop application the panel's own way to a server is what is tried.
+  if (!desktop) {
+    fixture.componentRef.setInput('connector', (address: string) => {
+      tried.push(address);
+      return connectToServer(address, {
+        fetch: reachable ? server.fetch : () => Promise.reject(new TypeError('Failed to fetch')),
+        parse: parseHere,
+      });
     });
-  });
+  }
   const panel = fixture.componentInstance;
   panel.use.subscribe((source: DataSource | null) => {
     said.push(source ? `use ${source.label}` : 'use files');
@@ -83,6 +96,7 @@ async function render(
     fixture,
     host,
     server,
+    desktop,
     said,
     tried,
     text: (selector) =>
@@ -570,5 +584,97 @@ describe('ServerPanel', () => {
       expect(host.querySelector('app-audit-panel')).toBeNull();
       expect(host.querySelector('#server-address')).not.toBeNull();
     });
+  });
+});
+
+describe('ServerPanel in the desktop application', () => {
+  beforeEach(() => localStorage.clear());
+  const ADA: FakeAccount = { name: 'ada', password: 'correct horse battery staple', role: 'admin' };
+  const ADDRESS = 'http://127.0.0.1:4300';
+
+  it('says what is otherwise there, and offers no saved server before there is one', async () => {
+    const { host, text, desktop } = await render(true, [], undefined, undefined, true);
+    expect(text('.server-note')[0]).toContain(
+      'a server you have not connected to before is put to you first',
+    );
+    expect(host.querySelector('datalist')).toBeNull();
+    expect(host.querySelector('input')!.getAttribute('list')).toBeNull();
+    expect(text('button')).not.toContain('Forget');
+    expect(desktop!.asked).toEqual([]);
+    expect(desktop!.requests).toEqual([]);
+  });
+
+  it('connects through the main process, which asks the user, and says so when they say no', async () => {
+    const { click, text, said, desktop, server } = await render(
+      true,
+      [],
+      undefined,
+      undefined,
+      true,
+    );
+    desktop!.agrees = false;
+    await click('Connect');
+    expect(text('.server-problem')).toEqual(['Not connected: the server was not agreed to.']);
+    expect(desktop!.asked).toEqual([ADDRESS]);
+    expect(server.asked).toEqual([]);
+    expect(said).toEqual([]);
+
+    desktop!.agrees = true;
+    await click('Connect');
+    expect(text('.server-state')).toEqual(['Connected: Server at 127.0.0.1:4300.']);
+    expect(said).toEqual(['use Server at 127.0.0.1:4300']);
+    expect(server.asked.length).toBeGreaterThan(0);
+    expect(TestBed.inject(PreferencesStore).preferences().serverAddress).toBe(ADDRESS);
+  });
+
+  it('offers the servers that were connected to, and forgets one when asked', async () => {
+    const { click, type, text, host, desktop, fixture } = await render(
+      true,
+      [],
+      undefined,
+      undefined,
+      true,
+    );
+    await click('Connect');
+    await click('Disconnect');
+    // The address in the field is a saved server: it is offered, and can be forgotten.
+    expect(host.querySelector('input')!.getAttribute('list')).toBe('server-saved');
+    expect(
+      [...host.querySelectorAll('datalist option')].map((option) => option.getAttribute('value')),
+    ).toEqual([ADDRESS]);
+    expect(text('button')).toContain('Forget');
+    // Another address is not one of them.
+    type('http://127.0.0.1:4301');
+    await fixture.whenStable();
+    expect(text('button')).not.toContain('Forget');
+
+    // However it is typed, it is the server that was saved.
+    type('127.0.0.1:4300');
+    await fixture.whenStable();
+    await click('Forget');
+    expect(await desktop!.connections()).toEqual([]);
+    expect(host.querySelector('datalist')).toBeNull();
+    expect(text('button')).not.toContain('Forget');
+    // Forgotten, it is a server the user is asked about again.
+    await click('Connect');
+    expect(desktop!.asked).toEqual([ADDRESS, ADDRESS]);
+  });
+
+  it('says where the login is kept, and logs in without the page holding a token', async () => {
+    const { click, text, host, desktop, server } = await render(true, [], [ADA], undefined, true);
+    await click('Connect');
+    expect(text('.server-state')).toEqual(['Server at 127.0.0.1:4300 asks for a login.']);
+    expect(text('.server-note')[0]).toContain('kept by this application');
+    expect(text('.server-note')[0]).toContain('keychain');
+
+    const fields = host.querySelectorAll<HTMLInputElement>('.server-login input');
+    fields[0].value = ADA.name;
+    fields[0].dispatchEvent(new Event('input'));
+    fields[1].value = ADA.password;
+    fields[1].dispatchEvent(new Event('input'));
+    await click('Log in');
+    expect(text('.server-state')).toEqual(['Connected: Server at 127.0.0.1:4300, as ada.']);
+    expect([...desktop!.tokens.values()]).toEqual(server.tokens());
+    expect(desktop!.requests.every((request) => !('authorization' in request.headers))).toBe(true);
   });
 });

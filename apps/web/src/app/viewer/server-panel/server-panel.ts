@@ -16,7 +16,9 @@ import {
 
 import { ActiveDataSource } from '../../data-source/active-data-source';
 import type { DataSource, PatientSummary } from '../../data-source/data-source';
-import { connectToServer, ServerSource } from '../../data-source/server-source';
+import type { ServerConnection } from '@open-rt-studio/desktop-bridge';
+import { connectToServer, serverAddress, ServerSource } from '../../data-source/server-source';
+import { DESKTOP_SERVER, desktopConnector } from '../../desktop-server';
 import { PreferencesStore } from '../../preferences-store';
 import { AccountsPanel } from '../accounts-panel/accounts-panel';
 import { AuditPanel } from '../audit-panel/audit-panel';
@@ -65,8 +67,48 @@ export class ServerPanel {
   private readonly sources = inject(ActiveDataSource);
   private readonly preferences = inject(PreferencesStore);
 
+  /** The desktop application's way to a server, through its main process; null in a browser. */
+  private readonly desktop = inject(DESKTOP_SERVER);
+  /** Whether this is the desktop application, which says some things otherwise. */
+  protected readonly inDesktop = this.desktop !== null;
   /** How a server is reached; a spec gives its own. */
-  readonly connector = input<(address: string) => Promise<ServerSource>>(connectToServer);
+  readonly connector = input<(address: string) => Promise<ServerSource>>(
+    this.desktop ? desktopConnector(this.desktop) : connectToServer,
+  );
+  /** The servers the desktop application has connected to, the last used first. */
+  protected readonly saved = signal<readonly ServerConnection[]>([]);
+  /** The saved server the address field names, if it names one. */
+  protected readonly savedHere = computed(() => {
+    let address: string;
+    try {
+      address = serverAddress(this.address());
+    } catch {
+      return null;
+    }
+    return this.saved().find((connection) => connection.address === address) ?? null;
+  });
+
+  constructor() {
+    void this.refreshSaved();
+  }
+
+  private async refreshSaved(): Promise<void> {
+    if (!this.desktop) return;
+    try {
+      this.saved.set(await this.desktop.connections());
+    } catch {
+      this.saved.set([]);
+    }
+  }
+
+  /** Forget the saved server the address names, with the login held for it. */
+  protected async onForget(): Promise<void> {
+    const connection = this.savedHere();
+    if (!connection || !this.desktop || this.busy()) return;
+    this.problem.set(null);
+    await this.desktop.forget(connection.id);
+    await this.refreshSaved();
+  }
 
   /** Whether a series is on screen, which turning to another patient would take away. */
   readonly showing = input(false);
@@ -188,6 +230,7 @@ export class ServerPanel {
       const source = await this.connector()(this.address());
       this.preferences.update({ serverAddress: source.address });
       this.address.set(source.address);
+      void this.refreshSaved();
       // A server that wants a login is not in use until there is one.
       if (source.login().kind === 'needed') this.waiting.set(source);
       else this.use.emit(source);

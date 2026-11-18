@@ -15,13 +15,14 @@
 // Add to it sparingly. Everything here is something a page can ask of a
 // process that can read the disk: a call takes the least it can, says what
 // it gives back, and never takes a path, a program or an address that the
-// main process then trusts.
+// main process then trusts. (The one address a call takes, a server's, is
+// put to the user by the main process before anything is sent there.)
 
 /** The name the bridge has on the window. */
 export const BRIDGE_GLOBAL = 'openRtStudioDesktop';
 
 /** Raised when a call changes what it takes or gives. */
-export const BRIDGE_VERSION = 2;
+export const BRIDGE_VERSION = 3;
 
 /** The systems the desktop application runs on, as Node names them. */
 export const DESKTOP_PLATFORMS = ['darwin', 'win32', 'linux'] as const;
@@ -81,6 +82,62 @@ export const READ_BYTES_AT_MOST = 4 * 1024 * 1024;
 export const GRANT_PATH_AT_MOST = 4096;
 
 /**
+ * A server the user agreed to connect to. The page has no network of its
+ * own: what it asks of a server it asks through the main process, of a
+ * connection, and a connection is made only when the user says so in a
+ * dialog of the main process that names the address.
+ */
+export interface ServerConnection {
+  /** Made by the main process: {@link isGrantId}. */
+  readonly id: string;
+  /** The server's origin: `https://pacs.example.org`, `http://127.0.0.1:4300`. */
+  readonly address: string;
+  /**
+   * Whether the application holds a login for it. The token of a login
+   * stays in the main process, which adds it to what is sent; the page gets
+   * {@link HELD_LOGIN} in its place.
+   */
+  readonly loggedIn: boolean;
+}
+
+/** What the page is given where a server's answer held the token of a login. */
+export const HELD_LOGIN = 'held-by-the-desktop-application';
+
+/** The methods a request to a server may have. */
+export const SERVER_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+export type ServerMethod = (typeof SERVER_METHODS)[number];
+
+/** The headers the page may give a request, in lower case. Who is asking is not the page's to say. */
+export const SERVER_REQUEST_HEADERS = ['accept', 'content-type', 'if-none-match', 'range'] as const;
+
+/** Where every request to a server goes: its API, and nothing else it may serve. */
+export const SERVER_API_PREFIX = '/api/v1/';
+/** How long the path of a request may be, with what is asked after it. */
+export const SERVER_PATH_AT_MOST = 8192;
+
+export interface ServerRequest {
+  /** A name for this request, made by the page, to cancel it by: {@link isGrantId}. */
+  readonly request: string;
+  readonly method: ServerMethod;
+  /** Begins with {@link SERVER_API_PREFIX}. */
+  readonly path: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: Uint8Array | null;
+}
+
+/** Why a request got no answer from the server. */
+export type ServerFailure = 'unreachable' | 'certificate' | 'cancelled' | 'too-large';
+
+/** What the server answered, whole; or why it did not. */
+export type ServerAnswer =
+  | {
+      readonly status: number;
+      readonly headers: Readonly<Record<string, string>>;
+      readonly body: Uint8Array;
+    }
+  | { readonly failed: ServerFailure };
+
+/**
  * Every call the page can make of the main process: the channel it goes by,
  * what it sends and what comes back.
  *
@@ -108,6 +165,29 @@ export interface BridgeCalls {
   'files:keep': { readonly args: readonly [id: string]; readonly result: boolean };
   /** Give a grant up. */
   'files:forget': { readonly args: readonly [id: string]; readonly result: null };
+  /**
+   * Connect to a server at an address the user typed. One that was not
+   * connected to before is put to the user first. Null when it is no
+   * address of a server, or the user said no.
+   */
+  'server:connect': {
+    readonly args: readonly [address: string];
+    readonly result: ServerConnection | null;
+  };
+  /** The servers that were connected to, the last used first. */
+  'server:connections': {
+    readonly args: readonly [];
+    readonly result: readonly ServerConnection[];
+  };
+  /** Forget a server, and the login held for it. */
+  'server:forget': { readonly args: readonly [id: string]; readonly result: null };
+  /** Ask a connected server's API. Null when there is no such connection. */
+  'server:request': {
+    readonly args: readonly [id: string, request: ServerRequest];
+    readonly result: ServerAnswer | null;
+  };
+  /** Give up a request that has not been answered. */
+  'server:cancel': { readonly args: readonly [request: string]; readonly result: null };
 }
 export type BridgeChannel = keyof BridgeCalls;
 
@@ -119,6 +199,11 @@ const CHANNELS: { readonly [C in BridgeChannel]: true } = {
   'files:read': true,
   'files:keep': true,
   'files:forget': true,
+  'server:connect': true,
+  'server:connections': true,
+  'server:forget': true,
+  'server:request': true,
+  'server:cancel': true,
 };
 /** The channels, for a main process that must serve each one. */
 export const BRIDGE_CHANNELS = Object.keys(CHANNELS) as readonly BridgeChannel[];
@@ -130,6 +215,55 @@ export interface DesktopBridge {
   info(): Promise<DesktopInfo>;
   /** The files the user chose, through the main process. One method for each `files:` call. */
   readonly files: DesktopFiles;
+  /** The servers the user connected to. One method for each `server:` call. */
+  readonly server: DesktopServer;
+}
+
+export interface DesktopServer {
+  connect(address: string): Promise<ServerConnection | null>;
+  connections(): Promise<readonly ServerConnection[]>;
+  forget(id: string): Promise<null>;
+  request(id: string, request: ServerRequest): Promise<ServerAnswer | null>;
+  cancel(request: string): Promise<null>;
+}
+
+const SERVER_CALLS: { readonly [M in keyof DesktopServer]: true } = {
+  connect: true,
+  connections: true,
+  forget: true,
+  request: true,
+  cancel: true,
+};
+
+/**
+ * Whether a path is one of a server's API: under {@link SERVER_API_PREFIX},
+ * written plainly, with no step up or in place and nothing a URL would read
+ * as another place.
+ */
+export function isServerPath(path: unknown): path is string {
+  if (typeof path !== 'string' || path.length > SERVER_PATH_AT_MOST) return false;
+  if (!path.startsWith(SERVER_API_PREFIX)) return false;
+  // Printable ASCII only: anything else is written with percent signs.
+  if (!/^[\x21-\x7e]+$/.test(path) || /[\\#]/.test(path)) return false;
+  const [route] = path.split('?');
+  return !route.split('/').some((part) => part === '.' || part === '..' || /^%2e/i.test(part));
+}
+
+/** Whether a value is a request the page may make of a server. */
+export function isServerRequest(value: unknown): value is ServerRequest {
+  if (typeof value !== 'object' || value === null) return false;
+  const request = value as Record<string, unknown>;
+  const { headers, body } = request;
+  if (!isGrantId(request['request']) || !isServerPath(request['path'])) return false;
+  if (!(SERVER_METHODS as readonly unknown[]).includes(request['method'])) return false;
+  if (typeof headers !== 'object' || headers === null || Array.isArray(headers)) return false;
+  for (const [name, text] of Object.entries(headers)) {
+    if (!(SERVER_REQUEST_HEADERS as readonly string[]).includes(name)) return false;
+    // One line of printable text: nothing that would begin another header.
+    if (typeof text !== 'string' || text.length > 1024 || !/^[\x20-\x7e]*$/.test(text))
+      return false;
+  }
+  return body === null || body instanceof Uint8Array;
 }
 
 export interface DesktopFiles {
@@ -206,10 +340,15 @@ export function desktopBridge(host: unknown = globalThis): DesktopBridge | null 
   if (typeof host !== 'object' || host === null) return null;
   const bridge = (host as Record<string, unknown>)[BRIDGE_GLOBAL];
   if (typeof bridge !== 'object' || bridge === null) return null;
-  const { version, info, files } = bridge as Record<string, unknown>;
+  const { version, info, files, server } = bridge as Record<string, unknown>;
   if (version !== BRIDGE_VERSION || typeof info !== 'function') return null;
-  if (typeof files !== 'object' || files === null) return null;
-  const methods = files as Record<string, unknown>;
-  if (Object.keys(FILE_METHODS).some((name) => typeof methods[name] !== 'function')) return null;
+  for (const [part, names] of [
+    [files, FILE_METHODS],
+    [server, SERVER_CALLS],
+  ] as const) {
+    if (typeof part !== 'object' || part === null) return null;
+    const methods = part as Record<string, unknown>;
+    if (Object.keys(names).some((name) => typeof methods[name] !== 'function')) return null;
+  }
   return bridge as DesktopBridge;
 }

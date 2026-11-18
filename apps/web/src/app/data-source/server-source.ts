@@ -89,6 +89,16 @@ export interface ServerSourceOptions {
   readonly parse?: typeof parseFilesInWorkers;
   /** How many files are downloaded at once. */
   readonly parallel?: number;
+  /**
+   * The token of a login that is already there. The desktop application
+   * gives a marker for a login its main process holds (`desktop-server.ts`).
+   */
+  readonly token?: string | null;
+  /**
+   * What to say when the server could not be reached, for whoever knows
+   * more of why than a browser tells: the whole sentence.
+   */
+  readonly unreachable?: (host: string, error: unknown) => string;
 }
 
 // The server's answers, as far as they are read here (see its OpenAPI document).
@@ -667,7 +677,8 @@ export class ServerSource implements DataSource {
    * outlast the page and be readable by anything else that runs in it.
    * Reloading the page logs out.
    */
-  private token: string | null = null;
+  private token: string | null;
+  private readonly unreachable: ((host: string, error: unknown) => string) | null;
   private readonly loginState = signal<ServerLogin>({ kind: 'none' });
   /** Whether the server wants a login, and who is logged in. */
   readonly login = this.loginState.asReadonly();
@@ -698,6 +709,8 @@ export class ServerSource implements DataSource {
     this.fetcher = options.fetch ?? ((input, init) => fetch(input, init));
     this.parse = options.parse ?? parseFilesInWorkers;
     this.parallel = Math.max(1, options.parallel ?? PARALLEL);
+    this.token = options.token ?? null;
+    this.unreachable = options.unreachable ?? null;
   }
 
   /**
@@ -740,7 +753,11 @@ export class ServerSource implements DataSource {
       });
     } catch (error) {
       if (isAbortError(error)) throw error;
-      throw new ServerError(`The server at ${this.host} could not be reached.`, null, true);
+      throw new ServerError(
+        this.unreachable?.(this.host, error) ?? `The server at ${this.host} could not be reached.`,
+        null,
+        true,
+      );
     }
     if (response.status === 401) {
       throw new ServerError('The name or the password is not right.', 401);
@@ -1654,7 +1671,8 @@ export class ServerSource implements DataSource {
       if (isAbortError(error)) throw error;
       // A browser gives no reason; these are the two there are.
       throw new ServerError(
-        `The server at ${this.host} could not be reached. It may not be running, or it may not allow this page (its allowedOrigins setting).${this.unreachableBecause()}`,
+        this.unreachable?.(this.host, error) ??
+          `The server at ${this.host} could not be reached. It may not be running, or it may not allow this page (its allowedOrigins setting).${this.unreachableBecause()}`,
         null,
         true,
       );
