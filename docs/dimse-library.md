@@ -282,6 +282,24 @@ class, and what it found on the way:
   for which no context was agreed is skipped by the library without a
   word, so the listener sends only what the caller said it takes.
 
+### What #51 did with this
+
+The server asks other systems with the library's client: a C-FIND, and a
+C-MOVE whose destination is the server's own listener.
+
+- **C-MOVE and not C-GET**, because of what #52 found: the library's client
+  offers to take back images only. With a move the objects arrive at the
+  listener of #49, which keeps them as they came.
+- **A question is cancelled once enough matches are in** (`client.cancel`),
+  and an answer that ends without a last status after that is taken as
+  cancelled.
+- **The number that remains is read only from an answer that is not the
+  last**, since the library's client carries it over from the one before.
+- **The library refuses to write a date that is no date** and says so as a
+  network error, so keys are checked before a question is made.
+- Tried against the server's own listener, and against DCMTK's `dcmqrscp`
+  in CI.
+
 ## One more thing it would bring
 
 `dcmjs-dimse` transcodes with `dcmjs-codecs`, by the same author and also

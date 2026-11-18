@@ -27,6 +27,7 @@ import {
 import { sopInstanceUidOf } from '../store/testing.js';
 import { dicomEcho } from './echo.js';
 import { dataSetOf, outgoingFrom } from './part10.js';
+import { findAt, moveFrom } from './ask.js';
 import { sendObjects } from './send.js';
 import { IMPLICIT_VR_LE } from './sop-classes.js';
 import {
@@ -42,7 +43,10 @@ const run = promisify(execFile);
 const installed = (tool: string): boolean =>
   spawnSync(tool, ['--version'], { stdio: 'ignore' }).status === 0;
 const required = process.env['REQUIRE_DCMTK'] === '1';
-const TOOLS = ['echoscu', 'storescu', 'storescp', 'dcmdump', 'findscu', 'movescu', 'getscu'];
+const TOOLS = [
+  ...['echoscu', 'storescu', 'storescp', 'dcmdump'],
+  ...['findscu', 'movescu', 'getscu', 'dcmqrscp'],
+];
 const dcmtk = required || TOOLS.every(installed);
 
 let directory = '';
@@ -418,6 +422,121 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
     ]);
     expect(stranger.ok).toBe(false);
     expect(stranger.text).toMatch(/Association Rejected|Calling AE Title Not Recognized/i);
+  });
+
+  // ---- #51: the server asks DCMTK's archive what it holds, and has it sent here.
+
+  /**
+   * DCMTK's dcmqrscp, holding the synthetic course, which knows the server
+   * under test as a place to send to.
+   */
+  async function dcmqrscp(ourPort: number): Promise<number> {
+    const port = await freePort();
+    const storage = await mkdtemp(join(directory, 'dcmqrscp-'));
+    const config = join(storage, 'dcmqrscp.cfg');
+    await writeFile(
+      config,
+      [
+        `NetworkTCPPort  = ${port}`,
+        'MaxPDUSize      = 16384',
+        'MaxAssociations = 16',
+        'HostTable BEGIN',
+        `ours = (${LISTENER_AE}, 127.0.0.1, ${ourPort})`,
+        'HostTable END',
+        'VendorTable BEGIN',
+        'VendorTable END',
+        'AETable BEGIN',
+        `DCMQRSCP ${storage} RW (200, 1024mb) ANY`,
+        'AETable END',
+        '',
+      ].join('\n'),
+    );
+    const child = spawn('dcmqrscp', ['--config', config, String(port)], { stdio: 'ignore' });
+    children.push(child);
+    let there = false;
+    for (let tries = 0; tries < 50 && !there; tries++) {
+      there = (await echo(port, 'DCMQRSCP')).outcome === 'ok';
+      if (!there) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!there) throw new Error('dcmqrscp did not start listening');
+    const sent = await said('storescu', [
+      ...['--aetitle', LISTENER_AE, '--call', 'DCMQRSCP'],
+      ...['127.0.0.1', String(port), ...(await onDisk(syntheticRtCourse()))],
+    ]);
+    if (!sent.ok) throw new Error(`dcmqrscp did not take the course: ${sent.text}`);
+    return port;
+  }
+
+  // The "done when" of #51, against a system that is not ours.
+  it('finds a study on dcmqrscp and retrieves it into the PACS', async () => {
+    const here = await startTestListener({ callers: ['DCMQRSCP'] });
+    open.push(here);
+    const port = await dcmqrscp(here.port);
+    const archive = {
+      host: '127.0.0.1',
+      port,
+      calledAeTitle: 'DCMQRSCP',
+      callingAeTitle: LISTENER_AE,
+      timeoutMs: 20_000,
+    };
+
+    const studies = await findAt(archive, 'study', { patientName: 'SYNTH*' });
+    expect(studies).toMatchObject({ outcome: 'answered', status: 0, complete: true });
+    if (studies.outcome !== 'answered') return;
+    expect(studies.matches.map((match) => match.studyInstanceUid).sort()).toEqual(
+      [SYNTHETIC_RT_COURSE.planningStudy, SYNTHETIC_RT_COURSE.followUpStudy].sort(),
+    );
+    expect(studies.matches.every((match) => match.patientName?.startsWith('SYNTH'))).toBe(true);
+    const series = await findAt(archive, 'series', {
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+    });
+    expect(
+      series.outcome === 'answered' && series.matches.map((one) => one.modality).sort(),
+    ).toEqual(['CT', 'MR', 'RTDOSE', 'RTPLAN', 'RTSTRUCT'].sort());
+    expect(await findAt(archive, 'study', { patientName: 'NOBODY*' })).toMatchObject({
+      outcome: 'answered',
+      matches: [],
+    });
+
+    const told: number[] = [];
+    const moved = await moveFrom(
+      archive,
+      LISTENER_AE,
+      { studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy },
+      (counts) => told.push(counts.completed),
+    );
+    expect(moved).toMatchObject({
+      outcome: 'answered',
+      status: 0,
+      counts: { remaining: 0, completed: 8, failed: 0 },
+    });
+    // It told how far it was on the way, and never went back.
+    expect(told.length).toBeGreaterThan(0);
+    expect([...told].sort((a, b) => a - b)).toEqual(told);
+    const arrived = await here.core.pacs!.index.findInstances({
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+    });
+    expect(arrived).toHaveLength(8);
+    // What came is read as what it is: the structure set is the CT's.
+    expect(
+      (await here.core.pacs!.index.relatedToSeries(SYNTHETIC_RT_COURSE.ct))?.structureSets.map(
+        (one) => one.sopInstanceUid,
+      ),
+    ).toEqual([SYNTHETIC_RT_COURSE.structureSet]);
+
+    // To a place dcmqrscp does not know, nothing is sent; and one series alone can be.
+    expect(
+      await moveFrom(archive, 'ELSEWHERE', { studyInstanceUid: SYNTHETIC_RT_COURSE.followUpStudy }),
+    ).toMatchObject({ outcome: 'answered', status: 0xa801 });
+    expect(
+      await moveFrom(archive, LISTENER_AE, {
+        studyInstanceUid: SYNTHETIC_RT_COURSE.followUpStudy,
+        seriesInstanceUid: SYNTHETIC_RT_COURSE.followUpCt,
+      }),
+    ).toMatchObject({ outcome: 'answered', status: 0 });
+    expect(await here.core.pacs!.index.counts()).toMatchObject({
+      instances: 8 + SYNTHETIC_RT_COURSE.followUpCtSlices,
+    });
   });
 });
 

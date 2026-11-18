@@ -350,6 +350,104 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     instances: { type: 'array', items: ref('DicomSendInstance') },
   }),
   DicomSends: object({ items: { type: 'array', items: ref('DicomSend') } }),
+  DicomSource: object({
+    id: { type: 'string', description: 'What a question or a retrieve names the system by.' },
+    name: { type: 'string', maxLength: 64 },
+    aeTitle: { type: 'string', maxLength: 16 },
+    canRetrieve: {
+      type: 'boolean',
+      description:
+        'Whether a retrieve from it can arrive: the server listens for DICOM, and lets this system send objects here.',
+    },
+  }),
+  DicomSources: object({ items: { type: 'array', items: ref('DicomSource') } }),
+  DicomPatientMatch: object({
+    patientId: text,
+    patientName: nullableText,
+    birthDate: date,
+    sex: nullableText,
+    studies: nullableInteger,
+  }),
+  DicomStudyMatch: object({
+    patientId: nullableText,
+    patientName: nullableText,
+    patientBirthDate: date,
+    patientSex: nullableText,
+    studyInstanceUid: uid,
+    date,
+    time: nullableText,
+    description: nullableText,
+    accessionNumber: nullableText,
+    modalities: { type: 'array', items: text },
+    series: nullableInteger,
+    instances: nullableInteger,
+  }),
+  DicomSeriesMatch: object({
+    studyInstanceUid: uid,
+    seriesInstanceUid: uid,
+    modality: nullableText,
+    number: nullableInteger,
+    description: nullableText,
+    instances: nullableInteger,
+  }),
+  DicomQueryAnswer: object(
+    {
+      level: { type: 'string', enum: ['patient', 'study', 'series'] },
+      outcome: {
+        type: 'string',
+        enum: ['answered', 'rejected', 'unreachable', 'broken', 'not-taken'],
+        description:
+          '`answered`, or why not: the association was `rejected`, nothing answered (`unreachable`), the connection ended (`broken`), or the system answers no such question (`not-taken`).',
+      },
+      status: {
+        type: ['integer', 'null'],
+        description: 'The status the answer ended with: 0 for success. Null when there was none.',
+      },
+      complete: {
+        type: 'boolean',
+        description:
+          'False when the matches are not all there were: the other system cut its answer or did not end it well, or there were more than are taken.',
+      },
+      patients: { type: 'array', items: ref('DicomPatientMatch') },
+      studies: { type: 'array', items: ref('DicomStudyMatch') },
+      series: { type: 'array', items: ref('DicomSeriesMatch') },
+    },
+    'What another system answered. The matches are in the list of the level that was asked; the other two are empty.',
+  ),
+  DicomRetrieve: object({
+    id: text,
+    source: ref('DicomDestination'),
+    studyInstanceUid: uid,
+    seriesInstanceUid: nullableUid,
+    state: { type: 'string', enum: ['waiting', 'running', 'done'] },
+    askedAt: text,
+    finishedAt: nullableText,
+    counts: {
+      type: ['object', 'null'],
+      description: 'How far it is, as the other system tells it; null until it has.',
+      properties: { remaining: count, completed: count, failed: count, warning: count },
+      required: ['remaining', 'completed', 'failed', 'warning'],
+      additionalProperties: false,
+    },
+    result: { type: ['string', 'null'], enum: ['retrieved', 'partly', 'failed', null] },
+    failure: {
+      type: ['string', 'null'],
+      enum: [
+        ...['rejected', 'unreachable', 'broken', 'not-taken'],
+        ...['destination-unknown', 'refused', 'stopped', null],
+      ],
+    },
+    status: {
+      type: ['integer', 'null'],
+      description: 'The status the other system ended the move with.',
+    },
+    held: {
+      type: ['integer', 'null'],
+      description:
+        'The instances of the study, or of the series, that the server holds once the retrieve is done.',
+    },
+  }),
+  DicomRetrieves: object({ items: { type: 'array', items: ref('DicomRetrieve') } }),
   DicomEcho: object({
     outcome: { type: 'string', enum: ['ok', 'rejected', 'unreachable', 'failed'] },
     status: { type: ['integer', 'null'], description: 'The status of an echo that failed.' },

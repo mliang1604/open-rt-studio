@@ -38,7 +38,7 @@ export class IdentifierError extends Error {
 }
 
 /** One value of a key as text, without the padding it travels with. */
-function textOf(value: unknown): string | undefined {
+export function textOf(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (Array.isArray(value)) return value.length === 0 ? '' : textOf(value[0]);
   if (typeof value === 'object') {
@@ -51,7 +51,7 @@ function textOf(value: unknown): string | undefined {
 }
 
 /** Every value of a key: a UID key may hold a list. */
-function listOf(value: unknown): string[] {
+export function listOf(value: unknown): string[] {
   const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
   return values.flatMap((one) => (textOf(one) ?? '').split('\\')).filter((one) => one !== '');
 }

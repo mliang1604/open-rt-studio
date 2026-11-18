@@ -52,7 +52,8 @@ application. Never commit patient data or real DICOM files
   are changed while it runs through `src/dimse/dicom-service.ts`, never by
   starting a listener elsewhere; what it sends goes out as the stored
   bytes (`storedDataset`), never read and written again unless the other
-  system takes no other; only `src/dimse/library.ts`
+  system takes no other; what another system answers to a question is its own text, and is taken
+  as text and no more (`ask-keys.ts`); only `src/dimse/library.ts`
   imports the DIMSE library, and the listener logs AE titles and outcomes,
   never a UID. `src/audit` is who did what: the
   host writes an audit record for every request unless the route says

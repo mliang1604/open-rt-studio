@@ -65,7 +65,9 @@ export class DicomSettingsError extends Error {
       | 'no-address'
       | 'no-such-series'
       | 'nothing-to-send'
-      | 'not-done',
+      | 'not-done'
+      | 'not-listening'
+      | 'may-not-store',
     message: string,
   ) {
     super(message);

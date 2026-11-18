@@ -12,6 +12,7 @@
 // listens, or that is asked for an echo.
 
 import type { Pacs } from '../core/core.js';
+import { isUid } from '../uid.js';
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
 import {
   checkedLocal,
@@ -24,8 +25,15 @@ import {
   type LocalDicom,
   type RemoteSystem,
 } from './dicom-settings.js';
+import { ASK_LEVELS, AskError, checkedKeys, type AskKeys, type AskLevel } from './ask-keys.js';
+import type { FindAnswer } from './ask.js';
 import type { EchoResult } from './echo.js';
 import type { DicomListener } from './listener.js';
+import {
+  createRetrieveManager,
+  type RetrieveManager,
+  type RetrieveRecord,
+} from './retrieve-manager.js';
 import { createSendManager, type SendManager, type SendRecord } from './send-manager.js';
 import type { sendObjects } from './send.js';
 
@@ -50,6 +58,11 @@ export interface DicomServiceOptions {
   readonly echoTimeoutMs?: number;
   /** How long a send waits for the connection, the association and each answer. */
   readonly sendTimeoutMs?: number;
+  /**
+   * How long a retrieve may hear nothing from the system that is sending
+   * before it is given up on.
+   */
+  readonly retrieveTimeoutMs?: number;
   /** How many instances a send puts on one association, for a test. */
   readonly sendInstancesAtOnce?: number;
   /** In place of the sender, for a test. */
@@ -99,8 +112,64 @@ export interface DicomService {
    * `not-found` or `no-address`.
    */
   retrySend(id: string): Promise<SendRecord | null>;
-  /** Close the listener, once the send under way has ended. True when nothing had to be cut off. */
+  /** The systems that can be asked what they hold: those with an address. */
+  sources(): Source[];
+  /**
+   * Ask a system for the patients, studies or series that match (C-FIND).
+   * What went wrong on the way is the answer's `outcome`; rejects with
+   * `not-found`, `no-address` or `invalid`.
+   */
+  query(what: QueryOf): Promise<QueryAnswer>;
+  /**
+   * Have a system send a study, or a series of one, to this server
+   * (C-MOVE). Answered at once with the retrieve's record, which
+   * {@link DicomService.retrieveOf} then follows. Rejects with `not-found`,
+   * `no-address`, `invalid`, `not-listening` (the objects would have nowhere
+   * to arrive) or `may-not-store` (they would be refused).
+   */
+  retrieve(what: RetrieveOf): Promise<RetrieveRecord>;
+  /** A retrieve's record as it is now; null for one there is none of. */
+  retrieveOf(id: string): RetrieveRecord | null;
+  /** The retrieves kept, the latest first. */
+  retrieves(): RetrieveRecord[];
+  /**
+   * Close the listener, once the send and the retrieve under way have
+   * ended. True when nothing had to be cut off.
+   */
   close(): Promise<boolean>;
+}
+
+/** A system that can be asked what it holds. */
+export interface Source {
+  readonly id: string;
+  readonly name: string;
+  readonly aeTitle: string;
+  /**
+   * Whether a retrieve from it can arrive: the server listens, and lets
+   * this system store.
+   */
+  readonly canRetrieve: boolean;
+}
+
+/** A question to another system. */
+export interface QueryOf {
+  /** The id of the system that is asked. */
+  readonly source: string;
+  /** `patient`, `study` or `series`. */
+  readonly level: unknown;
+  /** The keys of the level, as `checkedKeys` takes them. */
+  readonly keys: unknown;
+}
+
+/** What another system answered, or why it did not. */
+export type QueryAnswer = { readonly level: AskLevel } & FindAnswer<AskLevel>;
+
+/** What to retrieve, and from where. */
+export interface RetrieveOf {
+  readonly source: string;
+  readonly studyInstanceUid: string;
+  /** One series; without, the whole study. */
+  readonly seriesInstanceUid?: string;
 }
 
 /** A system that can be sent to. */
@@ -152,6 +221,14 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       ...(options.logger ? { logger: options.logger } : {}),
     });
   };
+
+  // Made by the first retrieve.
+  let retrieving: RetrieveManager | null = null;
+  const retrieveManager = (): RetrieveManager =>
+    (retrieving ??= createRetrieveManager({
+      index: options.pacs.index,
+      ...(options.logger ? { logger: options.logger } : {}),
+    }));
 
   // Made by the first send.
   let manager: SendManager | null = null;
@@ -385,14 +462,95 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       });
     },
 
+    sources: () =>
+      settings.remotes
+        .filter((r) => r.host !== null)
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          aeTitle: r.aeTitle,
+          canRetrieve: listener !== null && r.mayStore,
+        })),
+
+    async query(what) {
+      const { target } = destinationOf(what.source);
+      const level = ASK_LEVELS.find((one) => one === what.level);
+      if (!level) {
+        throw new DicomSettingsError('invalid', `level is one of ${ASK_LEVELS.join(', ')}.`);
+      }
+      let keys: AskKeys;
+      try {
+        keys = checkedKeys(level, what.keys ?? {});
+      } catch (error) {
+        if (error instanceof AskError) throw new DicomSettingsError('invalid', error.message);
+        throw error;
+      }
+      const started = Date.now();
+      const { findAt } = await import('./ask.js');
+      const answer = await findAt(target, level, keys);
+      logger.info('dicom-query', {
+        level,
+        outcome: answer.outcome,
+        matches: answer.outcome === 'answered' ? answer.matches.length : 0,
+        ms: Date.now() - started,
+      });
+      return { level, ...answer };
+    },
+
+    async retrieve(what) {
+      const from = destinationOf(what.source);
+      if (
+        !isUid(what.studyInstanceUid) ||
+        (what.seriesInstanceUid !== undefined && !isUid(what.seriesInstanceUid))
+      ) {
+        throw new DicomSettingsError('invalid', 'A study and a series are named by their UIDs.');
+      }
+      // The objects come to the listener, from the system that is asked.
+      if (listener === null) {
+        throw new DicomSettingsError(
+          'not-listening',
+          'The server does not listen for DICOM: what is retrieved would have nowhere to arrive.',
+        );
+      }
+      if (!settings.remotes.find((r) => r.id === what.source)?.mayStore) {
+        throw new DicomSettingsError(
+          'may-not-store',
+          'That system may not send objects here: what it sent would be refused.',
+        );
+      }
+      const { host, port, calledAeTitle, callingAeTitle } = from.target;
+      return retrieveManager().start({
+        source: from.destination,
+        target: {
+          ...{ host, port, calledAeTitle, callingAeTitle },
+          // How long it may hear nothing, which is longer than an answer may take.
+          ...(options.retrieveTimeoutMs === undefined
+            ? {}
+            : { timeoutMs: options.retrieveTimeoutMs }),
+        },
+        destinationAeTitle: settings.local.aeTitle,
+        what: {
+          studyInstanceUid: what.studyInstanceUid,
+          ...(what.seriesInstanceUid === undefined
+            ? {}
+            : { seriesInstanceUid: what.seriesInstanceUid }),
+        },
+      });
+    },
+
+    retrieveOf: (id) => retrieving?.get(id) ?? null,
+    retrieves: () => retrieving?.list() ?? [],
+
     async close() {
-      // The send under way ends the association it is on, as far as the time allows.
+      // The send and the retrieve under way end the associations they are
+      // on, as far as the time allows; a retrieve's objects arrive at the
+      // listener, which is closed after.
       let late: NodeJS.Timeout | undefined;
       const ended =
-        manager === null
+        manager === null && retrieving === null
           ? true
           : await Promise.race([
-              manager.close().then(() => true),
+              Promise.all([manager?.close(), retrieving?.close()]).then(() => true),
               new Promise<boolean>((resolve) => {
                 late = setTimeout(() => resolve(false), closeTimeoutMs);
                 late.unref();

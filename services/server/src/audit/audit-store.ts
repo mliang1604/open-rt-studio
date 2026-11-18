@@ -39,6 +39,10 @@ export const AUDIT_ACTIONS = [
   'dicom-destinations-read',
   'dicom-send',
   'dicom-send-read',
+  'dicom-sources-read',
+  'dicom-query',
+  'dicom-retrieve',
+  'dicom-retrieve-read',
   'request',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
