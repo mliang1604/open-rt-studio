@@ -651,6 +651,7 @@ describe('the API description', () => {
           'GET /jobs/{jobId}',
           'GET /jobs/{jobId}/log',
           'POST /jobs/{jobId}/cancel',
+          'GET /registration-presets',
           'GET /patients/{patientKey}/timepoints',
           'PUT /patients/{patientKey}/timepoints',
           'GET /dicom',
@@ -673,7 +674,7 @@ describe('the API description', () => {
       ].sort(),
     );
     // Nothing is described that is not served.
-    expect(described).toHaveLength(38);
+    expect(described).toHaveLength(39);
   });
 
   it('names every part of a path as a parameter, and only schemas that exist', async () => {

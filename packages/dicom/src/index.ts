@@ -461,6 +461,8 @@ export {
   MetaImageError,
   metaImageHeader,
   metaImageHeaderText,
+  readMetaImageField,
+  rightHandedGrid,
   writeMetaImage,
   type MetaImageHeader,
   type MetaImageProblem,

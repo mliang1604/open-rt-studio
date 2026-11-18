@@ -492,6 +492,12 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
   InstancePage: page('Instance'),
   JobKind: object({ name: text, description: text }),
   JobKinds: object({ items: { type: 'array', items: ref('JobKind') } }),
+  RegistrationPreset: object({
+    name: { type: 'string', description: 'What a job names it by.' },
+    title: text,
+    description: text,
+  }),
+  RegistrationPresets: object({ items: { type: 'array', items: ref('RegistrationPreset') } }),
   Job: object({
     id: text,
     kind: text,

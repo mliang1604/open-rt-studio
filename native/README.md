@@ -11,16 +11,18 @@ This folder is not an npm workspace. See
 
 ## What is here
 
-| Path                    | What it is                                                              |
-| ----------------------- | ----------------------------------------------------------------------- |
-| `cmake/versions.cmake`  | The pinned versions: ITK 5.4.7 and elastix 5.3.1, each with a checksum  |
-| `deps/`                 | The build of ITK and elastix themselves (long, and seldom needed again) |
-| `CMakeLists.txt`        | The build of the tools, against what `deps/` built                      |
-| `common/`               | What every tool shares: reading a volume, and how a tool reports        |
-| `tools/volume-info/`    | `ors-volume-info`: reads a volume and prints its geometry               |
-| `tools/register-rigid/` | `ors-register-rigid`: finds the rigid transform between two volumes     |
-| `tests/`                | The tests, on volumes made from a formula                               |
-| `THIRD-PARTY.md`        | What the tools are built on, with licences                              |
+| Path                         | What it is                                                              |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `cmake/versions.cmake`       | The pinned versions: ITK 5.4.7 and elastix 5.3.1, each with a checksum  |
+| `deps/`                      | The build of ITK and elastix themselves (long, and seldom needed again) |
+| `CMakeLists.txt`             | The build of the tools, against what `deps/` built                      |
+| `common/`                    | What every tool shares: reading a volume, and how a tool reports        |
+| `tools/volume-info/`         | `ors-volume-info`: reads a volume and prints its geometry               |
+| `tools/register-rigid/`      | `ors-register-rigid`: finds the rigid transform between two volumes     |
+| `tools/register-deformable/` | `ors-register-deformable`: finds the deformation between two volumes    |
+| `presets/deformable/`        | The presets of the deformable registration: elastix parameter files     |
+| `tests/`                     | The tests, on volumes made from a formula                               |
+| `THIRD-PARTY.md`             | What the tools are built on, with licences                              |
 
 ## Building
 
@@ -60,8 +62,9 @@ ctest --test-dir native/build/tools -C Release --output-on-failure
 
 ## What comes out
 
-`native/build/dist/bin` holds the tools and `native/build/dist/licenses` the
-licences of what is inside them. Each tool is one file with nothing to
+`native/build/dist/bin` holds the tools, `native/build/dist/presets` the
+presets a tool is run with, and `native/build/dist/licenses` the licences of
+what is inside the tools. Each tool is one file with nothing to
 install beside it:
 
 - **Linux**: the C++ runtime is linked in; the C library is the system's.
@@ -169,8 +172,103 @@ It is a tool and no judge of its own answer: a registration that ends is
 not thereby a good one. Nothing here measures how well two real images
 were registered; someone has to look.
 
+## `ors-register-deformable`
+
+```sh
+ors-register-deformable --fixed planning.mha --moving follow-up.mha \
+  --preset presets/deformable/ct-ct.txt --initial rigid.json \
+  --output result.json --field field.mha
+```
+
+It registers the two volumes with a B-spline in elastix, from coarse to
+fine. How it compares the two, how far apart the B-spline's control points
+are and how stiff it is come from the preset.
+
+**What comes out** is a field of vectors and a matrix, which together map
+the coordinates of a point: given where something is in the fixed volume's
+coordinates, they say where the same anatomy is in the moving volume's.
+
+    moving = fixedToMovingAfterField · (fixed + field(fixed))
+
+- **The field** is laid out in the fixed volume's coordinates, over the
+  fixed volume from its first voxel to its last, with vectors at most 4 mm
+  apart (`--field-spacing`). The vectors are in millimetres along the
+  patient's axes (LPS). It is written to the `--field` file as a MetaImage
+  of three 32-bit values to a point. Between its vectors it is taken to
+  run straight.
+- **The matrix** only turns and moves, and is the one the registration
+  started from: `--initial` (a JSON file with a `fixedToMoving` matrix, as
+  `ors-register-rigid` writes one), or without it the move that puts the
+  centre of the fixed volume on the centre of the moving one. Everything
+  found beyond that is in the field. It is written to the `--output` file
+  as JSON.
+- That is the way a DICOM Deformable Spatial Registration object holds a
+  registration, so the server stores it as it is.
+
+It reports as `ors-register-rigid` does, and its result says a little about
+the field:
+
+```
+@result {"fixedToMovingAfterField":[...],"size":[49,49,43],"spacing":[...],"largestMm":...,"points":103243,"foldedPoints":0,"seed":121212,"resolutions":4,"iterations":300}
+```
+
+`largestMm` is the longest vector. `foldedPoints` is how many points of the
+field are where it folds space over itself (where what it does to a small
+box turns the box inside out), which no anatomy does: more than a few says
+the registration went wrong there. The tool counts them and judges nothing.
+
+| Option                                      | What it does                                                                                    |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `--preset <file>`                           | An elastix parameter file: see below. Needed                                                    |
+| `--initial <file>`                          | A JSON file with a `fixedToMoving` matrix to start from; it must only turn and move             |
+| `--set Key=value`                           | Sets a parameter over the preset, for whoever knows elastix. Several values with spaces between |
+| `--field-spacing <mm>`                      | How far apart the vectors of the field are, at most; 4 without it                               |
+| `--roi`, `--seed`, `--threads`, `--verbose` | As for `ors-register-rigid`                                                                     |
+
+**Presets** are in `presets/deformable`, one file each, with a title and a
+description in its first lines:
+
+| Preset    | For                     | Compares by                | Control points | Stiffness |
+| --------- | ----------------------- | -------------------------- | -------------- | --------- |
+| `ct-ct`   | Two CTs of one patient  | Correlation of grey values | 16 mm          | 1         |
+| `cbct-ct` | A cone-beam CT and a CT | Mutual information         | 20 mm          | 5         |
+| `mr-ct`   | An MR and a CT          | Mutual information         | 24 mm          | 10        |
+
+Stiffness is the weight of elastix's bending energy penalty beside the
+measure. **None of the three was tuned on real images**: the numbers are
+elastix's usual ones for a B-spline registration, the differences between
+them are what the three cases are generally held to need, and all were only
+ever run on a synthetic phantom. Treat them as a place to start.
+
+What the tool decides itself cannot be set, by a preset or by `--set`: that
+the transform is a B-spline composed with the start, the seed, and
+everything that names a file or has elastix write one. Such a line in a
+preset is passed over; `--set` of one is refused (`fixed-parameter`).
+
+A failure is as for `ors-register-rigid`, with `bad-preset` (status 3) for
+a preset that is not there or is no parameter file, and `bad-parameter` or
+`fixed-parameter` (status 2) for a `--set` that cannot be used.
+
+Like the rigid tool it is no judge of its own answer.
+
 ## Tests
 
+- `register-deformable`: a phantom full of blobs is deformed in the fixed
+  volume by slow waves of up to 5 mm, and in the moving volume turned by 4
+  and 2 degrees and moved by (60, -35, 20) mm into a frame of its own
+  (`tests/synthetic_deformation.h`). At some 3300 points all through the
+  inside of the phantom, what the tool found has to put a point within
+  1 mm of where the formulas put it on average, and within 2 mm for 95 of
+  a hundred; the voxels are 3 to 3.5 mm, and the deformation moves the
+  points 3.6 mm on average. Each preset has to manage that from the exact
+  turn and move. On the runners: 0.29 mm on average with `ct-ct` (0.60 mm
+  at the 95th percentile), 0.70 mm with `cbct-ct`, 0.80 mm with `mr-ct`.
+  From a start that is 2 mm and a degree off, and from no start at all,
+  `ct-ct` has to come within 1.5 mm on average (0.30 and 0.32 mm). The
+  same seed has to give the same field twice, byte for byte; a parameter
+  set over the preset, a region and a coarser field have to be used; and
+  what it cannot use has to be refused with a code that names no file.
+- `register-deformable-version`: the versions are the pinned ones.
 - `register-rigid`: a phantom (an ellipsoid with four blobs, none placed
   symmetrically) is written on two different grids, in the second one
   turned by 6 and 3 degrees and moved by (7, -5, 4) mm
@@ -193,7 +291,8 @@ were registered; someone has to look.
   the libraries work on this system; it is no test of registration quality.
 
 No image file is in the repository: test data is made from formulas
-(`tests/synthetic_volume.h`, `tests/synthetic_pair.h`).
+(`tests/synthetic_volume.h`, `tests/synthetic_pair.h`,
+`tests/synthetic_deformation.h`).
 
 ## Moving to another version of ITK or elastix
 

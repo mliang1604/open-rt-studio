@@ -661,6 +661,8 @@ describe('the description', () => {
       'get /api/v1/counts',
       'get /api/v1/job-kinds',
       'get /api/v1/openapi.json',
+      // The presets of a registration: files of the server, the same for everyone.
+      'get /api/v1/registration-presets',
       'get /api/v1/session',
       'get /health',
     ]);

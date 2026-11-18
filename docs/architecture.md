@@ -2256,6 +2256,37 @@ Decided in #80, automatic rigid registration:
   tilted gantry) is refused, not resampled; nothing judges how good a
   registration is.
 
+Decided in #81, deformable registration:
+
+- **The tool, `ors-register-deformable`,** registers two volume files with
+  a B-spline in elastix and gives a field of vectors over the fixed volume
+  and a matrix: `moving = matrix · (fixed + field(fixed))`. The matrix is
+  the rigid one it started from (given, or centre on centre), and
+  everything found beyond it is in the field. The field is sampled from
+  the whole of what elastix found, so no convention of B-spline grids
+  leaves the tool.
+- **That is a Deformable Spatial Registration object as the standard has
+  it**: in the fixed frame, mapping into the moving one, with the matrix as
+  its Post Deformation matrix. The job stores it as it is. The rigid job's
+  object maps the other way; each is written the way its kind of object is.
+- **Presets are files** (`native/presets/deformable`): elastix parameter
+  files with a title and a description in their first lines, installed
+  beside the tools. Three come with them (CT to CT, cone-beam CT to CT, MR
+  to CT). None was tuned on real images.
+- **A preset is named, never given.** The server reads the presets beside
+  its tools when it starts and lists them at `registration-presets`; a job
+  names one. Parameters can be set over a preset, each a word or a number.
+- **Some parameters are the tool's own**: the kind of transform and how it
+  is combined with the start, the seed, and everything that names a file
+  or has elastix write one. Neither a preset nor a request sets them; the
+  tool and the server keep the same list.
+- **The tool counts where its field folds space over** and how long its
+  longest vector is, and the job passes that on. It judges nothing, and
+  stores a folded field as it stores any other.
+- **Rigid first, then deformable**: the deformable job takes the rigid
+  job's `fixedToMoving` as where to start. The two are not chained by the
+  server; whoever asks does that (#82).
+
 Status: **decided, and Michael's to overturn**.
 
 ## Continuous integration
