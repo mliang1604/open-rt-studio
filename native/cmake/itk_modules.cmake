@@ -38,6 +38,9 @@ set(ORS_ITK_OWN
   ITKDistanceMap
   ITKFFT
   ITKFiniteDifference
+  # Built with ITK_USE_GPU off: no OpenCL is used or linked.
+  ITKGPUCommon
+  ITKGPUFiniteDifference
   ITKIOBMP
   ITKIOGDCM
   ITKIOGIPL
