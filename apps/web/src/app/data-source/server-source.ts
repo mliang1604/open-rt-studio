@@ -269,6 +269,7 @@ export const AUDIT_ACTIONS = [
     'audit-read',
     'audit-export',
     'audit-clear',
+    'index-fill',
     'dicom-settings-read',
     'dicom-settings-change',
     'dicom-remote-add',

@@ -357,6 +357,63 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
     }
   }, 30_000);
 
+  it('has a reindex command, which makes a lost index again from the store, and not beside the server', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'open-rt-studio-data-'));
+    try {
+      const environment = { ...OPEN, OPEN_RT_STUDIO_DATA_DIR: directory };
+      const slices = syntheticCtSeries(3, 16);
+      const server = run(environment);
+      const port = await listeningPort(server);
+      for (const slice of slices) {
+        const uploaded = await fetch(`http://127.0.0.1:${port}/api/v1/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/dicom' },
+          body: slice.bytes,
+        });
+        expect(uploaded.status).toBe(201);
+      }
+
+      // Beside the server, which answers at the port the command is told of: refused.
+      const beside = run({ ...environment, OPEN_RT_STUDIO_PORT: String(port) }, ['reindex']);
+      expect(await beside.exited).toBe(1);
+      expect(beside.stderr()).toContain('A server with this configuration is running.');
+      expect(beside.stdout()).toBe('');
+
+      server.child.kill('SIGTERM');
+      expect(await server.exited).toBe(0);
+      // The index is lost.
+      for (const name of await readdir(directory)) {
+        if (name.startsWith('index.sqlite')) await rm(join(directory, name));
+      }
+      const made = run(environment, ['reindex']);
+      expect(await made.exited).toBe(0);
+      expect(made.stderr()).toBe('');
+      expect(made.stdout()).toContain(
+        'The store holds 3 instances. Filed in the index: 3 that it did not have, 0 that it had.',
+      );
+      // And says how it is used when it is not understood.
+      const wrong = run(environment, ['reindex', '--all']);
+      expect(await wrong.exited).toBe(2);
+      expect(wrong.stderr()).toContain('Usage: reindex');
+
+      const again = run(environment);
+      const counts = await fetch(`http://127.0.0.1:${await listeningPort(again)}/api/v1/counts`);
+      expect(await counts.json()).toEqual({ patients: 1, studies: 1, series: 1, instances: 3 });
+      again.child.kill('SIGTERM');
+      expect(await again.exited).toBe(0);
+      // That it was done is in the audit log.
+      const audit = createAuditLog({
+        store: openSqliteAuditStore(join(directory, 'audit.sqlite')),
+      });
+      expect(audit.find({ action: 'index-fill' }).items).toMatchObject([
+        { origin: 'command', outcome: 'ok', object: 'sqlite' },
+      ]);
+      audit.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+    }
+  }, 40_000);
+
   it('has a health command, which says by its exit code whether the server answers', async () => {
     const server = run(OPEN);
     const port = await listeningPort(server);

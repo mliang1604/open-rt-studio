@@ -15,7 +15,7 @@ import {
 } from '@open-rt-studio/testdata';
 
 import { createLogger } from '../logger.js';
-import { InstanceNotFoundError } from './dicom-store.js';
+import { InstanceNotFoundError, StoreReadOnlyError } from './dicom-store.js';
 import {
   instancePaths,
   openFileStore,
@@ -286,4 +286,63 @@ describe('opening a directory', () => {
       );
     },
   );
+});
+
+describe('a store that is opened to be read', () => {
+  it('reads and lists what is there, and changes nothing: not even what a write left behind', async () => {
+    const store = await openFileStore(root);
+    await store.put(FIRST.uid, FIRST.bytes);
+    // A server that has the store open is in the middle of a write.
+    await writeFile(join(root, 'incoming', 'being-written.part'), SECOND.bytes.subarray(0, 100));
+    const before = await filesUnder(root);
+
+    const lines: string[] = [];
+    const reading = await openFileStore(root, {
+      readOnly: true,
+      logger: createLogger({ level: 'info', write: (line) => lines.push(line) }),
+    });
+    expect(JSON.parse(lines[0])).toMatchObject({ event: 'store-opened', readOnly: true });
+    expect(await read(await reading.get(FIRST.uid))).toEqual(FIRST.bytes);
+    expect(await reading.verify(FIRST.uid)).toBe(true);
+    const listed: string[] = [];
+    for await (const one of reading.list()) listed.push(one.sopInstanceUid);
+    expect(listed).toEqual([FIRST.uid]);
+
+    await expect(reading.put(SECOND.uid, SECOND.bytes)).rejects.toBeInstanceOf(StoreReadOnlyError);
+    await expect(reading.delete(FIRST.uid)).rejects.toBeInstanceOf(StoreReadOnlyError);
+    expect(await filesUnder(root)).toEqual(before);
+  });
+
+  it('does not make a store where there is none', async () => {
+    await expect(openFileStore(root, { readOnly: true })).rejects.toThrow(
+      new StoreLayoutError('There is no store in the directory.'),
+    );
+    await mkdir(root, { recursive: true });
+    await expect(openFileStore(root, { readOnly: true })).rejects.toBeInstanceOf(StoreLayoutError);
+    expect(await filesUnder(root)).toEqual([]);
+  });
+});
+
+describe('listing', () => {
+  it('leaves out a record that cannot be read or is not where its UID puts it, and says how many', async () => {
+    const lines: string[] = [];
+    const store = await openFileStore(root, {
+      logger: createLogger({ level: 'info', write: (line) => lines.push(line) }),
+    });
+    await store.put(FIRST.uid, FIRST.bytes);
+    await store.put(SECOND.uid, SECOND.bytes);
+    // A record that is cut short, and a copy of a good one under another name.
+    const second = join(root, instancePaths(SECOND.uid).record);
+    const good = await readFile(second, 'utf8');
+    await writeFile(second, good.slice(0, 20));
+    await writeFile(join(root, instancePaths(FIRST.uid).directory, `${'0'.repeat(64)}.json`), good);
+
+    const listed: string[] = [];
+    for await (const one of store.list()) listed.push(one.sopInstanceUid);
+    expect(listed).toEqual([FIRST.uid]);
+    const warned = lines.map((line) => JSON.parse(line) as Record<string, unknown>).at(-1);
+    expect(warned).toMatchObject({ event: 'store-records-unreadable', count: 2 });
+    // The line says how many, and not which.
+    expect(Object.keys(warned!).sort()).toEqual(['count', 'event', 'level', 'time']);
+  });
 });

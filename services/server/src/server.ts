@@ -36,7 +36,7 @@ import {
 import type { JobKind } from './jobs/job.js';
 import { errorFields, type LogFields, type Logger } from './logger.js';
 import { IndexVersionError } from './pacs-index/migrations.js';
-import { IndexDatabaseError } from './pacs-index/pacs-index.js';
+import { IndexDatabaseError, type PacsIndex } from './pacs-index/pacs-index.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
 import { openFileStore } from './store/file-store.js';
 import { createMemoryStore } from './store/memory-store.js';
@@ -67,18 +67,36 @@ async function openPacs(config: ServerConfig, logger: Logger) {
     return { store: createMemoryStore(), index: await openSqliteIndex(':memory:', { logger }) };
   }
   await mkdir(config.dataDir, { recursive: true });
-  const store = await openFileStore(join(config.dataDir, 'store'), { logger });
-  const sqliteFile = join(config.dataDir, 'index.sqlite');
-  if (config.databaseUrl === null) {
-    return { store, index: await openSqliteIndex(sqliteFile, { logger }) };
-  }
+  const store = await openFileStore(join(config.dataDir, STORE_DIRECTORY), { logger });
+  return { store, index: await openIndex(config, config.dataDir, logger) };
+}
+
+/** Where the data directory keeps its instances, and its index when that is in SQLite. */
+export const STORE_DIRECTORY = 'store';
+export const SQLITE_INDEX_FILE = 'index.sqlite';
+
+/**
+ * The index of a server that keeps its data: in the PostgreSQL database the
+ * configuration names, or else in a SQLite file of the data directory.
+ * Throws {@link ConfigError} for a database that cannot be reached or
+ * cannot hold the index.
+ */
+export async function openIndex(
+  config: ServerConfig,
+  dataDir: string,
+  logger: Logger,
+  /** Whoever opens it knows of an index in SQLite beside it, and needs no warning of it. */
+  knowsOfSqlite = false,
+): Promise<PacsIndex> {
+  const sqliteFile = join(dataDir, SQLITE_INDEX_FILE);
+  if (config.databaseUrl === null) return openSqliteIndex(sqliteFile, { logger });
   // An index that was kept here before is not read, and not moved either.
-  if (existsSync(sqliteFile)) logger.warn('index-in-sqlite-not-used');
+  if (!knowsOfSqlite && existsSync(sqliteFile)) logger.warn('index-in-sqlite-not-used');
   // Loaded only by a server that is told to use it: one without does not
   // need node-postgres to be there.
   const { openPostgresIndex } = await import('./pacs-index/postgres-index.js');
   try {
-    return { store, index: await openPostgresIndex(config.databaseUrl, { logger }) };
+    return await openPostgresIndex(config.databaseUrl, { logger });
   } catch (error) {
     if (error instanceof IndexVersionError) {
       // The message is the index's own, and says nothing of the address.

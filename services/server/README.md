@@ -110,30 +110,31 @@ ended** (`outcome`: `ok`, `refused`, `not-found`, `rejected`, `failed`) and
 what more there is to say (`detail`: what was searched for, what was
 changed).
 
-| Action                                                  | Written when                                                      |
-| ------------------------------------------------------- | ----------------------------------------------------------------- |
-| `login`, `logout`, `password-change`                    | Someone logs in (or fails to), logs out, changes their own        |
-| `patients-list`, `studies-search`                       | A list is asked for; `detail` holds what was searched for         |
-| `study-read`, `series-read`, `instance-read`            | A study, a series or an instance is looked at                     |
-| `instance-download`                                     | A file is fetched                                                 |
-| `instance-upload`                                       | A file is sent; `detail` says what became of it                   |
-| `timepoints-read`, `timepoints-write`                   | A patient's timepoints are read or replaced; `detail` counts them |
-| `accounts-list`, `account-create`, `-change`, `-remove` | An administrator, or the `account` command, does so               |
-| `job-start`, `job-cancel`, `job-read`                   | A job is submitted, cancelled, followed                           |
-| `audit-read`, `audit-export`                            | The audit log itself is read                                      |
-| `audit-clear`                                           | The server clears records that have outlived the retention period |
-| `dicom-settings-read`, `dicom-settings-change`          | The DICOM settings are read, or the listener or AE title changed  |
-| `dicom-remote-add`, `-change`, `-remove`, `dicom-echo`  | A system is added, changed, forgotten or asked for a C-ECHO       |
-| `dicom-destinations-read`                               | The systems that can be sent to are listed                        |
-| `dicom-send`, `dicom-send-read`                         | A series or an object is sent to a system; a send is followed     |
-| `dicom-sources-read`, `dicom-query`                     | The systems that can be asked are listed; one is asked (C-FIND)   |
-| `dicom-retrieve`, `dicom-retrieve-read`                 | A study or a series is retrieved from a system; that is followed  |
-| `dicom-association`                                     | Another system was refused an association (by DICOM)              |
-| `dicom-store`                                           | Another system stored an object here (by DICOM)                   |
-| `dicom-find`                                            | Another system asked what the server holds (by DICOM)             |
-| `dicom-move`, `dicom-get`                               | Another system asked for objects to be sent on, or back to it     |
-| `dicom-sent`                                            | How a send, a move or a get ended: how much left, and where to    |
-| `dicom-retrieved`                                       | How a retrieve the server asked for ended                         |
+| Action                                                  | Written when                                                                             |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `login`, `logout`, `password-change`                    | Someone logs in (or fails to), logs out, changes their own                               |
+| `patients-list`, `studies-search`                       | A list is asked for; `detail` holds what was searched for                                |
+| `study-read`, `series-read`, `instance-read`            | A study, a series or an instance is looked at                                            |
+| `instance-download`                                     | A file is fetched                                                                        |
+| `instance-upload`                                       | A file is sent; `detail` says what became of it                                          |
+| `timepoints-read`, `timepoints-write`                   | A patient's timepoints are read or replaced; `detail` counts them                        |
+| `accounts-list`, `account-create`, `-change`, `-remove` | An administrator, or the `account` command, does so                                      |
+| `job-start`, `job-cancel`, `job-read`                   | A job is submitted, cancelled, followed                                                  |
+| `audit-read`, `audit-export`                            | The audit log itself is read                                                             |
+| `audit-clear`                                           | The server clears records that have outlived the retention period                        |
+| `index-fill`                                            | The `reindex` command made the index again from the store; `detail` counts what it filed |
+| `dicom-settings-read`, `dicom-settings-change`          | The DICOM settings are read, or the listener or AE title changed                         |
+| `dicom-remote-add`, `-change`, `-remove`, `dicom-echo`  | A system is added, changed, forgotten or asked for a C-ECHO                              |
+| `dicom-destinations-read`                               | The systems that can be sent to are listed                                               |
+| `dicom-send`, `dicom-send-read`                         | A series or an object is sent to a system; a send is followed                            |
+| `dicom-sources-read`, `dicom-query`                     | The systems that can be asked are listed; one is asked (C-FIND)                          |
+| `dicom-retrieve`, `dicom-retrieve-read`                 | A study or a series is retrieved from a system; that is followed                         |
+| `dicom-association`                                     | Another system was refused an association (by DICOM)                                     |
+| `dicom-store`                                           | Another system stored an object here (by DICOM)                                          |
+| `dicom-find`                                            | Another system asked what the server holds (by DICOM)                                    |
+| `dicom-move`, `dicom-get`                               | Another system asked for objects to be sent on, or back to it                            |
+| `dicom-sent`                                            | How a send, a move or a get ended: how much left, and where to                           |
+| `dicom-retrieved`                                       | How a retrieve the server asked for ended                                                |
 
 What to know about it:
 
@@ -973,7 +974,13 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   the size and SHA-256 taken when it was stored.
 - A directory that is not empty and is not a store is refused, and nothing in
   it is touched.
-- One process opens a store at a time.
+- One process opens a store at a time, to change it. A command that only
+  reads it (`reindex`) opens it to be read: it lists the records and reads
+  the bytes, removes nothing from `incoming/`, and can store and delete
+  nothing.
+- **It lists what it holds** (`list()`), by its records. A record that
+  cannot be read, or is not where its UID puts it, is left out and counted
+  in the log (`store-records-unreadable`).
 
 ## Ingest
 
@@ -1153,6 +1160,38 @@ without asking for each.
   file, or the database, as you would the data. Its errors and log lines
   carry none of them.
 
+### Made again from the store
+
+```sh
+OPEN_RT_STUDIO_DATA_DIR=./data node dist/main.js reindex
+```
+
+The `reindex` command reads every instance the store holds and files it in
+the index the configuration names, as ingest would: the index that comes of
+it is the one that ingesting the same files gives. It is for an index that
+was lost or damaged, and for
+[moving a server to PostgreSQL](#moving-a-server-to-postgresql).
+
+- **It adds and brings up to date, and takes nothing out.** It can be run
+  again, and on an index that has a part already.
+- **What it says is counts**: how many instances the store holds, how many
+  were filed, and how many were left out because their bytes are not the
+  DICOM object the store says they are, or because the index has them in
+  another series, study or patient. Nothing of whose they are is printed or
+  logged. It ends with 0 when every instance of the store is in the index,
+  and with 1 when some were left out or it could not finish.
+- **Stop the server first.** The command asks whether a server with the same
+  configuration answers on this machine, and does not run beside one unless
+  it is told to (`--beside-a-running-server`): an instance that is deleted
+  through the server at that moment may be listed again. It reads the
+  store and writes nothing to it. **In a container of its own it cannot
+  see the server** in another: with compose, `docker compose stop server`
+  and then `docker compose run --rm server reindex`.
+- **Timepoints are in no file**, so an index made from the store has none.
+  The one case in which they are brought is below.
+- That it was run is in the audit log (`index-fill`, with the counts and
+  the machine's user).
+
 ### In PostgreSQL
 
 The index is a SQLite file in the data directory unless the server is given
@@ -1198,13 +1237,30 @@ answers beside it, and is backed up and looked after with its own tools.
 - A server that cannot reach the database, or is refused by it, does not
   start, and says which setting to look at.
 
+#### Moving a server to PostgreSQL
+
+A server that is given a database starts with an empty index, whatever its
+data directory holds, and says so in its log (`index-in-sqlite-not-used`).
+To bring what it holds:
+
+```sh
+# The server is stopped. Its data directory has the store and index.sqlite.
+export OPEN_RT_STUDIO_DATABASE_URL=postgresql://ors@db.example:5432/open_rt_studio
+node dist/main.js reindex     # fills the database from the store
+node dist/main.js             # the server, on the index in PostgreSQL
+```
+
+With a database named and an `index.sqlite` in the data directory, the
+command also brings the **timepoints** users made from that file, to each
+patient that has none in the database yet. What was made in the database
+since is never replaced, so the command can be run again. `index.sqlite` is
+read and left where it is; remove it when the move has been checked.
+
+The other way, from PostgreSQL back to SQLite, the store is filed again and
+the timepoints are not brought: the command says so.
+
 Not there:
 
-- **Moving an index.** A server that is given a database starts with an
-  empty index, whatever its data directory holds; it says so in its log
-  (`index-in-sqlite-not-used`) and what is in the store is then not listed.
-  There is no command yet that fills an index from the store, or copies one
-  index into the other.
 - **Other versions.** It is tested against PostgreSQL 17 and uses nothing
   that 13 does not have; older versions have not been tried.
 - The character U+0000 in a name or a description, which PostgreSQL keeps

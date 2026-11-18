@@ -12,10 +12,12 @@ import { pipeline } from 'node:stream/promises';
 import { SILENT_LOGGER, type Logger } from '../logger.js';
 import {
   assertUid,
+  isUid,
   EmptyInstanceError,
   InstanceNotFoundError,
   piecesOf,
   type DicomStore,
+  StoreReadOnlyError,
   type StoredInstance,
 } from './dicom-store.js';
 
@@ -63,6 +65,13 @@ export class StoreLayoutError extends Error {
 
 export interface FileStoreOptions {
   readonly logger?: Logger;
+  /**
+   * Open a store that is there, to read it: nothing is made, nothing that an
+   * interrupted write left is removed, and `put` and `delete` are refused.
+   * This is how a command reads the store of a server that may be running:
+   * what is in `incoming/` may be that server's, being written.
+   */
+  readonly readOnly?: boolean;
 }
 
 /** Where an instance's files are, relative to the store's root. */
@@ -90,15 +99,19 @@ export function instancePaths(sopInstanceUid: string): InstancePaths {
 const missing = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
-/** Make sure `root` is a store: a new one in an empty or absent directory, or an existing one. */
-async function claim(root: string): Promise<void> {
-  await mkdir(root, { recursive: true });
+/**
+ * Make sure `root` is a store: a new one in an empty or absent directory, or
+ * an existing one. To be read, it has to be there already.
+ */
+async function claim(root: string, readOnly: boolean): Promise<void> {
+  if (!readOnly) await mkdir(root, { recursive: true });
   const marker = join(root, STORE_MARKER);
   let text: string;
   try {
     text = await readFile(marker, 'utf8');
   } catch (error) {
     if (!missing(error)) throw error;
+    if (readOnly) throw new StoreLayoutError('There is no store in the directory.');
     // Never adopt a directory that holds something else: opening a store
     // empties its incoming/ directory.
     if ((await readdir(root)).length > 0) {
@@ -128,15 +141,33 @@ export async function openFileStore(
   options: FileStoreOptions = {},
 ): Promise<DicomStore> {
   const logger = options.logger ?? SILENT_LOGGER;
-  await claim(root);
+  const readOnly = options.readOnly ?? false;
+  await claim(root, readOnly);
   const incoming = join(root, 'incoming');
-  await mkdir(join(root, 'instances'), { recursive: true });
-  await mkdir(incoming, { recursive: true });
+  if (readOnly) {
+    logger.info('store-opened', { layout: STORE_LAYOUT, readOnly: true });
+  } else {
+    await mkdir(join(root, 'instances'), { recursive: true });
+    await mkdir(incoming, { recursive: true });
 
-  // What an interrupted write left behind.
-  const leftOver = await readdir(incoming);
-  await Promise.all(leftOver.map((name) => rm(join(incoming, name), { force: true })));
-  logger.info('store-opened', { layout: STORE_LAYOUT, interruptedWritesRemoved: leftOver.length });
+    // What an interrupted write left behind.
+    const leftOver = await readdir(incoming);
+    await Promise.all(leftOver.map((name) => rm(join(incoming, name), { force: true })));
+    logger.info('store-opened', {
+      layout: STORE_LAYOUT,
+      interruptedWritesRemoved: leftOver.length,
+    });
+  }
+
+  /** The names in a directory of the store, in order; none for one that is not there. */
+  const namesIn = async (directory: string): Promise<string[]> => {
+    try {
+      return (await readdir(directory)).sort();
+    } catch (error) {
+      if (missing(error)) return [];
+      throw error;
+    }
+  };
 
   /** The last operation on each UID, so that the next one waits for it. */
   const busy = new Map<string, Promise<unknown>>();
@@ -213,6 +244,7 @@ export async function openFileStore(
   return {
     async put(sopInstanceUid, bytes) {
       assertUid(sopInstanceUid);
+      if (readOnly) throw new StoreReadOnlyError();
       const paths = instancePaths(sopInstanceUid);
       const incomingData = part();
       const incomingRecord = part();
@@ -275,6 +307,7 @@ export async function openFileStore(
 
     async delete(sopInstanceUid) {
       assertUid(sopInstanceUid);
+      if (readOnly) throw new StoreReadOnlyError();
       const paths = instancePaths(sopInstanceUid);
       return inTurn(sopInstanceUid, async () => {
         const existed = (await record(sopInstanceUid)) !== null;
@@ -297,6 +330,45 @@ export async function openFileStore(
           actual !== null && actual.size === expected.size && actual.sha256 === expected.sha256
         );
       });
+    },
+
+    async *list() {
+      const instances = join(root, 'instances');
+      let unreadable = 0;
+      for (const first of await namesIn(instances)) {
+        for (const second of await namesIn(join(instances, first))) {
+          const directory = join(instances, first, second);
+          for (const file of await namesIn(directory)) {
+            if (!file.endsWith('.json')) continue;
+            let kept: Partial<StoredInstance>;
+            try {
+              kept = JSON.parse(await readFile(join(directory, file), 'utf8')) as typeof kept;
+            } catch (error) {
+              // Removed since the directory was read: it is not there to list.
+              if (missing(error)) continue;
+              if (!(error instanceof SyntaxError)) throw error;
+              unreadable += 1;
+              continue;
+            }
+            const { sopInstanceUid, size, sha256 } = kept ?? {};
+            // A record is where its UID says it is, or it is not one of the store's.
+            if (
+              typeof sopInstanceUid !== 'string' ||
+              !isUid(sopInstanceUid) ||
+              join(first, second, file) !==
+                instancePaths(sopInstanceUid).record.slice('instances/'.length) ||
+              typeof size !== 'number' ||
+              typeof sha256 !== 'string'
+            ) {
+              unreadable += 1;
+              continue;
+            }
+            yield { sopInstanceUid, size, sha256 };
+          }
+        }
+      }
+      // How many, and not which: a path says nothing of whose they are, and nothing is said of it either.
+      if (unreadable > 0) logger.warn('store-records-unreadable', { count: unreadable });
     },
   };
 }

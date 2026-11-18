@@ -57,6 +57,19 @@ export interface DicomStore {
    * {@link InstanceNotFoundError}.
    */
   verify(sopInstanceUid: string): Promise<boolean>;
+  /**
+   * Every instance the store holds, in no order that means anything. One
+   * that is stored or removed while the list is read may be in it or not.
+   */
+  list(): AsyncIterable<StoredInstance>;
+}
+
+/** The store was opened to be read, and was asked to change. */
+export class StoreReadOnlyError extends Error {
+  override readonly name = 'StoreReadOnlyError';
+  constructor() {
+    super('The store was opened to be read, and keeps and removes nothing.');
+  }
 }
 
 /** Nothing is kept under this UID. */

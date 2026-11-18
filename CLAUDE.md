@@ -40,7 +40,8 @@ application. Never commit patient data or real DICOM files
   which both run; a change to what it keeps is a step in `migrations.ts`
   and one in `postgres-migrations.ts`; only `postgres.ts` imports `pg`, and
   nothing of what the database says of a failure leaves it but a code),
-  `src/ingest` is the one way in,
+  `src/ingest` is the one way in (and `reindex`, a command, files what the
+  store holds in an index again, as ingest would),
   `src/jobs` runs command-line workers (a job kind is registered in code and
   builds the command; never take a program from a request);
   `src/host` is HTTP on `node:http` and `src/api` the routes it serves. A
