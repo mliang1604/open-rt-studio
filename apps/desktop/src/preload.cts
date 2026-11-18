@@ -29,11 +29,19 @@ function call<C extends BridgeChannel>(
 }
 
 const NAME: typeof BRIDGE_GLOBAL = 'openRtStudioDesktop';
-const VERSION: typeof BRIDGE_VERSION = 1;
+const VERSION: typeof BRIDGE_VERSION = 2;
 
 const bridge: DesktopBridge = {
   version: VERSION,
   info: () => call('desktop:info'),
+  files: {
+    pickFolder: () => call('files:pick-folder'),
+    pickFiles: () => call('files:pick-files'),
+    list: (id) => call('files:list', id),
+    read: (id, path, offset, length) => call('files:read', id, path, offset, length),
+    keep: (id) => call('files:keep', id),
+    forget: (id) => call('files:forget', id),
+  },
 };
 
 contextBridge.exposeInMainWorld(NAME, bridge);

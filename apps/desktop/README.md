@@ -50,18 +50,42 @@ A change to the shell itself (`src/`) needs `npm run desktop:dev` again.
 The page is the same code as in a browser, and is given less than a browser
 gives a web site, not more.
 
-|                  |                                                                                                                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node             | None. Every page process is sandboxed, with context isolation and no Node integration, in workers and frames too.                                                                |
-| Its files        | The web client's build, served by the main process under `app://open-rt-studio/`. A request reaches a file of that build or nothing.                                             |
-| Scripts          | Only the application's own files. No script written into the page runs; no text is evaluated.                                                                                    |
-| The network      | None: the page fetches from the application itself. **A server cannot be reached from the desktop application yet** (#63).                                                       |
-| Going elsewhere  | It goes to no other address, opens no window and embeds no page. A file dropped on the window is the viewer's to open.                                                           |
-| Permissions      | To read the files and folders the user picks in the system's dialog. Nothing else: no camera, microphone, location, notifications, clipboard reading, screen capture or devices. |
-| The main process | The calls declared in [`packages/desktop-bridge`](../../packages/desktop-bridge), and no other. Today there is one: `info()`, the application's versions and system.             |
+|                  |                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node             | None. Every page process is sandboxed, with context isolation and no Node integration, in workers and frames too.                                                   |
+| Its files        | The web client's build, served by the main process under `app://open-rt-studio/`. A request reaches a file of that build or nothing.                                |
+| Scripts          | Only the application's own files. No script written into the page runs; no text is evaluated.                                                                       |
+| The network      | None: the page fetches from the application itself. **A server cannot be reached from the desktop application yet** (#63).                                          |
+| Going elsewhere  | It goes to no other address, opens no window and embeds no page. A file dropped on the window is the viewer's to open.                                              |
+| The disk         | The folders and files the user chose in the system's dialog, to read. See [Folders and files](#folders-and-files).                                                  |
+| Permissions      | To read a file or folder that is dropped on the window. Nothing else: no camera, microphone, location, notifications, clipboard reading, screen capture or devices. |
+| The main process | The calls declared in [`packages/desktop-bridge`](../../packages/desktop-bridge), and no other: `info()`, and the calls about files.                                |
 
 The reasons are in [docs/architecture.md](../../docs/architecture.md),
 "Desktop".
+
+## Folders and files
+
+**Open folder…** and **Open files…** show the system's dialog, from the main
+process. What the user chooses becomes a _grant_: an id, and the folder's
+name. The page holds the id and asks for what is under it.
+
+- **The page never names a place on the disk, and is never told one.** A
+  dialog is asked for with nothing; a file is asked for by the grant's id
+  and a path under it, which is checked to stay there. A link in the folder
+  is not listed and not followed.
+- **Files are read as they are parsed**, in pieces of 4 MB, so a large study
+  is never in memory whole.
+- **Recent folders open again without the dialog**, after a restart too.
+  The Recent list keeps the grant: its id in the page's database, and what it
+  stands for in `file-grants.json` in the profile, which only the user can
+  read. A folder that was moved or deleted is said to be gone, and is picked
+  again. A grant that leaves the Recent list is given up; a set of several
+  files is not kept, as in a browser.
+- A folder holds at most 100,000 files as far as the application reads it;
+  it says so when there were more.
+- What is **dropped** on the window comes as the browser's own handle, as in
+  a browser.
 
 ## Layout
 
@@ -71,11 +95,13 @@ src/preload.cts   the preload script: puts the bridge on the window
 src/policy.ts     where the page may go, its content security policy, its permissions
 src/content.ts    the application's files, as the page asks for them
 src/ipc.ts        the main process's side of the bridge
+src/grants.ts     what the page may read of the disk
+src/files.ts      the bridge's calls about files, answered from the grants
 scripts/dev.mjs   npm run desktop:dev
 e2e/              the shell as it runs, with Playwright
 ```
 
-`policy.ts`, `content.ts` and `ipc.ts` need no Electron, so each rule has a
+`policy.ts`, `content.ts`, `ipc.ts`, `grants.ts` and `files.ts` need no Electron, so each rule has a
 unit test; only `main.ts` and `preload.cts` import Electron, and lint holds
 the rest to it.
 
@@ -105,7 +131,10 @@ no Node, that the bridge is the declared calls, that the policy refuses a
 written-in script, evaluated text and a fetch from elsewhere, that the page
 cannot leave or open a window, and what it is permitted. With a GPU it loads
 the synthetic demo patient; without one it checks that the viewer says what
-is missing. `E2E_NO_WEBGPU=1` takes the GPU away, to see on a machine that
+is missing. A second file (`e2e/files.spec.ts`) opens a folder of synthetic
+slices, closes the application, starts it again and opens the folder from
+the Recent list. A test cannot answer the system's dialog, so there the main
+process's is replaced by one that answers as the user would. `E2E_NO_WEBGPU=1` takes the GPU away, to see on a machine that
 has one what a runner without one sees.
 
 It needs a display. On Linux without one: `xvfb-run --auto-servernum npm run

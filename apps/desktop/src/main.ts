@@ -13,7 +13,16 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { app, BrowserWindow, dialog, ipcMain, protocol, session, type WebContents } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  protocol,
+  session,
+  type OpenDialogOptions,
+  type WebContents,
+} from 'electron';
 
 import {
   DESKTOP_PLATFORMS,
@@ -22,6 +31,8 @@ import {
 } from '@open-rt-studio/desktop-bridge';
 
 import { respond } from './content.js';
+import { fileAnswers, type Pickers } from './files.js';
+import { openGrants } from './grants.js';
 import { serveBridge } from './ipc.js';
 import {
   APP_HOME,
@@ -34,6 +45,7 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const NAME = 'Open RT Studio';
+const GRANTS_FILE = 'file-grants.json';
 
 /** Settings for working on the application. An installed one reads none of them. */
 const DEV_SERVER = 'OPEN_RT_STUDIO_DESKTOP_DEV_SERVER';
@@ -147,7 +159,31 @@ function openWindow(): void {
   void window.loadURL(home);
 }
 
-function start(): void {
+/** The system's dialogs, over the application's window. What is chosen there is all the page may read. */
+const pickers: Pickers = {
+  async folder() {
+    const chosen = await showOpenDialog({ title: 'Open folder', properties: ['openDirectory'] });
+    return chosen[0] ?? null;
+  },
+  async files() {
+    const chosen = await showOpenDialog({
+      title: 'Open files',
+      properties: ['openFile', 'multiSelections'],
+    });
+    return chosen.length === 0 ? null : chosen;
+  },
+};
+
+async function showOpenDialog(options: OpenDialogOptions): Promise<readonly string[]> {
+  const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows().at(0);
+  const answer =
+    window === undefined
+      ? await dialog.showOpenDialog(options)
+      : await dialog.showOpenDialog(window, options);
+  return answer.canceled ? [] : answer.filePaths;
+}
+
+async function start(): Promise<void> {
   if (devServer === null && !existsSync(join(webRoot, 'index.html'))) {
     fail('The viewer has not been built. Run "npm run build" in the repository first.');
   }
@@ -173,8 +209,11 @@ function start(): void {
     });
   }
 
+  // Kept grants are in the profile: they say where the user's data is, and nothing of it.
+  const grants = await openGrants({ file: join(app.getPath('userData'), GRANTS_FILE) });
   serveBridge(ipcMain, (address) => mayNavigate(address, home), {
     'desktop:info': { accepts: (args) => args.length === 0, answer: desktopInfo },
+    ...fileAnswers(grants, pickers),
   });
 
   openWindow();
@@ -201,5 +240,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
-  void app.whenReady().then(start);
+  void app
+    .whenReady()
+    .then(start)
+    .catch(() => fail('The application could not start.'));
 }

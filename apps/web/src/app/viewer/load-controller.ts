@@ -4,6 +4,8 @@
 
 import { DestroyRef, Injectable, inject, type WritableSignal, signal } from '@angular/core';
 import { describeSelection, RecentStore, type RecentEntry } from '../recent-store';
+import { GRANT_FILES_AT_MOST } from '@open-rt-studio/desktop-bridge';
+import { DesktopHandle } from '../desktop-files';
 import { RecentHandles } from '../recent-handles';
 import {
   droppedHandle,
@@ -374,6 +376,13 @@ export class LoadController {
     }
     const imported = await this.loadFiles(files, entry);
     if (imported) await this.keepHandle(entry, handle);
+    if (imported && handle instanceof DesktopHandle && handle.truncated) {
+      this.flashNotice(
+        `${handle.name} holds more than ${GRANT_FILES_AT_MOST.toLocaleString('en')} files. ` +
+          `The first ${GRANT_FILES_AT_MOST.toLocaleString('en')} were read.`,
+        ERROR_NOTICE_MS,
+      );
+    }
     return imported;
   }
 

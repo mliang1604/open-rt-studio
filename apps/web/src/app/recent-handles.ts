@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { Injectable, InjectionToken, inject, signal } from '@angular/core';
+import { DESKTOP_FILES, DesktopHandle, isStoredGrant, type StoredGrant } from './desktop-files';
 import type { AccessHandle } from './file-access';
 import type { RecentEntry } from './recent-store';
 
@@ -14,12 +15,16 @@ import type { RecentEntry } from './recent-store';
 // Only a folder or a single file gets a handle. A set of several files has one
 // handle per file and the browser asks about each, which is worse than picking
 // them again.
+//
+// In the desktop application a handle stands for a grant of the main process
+// (`desktop-files.ts`). What is kept here is the grant's id, and the main
+// process is told to keep the grant, and to give it up when the entry goes.
 
 /** Where the handles are kept. Null where the browser has no IndexedDB. */
 export interface HandleDatabase {
   keys(): Promise<string[]>;
-  get(key: string): Promise<AccessHandle | undefined>;
-  set(key: string, handle: AccessHandle): Promise<void>;
+  get(key: string): Promise<AccessHandle | StoredGrant | undefined>;
+  set(key: string, handle: AccessHandle | StoredGrant): Promise<void>;
   delete(key: string): Promise<void>;
 }
 
@@ -56,7 +61,10 @@ export function indexedDbHandles(): HandleDatabase | null {
   return {
     keys: async () => (await run('readonly', (store) => store.getAllKeys())).map(String),
     get: (key) =>
-      run('readonly', (store) => store.get(key) as IDBRequest<AccessHandle | undefined>),
+      run(
+        'readonly',
+        (store) => store.get(key) as IDBRequest<AccessHandle | StoredGrant | undefined>,
+      ),
     set: async (key, handle) => {
       await run('readwrite', (store) => store.put(handle, key));
     },
@@ -80,6 +88,7 @@ export const HANDLE_DATABASE = new InjectionToken<HandleDatabase | null>('recent
 @Injectable({ providedIn: 'root' })
 export class RecentHandles {
   private readonly db = inject(HANDLE_DATABASE);
+  private readonly desktop = inject(DESKTOP_FILES);
   private readonly kept = signal<ReadonlySet<string>>(new Set());
 
   constructor() {
@@ -102,11 +111,22 @@ export class RecentHandles {
   ): Promise<void> {
     if (!this.db) return;
     try {
-      await this.db.set(recentKey(entry), handle);
-      const listed = new Set([recentKey(entry), ...current.map(recentKey)]);
-      for (const key of await this.db.keys()) {
-        if (!listed.has(key)) await this.db.delete(key);
+      const key = recentKey(entry);
+      const before = await this.db.get(key);
+      if (handle instanceof DesktopHandle) {
+        await this.db.set(key, handle.stored);
+        await this.desktop?.keep(handle.stored.desktopGrant);
+      } else {
+        await this.db.set(key, handle);
       }
+      const listed = new Set([key, ...current.map(recentKey)]);
+      const gone = [before];
+      for (const other of await this.db.keys()) {
+        if (listed.has(other)) continue;
+        gone.push(await this.db.get(other));
+        await this.db.delete(other);
+      }
+      await this.release(gone);
     } catch {
       // Not kept; refresh() below says what is there.
     }
@@ -117,9 +137,29 @@ export class RecentHandles {
   async handleFor(entry: RecentEntry): Promise<AccessHandle | null> {
     if (!this.db) return null;
     try {
-      return (await this.db.get(recentKey(entry))) ?? null;
+      const kept = (await this.db.get(recentKey(entry))) ?? null;
+      if (!isStoredGrant(kept)) return kept;
+      return this.desktop ? new DesktopHandle(this.desktop, kept) : null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Tell the main process to give up the grants of what was kept and no
+   * longer is: those that no entry of the list still goes by.
+   */
+  private async release(gone: readonly unknown[]): Promise<void> {
+    if (!this.db || !this.desktop) return;
+    const grants = gone.filter(isStoredGrant).map((stored) => stored.desktopGrant);
+    if (grants.length === 0) return;
+    const held = new Set<string>();
+    for (const key of await this.db.keys()) {
+      const kept = await this.db.get(key);
+      if (isStoredGrant(kept)) held.add(kept.desktopGrant);
+    }
+    for (const id of new Set(grants)) {
+      if (!held.has(id)) await this.desktop.forget(id);
     }
   }
 
@@ -127,7 +167,9 @@ export class RecentHandles {
   async forget(entry: RecentEntry): Promise<void> {
     if (!this.db) return;
     try {
+      const before = await this.db.get(recentKey(entry));
       await this.db.delete(recentKey(entry));
+      await this.release([before]);
     } catch {
       // Nothing to do: refresh() reports what is left.
     }
