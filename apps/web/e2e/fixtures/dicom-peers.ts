@@ -52,6 +52,7 @@ export async function listenForDicom(
     host: null,
     port: null,
     mayStore: true,
+    mayRetrieve: false,
   });
   return state.listening.port;
 }

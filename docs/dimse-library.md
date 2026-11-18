@@ -254,6 +254,34 @@ Still as the library has it: requests on an association go one after
 another, and a request's bytes must be in memory before the association is
 made, which is why a long series goes on several associations.
 
+### What #52 did with this
+
+The listener answers C-FIND, C-MOVE and C-GET with the library's protocol
+class, and what it found on the way:
+
+- **A handler answers once.** The callback a request comes with takes the
+  answers and may be called one time ("Callback was already called" the
+  second). That suits a C-FIND, whose matches are all known before the
+  first goes out. A retrieve says how far it is while it runs: those
+  answers go out through `sendResponse`, and the last through the callback.
+- **A response says it is of the study root**, whatever was asked: the
+  affected SOP class is set from the request each time.
+- **The library's C-GET client offers to take back images, and nothing
+  else**: its list of storage classes has no RT Dose, RT Structure Set, RT
+  Plan or registration, and a context that is added to a client loses its
+  role. So the tests that get those back are DCMTK's `getscu`, in CI.
+- **The library's client reads the number that remains from the answer
+  before** when the last answer has none (seen on C-MOVE). The server sends
+  none with a final answer, as the standard has it.
+- **An identifier is written by the library** (it is small, and is no
+  stored object), in the uncompressed transfer syntax the association
+  agreed, which is why the query and retrieve contexts are accepted in
+  those two alone. Text that is not ASCII goes out as UTF-8, and says so.
+- **Sending back on the caller's association** is `sendRequests` on the
+  answering side, with the same data set of stored bytes as #50. A request
+  for which no context was agreed is skipped by the library without a
+  word, so the listener sends only what the caller said it takes.
+
 ## One more thing it would bring
 
 `dcmjs-dimse` transcodes with `dcmjs-codecs`, by the same author and also

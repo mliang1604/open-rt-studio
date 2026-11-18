@@ -44,8 +44,9 @@
       <button type="submit" [disabled]="busy()">Save</button>
     </form>
     <p class="dicom-note" [class.warned]="exposed()">
-      DICOM asks for no login. A system that can reach the port and gives an AE title that may send
-      here can store objects on this server.
+      DICOM asks for no login. A system that can reach the port and gives an AE title from the list
+      below can do what the list lets that title do: store objects on this server, or be answered
+      what it holds.
       @if (exposed()) {
         This server is reached from other machines.
       }
@@ -63,6 +64,7 @@
               <th scope="col">AE title</th>
               <th scope="col">Address</th>
               <th scope="col">May send here</th>
+              <th scope="col">May retrieve</th>
               <th scope="col">Echo</th>
               <th scope="col"><span class="unseen">What to do</span></th>
             </tr>
@@ -80,6 +82,7 @@
                   }
                 </td>
                 <td class="dicom-may">{{ remote.mayStore ? 'Yes' : 'No' }}</td>
+                <td class="dicom-may">{{ remote.mayRetrieve ? 'Yes' : 'No' }}</td>
                 <td class="dicom-echo" [attr.data-outcome]="echoes()[remote.id] ?? null">
                   {{ echoWord(remote.id) }}
                 </td>
@@ -180,9 +183,27 @@
           />
         </div>
         <label class="check">
-          <input type="checkbox" [checked]="typed.mayStore" (change)="onFormMayStore($event)" />
+          <input
+            type="checkbox"
+            [checked]="typed.mayStore"
+            (change)="onFormMay('mayStore', $event)"
+          />
           May send objects here
         </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            [checked]="typed.mayRetrieve"
+            (change)="onFormMay('mayRetrieve', $event)"
+          />
+          May query and retrieve
+        </label>
+        @if (typed.mayRetrieve) {
+          <p class="note" id="dicom-retrieve-note">
+            It is answered what the server holds, of every patient, and can have it sent to itself
+            or to any system here that has an address. DICOM asks it for no login.
+          </p>
+        }
         <button type="submit" [disabled]="busy()">
           {{ typed.id === null ? 'Add system' : 'Save' }}
         </button>

@@ -17,7 +17,12 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { readInstanceHeader, SUM_RECORD_CREATOR } from '@open-rt-studio/dicom';
-import { syntheticCtSeries, syntheticRtCourse, type SyntheticFile } from '@open-rt-studio/testdata';
+import {
+  SYNTHETIC_RT_COURSE,
+  syntheticCtSeries,
+  syntheticRtCourse,
+  type SyntheticFile,
+} from '@open-rt-studio/testdata';
 
 import { sopInstanceUidOf } from '../store/testing.js';
 import { dicomEcho } from './echo.js';
@@ -37,7 +42,8 @@ const run = promisify(execFile);
 const installed = (tool: string): boolean =>
   spawnSync(tool, ['--version'], { stdio: 'ignore' }).status === 0;
 const required = process.env['REQUIRE_DCMTK'] === '1';
-const dcmtk = required || ['echoscu', 'storescu', 'storescp', 'dcmdump'].every(installed);
+const TOOLS = ['echoscu', 'storescu', 'storescp', 'dcmdump', 'findscu', 'movescu', 'getscu'];
+const dcmtk = required || TOOLS.every(installed);
 
 let directory = '';
 const open: TestListener[] = [];
@@ -76,6 +82,17 @@ async function tool(name: string, args: readonly string[]): Promise<boolean> {
   return run(name, [...args], { timeout: 30_000 }).then(
     () => true,
     () => false,
+  );
+}
+
+/** What a DCMTK tool said, and whether it ended well. Kept out of the test log. */
+async function said(name: string, args: readonly string[]): Promise<{ ok: boolean; text: string }> {
+  return run(name, [...args], { timeout: 30_000 }).then(
+    ({ stdout, stderr }) => ({ ok: true, text: `${stdout}\n${stderr}` }),
+    (error: { stdout?: string; stderr?: string }) => ({
+      ok: false,
+      text: `${error.stdout ?? ''}\n${error.stderr ?? ''}`,
+    }),
   );
 }
 
@@ -236,10 +253,176 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
     );
     expect(await readdir(folder)).toEqual([]);
   });
+
+  // ---- #52: asked what it holds, and to send it, by findscu, movescu and getscu.
+
+  /** A listener that holds the synthetic course, which PEER may query and retrieve from. */
+  async function holding(
+    options: Parameters<typeof startTestListener>[0] = {},
+  ): Promise<TestListener> {
+    const started = await startTestListener({ callers: [], retrievers: [PEER_AE], ...options });
+    open.push(started);
+    for (const file of syntheticRtCourse()) {
+      expect((await started.core.pacs!.ingest.ingest(file.bytes)).outcome).toBe('stored');
+    }
+    return started;
+  }
+  /**
+   * A value as a DCMTK tool prints one: in brackets, with the NUL a UID of
+   * odd length is padded with, or the space of other text.
+   */
+  const shown = (value: string): RegExp =>
+    new RegExp(`\\[${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\0 ]?\\]`);
+  const asking = (port: number, calling = PEER_AE): string[] => [
+    ...['--verbose', '--aetitle', calling, '--call', LISTENER_AE],
+    ...['127.0.0.1', String(port)],
+  ];
+  const kept = async (core: TestListener['core'], sopInstanceUid: string): Promise<Buffer> => {
+    const pieces: Buffer[] = [];
+    for await (const piece of await core.pacs!.store.get(sopInstanceUid)) {
+      pieces.push(piece as Buffer);
+    }
+    return Buffer.concat(pieces);
+  };
+  /** That each file a DCMTK tool wrote holds the data set the server has under its UID. */
+  async function expectAsHeld(core: TestListener['core'], files: readonly Buffer[]): Promise<void> {
+    for (const file of files) {
+      const read = readInstanceHeader(file);
+      if (!read.ok) throw new Error('the server cannot read what DCMTK wrote');
+      const ours = dataSetOf(await kept(core, read.header.sopInstanceUid))!;
+      expect(
+        Buffer.from(dataSetOf(file)!).equals(Buffer.from(ours)),
+        read.header.sopInstanceUid,
+      ).toBe(true);
+    }
+  }
+
+  it('findscu finds the studies of a patient by a part of the name, and the series of one', async () => {
+    const { port, core } = await holding();
+    const [patient] = await core.pacs!.index.findPatients();
+    const studies = await said('findscu', [
+      ...['--study', '-k', 'QueryRetrieveLevel=STUDY'],
+      ...['-k', `PatientName=${patient.name!.slice(0, 4)}*`],
+      ...['-k', 'PatientID', '-k', 'StudyInstanceUID', '-k', 'StudyDate'],
+      ...['-k', 'NumberOfStudyRelatedInstances'],
+      ...asking(port),
+    ]);
+    expect(studies.ok, studies.text).toBe(true);
+    expect(studies.text).toMatch(shown(SYNTHETIC_RT_COURSE.planningStudy));
+    expect(studies.text).toMatch(shown(SYNTHETIC_RT_COURSE.followUpStudy));
+    expect(studies.text).toMatch(shown(patient.patientId));
+    expect(studies.text.match(/Find Response: \d+ \(Pending\)/g)).toHaveLength(2);
+
+    const series = await said('findscu', [
+      ...['--patient', '-k', 'QueryRetrieveLevel=SERIES'],
+      ...['-k', `StudyInstanceUID=${SYNTHETIC_RT_COURSE.planningStudy}`],
+      ...['-k', 'Modality=CT', '-k', 'SeriesInstanceUID'],
+      ...asking(port),
+    ]);
+    expect(series.ok, series.text).toBe(true);
+    expect(series.text).toMatch(shown(SYNTHETIC_RT_COURSE.ct));
+    expect(series.text).not.toMatch(shown(SYNTHETIC_RT_COURSE.mr));
+  });
+
+  it('movescu has a study sent to storescp, each data set byte for byte', async () => {
+    const archive = await storescp(['--bit-preserving']);
+    const { port, core } = await holding({
+      destinationOf: (aeTitle) =>
+        aeTitle === 'DCMTK' ? { host: '127.0.0.1', port: archive.port } : null,
+      moveTimeoutMs: 10_000,
+      retrieveLimits: { instancesAtOnce: 3 },
+    });
+    const moved = await said('movescu', [
+      ...['--study', '--move', 'DCMTK', '-k', 'QueryRetrieveLevel=STUDY'],
+      ...['-k', `StudyInstanceUID=${SYNTHETIC_RT_COURSE.planningStudy}`],
+      ...asking(port),
+    ]);
+    expect(moved.ok, moved.text).toBe(true);
+    const held = await core.pacs!.index.findInstances({
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+    });
+    const theirs = await written(archive.folder);
+    expect(theirs).toHaveLength(held.length);
+    await expectAsHeld(core, theirs);
+
+    // A destination the server does not know is refused, and nothing is sent.
+    const elsewhere = await said('movescu', [
+      ...['--study', '--move', 'ELSEWHERE', '-k', 'QueryRetrieveLevel=STUDY'],
+      ...['-k', `StudyInstanceUID=${SYNTHETIC_RT_COURSE.followUpStudy}`],
+      ...asking(port),
+    ]);
+    expect(elsewhere.text).toMatch(/Move ?Destination ?unknown/i);
+    expect(await written(archive.folder)).toHaveLength(held.length);
+  });
+
+  it('getscu gets everything of a patient back: images, structure set, plan, dose and registration', async () => {
+    const { port, core } = await holding({ retrieveLimits: { instancesAtOnce: 4 } });
+    const [patient] = await core.pacs!.index.findPatients();
+    const folder = await mkdtemp(join(directory, 'getscu-'));
+    const got = await said('getscu', [
+      ...['--patient', '--bit-preserving', '--output-directory', folder],
+      ...['-k', 'QueryRetrieveLevel=PATIENT', '-k', `PatientID=${patient.patientId}`],
+      ...asking(port),
+    ]);
+    expect(got.ok, got.text).toBe(true);
+    const theirs = await written(folder);
+    expect(theirs).toHaveLength(SYNTHETIC_RT_COURSE.instances);
+    await expectAsHeld(core, theirs);
+    const uids = theirs.map((file) => {
+      const read = readInstanceHeader(file);
+      return read.ok ? read.header.sopInstanceUid : '';
+    });
+    expect(uids).toEqual(
+      expect.arrayContaining([
+        SYNTHETIC_RT_COURSE.structureSet,
+        SYNTHETIC_RT_COURSE.plan,
+        SYNTHETIC_RT_COURSE.dose,
+        SYNTHETIC_RT_COURSE.registration,
+      ]),
+    );
+  });
+
+  // The second "done when" of #52.
+  it('an AE title that is not on the list is refused by all three, and one that may only store is answered nothing', async () => {
+    const { port } = await holding({ callers: ['STORER'] });
+    const study = ['-k', `StudyInstanceUID=${SYNTHETIC_RT_COURSE.planningStudy}`];
+    const level = ['-k', 'QueryRetrieveLevel=STUDY'];
+    const folder = await mkdtemp(join(directory, 'getscu-'));
+    for (const calling of ['SOMEONE', 'STORER']) {
+      const found = await said('findscu', [
+        '--study',
+        ...level,
+        ...study,
+        ...asking(port, calling),
+      ]);
+      expect(found.text, calling).not.toMatch(shown(SYNTHETIC_RT_COURSE.planningStudy));
+      expect(found.text, calling).not.toMatch(/Find Response: \d+ \(Pending\)/);
+      const moved = await said('movescu', [
+        ...['--study', '--move', 'DCMTK', ...level, ...study],
+        ...asking(port, calling),
+      ]);
+      expect(moved.ok, calling).toBe(false);
+      const got = await said('getscu', [
+        ...['--study', '--output-directory', folder, ...level, ...study],
+        ...asking(port, calling),
+      ]);
+      expect(got.ok, calling).toBe(false);
+      expect(await readdir(folder), calling).toEqual([]);
+    }
+    // The one that is not on the list is told so when it asks for an association.
+    const stranger = await said('findscu', [
+      '--study',
+      ...level,
+      ...study,
+      ...asking(port, 'SOMEONE'),
+    ]);
+    expect(stranger.ok).toBe(false);
+    expect(stranger.text).toMatch(/Association Rejected|Calling AE Title Not Recognized/i);
+  });
 });
 
 describe.skipIf(!required)('where DCMTK is required', () => {
   it('is installed', () => {
-    expect(['echoscu', 'storescu', 'storescp'].filter((name) => !installed(name))).toEqual([]);
+    expect(TOOLS.filter((name) => !installed(name))).toEqual([]);
   });
 });

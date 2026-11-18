@@ -436,6 +436,7 @@ test('a sum saved as an RT Dose is the sum when it is opened again', async ({ pa
       host: '127.0.0.1',
       port,
       mayStore: false,
+      mayRetrieve: false,
     });
     const held = await serverApi<{ items: { studyInstanceUid: string }[] }>(
       source,

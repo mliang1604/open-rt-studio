@@ -36,23 +36,23 @@ to acknowledge it before the viewer opens.
 
 Status is **decided** unless a row says otherwise.
 
-| Area             | Decision                                                                                                                                                                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Web client       | Angular 22: standalone components, zoneless change detection, signals with `ChangeDetectionStrategy.OnPush`.                                                                                                                                     |
-| Rendering        | WebGPU with WGSL shaders. There is no WebGL or canvas-2D fallback for image rendering; when WebGPU is missing the app explains why and what to do.                                                                                               |
-| Desktop          | Electron for macOS, Windows and Linux. It hosts the same web client. A **standalone mode** runs without any server by embedding the server core in the main process.                                                                             |
-| Server           | TypeScript on Node. The core (store, index, ingest, jobs) is a library that runs both as the network service and inside Electron. HTTP is served with Node's own `node:http`, with no framework ([below](#server-and-pacs)).                     |
-| PACS             | Our own, not Orthanc: a filesystem DICOM store with an index in SQLite (standalone and small installs) or PostgreSQL (server installs).                                                                                                          |
-| DICOM networking | DIMSE through `dcmjs-dimse`, behind `src/dimse`, on a listener of our own ([dimse-library.md](dimse-library.md)). Approved by Michael and tried in #40. C-ECHO both ways, C-STORE received (#49) and sent (#50); query and retrieve are not yet. |
-| Heavy compute    | C++ command-line tools built on ITK and elastix (registration, resampling), started by the server as jobs. **No Python at runtime.**                                                                                                             |
-| AI models        | ONNX Runtime, later (contouring spikes #121 and #122).                                                                                                                                                                                           |
-| Hosting          | GitHub only: Actions for CI, Pages for the web client, Releases for desktop installers, GHCR for the server image.                                                                                                                               |
-| License          | MPL 2.0. No GPL or AGPL dependencies. See [license-headers.md](license-headers.md).                                                                                                                                                              |
-| Data             | Synthetic or clearly shareable public data only; never patient data. See [test-data.md](test-data.md).                                                                                                                                           |
-| Captures         | PNG and video captures are left clean: no not-for-clinical-use mark is drawn into them, and their file names and contents carry no patient name or ID (#148).                                                                                    |
-| Languages        | TypeScript (strict) everywhere outside `native/`; C++ in `native/`.                                                                                                                                                                              |
-| Package manager  | npm workspaces. `npm ci` in CI; the lockfile is committed and CI fails if it drifts.                                                                                                                                                             |
-| Tests            | Vitest for unit tests (specs sit next to the code as `*.spec.ts`), Playwright for end-to-end tests. CI runners have no GPU, so tests must pass without WebGPU and anything that needs it must skip explicitly.                                   |
+| Area             | Decision                                                                                                                                                                                                                                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web client       | Angular 22: standalone components, zoneless change detection, signals with `ChangeDetectionStrategy.OnPush`.                                                                                                                                                                                          |
+| Rendering        | WebGPU with WGSL shaders. There is no WebGL or canvas-2D fallback for image rendering; when WebGPU is missing the app explains why and what to do.                                                                                                                                                    |
+| Desktop          | Electron for macOS, Windows and Linux. It hosts the same web client. A **standalone mode** runs without any server by embedding the server core in the main process.                                                                                                                                  |
+| Server           | TypeScript on Node. The core (store, index, ingest, jobs) is a library that runs both as the network service and inside Electron. HTTP is served with Node's own `node:http`, with no framework ([below](#server-and-pacs)).                                                                          |
+| PACS             | Our own, not Orthanc: a filesystem DICOM store with an index in SQLite (standalone and small installs) or PostgreSQL (server installs).                                                                                                                                                               |
+| DICOM networking | DIMSE through `dcmjs-dimse`, behind `src/dimse`, on a listener of our own ([dimse-library.md](dimse-library.md)). Approved by Michael and tried in #40. C-ECHO both ways, C-STORE received (#49) and sent (#50), and C-FIND, C-MOVE and C-GET answered (#52); asking another system is not yet (#51). |
+| Heavy compute    | C++ command-line tools built on ITK and elastix (registration, resampling), started by the server as jobs. **No Python at runtime.**                                                                                                                                                                  |
+| AI models        | ONNX Runtime, later (contouring spikes #121 and #122).                                                                                                                                                                                                                                                |
+| Hosting          | GitHub only: Actions for CI, Pages for the web client, Releases for desktop installers, GHCR for the server image.                                                                                                                                                                                    |
+| License          | MPL 2.0. No GPL or AGPL dependencies. See [license-headers.md](license-headers.md).                                                                                                                                                                                                                   |
+| Data             | Synthetic or clearly shareable public data only; never patient data. See [test-data.md](test-data.md).                                                                                                                                                                                                |
+| Captures         | PNG and video captures are left clean: no not-for-clinical-use mark is drawn into them, and their file names and contents carry no patient name or ID (#148).                                                                                                                                         |
+| Languages        | TypeScript (strict) everywhere outside `native/`; C++ in `native/`.                                                                                                                                                                                                                                   |
+| Package manager  | npm workspaces. `npm ci` in CI; the lockfile is committed and CI fails if it drifts.                                                                                                                                                                                                                  |
+| Tests            | Vitest for unit tests (specs sit next to the code as `*.spec.ts`), Playwright for end-to-end tests. CI runners have no GPU, so tests must pass without WebGPU and anything that needs it must skip explicitly.                                                                                        |
 
 ## Repository layout
 
@@ -710,6 +710,14 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   server's, and goes through ingest. DICOM has no login, and an AE title
   proves nothing: the README says so, and the log does when the listener is
   on another address than this machine's. One file imports the library.
+- Query and retrieve (#52) is answered by the same listener, for the
+  systems on the list that may: a second permission beside the one to
+  store, since a system that sends objects here need not be one that reads
+  them. There is no finer permission: what may retrieve reads everything.
+  A question is put to the index, whose matching is DICOM's already; a
+  retrieve goes out as stored bytes a part at a time, one retrieve at a
+  time for the whole server, to the caller (C-GET) or to a system on the
+  list with an address (C-MOVE), and to no address a caller names.
 - Sending (#50) is the server's work: a user asks for a series or an
   object to go to a system the administrator listed, and follows the
   send's record. Objects go out as the bytes they are stored in (a data

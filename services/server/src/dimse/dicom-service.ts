@@ -139,6 +139,15 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       // Asked for at each association: a change needs no new listener.
       aeTitle: () => settings.local.aeTitle,
       callers: () => settings.remotes.filter((r) => r.mayStore).map((r) => r.aeTitle),
+      retrievers: () => settings.remotes.filter((r) => r.mayRetrieve).map((r) => r.aeTitle),
+      // A move goes to a system on the list that has an address, and to no other.
+      destinationOf: (aeTitle) => {
+        const there = settings.remotes.find((r) => r.aeTitle === aeTitle);
+        return there?.host != null && there.port != null
+          ? { host: there.host, port: there.port }
+          : null;
+      },
+      ...(options.sendTimeoutMs === undefined ? {} : { moveTimeoutMs: options.sendTimeoutMs }),
       maxObjectBytes: options.maxObjectBytes,
       ...(options.logger ? { logger: options.logger } : {}),
     });

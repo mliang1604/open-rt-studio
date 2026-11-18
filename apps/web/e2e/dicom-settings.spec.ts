@@ -27,7 +27,7 @@ test.afterAll(async () => {
 
 const card = (page: Page) => page.locator('app-server-panel');
 const panel = (page: Page) => card(page).locator('app-dicom-panel');
-/** The systems as the table reads: name, AE title, address, may send here, echo. */
+/** The systems as the table reads: name, AE title, address, may send here, may retrieve, echo. */
 const systems = (page: Page) =>
   panel(page)
     .locator('tbody tr')
@@ -93,13 +93,15 @@ test('an administrator turns the DICOM listener on, adds a system and tests it',
     port,
     mayStore: false,
   });
-  expect(await systems(page)).toEqual([['This server', 'ORS-E2E', `127.0.0.1:${port}`, 'No', '']]);
+  expect(await systems(page)).toEqual([
+    ['This server', 'ORS-E2E', `127.0.0.1:${port}`, 'No', 'No', ''],
+  ]);
   const test = panel(page).getByRole('button', { name: 'Test This server with a C-ECHO' });
   await test.click();
   await expect(panel(page).getByRole('alert')).toContainText(
     'This server is there and refused the association.',
   );
-  await expect.poll(async () => (await systems(page))[0][4]).toBe('Refused');
+  await expect.poll(async () => (await systems(page))[0][5]).toBe('Refused');
 
   // Let in, by keyboard: the form opens with the keyboard in it and gives it back.
   const change = panel(page).getByRole('button', { name: 'Change This server' });
@@ -109,10 +111,23 @@ test('an administrator turns the DICOM listener on, adds a system and tests it',
   await panel(page).getByLabel('May send objects here').check();
   await page.keyboard.press('Enter');
   await expect(panel(page).getByRole('status')).toHaveText('Changed This server.');
-  expect(await systems(page)).toEqual([['This server', 'ORS-E2E', `127.0.0.1:${port}`, 'Yes', '']]);
+  expect(await systems(page)).toEqual([
+    ['This server', 'ORS-E2E', `127.0.0.1:${port}`, 'Yes', 'No', ''],
+  ]);
   await test.click();
   await expect(panel(page).getByRole('status')).toHaveText('This server answered.');
-  await expect.poll(async () => (await systems(page))[0][4]).toBe('Answered');
+  await expect.poll(async () => (await systems(page))[0][5]).toBe('Answered');
+
+  // It may query and retrieve once that is said, and the form says what that lets it do.
+  await change.click();
+  await expect(panel(page).locator('#dicom-retrieve-note')).toHaveCount(0);
+  await panel(page).getByLabel('May query and retrieve').check();
+  await expect(panel(page).locator('#dicom-retrieve-note')).toContainText(
+    'It is answered what the server holds, of every patient',
+  );
+  await panel(page).getByRole('button', { name: 'Save', exact: true }).last().click();
+  await expect(panel(page).getByRole('status')).toHaveText('Changed This server.');
+  expect((await systems(page))[0].slice(3, 5)).toEqual(['Yes', 'Yes']);
 
   // A second system, where nothing is.
   await addSystem(page, {

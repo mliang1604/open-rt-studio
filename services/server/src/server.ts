@@ -218,6 +218,7 @@ export function dicomDefaults(config: ServerConfig): DicomSettings {
       host: null,
       port: null,
       mayStore: true,
+      mayRetrieve: false,
     })),
   };
 }

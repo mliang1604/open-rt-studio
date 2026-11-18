@@ -58,6 +58,7 @@ interface SystemForm {
   readonly host: string;
   readonly port: string;
   readonly mayStore: boolean;
+  readonly mayRetrieve: boolean;
 }
 
 const EMPTY_FORM: SystemForm = {
@@ -67,6 +68,7 @@ const EMPTY_FORM: SystemForm = {
   host: '',
   port: '',
   mayStore: false,
+  mayRetrieve: false,
 };
 
 /** A port as it was typed: its number, or null when it is not one. */
@@ -177,10 +179,10 @@ export class DicomPanel {
     }
   }
 
-  protected onFormMayStore(event: Event): void {
+  protected onFormMay(what: 'mayStore' | 'mayRetrieve', event: Event): void {
     const form = this.form();
     if (form && event.target instanceof HTMLInputElement) {
-      this.form.set({ ...form, mayStore: event.target.checked });
+      this.form.set({ ...form, [what]: event.target.checked });
     }
   }
 
@@ -201,6 +203,7 @@ export class DicomPanel {
             host: remote.host ?? '',
             port: remote.port === null ? '' : String(remote.port),
             mayStore: remote.mayStore,
+            mayRetrieve: remote.mayRetrieve,
           }
         : EMPTY_FORM,
     );
@@ -236,6 +239,7 @@ export class DicomPanel {
       host: host === '' ? null : host,
       port,
       mayStore: form.mayStore,
+      mayRetrieve: form.mayRetrieve,
     };
     const { id } = form;
     const saved = await this.attempt(id === null ? `Added ${name}.` : `Changed ${name}.`, () =>

@@ -276,8 +276,10 @@ a restart, client certificates.
 
 ## DICOM
 
-Other systems can verify that the server is there (C-ECHO) and send it
-objects (C-STORE). The listener is off unless it is given a port:
+Other systems can verify that the server is there (C-ECHO), send it
+objects (C-STORE), and, those that [may](#query-and-retrieve), ask what it
+holds and have it sent (C-FIND, C-MOVE, C-GET). The listener is off unless
+it is given a port:
 
 ```sh
 OPEN_RT_STUDIO_DICOM_PORT=11112 \
@@ -287,12 +289,14 @@ npm start -w @open-rt-studio/server
 ```
 
 - **Who is let in** is decided by the AE title the caller gives, which must
-  be on `dicomCallers` (or be a system that [may send](#changed-while-the-server-runs)), and by the AE title it addresses, which must be the
-  server's (`dicomAeTitle`). The list is empty by default, and an empty list
+  be on `dicomCallers` (or be a system that
+  [may send or retrieve](#changed-while-the-server-runs)), and by the AE
+  title it addresses, which must be the server's (`dicomAeTitle`). The list is empty by default, and an empty list
   lets nobody in (the log says `dicom-no-callers`).
 - **DICOM has no login.** An AE title is a name, not a proof of who is
-  calling: whoever can reach the port and gives a name on the list can store
-  objects, accounts or no accounts. The listener is on the server's own
+  calling: whoever can reach the port and gives a name on the list can do
+  what the list lets that name do, accounts or no accounts: store objects,
+  or read all that the server holds. The listener is on the server's own
   address (`host`), which is this machine alone by default. On any other
   address the log says `dicom-without-login`; reach for a network that only
   the systems on the list are on. Associations are not encrypted (#57).
@@ -336,19 +340,21 @@ An administrator can change all of this from the viewer (the server card's
 "DICOM") or through the API, and a change takes effect at once, with no
 restart:
 
-| Request                               | What it does                                                             |
-| ------------------------------------- | ------------------------------------------------------------------------ |
-| `GET /api/v1/dicom`                   | The settings, the systems the server knows, and where it listens now     |
-| `PUT /api/v1/dicom/local`             | Listener on or off, its port and the server's AE title                   |
-| `POST /api/v1/dicom/remotes`          | Add a system: `{ "name", "aeTitle", "host", "port", "mayStore" }`        |
-| `PUT /api/v1/dicom/remotes/:id`       | Replace what is known of one                                             |
-| `DELETE /api/v1/dicom/remotes/:id`    | Forget one                                                               |
-| `POST /api/v1/dicom/remotes/:id/echo` | C-ECHO to one: `ok`, `rejected`, `unreachable` or `failed` with a status |
+| Request                               | What it does                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| `GET /api/v1/dicom`                   | The settings, the systems the server knows, and where it listens now             |
+| `PUT /api/v1/dicom/local`             | Listener on or off, its port and the server's AE title                           |
+| `POST /api/v1/dicom/remotes`          | Add a system: `{ "name", "aeTitle", "host", "port", "mayStore", "mayRetrieve" }` |
+| `PUT /api/v1/dicom/remotes/:id`       | Replace what is known of one                                                     |
+| `DELETE /api/v1/dicom/remotes/:id`    | Forget one                                                                       |
+| `POST /api/v1/dicom/remotes/:id/echo` | C-ECHO to one: `ok`, `rejected`, `unreachable` or `failed` with a status         |
 
 - **A system** has a name for people, its AE title, where it listens (a
   host and a port, or neither for a system that only calls this server),
-  and whether it may send objects here (`mayStore`). The systems that may
-  are the list of callers that are let in. No two have one AE title.
+  whether it may send objects here (`mayStore`), and whether it may query
+  and retrieve (`mayRetrieve`, which is `false` when it is left out). A
+  system that may do either is let in when it calls, for that. No two have
+  one AE title.
 - **At once** means at the next association: the listener asks for its AE
   title and its callers each time one is made. A new port is opened before
   the old one is closed, and when it cannot be had nothing changes (`409`,
@@ -414,11 +420,56 @@ is the server card's "Send…"; through the API:
 - **Whom it goes to is the administrator's choice.** A user picks among the
   systems on the list and cannot name an address.
 
-Not there yet: query and retrieve (#51, #52), TLS (#57) and audit records
-for associations (#212). Until #212 the audit log has the request for a
-send and not the associations it made, and nothing of what other systems
-send here; the file header of each received object names the AE title that
-sent it.
+### Query and retrieve
+
+A system on the list that `mayRetrieve` can ask the server what it holds
+and have it sent. The systems named in `OPEN_RT_STUDIO_DICOM_CALLERS` may
+store and may not retrieve; that is given to a system under "DICOM" in the
+viewer, or through the API.
+
+- **It reads everything.** DICOM has no login and the server has no
+  patients that are one system's and not another's: a system that may
+  retrieve is answered about every patient, and can have any object sent
+  to itself, or to any system on the list that has an address. Give it to
+  systems you would hand the whole store to.
+- **C-FIND**, of the patient root and the study root, at the patient,
+  study, series and image level. Matched: Patient ID, Patient's Name,
+  Study Instance UID (one or a list), Study Date (a day or a range),
+  Accession Number, Study Description, Modalities in Study, Series
+  Instance UID, Modality, SOP Instance UID and SOP Class UID, with `*` and
+  `?` where the standard has them; names and descriptions without regard
+  to case. Answered beside those: birth date and sex, study time, series
+  number and description, Frame of Reference UID, instance number, number
+  of frames, and the counts of related studies, series and instances. A
+  key that is asked for and is none of these is left out of the answer,
+  and the answer's status says so (`FF01`). Sequences are not matched, and
+  there is no relational query, though a level is answered without the
+  keys of the levels above it.
+- **At most 500 matches** are answered. When there are more, the last
+  answer is "out of resources" (`A700`) and not success, so that a list
+  that was cut is not taken for the whole.
+- **C-MOVE** sends to a system on the list that has an address, by its AE
+  title, and to no other (`A801`, move destination unknown). **C-GET**
+  sends back on the association it was asked on, the kinds of object the
+  caller said it takes. Both name a patient, studies, series or instances
+  by their IDs, as lists where the standard allows.
+- **Objects go as the bytes they are stored in**, as in
+  [sending](#sending), a few to a part (25, or 64 MB), with the counts
+  answered after each part. One retrieve runs at a time for the whole
+  server; the others wait their turn. One retrieve sends at most 20,000
+  instances (`A701` for more, and nothing is sent).
+- **How it ends**: success; `B000` with the UIDs that were not sent, when
+  some were not; `A702` when none was (the destination did not answer, or
+  takes none of it); cancelled (`FE00`) when the caller sent a C-CANCEL,
+  with what was left.
+- **A system that may retrieve and not store** is refused what it sends
+  (`0124`).
+
+Not there yet: query and retrieve from other systems (#51, #54), TLS
+(#57) and audit records for associations (#212). Until #212 the audit log
+has the request for a send and not the associations it made, and nothing
+of what other systems send here or ask; the file header of each received
+object names the AE title that sent it.
 
 The library underneath is `dcmjs-dimse`, which only `src/dimse/library.ts`
 imports; [docs/dimse-library.md](../../docs/dimse-library.md) says why it
@@ -597,7 +648,10 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   `dicom-settings.ts` what it keeps. `send.ts` is C-STORE to another
   system on one association and `send-manager.ts` the sends under way and
   made (#50). `listener.ts` is the listener
-  (C-ECHO and C-STORE), `echo.ts` asks another system for a C-ECHO,
+  (C-ECHO, C-STORE, and C-FIND, C-MOVE and C-GET for those that may),
+  `query.ts` turns what is asked into questions to the index and answers,
+  `retrieve.ts` sends what a retrieve names a part at a time and counts,
+  `parts.ts` reads stored instances a few at a time, `echo.ts` asks another system for a C-ECHO,
   `part10.ts` writes the file header in front of a received data set, and
   `sop-classes.ts` is what the listener agrees to. `library.ts` is the only
   file that imports the DIMSE library (a lint rule holds the rest to that).

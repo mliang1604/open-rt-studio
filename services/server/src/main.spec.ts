@@ -473,6 +473,7 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
       host: null,
       port: null,
       mayStore: true,
+      mayRetrieve: false,
     });
     expect(known.status).toBe(201);
 

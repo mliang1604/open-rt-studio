@@ -46,7 +46,8 @@ application. Never commit patient data or real DICOM files
   user unless it sets `access` (`public` or `admin`); leave it out for
   anything that reads or changes what the server holds. Account names,
   passwords and tokens are never logged. `src/dimse` is DICOM networking: a listener that
-  is off unless it is given a port, lets in the calling AE titles on a list,
+  is off unless it is given a port, lets in the calling AE titles on a list
+  (to store, or to query and retrieve, which are two permissions),
   and keeps a received data set as it came; its AE title, port and callers
   are changed while it runs through `src/dimse/dicom-service.ts`, never by
   starting a listener elsewhere; what it sends goes out as the stored

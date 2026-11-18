@@ -20,6 +20,7 @@ const PLANNING = {
   host: '192.0.2.10',
   port: 104,
   mayStore: true,
+  mayRetrieve: false,
 };
 
 /** Render the panel for an administrator; `null` is a server without accounts. */
@@ -191,13 +192,13 @@ describe('the DICOM settings', () => {
     await panel.press('Add system');
 
     expect(panel.server.dicom.remotes).toEqual([{ ...PLANNING, id: 'system-1' }]);
-    expect(panel.rows()).toEqual([['Planning', 'PLANNING', '192.0.2.10:104', 'Yes', '']]);
+    expect(panel.rows()).toEqual([['Planning', 'PLANNING', '192.0.2.10:104', 'Yes', 'No', '']]);
     expect(panel.said('done')).toBe('Added Planning.');
     expect(panel.host.querySelector('#dicom-system-form')).toBeNull();
     expect(document.activeElement?.id).toBe('dicom-add');
 
     await panel.press('Test Planning with a C-ECHO');
-    expect(panel.rows()[0][4]).toBe('Answered');
+    expect(panel.rows()[0][5]).toBe('Answered');
     expect(panel.said('done')).toBe('Planning answered.');
     expect(panel.server.asked.at(-1)).toBe('/dicom/remotes/system-1/echo');
   });
@@ -227,7 +228,7 @@ describe('the DICOM settings', () => {
     expect(panel.said('problem')).toBe(
       'Linac answered the echo with status 0110, which is not success.',
     );
-    expect(panel.rows().map((row) => row[4])).toEqual(['Refused', 'No answer', 'Failed']);
+    expect(panel.rows().map((row) => row[5])).toEqual(['Refused', 'No answer', 'Failed']);
     expect(panel.said('done')).toBeNull();
   });
 
@@ -245,7 +246,7 @@ describe('the DICOM settings', () => {
     const panel = await render(ROOT, (server) => {
       server.dicom.remotes = [{ ...PLANNING, host: null, port: null }];
     });
-    expect(panel.rows()).toEqual([['Planning', 'PLANNING', 'Only calls', 'Yes', '']]);
+    expect(panel.rows()).toEqual([['Planning', 'PLANNING', 'Only calls', 'Yes', 'No', '']]);
     expect(panel.buttons()).not.toContain('Test Planning with a C-ECHO');
     expect(panel.buttons()).toContain('Change Planning');
   });
@@ -256,7 +257,7 @@ describe('the DICOM settings', () => {
       server.dicom.there.set('192.0.2.10:104', { aeTitle: 'PLANNING', knows: ['OPENRTSTUDIO'] });
     });
     await panel.press('Test Planning with a C-ECHO');
-    expect(panel.rows()[0][4]).toBe('Answered');
+    expect(panel.rows()[0][5]).toBe('Answered');
 
     await panel.press('Change Planning');
     expect(panel.host.querySelector('#dicom-system-form')!.getAttribute('aria-label')).toBe(
@@ -270,6 +271,14 @@ describe('the DICOM settings', () => {
     panel.fill('dicom-system-host', '');
     panel.fill('dicom-system-port', '');
     panel.tick('May send objects here', false);
+    // What it lets the system do is said once it is ticked, and not before.
+    expect(panel.box('May query and retrieve').checked).toBe(false);
+    expect(panel.host.querySelector('#dicom-retrieve-note')).toBeNull();
+    panel.tick('May query and retrieve', true);
+    await panel.settle();
+    expect(panel.host.querySelector('#dicom-retrieve-note')!.textContent).toContain(
+      'It is answered what the server holds, of every patient',
+    );
     await panel.press('Save');
     // The second Save is the system's; the first is this server's.
     expect(panel.server.dicom.remotes).toEqual([PLANNING]);
@@ -277,9 +286,16 @@ describe('the DICOM settings', () => {
     save.find((one) => one.textContent.trim() === 'Save')!.click();
     await panel.settle();
     expect(panel.server.dicom.remotes).toEqual([
-      { ...PLANNING, name: 'Planning 2', host: null, port: null, mayStore: false },
+      {
+        ...PLANNING,
+        name: 'Planning 2',
+        host: null,
+        port: null,
+        mayStore: false,
+        mayRetrieve: true,
+      },
     ]);
-    expect(panel.rows()).toEqual([['Planning 2', 'PLANNING', 'Only calls', 'No', '']]);
+    expect(panel.rows()).toEqual([['Planning 2', 'PLANNING', 'Only calls', 'No', 'Yes', '']]);
     expect(panel.said('done')).toBe('Changed Planning 2.');
   });
 

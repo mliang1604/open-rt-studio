@@ -16,13 +16,30 @@ import {
   type DicomSettingsStore,
 } from './dicom-settings.js';
 import { dicomEcho } from './echo.js';
-import { freePort, LISTENER_AE, PEER_AE, startTestListener } from './testing/peer.js';
+import { FIND_STATUS } from './listener.js';
+import { RETRIEVE_STATUS } from './retrieve.js';
+import {
+  converse,
+  findRequest,
+  freePort,
+  LISTENER_AE,
+  moveRequest,
+  PEER_AE,
+  startTestListener,
+} from './testing/peer.js';
 
 const OFF: DicomSettings = {
   local: { enabled: false, port: 0, aeTitle: LISTENER_AE },
   remotes: [],
 };
-const CALLER = { name: 'A peer', aeTitle: PEER_AE, host: null, port: null, mayStore: true };
+const CALLER = {
+  name: 'A peer',
+  aeTitle: PEER_AE,
+  host: null,
+  port: null,
+  mayStore: true,
+  mayRetrieve: false,
+};
 
 const cores: ServerCore[] = [];
 const services: DicomService[] = [];
@@ -36,7 +53,7 @@ afterEach(async () => {
 async function make(
   defaults: DicomSettings = OFF,
   store: DicomSettingsStore = createMemorySettingsStore(),
-): Promise<{ service: DicomService; log: () => Record<string, unknown>[] }> {
+): Promise<{ service: DicomService; core: ServerCore; log: () => Record<string, unknown>[] }> {
   const core = createCore({
     pacs: { store: createMemoryStore(), index: await openSqliteIndex(':memory:') },
   });
@@ -55,7 +72,11 @@ async function make(
   });
   services.push(service);
   await service.start();
-  return { service, log: () => lines.map((line) => JSON.parse(line) as Record<string, unknown>) };
+  return {
+    service,
+    core,
+    log: () => lines.map((line) => JSON.parse(line) as Record<string, unknown>),
+  };
 }
 
 const echo = (port: number, calling = PEER_AE, called = LISTENER_AE) =>
@@ -103,7 +124,7 @@ describe('the DICOM service', () => {
     expect(await echo(port)).toEqual({ outcome: 'ok' });
 
     // Known, and not let in.
-    await service.changeRemote(added.id, { ...CALLER, mayStore: false });
+    await service.changeRemote(added.id, { ...CALLER, mayStore: false, mayRetrieve: false });
     expect(await echo(port)).toEqual({ outcome: 'rejected' });
     // Under another title.
     await service.changeRemote(added.id, { ...CALLER, aeTitle: 'RENAMED' });
@@ -205,6 +226,7 @@ describe('the DICOM service', () => {
       host: '127.0.0.1',
       port: other.port,
       mayStore: false,
+      mayRetrieve: false,
     };
     const remote = await service.addRemote(there);
     expect(await service.echo(remote.id)).toEqual({ outcome: 'ok' });
@@ -297,6 +319,7 @@ describe('the DICOM service', () => {
         host: '127.0.0.1',
         port: other.port,
         mayStore: false,
+        mayRetrieve: false,
       };
       const remote = await made.service.addRemote(there);
       /** The record of a send once it is done. */
@@ -425,5 +448,72 @@ describe('the DICOM service', () => {
       expect(service.sendOf(asked.id)!.state).toBe('done');
       expect(await other.core.pacs!.index.counts()).toMatchObject({ instances: uids.length });
     });
+  });
+});
+
+// #52: who may query and retrieve is the list's to say, as who may store is.
+describe('querying and retrieving', () => {
+  const STUDY_FIND = '1.2.840.10008.5.1.4.1.2.2.1';
+  const STUDY_MOVE = '1.2.840.10008.5.1.4.1.2.2.2';
+  const everyStudy = () =>
+    findRequest(STUDY_FIND, { QueryRetrieveLevel: 'STUDY', StudyInstanceUID: '' });
+
+  it('is for a system that may, from the moment it may until it may not', async () => {
+    const { service, core } = await make({ ...OFF, local: { ...OFF.local, enabled: true } });
+    for (const file of syntheticCtSeries(2, 8)) await core.pacs!.ingest.ingest(file.bytes);
+    const port = service.state().listening!.port;
+    const statuses = async () =>
+      (await converse(port, [everyStudy()])).answers[0].map((answer) => answer.status);
+
+    // Let in to store: it is not answered what the server holds.
+    const caller = await service.addRemote(CALLER);
+    expect(await statuses()).toEqual([]);
+    await service.changeRemote(caller.id, { ...CALLER, mayRetrieve: true });
+    expect(await statuses()).toEqual([FIND_STATUS.pending, FIND_STATUS.success]);
+    // To retrieve alone: it is let in for that.
+    await service.changeRemote(caller.id, { ...CALLER, mayStore: false, mayRetrieve: true });
+    expect(await statuses()).toEqual([FIND_STATUS.pending, FIND_STATUS.success]);
+    await service.changeRemote(caller.id, { ...CALLER, mayStore: false, mayRetrieve: false });
+    expect((await converse(port, [everyStudy()])).rejected).toBe(true);
+  });
+
+  it('moves to a system on the list that has an address, and to no other', async () => {
+    const there = await startTestListener({ aeTitle: 'ARCHIVE', callers: [LISTENER_AE] });
+    closing.push(() => there.close());
+    const { service, core } = await make({ ...OFF, local: { ...OFF.local, enabled: true } });
+    const files = syntheticCtSeries(3, 8);
+    for (const file of files) await core.pacs!.ingest.ingest(file.bytes);
+    const [study] = await core.pacs!.index.findStudies();
+    await service.addRemote({ ...CALLER, mayStore: false, mayRetrieve: true });
+    const archive = {
+      name: 'Archive',
+      aeTitle: 'ARCHIVE',
+      host: '127.0.0.1',
+      port: there.port,
+      mayStore: false,
+      mayRetrieve: false,
+    };
+    const listed = await service.addRemote(archive);
+    const move = async (destination: string) =>
+      (
+        await converse(service.state().listening!.port, [
+          moveRequest(STUDY_MOVE, destination, {
+            QueryRetrieveLevel: 'STUDY',
+            StudyInstanceUID: study.studyInstanceUid,
+          }),
+        ])
+      ).answers[0].at(-1);
+
+    expect(await move('ARCHIVE')).toMatchObject({
+      status: RETRIEVE_STATUS.success,
+      completed: files.length,
+    });
+    expect(await there.core.pacs!.index.counts()).toMatchObject({ instances: files.length });
+    // A system that is not on the list, the caller itself (which has no address), and
+    // the archive once its address is gone: none is a destination.
+    expect(await move('ELSEWHERE')).toMatchObject({ status: RETRIEVE_STATUS.destinationUnknown });
+    expect(await move(PEER_AE)).toMatchObject({ status: RETRIEVE_STATUS.destinationUnknown });
+    await service.changeRemote(listed.id, { ...archive, host: null, port: null });
+    expect(await move('ARCHIVE')).toMatchObject({ status: RETRIEVE_STATUS.destinationUnknown });
   });
 });

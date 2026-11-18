@@ -20,6 +20,7 @@ const PLANNING = {
   host: '192.0.2.10',
   port: 104,
   mayStore: false,
+  mayRetrieve: false,
 };
 const ARCHIVE = { ...PLANNING, id: 'system-b', name: 'Archive', aeTitle: 'ARCHIVE', port: 105 };
 
