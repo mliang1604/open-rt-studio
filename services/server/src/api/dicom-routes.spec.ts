@@ -28,6 +28,7 @@ import {
 } from '../dimse/testing/peer.js';
 import { createLogger } from '../logger.js';
 import { startServer, type RunningServer } from '../server.js';
+import { testCertificate } from '../tls-testing.js';
 import { API_PREFIX } from './api-routes.js';
 import { SCHEMAS } from './schemas.js';
 import { violations } from './testing.js';
@@ -112,7 +113,7 @@ function held<T>(answer: Answer, status: number, schema: string): T {
 }
 
 interface State {
-  local: { enabled: boolean; port: number; aeTitle: string };
+  local: { enabled: boolean; port: number; aeTitle: string; tls: boolean };
   remotes: {
     id: string;
     name: string;
@@ -121,7 +122,8 @@ interface State {
     port: number | null;
     mayStore: boolean;
   }[];
-  listening: { host: string; port: number } | null;
+  listening: { host: string; port: number; tls: boolean } | null;
+  tlsAvailable: boolean;
 }
 
 const PEER = {
@@ -131,6 +133,7 @@ const PEER = {
   port: null,
   mayStore: true,
   mayRetrieve: false,
+  tls: false,
 };
 
 describe('the DICOM settings of the API', () => {
@@ -142,9 +145,11 @@ describe('the DICOM settings of the API', () => {
       'DicomState',
     );
     expect(state).toEqual({
-      local: { enabled: false, port: 11112, aeTitle: 'OPENRTSTUDIO' },
+      local: { enabled: false, port: 11112, aeTitle: 'OPENRTSTUDIO', tls: false },
       remotes: [],
       listening: null,
+      // No certificate for DICOM was named: it could not listen with TLS.
+      tlsAvailable: false,
     });
   });
 
@@ -159,7 +164,7 @@ describe('the DICOM settings of the API', () => {
       200,
       'DicomState',
     );
-    expect(state.local).toEqual({ enabled: true, port: 0, aeTitle: 'ORS' });
+    expect(state.local).toEqual({ enabled: true, port: 0, aeTitle: 'ORS', tls: false });
     expect(state.listening).toEqual(made.server.dicom);
     expect(state.remotes.map(({ id, ...rest }) => (id.length === 16 ? rest : null))).toEqual([
       {
@@ -169,6 +174,7 @@ describe('the DICOM settings of the API', () => {
         port: null,
         mayStore: true,
         mayRetrieve: false,
+        tls: false,
       },
       {
         name: 'LINAC2',
@@ -177,6 +183,7 @@ describe('the DICOM settings of the API', () => {
         port: null,
         mayStore: true,
         mayRetrieve: false,
+        tls: false,
       },
     ]);
   });
@@ -407,6 +414,132 @@ describe('the DICOM settings of the API', () => {
     expect(state.remotes).toHaveLength(1);
   });
 
+  // #57.
+  it('have the listener speak TLS, and a system be called with it, with no restart', async () => {
+    const authority = testCertificate({ authority: true });
+    const own = testCertificate({ signedBy: authority });
+    const [cert, key, ca] = ['cert.pem', 'key.pem', 'ca.pem'].map((name) => join(directory, name));
+    await writeFile(cert, own.cert);
+    await writeFile(key, own.key);
+    await writeFile(ca, authority.cert);
+    // Another system, which asks who calls and is of the same authority.
+    const their = testCertificate({ signedBy: authority });
+    const other = await startTestListener({
+      aeTitle: 'PLANNING',
+      callers: ['OPENRTSTUDIO'],
+      tls: { ...their, ca: authority.cert },
+    });
+    closing.push(() => other.close());
+    const made = await make({ dicomTlsCert: cert, dicomTlsKey: key, dicomTlsCa: ca });
+    const { admin } = made;
+    const state = async () =>
+      held<State>(await made.call('GET', '/dicom', { token: admin }), 200, 'DicomState');
+    // With a certificate, the listener would speak TLS; it is off until it is turned on.
+    expect(await state()).toMatchObject({
+      local: { enabled: false, tls: true },
+      listening: null,
+      tlsAvailable: true,
+    });
+    const on = held<State>(
+      await made.call('PUT', '/dicom/local', {
+        token: admin,
+        body: { enabled: true, port: 0, aeTitle: 'OPENRTSTUDIO', tls: true },
+      }),
+      200,
+      'DicomState',
+    );
+    expect(on.listening).toMatchObject({ tls: true });
+    const target = {
+      host: '127.0.0.1',
+      port: on.listening!.port,
+      callingAeTitle: 'PLANNING',
+      calledAeTitle: 'OPENRTSTUDIO',
+      timeoutMs: 2_000,
+    };
+    // It asks who calls: a certificate of the authority, and the system must be let in too.
+    const shown = { ca: authority.cert, cert: their.cert, key: their.key };
+    expect(await dicomEcho({ ...target, tls: shown })).toEqual({ outcome: 'rejected' });
+    expect(await dicomEcho({ ...target, tls: { ca: authority.cert } })).toEqual({
+      outcome: 'tls-refused',
+    });
+
+    const there = { ...PEER, host: '127.0.0.1', port: other.port };
+    const added = held<State['remotes'][number]>(
+      await made.call('POST', '/dicom/remotes', { token: admin, body: there }),
+      201,
+      'DicomRemote',
+    );
+    expect(await dicomEcho({ ...target, tls: shown })).toEqual({ outcome: 'ok' });
+    // Called without TLS, the other system does not answer; with, it does.
+    const echo = async () =>
+      held<{ outcome: string }>(
+        await made.call('POST', `/dicom/remotes/${added.id}/echo`, { token: admin }),
+        200,
+        'DicomEcho',
+      ).outcome;
+    expect(await echo()).not.toBe('ok');
+    held(
+      await made.call('PUT', `/dicom/remotes/${added.id}`, {
+        token: admin,
+        body: { ...there, tls: true },
+      }),
+      200,
+      'DicomRemote',
+    );
+    expect(await echo()).toBe('ok');
+
+    // What was done is in the audit log, and no certificate is in the application log.
+    expect(made.records().map((one) => [one.action, one.outcome, one.detail])).toEqual(
+      expect.arrayContaining([
+        ['dicom-settings-change', 'ok', expect.stringMatching(/^enabled=true port=\d+ tls=true$/)],
+        ['dicom-remote-change', 'ok', 'mayStore=true mayRetrieve=false tls=true'],
+        ['dicom-echo', 'ok', 'ok'],
+      ]),
+    );
+    const said = JSON.stringify(made.log());
+    expect(said).toContain('tls-caller-not-trusted');
+    expect(said).not.toContain('BEGIN');
+  });
+
+  it('refuse TLS for the listener of a server that has no certificate for DICOM', async () => {
+    const made = await make();
+    const { admin } = made;
+    const answer = await made.call('PUT', '/dicom/local', {
+      token: admin,
+      body: { enabled: true, port: 0, aeTitle: 'ORS', tls: true },
+    });
+    expect(violations(answer.body, SCHEMAS['Error'], SCHEMAS)).toEqual([]);
+    expect([answer.status, (answer.body as { error: string }).error]).toEqual([
+      409,
+      'no-certificate',
+    ]);
+    expect(made.server.dicom).toBeNull();
+    // A system may be called with TLS all the same: that takes no certificate of the server's.
+    const other = await startTestListener({
+      aeTitle: 'PLANNING',
+      callers: ['OPENRTSTUDIO'],
+      tls: { ...testCertificate(), ca: null },
+    });
+    closing.push(() => other.close());
+    const added = held<State['remotes'][number]>(
+      await made.call('POST', '/dicom/remotes', {
+        token: admin,
+        body: { ...PEER, host: '127.0.0.1', port: other.port, tls: true },
+      }),
+      201,
+      'DicomRemote',
+    );
+    // Its certificate is its own, and of no authority the machine knows.
+    const echoed = await made.call('POST', `/dicom/remotes/${added.id}/echo`, { token: admin });
+    expect(held(echoed, 200, 'DicomEcho')).toEqual({ outcome: 'tls-untrusted', status: null });
+    expect(made.records().at(-1)).toMatchObject({
+      action: 'dicom-echo',
+      // The request was answered; what came of the echo is the detail.
+      outcome: 'ok',
+      detail: 'tls-untrusted',
+    });
+  });
+
   it('are an administrator’s alone', async () => {
     const made = await make();
     for (const [method, path, body] of [
@@ -436,7 +569,7 @@ describe('the DICOM settings of the API', () => {
 
     const second = await make(config);
     expect((await second.call('GET', '/dicom', { token: second.admin })).body).toEqual(left);
-    expect(second.server.dicom).toEqual({ host: '127.0.0.1', port });
+    expect(second.server.dicom).toEqual({ host: '127.0.0.1', port, tls: false });
     expect(
       await dicomEcho({
         host: '127.0.0.1',
@@ -480,10 +613,16 @@ describe('the DICOM settings of the API', () => {
       ]),
     ).toEqual([
       ['dicom-settings-read', 'root', 'ok', null, null],
-      ['dicom-settings-change', 'root', 'ok', 'ORS', 'enabled=true port=0'],
-      ['dicom-remote-add', 'root', 'ok', 'PLANNING', 'mayStore=true mayRetrieve=false'],
+      ['dicom-settings-change', 'root', 'ok', 'ORS', 'enabled=true port=0 tls=false'],
+      ['dicom-remote-add', 'root', 'ok', 'PLANNING', 'mayStore=true mayRetrieve=false tls=false'],
       ['dicom-echo', 'root', 'ok', 'PLANNING', 'unreachable'],
-      ['dicom-remote-change', 'root', 'ok', 'RENAMED', 'mayStore=false mayRetrieve=false'],
+      [
+        'dicom-remote-change',
+        'root',
+        'ok',
+        'RENAMED',
+        'mayStore=false mayRetrieve=false tls=false',
+      ],
       ['dicom-remote-remove', 'root', 'ok', 'RENAMED', null],
       ['dicom-remote-add', 'ada', 'refused', null, null],
     ]);

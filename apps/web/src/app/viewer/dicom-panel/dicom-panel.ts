@@ -16,12 +16,13 @@ import {
   untracked,
 } from '@angular/core';
 
-import type {
-  DicomEcho,
-  DicomRemote,
-  DicomRemoteInput,
-  DicomState,
-  ServerSource,
+import {
+  dicomTlsFailureSaid,
+  type DicomEcho,
+  type DicomRemote,
+  type DicomRemoteInput,
+  type DicomState,
+  type ServerSource,
 } from '../../data-source/server-source';
 
 /** Ask before a system is forgotten; replaced in the specs. */
@@ -38,10 +39,24 @@ export function echoSaid(remote: DicomRemote, echo: DicomEcho, ownAeTitle: strin
       return `${remote.name} is there and refused the association. It may not know this server’s AE title, ${ownAeTitle}, or may go by another title than ${remote.aeTitle}.`;
     case 'unreachable':
       return `Nothing answered at ${remote.host}:${remote.port}.`;
+    case 'broken':
+      return `${remote.name} took the connection at ${remote.host}:${remote.port} and gave no answer.${
+        remote.tls ? '' : ' It may expect TLS there: change it to be called with TLS.'
+      }`;
     case 'failed': {
       const status = (echo.status ?? 0).toString(16).toUpperCase().padStart(4, '0');
       return `${remote.name} answered the echo with status ${status}, which is not success.`;
     }
+    case 'tls-untrusted':
+      return `${dicomTlsFailureSaid(echo.outcome, remote.name)}. The server’s configuration names the authorities it trusts (OPEN_RT_STUDIO_DICOM_TLS_CA); without, it trusts those its machine knows.`;
+    case 'tls-expired':
+      return `${dicomTlsFailureSaid(echo.outcome, remote.name)}.`;
+    case 'tls-name':
+      return `${remote.name}’s certificate is for another name than ${remote.host}. Call it by the name its certificate is for.`;
+    case 'tls-refused':
+      return `${dicomTlsFailureSaid(echo.outcome, remote.name)}.`;
+    case 'tls-failed':
+      return `No secure connection could be made to ${remote.host}:${remote.port}. ${remote.name} may not use TLS at that port.`;
     default: {
       const exhaustive: never = echo.outcome;
       return String(exhaustive);
@@ -59,6 +74,7 @@ interface SystemForm {
   readonly port: string;
   readonly mayStore: boolean;
   readonly mayRetrieve: boolean;
+  readonly tls: boolean;
 }
 
 const EMPTY_FORM: SystemForm = {
@@ -69,6 +85,7 @@ const EMPTY_FORM: SystemForm = {
   port: '',
   mayStore: false,
   mayRetrieve: false,
+  tls: false,
 };
 
 /** A port as it was typed: its number, or null when it is not one. */
@@ -107,6 +124,7 @@ export class DicomPanel {
   protected readonly enabled = signal(false);
   protected readonly aeTitle = signal('');
   protected readonly port = signal('');
+  protected readonly tls = signal(false);
 
   /** The system being added or changed, or null while the form is shut. */
   protected readonly form = signal<SystemForm | null>(null);
@@ -121,9 +139,13 @@ export class DicomPanel {
     if (!state) return '';
     const at = state.listening;
     return at
-      ? `Listening at ${at.host}, port ${at.port}, as ${state.local.aeTitle}.`
+      ? `Listening at ${at.host}, port ${at.port}, as ${state.local.aeTitle}, ${at.tls ? 'with TLS' : 'without TLS'}.`
       : 'Not listening for DICOM.';
   });
+  /** Whether TLS can be chosen for the listener: with a certificate, or to take it off again. */
+  protected readonly tlsOffered = computed(
+    () => (this.state()?.tlsAvailable ?? false) || this.tls(),
+  );
   /** Whether the listener can be reached from other machines, where DICOM asks for no login. */
   protected readonly exposed = computed(() => {
     const host = this.state()?.listening?.host;
@@ -147,6 +169,10 @@ export class DicomPanel {
     if (event.target instanceof HTMLInputElement) this.enabled.set(event.target.checked);
   }
 
+  protected onTls(event: Event): void {
+    if (event.target instanceof HTMLInputElement) this.tls.set(event.target.checked);
+  }
+
   protected onLocalText(field: 'aeTitle' | 'port', event: Event): void {
     if (event.target instanceof HTMLInputElement) this[field].set(event.target.value);
   }
@@ -163,12 +189,12 @@ export class DicomPanel {
       this.problem.set('Give this server an AE title.');
       return;
     }
-    const enabled = this.enabled();
+    const [enabled, tls] = [this.enabled(), this.tls()];
     await this.attempt(
       enabled
-        ? 'This server listens for DICOM as set.'
+        ? `This server listens for DICOM as set, ${tls ? 'with TLS' : 'without TLS'}.`
         : 'This server no longer listens for DICOM.',
-      () => this.server().setDicomLocal({ enabled, port, aeTitle }),
+      () => this.server().setDicomLocal({ enabled, port, aeTitle, tls }),
     );
   }
 
@@ -179,7 +205,7 @@ export class DicomPanel {
     }
   }
 
-  protected onFormMay(what: 'mayStore' | 'mayRetrieve', event: Event): void {
+  protected onFormMay(what: 'mayStore' | 'mayRetrieve' | 'tls', event: Event): void {
     const form = this.form();
     if (form && event.target instanceof HTMLInputElement) {
       this.form.set({ ...form, [what]: event.target.checked });
@@ -204,6 +230,7 @@ export class DicomPanel {
             port: remote.port === null ? '' : String(remote.port),
             mayStore: remote.mayStore,
             mayRetrieve: remote.mayRetrieve,
+            tls: remote.tls,
           }
         : EMPTY_FORM,
     );
@@ -233,6 +260,12 @@ export class DicomPanel {
       );
       return;
     }
+    if (form.tls && host === '') {
+      this.problem.set(
+        'TLS is for how the server calls a system: give its host and port, or leave TLS off.',
+      );
+      return;
+    }
     const remote: DicomRemoteInput = {
       name,
       aeTitle,
@@ -240,6 +273,7 @@ export class DicomPanel {
       port,
       mayStore: form.mayStore,
       mayRetrieve: form.mayRetrieve,
+      tls: form.tls,
     };
     const { id } = form;
     const saved = await this.attempt(id === null ? `Added ${name}.` : `Changed ${name}.`, () =>
@@ -297,9 +331,20 @@ export class DicomPanel {
       case 'rejected':
         return 'Refused';
       case 'unreachable':
+      case 'broken':
         return 'No answer';
       case 'failed':
         return 'Failed';
+      case 'tls-untrusted':
+        return 'Not trusted';
+      case 'tls-expired':
+        return 'Certificate expired';
+      case 'tls-name':
+        return 'Another name';
+      case 'tls-refused':
+        return 'Refused';
+      case 'tls-failed':
+        return 'No TLS';
       default: {
         const exhaustive: never = outcome;
         return String(exhaustive);
@@ -343,6 +388,7 @@ export class DicomPanel {
         this.enabled.set(state.local.enabled);
         this.aeTitle.set(state.local.aeTitle);
         this.port.set(String(state.local.port));
+        this.tls.set(state.local.tls);
       }
     } catch (error) {
       if (through) this.problem.set(error instanceof Error ? error.message : String(error));

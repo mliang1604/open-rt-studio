@@ -19,7 +19,7 @@ import {
 import type { SyntheticFile } from '@open-rt-studio/testdata';
 
 import type { ParsedFiles } from '../parse-pool';
-import type { AuditEntry } from './server-source';
+import type { AuditEntry, DicomTlsFailure } from './server-source';
 
 /** What the worker pool does, on this thread. */
 export async function parseHere(files: readonly File[]): Promise<ParsedFiles> {
@@ -87,7 +87,9 @@ export interface FakeServer {
 
 /** The DICOM side of a stand-in server. */
 export interface FakeDicom {
-  local: { enabled: boolean; port: number; aeTitle: string };
+  local: { enabled: boolean; port: number; aeTitle: string; tls?: boolean };
+  /** Whether the server has a certificate for DICOM (#57). */
+  tlsAvailable: boolean;
   remotes: {
     id: string;
     name: string;
@@ -96,6 +98,8 @@ export interface FakeDicom {
     port: number | null;
     mayStore: boolean;
     mayRetrieve: boolean;
+    /** Left out by a spec that has nothing to say of TLS: without. */
+    tls?: boolean;
   }[];
   /** The address the server itself is on. */
   host: string;
@@ -113,6 +117,9 @@ export interface FakeDicom {
       holds?: readonly SyntheticFile[];
       /** False for a system that does not know this server as a place to send to. */
       knowsHere?: boolean;
+      /** Whether it speaks TLS at its port, and what is wrong with its certificate if anything is. */
+      tls?: boolean;
+      certificate?: DicomTlsFailure;
     }
   >;
   /** Ports the server cannot listen on. */
@@ -239,7 +246,8 @@ export function fakeServer(
     json({ error: 'not-found', message: 'The server does not hold that.' }, 404);
 
   const dicom: FakeDicom = {
-    local: { enabled: false, port: 11112, aeTitle: 'OPENRTSTUDIO' },
+    local: { enabled: false, port: 11112, aeTitle: 'OPENRTSTUDIO', tls: false },
+    tlsAvailable: false,
     remotes: [],
     host: '127.0.0.1',
     there: new Map(),
@@ -268,9 +276,15 @@ export function fakeServer(
     return new RegExp(`^${pattern}$`, 'i').test(value ?? '');
   };
   /** Why the system a remote names gives no answer; null when it does. */
-  const silence = (remote: FakeDicom['remotes'][number]): 'unreachable' | 'rejected' | null => {
+  const silence = (
+    remote: FakeDicom['remotes'][number],
+  ): 'unreachable' | 'broken' | 'rejected' | DicomTlsFailure | null => {
     const there = dicom.there.get(`${remote.host}:${remote.port}`);
     if (!there) return 'unreachable';
+    // Called with TLS where there is none, or without where there is.
+    const secure = remote.tls ?? false;
+    if (secure !== (there.tls ?? false)) return secure ? 'tls-failed' : 'broken';
+    if (secure && there.certificate) return there.certificate;
     return there.aeTitle !== remote.aeTitle || !there.knows.includes(dicom.local.aeTitle)
       ? 'rejected'
       : null;
@@ -562,9 +576,12 @@ export function fakeServer(
     const refuse = (error: string, message: string, status: number): Response =>
       json({ error, message }, status);
     const state = () => ({
-      local: dicom.local,
-      remotes: dicom.remotes,
-      listening: dicom.local.enabled ? { host: dicom.host, port: dicom.local.port } : null,
+      local: { ...dicom.local, tls: dicom.local.tls ?? false },
+      remotes: dicom.remotes.map((one) => ({ ...one, tls: one.tls ?? false })),
+      listening: dicom.local.enabled
+        ? { host: dicom.host, port: dicom.local.port, tls: dicom.local.tls ?? false }
+        : null,
+      tlsAvailable: dicom.tlsAvailable,
     });
     const aeTitle = (value: unknown): value is string =>
       typeof value === 'string' &&
@@ -572,7 +589,14 @@ export function fakeServer(
       value.trim() !== '';
     if (path === '/dicom' && verb === 'GET') return json(state());
     if (path === '/dicom/local' && verb === 'PUT') {
-      const local = body() as FakeDicom['local'];
+      const local = { tls: false, ...(body() as FakeDicom['local']) };
+      if (local.enabled && local.tls && !dicom.tlsAvailable) {
+        return refuse(
+          'no-certificate',
+          'The server has no certificate for DICOM, and cannot listen with TLS. Its configuration names one (dicomTlsCert and dicomTlsKey), read when it starts.',
+          409,
+        );
+      }
       if (!aeTitle(local.aeTitle)) {
         return refuse(
           'invalid-request',
@@ -594,7 +618,10 @@ export function fakeServer(
     const taken = (title: string, but?: string): boolean =>
       dicom.remotes.some((one) => one.aeTitle === title && one.id !== but);
     const checked = (): FakeDicom['remotes'][number] | Response => {
-      const remote = body() as FakeDicom['remotes'][number];
+      const remote = { tls: false, ...(body() as FakeDicom['remotes'][number]) };
+      if (remote.tls && remote.host === null) {
+        return refuse('invalid-request', 'tls is for a system that has an address to call.', 400);
+      }
       if (!aeTitle(remote.aeTitle)) {
         return refuse(
           'invalid-request',
@@ -625,10 +652,8 @@ export function fakeServer(
         );
       }
       const there = dicom.there.get(`${known.host}:${known.port}`);
-      if (!there) return json({ outcome: 'unreachable', status: null });
-      if (there.aeTitle !== known.aeTitle || !there.knows.includes(dicom.local.aeTitle)) {
-        return json({ outcome: 'rejected', status: null });
-      }
+      const silent = silence(known);
+      if (!there || silent !== null) return json({ outcome: silent, status: null });
       return there.status === undefined
         ? json({ outcome: 'ok', status: null })
         : json({ outcome: 'failed', status: there.status });

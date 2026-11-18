@@ -72,6 +72,24 @@ export interface ServerConfig {
    * objects, with no login.
    */
   readonly dicomCallers: readonly string[];
+  /**
+   * The file that holds the certificate the server shows over DICOM, in
+   * PEM, with any between it and its authority after it. With this and
+   * `dicomTlsKey` the server can listen for DICOM with TLS, which it then
+   * does unless its DICOM settings say otherwise, and shows the certificate
+   * to a system it calls with TLS that asks who is calling.
+   */
+  readonly dicomTlsCert: string | null;
+  /** The file that holds that certificate's private key, in PEM, with no passphrase. */
+  readonly dicomTlsKey: string | null;
+  /**
+   * A file of the certificates of the authorities other DICOM systems are
+   * trusted by, in PEM. With it, a system that calls the server with TLS
+   * must show a certificate of theirs, and a system the server calls with
+   * TLS must have one. Without it, a system the server calls is trusted by
+   * the authorities the machine knows, and one that calls is asked for none.
+   */
+  readonly dicomTlsCa: string | null;
 }
 
 export const AUTH_MODES = ['accounts', 'none'] as const;
@@ -93,6 +111,9 @@ export const DEFAULT_CONFIG: ServerConfig = {
   dicomPort: null,
   dicomAeTitle: 'OPENRTSTUDIO',
   dicomCallers: [],
+  dicomTlsCert: null,
+  dicomTlsKey: null,
+  dicomTlsCa: null,
 };
 
 /** The environment variable naming a JSON config file. */
@@ -115,6 +136,9 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   dicomPort: 'OPEN_RT_STUDIO_DICOM_PORT',
   dicomAeTitle: 'OPEN_RT_STUDIO_DICOM_AE_TITLE',
   dicomCallers: 'OPEN_RT_STUDIO_DICOM_CALLERS',
+  dicomTlsCert: 'OPEN_RT_STUDIO_DICOM_TLS_CERT',
+  dicomTlsKey: 'OPEN_RT_STUDIO_DICOM_TLS_KEY',
+  dicomTlsCa: 'OPEN_RT_STUDIO_DICOM_TLS_CA',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -218,6 +242,9 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       }
       return { value: titles };
     },
+    dicomTlsCert: fileOrNone,
+    dicomTlsKey: fileOrNone,
+    dicomTlsCa: fileOrNone,
   };
 
 /** Whether a text is a web origin as a browser writes one in an `Origin` header. */
@@ -295,6 +322,12 @@ export function resolveConfig(file: unknown, environment: Environment = {}): Ser
     throw new ConfigError(
       `HTTPS takes a certificate and its key: set both ${ENVIRONMENT_VARIABLES.tlsCert} and ` +
         `${ENVIRONMENT_VARIABLES.tlsKey}, or neither.`,
+    );
+  }
+  if ((resolved.dicomTlsCert === null) !== (resolved.dicomTlsKey === null)) {
+    throw new ConfigError(
+      `TLS for DICOM takes a certificate and its key: set both ` +
+        `${ENVIRONMENT_VARIABLES.dicomTlsCert} and ${ENVIRONMENT_VARIABLES.dicomTlsKey}, or neither.`,
     );
   }
   return resolved;

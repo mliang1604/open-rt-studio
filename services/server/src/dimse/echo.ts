@@ -6,6 +6,7 @@
 // server in?
 
 import { CEchoRequest, Client } from './library.js';
+import { securityOptions, withTlsProblem, type ClientTls, type TlsFailure } from './tls.js';
 
 export interface EchoTarget {
   readonly host: string;
@@ -16,6 +17,8 @@ export interface EchoTarget {
   readonly callingAeTitle: string;
   /** How long to wait for the connection and for each answer. Default 10 seconds. */
   readonly timeoutMs?: number;
+  /** Call with TLS, with this; without, the call is not encrypted. */
+  readonly tls?: ClientTls;
 }
 
 /**
@@ -24,19 +27,22 @@ export interface EchoTarget {
  * - `ok`: the other system answered with success
  * - `rejected`: it is there and refused the association (an AE title it does
  *   not know, most often)
- * - `unreachable`: no association could be made: nothing listens there, the
- *   connection broke, or no answer came in time
+ * - `unreachable`: no connection could be made: nothing listens there
+ * - `broken`: the connection was made and no answer came: it was ended, or
+ *   nothing came in time. A system that expects TLS does this to a call
+ *   without.
  * - `failed`: it answered the echo with a status that is not success
+ * - one of {@link TlsFailure}: no secure connection could be made, and why
  */
 export type EchoResult =
   | { readonly outcome: 'ok' }
-  | { readonly outcome: 'rejected' | 'unreachable' }
+  | { readonly outcome: 'rejected' | 'unreachable' | 'broken' | TlsFailure }
   | { readonly outcome: 'failed'; readonly status: number };
 
 /** Ask another system for a C-ECHO. Resolves in every case; it does not reject. */
 export async function dicomEcho(target: EchoTarget): Promise<EchoResult> {
   const timeoutMs = target.timeoutMs ?? 10_000;
-  return new Promise((resolve) => {
+  return new Promise<EchoResult>((resolve) => {
     let result: EchoResult = { outcome: 'unreachable' };
     let settled = false;
     const settle = (): void => {
@@ -54,12 +60,17 @@ export async function dicomEcho(target: EchoTarget): Promise<EchoResult> {
     client.on('associationRejected', () => {
       result = { outcome: 'rejected' };
     });
+    client.on('connected', () => {
+      // Something is there; what it answers, if it does, is said in place of this.
+      if (result.outcome === 'unreachable') result = { outcome: 'broken' };
+    });
     client.on('networkError', settle);
     client.on('closed', settle);
     client.send(target.host, target.port, target.callingAeTitle, target.calledAeTitle, {
       connectTimeout: timeoutMs,
       associationTimeout: timeoutMs,
       pduTimeout: timeoutMs,
+      ...(target.tls ? { securityOptions: securityOptions(target.tls) } : {}),
     });
-  });
+  }).then((result) => withTlsProblem(target, result, timeoutMs));
 }

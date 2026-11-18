@@ -74,14 +74,23 @@ test('an administrator turns the DICOM listener on, adds a system and tests it',
   await expect(listening).toHaveText('Not listening for DICOM.');
   await expect(panel(page)).toContainText('This server knows no other system, and lets none in.');
   await expect(panel(page)).toContainText('DICOM asks for no login.');
+  // TLS is not offered by a server that was given no certificate for DICOM, and it says why.
+  await expect(panel(page).getByLabel('Listen with TLS')).toBeDisabled();
+  await expect(panel(page).locator('#dicom-tls-note')).toContainText(
+    'This server was given no certificate for DICOM, so it cannot listen with TLS.',
+  );
 
   // On, at a port the system picks, with no restart.
   await panel(page).getByLabel('Listen for DICOM').check();
   await panel(page).getByLabel('AE title', { exact: true }).fill('ORS-E2E');
   await panel(page).locator('#dicom-local-port').fill('0');
   await panel(page).getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(panel(page).getByRole('status')).toHaveText('This server listens for DICOM as set.');
-  await expect(listening).toHaveText(/^Listening at 127\.0\.0\.1, port \d+, as ORS-E2E\.$/);
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'This server listens for DICOM as set, without TLS.',
+  );
+  await expect(listening).toHaveText(
+    /^Listening at 127\.0\.0\.1, port \d+, as ORS-E2E, without TLS\.$/,
+  );
   const port = /port (\d+)/.exec(await listening.innerText())![1];
   expect(Number(port)).toBeGreaterThan(0);
 
@@ -155,7 +164,9 @@ test('an administrator turns the DICOM listener on, adds a system and tests it',
   await panel(page).getByLabel('AE title', { exact: true }).fill('RENAMED');
   await panel(page).locator('#dicom-local-port').fill(port);
   await panel(page).getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(listening).toHaveText(`Listening at 127.0.0.1, port ${port}, as RENAMED.`);
+  await expect(listening).toHaveText(
+    `Listening at 127.0.0.1, port ${port}, as RENAMED, without TLS.`,
+  );
   await test.click();
   await expect(panel(page).getByRole('alert')).toContainText('refused the association');
 
@@ -168,7 +179,9 @@ test('an administrator turns the DICOM listener on, adds a system and tests it',
   await card(page).getByLabel('Password').fill(ADMIN.password);
   await card(page).getByRole('button', { name: 'Log in', exact: true }).click();
   await card(page).getByRole('button', { name: 'DICOM', exact: true }).click();
-  await expect(listening).toHaveText(`Listening at 127.0.0.1, port ${port}, as RENAMED.`);
+  await expect(listening).toHaveText(
+    `Listening at 127.0.0.1, port ${port}, as RENAMED, without TLS.`,
+  );
   expect((await systems(page)).map((row) => row[0])).toEqual(['This server', 'Nobody']);
 
   // Forgotten, and off again.
@@ -180,4 +193,87 @@ test('an administrator turns the DICOM listener on, adds a system and tests it',
   await expect(listening).toHaveText('Not listening for DICOM.');
   await test.click();
   await expect(panel(page).getByRole('alert')).toHaveText(`Nothing answered at 127.0.0.1:${port}.`);
+});
+
+// #57: on a server that was given a certificate for DICOM. The system that
+// answers is again the server's own listener, which asks who calls: the
+// server shows it its own certificate, and trusts it by the same.
+test('an administrator has the listener speak TLS, and the server call a system with it', async ({
+  page,
+}) => {
+  const secure = await startTestServer([PAGE_ORIGIN], { account: ADMIN, dicomCertificate: true });
+  try {
+    await preAcknowledge(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await requireWebGpu(page);
+    await openServerCard(page, 'empty state');
+    await card(page).getByLabel('Address of an Open RT Studio server').fill(secure.address);
+    await card(page).getByRole('button', { name: 'Connect' }).click();
+    await card(page).getByLabel('Name').fill(ADMIN.name);
+    await card(page).getByLabel('Password').fill(ADMIN.password);
+    await card(page).getByRole('button', { name: 'Log in', exact: true }).click();
+    await card(page).getByRole('button', { name: 'DICOM', exact: true }).click();
+
+    // With a certificate, TLS is what the listener would speak; it is not yet listening.
+    const listening = panel(page).locator('.dicom-listening');
+    const withTls = panel(page).getByLabel('Listen with TLS');
+    await expect(listening).toHaveText('Not listening for DICOM.');
+    await expect(withTls).toBeEnabled();
+    await expect(withTls).toBeChecked();
+    await expect(panel(page).locator('#dicom-tls-note')).toContainText(
+      'every system that calls must call with TLS',
+    );
+    await panel(page).getByLabel('Listen for DICOM').check();
+    await panel(page).getByLabel('AE title', { exact: true }).fill('ORS-TLS');
+    await panel(page).locator('#dicom-local-port').fill('0');
+    await panel(page).getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(panel(page).getByRole('status')).toHaveText(
+      'This server listens for DICOM as set, with TLS.',
+    );
+    await expect(listening).toHaveText(
+      /^Listening at 127\.0\.0\.1, port \d+, as ORS-TLS, with TLS\.$/,
+    );
+    const port = /port (\d+)/.exec(await listening.innerText())![1];
+
+    // Called without TLS, the listener does not answer.
+    await addSystem(page, {
+      name: 'This server',
+      aeTitle: 'ORS-TLS',
+      host: '127.0.0.1',
+      port,
+      mayStore: true,
+    });
+    const test = panel(page).getByRole('button', { name: 'Test This server with a C-ECHO' });
+    await test.click();
+    await expect(panel(page).getByRole('alert')).toHaveText(
+      `This server took the connection at 127.0.0.1:${port} and gave no answer. It may expect TLS there: change it to be called with TLS.`,
+    );
+    await expect.poll(async () => (await systems(page))[0][5]).toBe('No answer');
+
+    // Called with TLS, it does; and the table says how the server calls it.
+    await panel(page).getByRole('button', { name: 'Change This server' }).click();
+    await expect(panel(page).locator('#dicom-system-tls-note')).toHaveCount(0);
+    await panel(page).getByLabel('Call it with TLS').check();
+    await expect(panel(page).locator('#dicom-system-tls-note')).toContainText(
+      'The server checks the system’s certificate',
+    );
+    await panel(page).locator('#dicom-system-form button[type="submit"]').click();
+    await expect(panel(page).getByRole('status')).toHaveText('Changed This server.');
+    expect((await systems(page))[0][2]).toBe(`127.0.0.1:${port} TLS`);
+    await test.click();
+    await expect(panel(page).getByRole('status')).toHaveText('This server answered.');
+    await expect.poll(async () => (await systems(page))[0][5]).toBe('Answered');
+
+    // Without TLS again, on the port it has, at once.
+    await withTls.uncheck();
+    await expect(panel(page).locator('#dicom-tls-note')).toContainText('Without TLS');
+    await panel(page).locator('#dicom-local-port').fill(port);
+    await panel(page).getByRole('button', { name: 'Save', exact: true }).first().click();
+    await expect(listening).toHaveText(
+      `Listening at 127.0.0.1, port ${port}, as ORS-TLS, without TLS.`,
+    );
+  } finally {
+    await secure.stop();
+  }
 });

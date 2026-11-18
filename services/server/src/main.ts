@@ -18,9 +18,16 @@ import { createAccounts } from './accounts/accounts.js';
 import { ConfigError, ENVIRONMENT_VARIABLES, loadConfig, type ServerConfig } from './config.js';
 import { openFileSettingsStore } from './dimse/dicom-settings.js';
 import { isAeTitle } from './dimse/sop-classes.js';
+import { clientTls, type ClientTls } from './dimse/tls.js';
 import { askHealth } from './health-check.js';
 import { createLogger, errorFields } from './logger.js';
-import { ACCOUNTS_FILE, DICOM_SETTINGS_FILE, openAudit, startServer } from './server.js';
+import {
+  ACCOUNTS_FILE,
+  DICOM_SETTINGS_FILE,
+  openAudit,
+  openDicomTls,
+  startServer,
+} from './server.js';
 
 let config: ServerConfig;
 try {
@@ -81,10 +88,14 @@ if (process.argv[2] === 'account') {
 if (process.argv[2] === 'dicom-echo') {
   // C-ECHO to another system, under this server's AE title: is it there, and
   // does it let this server in? 0 when it answers, 1 when it does not.
-  const [host, portText = '', calledAeTitle = ''] = process.argv.slice(3);
+  const given = process.argv.slice(3);
+  const withTls = given.includes('--tls');
+  const [host, portText = '', calledAeTitle = '', ...more] = given.filter((one) => one !== '--tls');
   const port = /^\d{1,5}$/.test(portText) ? Number(portText) : 0;
-  if (!host || port < 1 || port > 65535 || !isAeTitle(calledAeTitle)) {
-    process.stderr.write('Usage: dicom-echo <host> <port> <AE title of the other system>\n');
+  if (!host || port < 1 || port > 65535 || !isAeTitle(calledAeTitle) || more.length > 0) {
+    process.stderr.write(
+      'Usage: dicom-echo <host> <port> <AE title of the other system> [--tls]\n',
+    );
     process.exit(2);
   }
   // The title the server goes by now: what was set while it ran, if anything was.
@@ -94,7 +105,18 @@ if (process.argv[2] === 'dicom-echo') {
       : openFileSettingsStore(join(config.dataDir, DICOM_SETTINGS_FILE)).read();
   const ownAeTitle = kept?.local.aeTitle ?? config.dicomAeTitle;
   const { dicomEcho } = await import('./dimse/echo.js');
-  const result = await dicomEcho({ host, port, calledAeTitle, callingAeTitle: ownAeTitle });
+  // With TLS: what the server would bring to the call, as its configuration has it.
+  let tls: { readonly tls?: ClientTls } = {};
+  if (withTls) {
+    try {
+      tls = { tls: clientTls(openDicomTls(config, createLogger({ level: 'silent' }))) };
+    } catch (error) {
+      if (!(error instanceof ConfigError)) throw error;
+      process.stderr.write(`${error.message}\n`);
+      process.exit(2);
+    }
+  }
+  const result = await dicomEcho({ host, port, calledAeTitle, callingAeTitle: ownAeTitle, ...tls });
   const where = `${calledAeTitle} at ${host}:${port}`;
   switch (result.outcome) {
     case 'ok':
@@ -108,6 +130,35 @@ if (process.argv[2] === 'dicom-echo') {
       break;
     case 'unreachable':
       process.stderr.write(`No DICOM system answered at ${host}:${port}.\n`);
+      break;
+    case 'broken':
+      process.stderr.write(
+        `${host}:${port} took the connection and gave no answer.` +
+          `${withTls ? '' : ' It may expect TLS: try --tls.'}\n`,
+      );
+      break;
+    case 'tls-untrusted':
+      process.stderr.write(
+        `The certificate of ${where} is not of an authority this server trusts ` +
+          `(${ENVIRONMENT_VARIABLES.dicomTlsCa}; without, those the machine knows).\n`,
+      );
+      break;
+    case 'tls-expired':
+      process.stderr.write(`The certificate of ${where} has expired, or is not valid yet.\n`);
+      break;
+    case 'tls-name':
+      process.stderr.write(`The certificate of ${where} is for another name than ${host}.\n`);
+      break;
+    case 'tls-refused':
+      process.stderr.write(
+        `${where} ended the secure connection as it was made. It may want a certificate ` +
+          `of this server's, or not accept the one it has.\n`,
+      );
+      break;
+    case 'tls-failed':
+      process.stderr.write(
+        `No secure connection could be made to ${host}:${port}. It may not use TLS there.\n`,
+      );
       break;
     case 'failed':
       process.stderr.write(

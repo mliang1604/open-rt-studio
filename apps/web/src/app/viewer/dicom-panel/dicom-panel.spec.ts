@@ -5,7 +5,11 @@
 import { TestBed } from '@angular/core/testing';
 import { syntheticCtSeries } from '@open-rt-studio/testdata';
 
-import { connectToServer, type DicomRemote } from '../../data-source/server-source';
+import {
+  connectToServer,
+  DICOM_TLS_FAILURES,
+  type DicomRemote,
+} from '../../data-source/server-source';
 import { fakeServer, parseHere, type FakeAccount } from '../../data-source/server-testing';
 import { DicomPanel, echoSaid } from './dicom-panel';
 
@@ -21,6 +25,7 @@ const PLANNING = {
   port: 104,
   mayStore: true,
   mayRetrieve: false,
+  tls: false,
 };
 
 /** Render the panel for an administrator; `null` is a server without accounts. */
@@ -128,9 +133,14 @@ describe('the DICOM settings', () => {
     panel.fill('dicom-local-ae', ' ORS ');
     panel.fill('dicom-local-port', '4242');
     await panel.press('Save');
-    expect(panel.server.dicom.local).toEqual({ enabled: true, port: 4242, aeTitle: 'ORS' });
-    expect(panel.said('listening')).toBe('Listening at 127.0.0.1, port 4242, as ORS.');
-    expect(panel.said('done')).toBe('This server listens for DICOM as set.');
+    expect(panel.server.dicom.local).toEqual({
+      enabled: true,
+      port: 4242,
+      aeTitle: 'ORS',
+      tls: false,
+    });
+    expect(panel.said('listening')).toBe('Listening at 127.0.0.1, port 4242, as ORS, without TLS.');
+    expect(panel.said('done')).toBe('This server listens for DICOM as set, without TLS.');
     expect(panel.field('dicom-local-ae').value).toBe('ORS');
 
     panel.tick('Listen for DICOM', false);
@@ -145,7 +155,7 @@ describe('the DICOM settings', () => {
       server.dicom.host = '0.0.0.0';
       server.dicom.local = { enabled: true, port: 104, aeTitle: 'ORS' };
     });
-    expect(panel.said('listening')).toBe('Listening at 0.0.0.0, port 104, as ORS.');
+    expect(panel.said('listening')).toBe('Listening at 0.0.0.0, port 104, as ORS, without TLS.');
     expect(panel.said('note')).toContain('This server is reached from other machines.');
     expect(panel.host.querySelector('.dicom-note.warned')).not.toBeNull();
   });
@@ -234,12 +244,178 @@ describe('the DICOM settings', () => {
 
   it('put every outcome of an echo in words', () => {
     const remote: DicomRemote = PLANNING;
-    for (const outcome of ['ok', 'rejected', 'unreachable', 'failed'] as const) {
-      expect(
-        echoSaid(remote, { outcome, status: outcome === 'failed' ? 0xa700 : null }, 'ORS'),
-      ).toMatch(/^(Planning|Nothing) .+\.$/);
+    for (const outcome of [
+      ...(['ok', 'rejected', 'unreachable', 'broken', 'failed'] as const),
+      ...DICOM_TLS_FAILURES,
+    ]) {
+      const said = echoSaid(
+        remote,
+        { outcome, status: outcome === 'failed' ? 0xa700 : null },
+        'ORS',
+      );
+      expect(said, outcome).toMatch(/^(Planning|Nothing|No secure).+\.$/);
+      expect(said, outcome).not.toContain(outcome);
     }
     expect(echoSaid(remote, { outcome: 'failed', status: 0xa700 }, 'ORS')).toContain('A700');
+  });
+
+  // #57.
+  it('offer TLS for the listener only on a server that has a certificate for it', async () => {
+    const without = await render();
+    expect(without.box('Listen with TLS').disabled).toBe(true);
+    expect(without.host.querySelector('#dicom-tls-note')?.textContent).toContain(
+      'This server was given no certificate for DICOM, so it cannot listen with TLS.',
+    );
+
+    const panel = await render(ROOT, (server) => (server.dicom.tlsAvailable = true));
+    const note = () =>
+      panel.host.querySelector('#dicom-tls-note')!.textContent.trim().replace(/\s+/g, ' ');
+    expect(panel.box('Listen with TLS').disabled).toBe(false);
+    expect(panel.box('Listen with TLS').getAttribute('aria-describedby')).toBe('dicom-tls-note');
+    expect(note()).toContain('Without TLS, what is sent to this server');
+    panel.tick('Listen for DICOM', true);
+    panel.tick('Listen with TLS', true);
+    await panel.settle();
+    expect(note()).toContain('every system that calls must call with TLS');
+    await panel.press('Save');
+    expect(panel.server.dicom.local).toMatchObject({ enabled: true, tls: true });
+    expect(panel.said('listening')).toBe(
+      'Listening at 127.0.0.1, port 11112, as OPENRTSTUDIO, with TLS.',
+    );
+    expect(panel.said('done')).toBe('This server listens for DICOM as set, with TLS.');
+    expect(panel.box('Listen with TLS').checked).toBe(true);
+
+    panel.tick('Listen with TLS', false);
+    await panel.press('Save');
+    expect(panel.server.dicom.local.tls).toBe(false);
+    expect(panel.said('listening')).toContain('without TLS');
+  });
+
+  it('let TLS be taken off where the server no longer has a certificate, and say what it refuses', async () => {
+    const panel = await render(ROOT, (server) => {
+      // As kept from when it had one; it does not listen.
+      server.dicom.local = { enabled: false, port: 104, aeTitle: 'ORS', tls: true };
+    });
+    expect(panel.box('Listen with TLS').checked).toBe(true);
+    expect(panel.box('Listen with TLS').disabled).toBe(false);
+    panel.tick('Listen for DICOM', true);
+    await panel.press('Save');
+    expect(panel.said('problem')).toContain(
+      'The server has no certificate for DICOM, and cannot listen with TLS.',
+    );
+    expect(panel.said('listening')).toBe('Not listening for DICOM.');
+    panel.tick('Listen with TLS', false);
+    await panel.press('Save');
+    expect(panel.said('listening')).toBe('Listening at 127.0.0.1, port 104, as ORS, without TLS.');
+    // Off, and with no certificate, it is not offered again.
+    expect(panel.box('Listen with TLS').disabled).toBe(true);
+  });
+
+  it('have the server call a system with TLS, and show that it does', async () => {
+    const panel = await render();
+    await panel.press('Add a system…');
+    panel.fill('dicom-system-name', 'Archive');
+    panel.fill('dicom-system-ae', 'ARCHIVE');
+    panel.tick('Call it with TLS', true);
+    await panel.settle();
+    expect(panel.host.querySelector('#dicom-system-tls-note')?.textContent).toContain(
+      'The server checks the system’s certificate',
+    );
+    // It is how the server calls: a system that only calls has nothing to call with TLS.
+    await panel.press('Add system');
+    expect(panel.said('problem')).toBe(
+      'TLS is for how the server calls a system: give its host and port, or leave TLS off.',
+    );
+    expect(panel.server.dicom.remotes).toEqual([]);
+    panel.fill('dicom-system-host', 'archive.example.org');
+    panel.fill('dicom-system-port', '2762');
+    await panel.press('Add system');
+    expect(panel.server.dicom.remotes).toMatchObject([
+      { name: 'Archive', host: 'archive.example.org', port: 2762, tls: true },
+    ]);
+    expect(panel.rows()[0][2]).toBe('archive.example.org:2762 TLS');
+
+    // Changed, the form shows what the server has; and TLS can be taken off again.
+    await panel.press('Change Archive');
+    expect(panel.box('Call it with TLS').checked).toBe(true);
+    panel.tick('Call it with TLS', false);
+    // The system's Save, which is the form's own; the first in the panel is this server's.
+    panel.host
+      .querySelector<HTMLButtonElement>('#dicom-system-form button[type="submit"]')!
+      .click();
+    await panel.settle();
+    expect(panel.server.dicom.remotes[0].tls).toBe(false);
+    expect(panel.rows()[0][2]).toBe('archive.example.org:2762');
+  });
+
+  it('say what is wrong when no secure connection can be made to a system', async () => {
+    const secure = { ...PLANNING, tls: true };
+    const panel = await render(ROOT, (server) => {
+      server.dicom.remotes = [
+        secure,
+        { ...secure, id: 'system-b', name: 'Archive', aeTitle: 'ARCHIVE', port: 105 },
+        { ...secure, id: 'system-c', name: 'Linac', aeTitle: 'LINAC', port: 106 },
+        { ...secure, id: 'system-d', name: 'Old', aeTitle: 'OLD', port: 107 },
+        { ...secure, id: 'system-e', name: 'Strict', aeTitle: 'STRICT', port: 108 },
+        { ...secure, id: 'system-f', name: 'Good', aeTitle: 'GOOD', port: 109 },
+      ];
+      const there = (aeTitle: string, more: object) => ({
+        aeTitle,
+        knows: ['OPENRTSTUDIO'],
+        tls: true,
+        ...more,
+      });
+      const at = server.dicom.there;
+      at.set('192.0.2.10:104', there('PLANNING', { certificate: 'tls-untrusted' }));
+      at.set('192.0.2.10:105', there('ARCHIVE', { certificate: 'tls-expired' }));
+      at.set('192.0.2.10:106', there('LINAC', { certificate: 'tls-name' }));
+      // One that does not speak TLS at its port, and one that wants a certificate of the server's.
+      at.set('192.0.2.10:107', there('OLD', { tls: false }));
+      at.set('192.0.2.10:108', there('STRICT', { certificate: 'tls-refused' }));
+      at.set('192.0.2.10:109', there('GOOD', {}));
+      // One that expects TLS, and is called without.
+      server.dicom.remotes.push({
+        ...PLANNING,
+        id: 'system-g',
+        name: 'Plain',
+        aeTitle: 'PLAIN',
+        port: 110,
+      });
+      at.set('192.0.2.10:110', there('PLAIN', {}));
+    });
+    await panel.press('Test Plain with a C-ECHO');
+    expect(panel.said('problem')).toBe(
+      'Plain took the connection at 192.0.2.10:110 and gave no answer. It may expect TLS there: change it to be called with TLS.',
+    );
+    await panel.press('Test Planning with a C-ECHO');
+    expect(panel.said('problem')).toBe(
+      'Planning’s certificate is not of an authority this server trusts. The server’s configuration names the authorities it trusts (OPEN_RT_STUDIO_DICOM_TLS_CA); without, it trusts those its machine knows.',
+    );
+    await panel.press('Test Archive with a C-ECHO');
+    expect(panel.said('problem')).toBe('Archive’s certificate has expired, or is not valid yet.');
+    await panel.press('Test Linac with a C-ECHO');
+    expect(panel.said('problem')).toBe(
+      'Linac’s certificate is for another name than 192.0.2.10. Call it by the name its certificate is for.',
+    );
+    await panel.press('Test Old with a C-ECHO');
+    expect(panel.said('problem')).toBe(
+      'No secure connection could be made to 192.0.2.10:107. Old may not use TLS at that port.',
+    );
+    await panel.press('Test Strict with a C-ECHO');
+    expect(panel.said('problem')).toBe(
+      'Strict ended the secure connection as it was made: it may want a certificate of this server’s, or not accept the one it has.',
+    );
+    await panel.press('Test Good with a C-ECHO');
+    expect(panel.said('done')).toBe('Good answered.');
+    expect(panel.rows().map((row) => row[5])).toEqual([
+      'Not trusted',
+      'Certificate expired',
+      'Another name',
+      'No TLS',
+      'Refused',
+      'Answered',
+      'No answer',
+    ]);
   });
 
   it('show a system that only calls, which there is nothing to test', async () => {

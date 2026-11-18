@@ -12,10 +12,12 @@ import { join } from 'node:path';
 import { openSqliteAccountStore } from './accounts/account-store.js';
 import { createAccounts } from './accounts/accounts.js';
 import { API_PREFIX } from './api/api-routes.js';
-import { ConfigError, DEFAULT_CONFIG, type ServerConfig } from './config.js';
+import { ConfigError, DEFAULT_CONFIG, resolveConfig, type ServerConfig } from './config.js';
+import { dicomEcho } from './dimse/echo.js';
 import { createLogger, SILENT_LOGGER } from './logger.js';
 import {
   CERTIFICATE_WARNING_DAYS,
+  openDicomTls,
   openTls,
   startServer,
   startWarnings,
@@ -310,5 +312,189 @@ describe('what a server warns of as it starts', () => {
     ).toEqual([{ event: 'no-login' }, { event: 'origins-allowed', fields: { count: 1 } }]);
     expect(events({}, 0, false)).toEqual(['no-accounts']);
     expect(events({ host: '0.0.0.0' }, 0, false)).toEqual(['no-accounts', 'no-tls']);
+  });
+});
+
+// The same checks for the certificate the server shows over DICOM, and the
+// authorities it trusts other systems by.
+describe('the certificate for DICOM, when the server starts', () => {
+  async function forDicom(
+    cert: string,
+    key: string,
+    ca: string | null = null,
+    more: Partial<ServerConfig> = {},
+  ): Promise<ServerConfig> {
+    const dicomTlsCert = join(directory, 'dicom-cert.pem');
+    const dicomTlsKey = join(directory, 'dicom-key.pem');
+    const dicomTlsCa = ca === null ? null : join(directory, 'dicom-ca.pem');
+    await writeFile(dicomTlsCert, cert);
+    await writeFile(dicomTlsKey, key);
+    if (dicomTlsCa !== null) await writeFile(dicomTlsCa, ca!);
+    return {
+      ...DEFAULT_CONFIG,
+      port: 0,
+      shutdownTimeoutMs: 2_000,
+      dicomTlsCert,
+      dicomTlsKey,
+      dicomTlsCa,
+      ...more,
+    };
+  }
+
+  it('is not asked for: a server without one calls with TLS and cannot listen with it', () => {
+    expect(openDicomTls(DEFAULT_CONFIG, SILENT_LOGGER)).toBeNull();
+  });
+
+  it('is read with its key, and with the authorities when some are named', async () => {
+    const authority = testCertificate({ authority: true });
+    const made = testCertificate({ signedBy: authority });
+    expect(openDicomTls(await forDicom(made.cert, made.key), SILENT_LOGGER)).toEqual({
+      cert: made.cert,
+      key: made.key,
+      ca: null,
+    });
+    // More than one authority in a file.
+    const two = authority.cert + testCertificate({ authority: true }).cert;
+    expect(openDicomTls(await forDicom(made.cert, made.key, two), SILENT_LOGGER)).toEqual({
+      cert: made.cert,
+      key: made.key,
+      ca: two,
+    });
+  });
+
+  it('says what is wrong by the setting that names the file, and repeats nothing of it', async () => {
+    const made = testCertificate();
+    const config = await forDicom(made.cert, made.key);
+    expect(() =>
+      openDicomTls({ ...config, dicomTlsCert: join(directory, 'absent.pem') }, SILENT_LOGGER),
+    ).toThrow(new ConfigError('The file OPEN_RT_STUDIO_DICOM_TLS_CERT names could not be read.'));
+    expect(() =>
+      openDicomTls({ ...config, dicomTlsCa: join(directory, 'absent.pem') }, SILENT_LOGGER),
+    ).toThrow(new ConfigError('The file OPEN_RT_STUDIO_DICOM_TLS_CA names could not be read.'));
+    const swapped = await forDicom(made.key, made.cert);
+    expect(() => openDicomTls(swapped, SILENT_LOGGER)).toThrow(
+      new ConfigError('The file OPEN_RT_STUDIO_DICOM_TLS_CERT names is not a certificate in PEM.'),
+    );
+    const mismatched = await forDicom(made.cert, testCertificate().key);
+    expect(() => openDicomTls(mismatched, SILENT_LOGGER)).toThrow(
+      new ConfigError('The certificate and the key for DICOM do not belong together.'),
+    );
+    // Authorities that are none would trust no one: said, with nothing of the file.
+    for (const wrong of ['this is a secret, and no certificate', made.key]) {
+      const notCa = await forDicom(made.cert, made.key, wrong);
+      const thrown = (() => {
+        try {
+          openDicomTls(notCa, SILENT_LOGGER);
+          return null;
+        } catch (error) {
+          return error as Error;
+        }
+      })();
+      expect(thrown).toEqual(
+        new ConfigError('The file OPEN_RT_STUDIO_DICOM_TLS_CA names is not certificates in PEM.'),
+      );
+      expect(thrown!.message).not.toContain('secret');
+    }
+  });
+
+  it('says when the certificate has expired, and on which day', async () => {
+    const now = Date.parse('2026-06-15T12:00:00Z');
+    const past = testCertificate({
+      notBefore: new Date('2026-01-01T00:00:00Z'),
+      notAfter: new Date('2026-06-01T00:00:00Z'),
+    });
+    expect(() => openDicomTls(DEFAULT_CONFIG, SILENT_LOGGER, () => now)).not.toThrow();
+    const expired = await forDicom(past.cert, past.key);
+    expect(() => openDicomTls(expired, SILENT_LOGGER, () => now)).toThrow(
+      new ConfigError('The certificate for DICOM expired on 2026-06-01.'),
+    );
+  });
+
+  it('warns when it ends soon, and says which certificate', async () => {
+    const start = Date.parse('2026-06-01T00:00:00Z');
+    const made = testCertificate({
+      notBefore: new Date(start),
+      notAfter: new Date(start + 30 * DAY),
+    });
+    const lines: string[] = [];
+    const logger = createLogger({ level: 'info', write: (line) => lines.push(line) });
+    openDicomTls(await forDicom(made.cert, made.key), logger, () => start + 20 * DAY + 1);
+    expect(lines.map((line) => JSON.parse(line) as Record<string, unknown>)).toMatchObject([
+      { event: 'certificate-expires-soon', days: 9, use: 'dicom' },
+    ]);
+  });
+
+  it('wants a certificate with the authorities, and a key with the certificate', () => {
+    expect(() =>
+      openDicomTls({ ...DEFAULT_CONFIG, dicomTlsCa: '/etc/ca.pem' }, SILENT_LOGGER),
+    ).toThrow(
+      new ConfigError(
+        'OPEN_RT_STUDIO_DICOM_TLS_CA names authorities for TLS over DICOM, and the server has no certificate of its own for it: set OPEN_RT_STUDIO_DICOM_TLS_CERT and OPEN_RT_STUDIO_DICOM_TLS_KEY too.',
+      ),
+    );
+    expect(() => resolveConfig({ dicomTlsCert: '/etc/cert.pem' })).toThrow(
+      new ConfigError(
+        'TLS for DICOM takes a certificate and its key: set both OPEN_RT_STUDIO_DICOM_TLS_CERT and OPEN_RT_STUDIO_DICOM_TLS_KEY, or neither.',
+      ),
+    );
+  });
+
+  it('has a server that listens for DICOM listen with TLS, with no more said', async () => {
+    const made = testCertificate();
+    const lines: string[] = [];
+    const logger = createLogger({ level: 'info', write: (line) => lines.push(line) });
+    server = await startServer(
+      await forDicom(made.cert, made.key, null, {
+        auth: 'none',
+        dicomPort: 0,
+        dicomCallers: ['PEER'],
+      }),
+      logger,
+    );
+    expect(server.dicom).toMatchObject({ host: '127.0.0.1', tls: true });
+    const target = {
+      host: '127.0.0.1',
+      port: server.dicom!.port,
+      callingAeTitle: 'PEER',
+      calledAeTitle: DEFAULT_CONFIG.dicomAeTitle,
+      timeoutMs: 2_000,
+    };
+    expect(await dicomEcho({ ...target, tls: { ca: made.cert } })).toEqual({ outcome: 'ok' });
+    expect(await dicomEcho(target)).toEqual({ outcome: 'broken' });
+    // The API is another matter: it has no certificate here, and speaks HTTP.
+    expect(server.tls).toBe(false);
+    const said = lines.join('\n');
+    expect(said).toContain('"dicom-listening"');
+    expect(said).not.toContain('BEGIN');
+  });
+
+  it('does not start a server whose kept settings say TLS once it has no certificate', async () => {
+    const made = testCertificate();
+    const dataDir = join(directory, 'data');
+    const config = await forDicom(made.cert, made.key, null, {
+      auth: 'none',
+      dataDir,
+      dicomPort: 0,
+    });
+    server = await startServer(config, SILENT_LOGGER);
+    // Kept as it is, by a change that changes nothing else.
+    const local = await fetch(`http://127.0.0.1:${server.address.port}${API_PREFIX}/dicom/local`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true, port: 0, aeTitle: 'ORS', tls: true }),
+    });
+    expect(local.status).toBe(200);
+    await server.stop();
+    server = null;
+    await expect(
+      startServer({ ...config, dicomTlsCert: null, dicomTlsKey: null }, SILENT_LOGGER),
+    ).rejects.toThrow(
+      new ConfigError(
+        'The DICOM settings that were kept say to listen with TLS, and the server has no certificate for DICOM. Set OPEN_RT_STUDIO_DICOM_TLS_CERT and OPEN_RT_STUDIO_DICOM_TLS_KEY, or take "tls" out of the local settings in dicom.json in the data directory.',
+      ),
+    );
+    // With the certificate again, it is as it was left.
+    server = await startServer(config, SILENT_LOGGER);
+    expect(server.dicom).toMatchObject({ tls: true });
   });
 });

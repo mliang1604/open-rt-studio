@@ -25,6 +25,7 @@ import { createJobManager } from './jobs/job-manager.js';
 import { openSqliteJobStore } from './jobs/job-store.js';
 import { dicomRoutes } from './api/dicom-routes.js';
 import { dicomAudit } from './dimse/dicom-audit.js';
+import type { DicomTls } from './dimse/tls.js';
 import { createDicomService } from './dimse/dicom-service.js';
 import {
   createMemorySettingsStore,
@@ -45,7 +46,7 @@ export interface RunningServer {
   /** Whether it speaks HTTPS. */
   readonly tls: boolean;
   /** Where it listens for DICOM associations, or null when it has no DICOM listener. */
-  readonly dicom: { readonly host: string; readonly port: number } | null;
+  readonly dicom: { readonly host: string; readonly port: number; readonly tls: boolean } | null;
   /**
    * Stop cleanly: no new connections, the requests in flight answered, then
    * the core's work finished. True when nothing had to be cut off or
@@ -130,13 +131,76 @@ export function openAccounts(
 export const CERTIFICATE_WARNING_DAYS = 30;
 const DAY_MS = 86_400_000;
 
+/** A file a setting names, read; the error names the setting and never the contents. */
+function readNamed(path: string, setting: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    throw new ConfigError(`The file ${setting} names could not be read.`);
+  }
+}
+
 /**
- * The certificate and key the configuration names, read and checked; null
- * for a server that speaks HTTP. Throws {@link ConfigError} for what a
- * client would otherwise meet as a failed connection with no reason given:
- * a file that cannot be read or is not what it should be, a key that is not
- * the certificate's, a certificate whose time has not come or has passed.
- * The error names the setting, never the file's contents.
+ * A certificate and its key, read from the files two settings name and
+ * checked. Throws {@link ConfigError} for what a client would otherwise meet
+ * as a failed connection with no reason given: a file that cannot be read
+ * or is not what it should be, a key that is not the certificate's, a
+ * certificate whose time has not come or has passed. The error names the
+ * setting, never the file's contents.
+ */
+function readCertificate(
+  files: { readonly cert: string; readonly key: string },
+  settings: { readonly cert: string; readonly key: string },
+  logger: Logger,
+  now: () => number,
+  /** What the certificate is for, in the log's word for one that ends soon. */
+  use: 'https' | 'dicom',
+): { readonly cert: string; readonly key: string } {
+  const cert = readNamed(files.cert, settings.cert);
+  const key = readNamed(files.key, settings.key);
+  let certificate: X509Certificate;
+  try {
+    // The first in the file is the server's own; any after it lead to its authority.
+    certificate = new X509Certificate(cert);
+  } catch {
+    throw new ConfigError(`The file ${settings.cert} names is not a certificate in PEM.`);
+  }
+  let privateKey: KeyObject;
+  try {
+    privateKey = createPrivateKey(key);
+  } catch {
+    throw new ConfigError(
+      `The file ${settings.key} names is not a private key in PEM, ` +
+        'or is protected by a passphrase, which the server does not take.',
+    );
+  }
+  if (!certificate.checkPrivateKey(privateKey)) {
+    throw new ConfigError(
+      use === 'https'
+        ? 'The certificate and the key do not belong together.'
+        : 'The certificate and the key for DICOM do not belong together.',
+    );
+  }
+  const from = Date.parse(certificate.validFrom);
+  const to = Date.parse(certificate.validTo);
+  const day = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+  const which = use === 'https' ? 'The certificate' : 'The certificate for DICOM';
+  if (now() < from) throw new ConfigError(`${which} is not valid until ${day(from)}.`);
+  if (now() > to) throw new ConfigError(`${which} expired on ${day(to)}.`);
+  const daysLeft = Math.floor((to - now()) / DAY_MS);
+  if (daysLeft < CERTIFICATE_WARNING_DAYS) {
+    // The server reads the certificate when it starts: a new one needs a restart.
+    logger.warn('certificate-expires-soon', {
+      days: daysLeft,
+      ...(use === 'https' ? {} : { use }),
+    });
+  }
+  return { cert, key };
+}
+
+/**
+ * The certificate and key the configuration names for HTTPS, read and
+ * checked; null for a server that speaks HTTP.
  */
 export function openTls(
   config: ServerConfig,
@@ -144,51 +208,57 @@ export function openTls(
   now: () => number = Date.now,
 ): { readonly cert: string; readonly key: string } | null {
   if (config.tlsCert === null || config.tlsKey === null) return null;
-  const read = (path: string, setting: string): string => {
-    try {
-      return readFileSync(path, 'utf8');
-    } catch {
-      throw new ConfigError(`The file ${setting} names could not be read.`);
+  return readCertificate(
+    { cert: config.tlsCert, key: config.tlsKey },
+    { cert: ENVIRONMENT_VARIABLES.tlsCert, key: ENVIRONMENT_VARIABLES.tlsKey },
+    logger,
+    now,
+    'https',
+  );
+}
+
+/**
+ * What the configuration gives the server for TLS over DICOM (#57): its
+ * certificate and key, and the authorities it trusts other systems by.
+ * Null for a server that was given no certificate, which can then neither
+ * listen with TLS nor show who it is. Throws {@link ConfigError} as
+ * {@link openTls} does, and for authorities named without a certificate.
+ */
+export function openDicomTls(
+  config: ServerConfig,
+  logger: Logger,
+  now: () => number = Date.now,
+): DicomTls | null {
+  if (config.dicomTlsCert === null || config.dicomTlsKey === null) {
+    if (config.dicomTlsCa !== null) {
+      throw new ConfigError(
+        `${ENVIRONMENT_VARIABLES.dicomTlsCa} names authorities for TLS over DICOM, and the ` +
+          `server has no certificate of its own for it: set ` +
+          `${ENVIRONMENT_VARIABLES.dicomTlsCert} and ${ENVIRONMENT_VARIABLES.dicomTlsKey} too.`,
+      );
     }
-  };
-  const cert = read(config.tlsCert, ENVIRONMENT_VARIABLES.tlsCert);
-  const key = read(config.tlsKey, ENVIRONMENT_VARIABLES.tlsKey);
-  let certificate: X509Certificate;
+    return null;
+  }
+  const own = readCertificate(
+    { cert: config.dicomTlsCert, key: config.dicomTlsKey },
+    { cert: ENVIRONMENT_VARIABLES.dicomTlsCert, key: ENVIRONMENT_VARIABLES.dicomTlsKey },
+    logger,
+    now,
+    'dicom',
+  );
+  if (config.dicomTlsCa === null) return { ...own, ca: null };
+  const ca = readNamed(config.dicomTlsCa, ENVIRONMENT_VARIABLES.dicomTlsCa);
+  // Each certificate in the file must be one: a file of something else would trust no one.
+  const blocks = ca.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
   try {
-    // The first in the file is the server's own; any after it lead to its authority.
-    certificate = new X509Certificate(cert);
+    if (blocks.length === 0) throw new Error('none');
+    for (const block of blocks) new X509Certificate(block);
   } catch {
     throw new ConfigError(
-      `The file ${ENVIRONMENT_VARIABLES.tlsCert} names is not a certificate in PEM.`,
+      `The file ${ENVIRONMENT_VARIABLES.dicomTlsCa} names is not certificates in PEM.`,
     );
   }
-  let privateKey: KeyObject;
-  try {
-    privateKey = createPrivateKey(key);
-  } catch {
-    throw new ConfigError(
-      `The file ${ENVIRONMENT_VARIABLES.tlsKey} names is not a private key in PEM, ` +
-        'or is protected by a passphrase, which the server does not take.',
-    );
-  }
-  if (!certificate.checkPrivateKey(privateKey)) {
-    throw new ConfigError('The certificate and the key do not belong together.');
-  }
-  const from = Date.parse(certificate.validFrom);
-  const to = Date.parse(certificate.validTo);
-  const day = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
-  if (now() < from) {
-    throw new ConfigError(`The certificate is not valid until ${day(from)}.`);
-  }
-  if (now() > to) {
-    throw new ConfigError(`The certificate expired on ${day(to)}.`);
-  }
-  const daysLeft = Math.floor((to - now()) / DAY_MS);
-  if (daysLeft < CERTIFICATE_WARNING_DAYS) {
-    // The server reads the certificate when it starts: a new one needs a restart.
-    logger.warn('certificate-expires-soon', { days: daysLeft });
-  }
-  return { cert, key };
+  return { ...own, ca };
 }
 
 /** The name of the file in the data directory that holds the audit log. */
@@ -211,6 +281,8 @@ export function dicomDefaults(config: ServerConfig): DicomSettings {
       enabled: config.dicomPort !== null,
       port: config.dicomPort ?? USUAL_DICOM_PORT,
       aeTitle: config.dicomAeTitle,
+      // With a certificate for it, the listener speaks TLS unless it is told not to.
+      tls: config.dicomTlsCert !== null,
     },
     remotes: config.dicomCallers.map((aeTitle) => ({
       id: newRemoteId(),
@@ -220,6 +292,7 @@ export function dicomDefaults(config: ServerConfig): DicomSettings {
       port: null,
       mayStore: true,
       mayRetrieve: false,
+      tls: false,
     })),
   };
 }
@@ -327,6 +400,7 @@ export async function startServer(
 ): Promise<RunningServer> {
   // First: a configuration that is refused opens nothing.
   const tls = openTls(config, logger);
+  const dicomTls = openDicomTls(config, logger);
   const accounts = openAccounts(config, logger, parts.accounts);
   const audit = openAudit(config.dataDir, parts.audit);
   const stopClearing = keepAuditRetention(audit, config.auditRetentionDays, logger);
@@ -349,6 +423,7 @@ export async function startServer(
     defaults: dicomDefaults(config),
     closeTimeoutMs: config.shutdownTimeoutMs,
     audit: dicomAudit(audit, logger),
+    tls: dicomTls,
     logger,
   });
   const dicomApi = dicomRoutes(dicom, core.pacs!.index);
@@ -402,6 +477,15 @@ export async function startServer(
     stopClearing();
     accounts?.close();
     audit?.close();
+    if ((error as { code?: unknown } | null)?.code === 'no-certificate') {
+      // Never without TLS where TLS was asked for: it does not start, and says how it would.
+      throw new ConfigError(
+        `The DICOM settings that were kept say to listen with TLS, and the server has no ` +
+          `certificate for DICOM. Set ${ENVIRONMENT_VARIABLES.dicomTlsCert} and ` +
+          `${ENVIRONMENT_VARIABLES.dicomTlsKey}, or take "tls" out of the local settings in ` +
+          `${DICOM_SETTINGS_FILE} in the data directory.`,
+      );
+    }
     throw error;
   }
 

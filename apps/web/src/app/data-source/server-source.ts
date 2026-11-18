@@ -311,6 +311,8 @@ export interface DicomLocal {
   readonly port: number;
   /** The AE title it is addressed by, and calls under. */
   readonly aeTitle: string;
+  /** Whether it listens with TLS: every system that calls then calls with TLS. */
+  readonly tls: boolean;
 }
 
 /** Another system a server knows, without the server's own name for it. */
@@ -324,6 +326,8 @@ export interface DicomRemoteInput {
   readonly mayStore: boolean;
   /** Whether it may ask what the server holds, and have it sent (C-FIND, C-MOVE, C-GET). */
   readonly mayRetrieve: boolean;
+  /** Whether the server calls it with TLS, and checks its certificate. */
+  readonly tls: boolean;
 }
 
 export interface DicomRemote extends DicomRemoteInput {
@@ -334,12 +338,51 @@ export interface DicomRemote extends DicomRemoteInput {
 export interface DicomState {
   readonly local: DicomLocal;
   readonly remotes: readonly DicomRemote[];
-  readonly listening: { readonly host: string; readonly port: number } | null;
+  readonly listening: {
+    readonly host: string;
+    readonly port: number;
+    readonly tls: boolean;
+  } | null;
+  /** Whether the server was given a certificate for DICOM, without which it cannot listen with TLS. */
+  readonly tlsAvailable: boolean;
+}
+
+/** Why a call over TLS could not be made, as the server names it. */
+export const DICOM_TLS_FAILURES = [
+  ...(['tls-untrusted', 'tls-expired', 'tls-name'] as const),
+  ...(['tls-refused', 'tls-failed'] as const),
+] as const;
+export type DicomTlsFailure = (typeof DICOM_TLS_FAILURES)[number];
+
+export const isDicomTlsFailure = (failure: string): failure is DicomTlsFailure =>
+  (DICOM_TLS_FAILURES as readonly string[]).includes(failure);
+
+/**
+ * Why no secure connection could be made to a system, as the end of a
+ * sentence; `who` is the system's name, or "the system".
+ */
+export function dicomTlsFailureSaid(failure: DicomTlsFailure, who: string): string {
+  switch (failure) {
+    case 'tls-untrusted':
+      return `${who}’s certificate is not of an authority this server trusts`;
+    case 'tls-expired':
+      return `${who}’s certificate has expired, or is not valid yet`;
+    case 'tls-name':
+      return `${who}’s certificate is for another name than the host the server calls it by`;
+    case 'tls-refused':
+      return `${who} ended the secure connection as it was made: it may want a certificate of this server’s, or not accept the one it has`;
+    case 'tls-failed':
+      return `no secure connection could be made: ${who} may not use TLS at that port`;
+    default: {
+      const exhaustive: never = failure;
+      return String(exhaustive);
+    }
+  }
 }
 
 /** What came of asking a system for a C-ECHO. */
 export interface DicomEcho {
-  readonly outcome: 'ok' | 'rejected' | 'unreachable' | 'failed';
+  readonly outcome: 'ok' | 'rejected' | 'unreachable' | 'broken' | 'failed' | DicomTlsFailure;
   /** The status of an echo that failed. */
   readonly status: number | null;
 }
@@ -355,6 +398,7 @@ export interface DicomDestination {
 export const DICOM_SEND_FAILURES = [
   ...(['refused', 'kind-not-taken', 'transfer-syntax-not-taken', 'rejected'] as const),
   ...(['unreachable', 'broken', 'missing', 'stopped'] as const),
+  ...DICOM_TLS_FAILURES,
 ] as const;
 export type DicomSendFailure = (typeof DICOM_SEND_FAILURES)[number];
 
@@ -417,7 +461,10 @@ export interface DicomFoundStudy {
 }
 
 /** Why another system gave no answer, as the server names it. */
-export const DICOM_ASK_FAILURES = ['rejected', 'unreachable', 'broken', 'not-taken'] as const;
+export const DICOM_ASK_FAILURES = [
+  ...(['rejected', 'unreachable', 'broken', 'not-taken'] as const),
+  ...DICOM_TLS_FAILURES,
+] as const;
 export type DicomAskFailure = (typeof DICOM_ASK_FAILURES)[number];
 
 /** What another system answered to a question about its studies, or why it did not. */

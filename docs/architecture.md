@@ -610,10 +610,42 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   server cannot tell that one is there, so it warns (`no-tls`) whenever it
   listens beyond this machine without a certificate, and does not refuse.
   No `Strict-Transport-Security`: it binds the host name, not the port.
-  TLS for DIMSE waits for DIMSE.
+  In a container it is `compose.https.yaml` over `compose.yaml`, which
+  mounts the certificate; the container check runs it.
 
   Status: **decided, and Michael's to overturn**: warning and not refusing
   when a reachable server has no certificate.
+
+- **TLS for DICOM** (#57, the other half). Optional, and set in two places
+  that mean different things. The listener's `tls` says whether the port
+  speaks TLS, for every caller, since a port cannot do both. Each system's
+  `tls` says whether the server calls that system with TLS. The certificate
+  is one for DICOM (`dicomTlsCert`, `dicomTlsKey`), apart from the API's,
+  and comes from the configuration, never from a request: a key is not
+  something the viewer uploads. `dicomTlsCa` is the authorities other
+  systems are trusted by, in both directions: with it a caller must show a
+  certificate of theirs, and a system that is called must have one.
+  - A system that is called has its certificate checked always: authority,
+    time and host name. There is no setting to skip the check; a
+    certificate of a system's own making is trusted by naming it as an
+    authority.
+  - What went wrong is an outcome of its own (`tls-untrusted`,
+    `tls-expired`, `tls-name`, `tls-refused`, `tls-failed`), carried by
+    echoes, sends, questions and retrieves alike, and put in words by the
+    viewer. The DIMSE library does not say which, so the address is asked
+    for a handshake once more to learn it.
+  - A server whose kept settings say TLS and that has no certificate does
+    not start: listening without it would be the one thing worse than not
+    listening.
+  - A caller that does not get through the handshake is in the application
+    log by the reason alone, and not in the audit log: it has given no AE
+    title.
+  - Not there: a certificate or authority per system, pinning, revocation
+    lists, a link between a certificate and an AE title.
+
+  Status: **decided, and Michael's to overturn**, most of all that a server
+  given a certificate listens with TLS unless told otherwise, and that one
+  list of authorities serves every system.
 
 - **Who did what** (#56). An audit log in a SQLite file of its own
   (`audit.sqlite`), apart from the application log: the one holds

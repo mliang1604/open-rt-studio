@@ -14,7 +14,11 @@ import {
 } from '@open-rt-studio/testdata';
 
 import type { PatientSummary } from '../../data-source/data-source';
-import { connectToServer, type DicomRetrieve } from '../../data-source/server-source';
+import {
+  connectToServer,
+  DICOM_TLS_FAILURES,
+  type DicomRetrieve,
+} from '../../data-source/server-source';
 import { fakeServer, parseHere, type FakeAccount } from '../../data-source/server-testing';
 import {
   dateRangeKey,
@@ -243,6 +247,18 @@ describe('a retrieve in words', () => {
       expect(retrieveFailureSaid(failure, null), failure).not.toBe(failure);
     }
     expect(retrieveFailureSaid('a-later-reason', null)).toBe('a-later-reason');
+    // #57: why no secure connection was made.
+    for (const failure of DICOM_TLS_FAILURES) {
+      expect(retrieveFailureSaid(failure, null), failure).toMatch(/the system/);
+      expect(unansweredSaid(failure, 'Archive'), failure).toMatch(/^(Archive|No secure).+\.$/);
+      expect(unansweredSaid(failure, 'Archive'), failure).not.toContain(failure);
+    }
+    expect(unansweredSaid('tls-expired', 'Archive')).toBe(
+      'Archive’s certificate has expired, or is not valid yet.',
+    );
+    expect(unansweredSaid('tls-failed', 'Archive')).toBe(
+      'No secure connection could be made: Archive may not use TLS at that port.',
+    );
     for (const outcome of ['rejected', 'unreachable', 'broken', 'not-taken']) {
       expect(unansweredSaid(outcome, 'Archive'), outcome).toContain('Archive');
       expect(unansweredSaid(outcome, 'Archive'), outcome).not.toContain(outcome);

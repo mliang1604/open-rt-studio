@@ -13,6 +13,7 @@
 import { parseDateKey } from '../pacs-index/pacs-index.js';
 import { isUid } from '../uid.js';
 import { listOf, textOf, type Identifier } from './query.js';
+import type { TlsFailure } from './tls.js';
 
 /** The levels a question to another system can be of. */
 export const ASK_LEVELS = ['patient', 'study', 'series'] as const;
@@ -30,7 +31,9 @@ export type AskFailure =
   /** The connection ended before the answer did. */
   | 'broken'
   /** It does not answer questions of this kind. */
-  | 'not-taken';
+  | 'not-taken'
+  /** No secure connection could be made, and why. */
+  | TlsFailure;
 
 /** The keys a question may have. Which of them a level takes is {@link checkedKeys}'. */
 export interface AskKeys {

@@ -20,6 +20,12 @@ export interface LocalDicom {
   readonly port: number;
   /** The AE title it is addressed by, and calls under. */
   readonly aeTitle: string;
+  /**
+   * Whether it listens with TLS (#57): every system that calls then calls
+   * with TLS, on the one port there is. It takes a certificate, which the
+   * server's configuration names.
+   */
+  readonly tls: boolean;
 }
 
 /** Another system the server knows. */
@@ -39,6 +45,8 @@ export interface RemoteSystem {
    * C-MOVE, C-GET) when it calls: all that the server holds.
    */
   readonly mayRetrieve: boolean;
+  /** Whether the server calls it with TLS (#57), and checks its certificate. */
+  readonly tls: boolean;
 }
 
 export interface DicomSettings {
@@ -67,7 +75,8 @@ export class DicomSettingsError extends Error {
       | 'nothing-to-send'
       | 'not-done'
       | 'not-listening'
-      | 'may-not-store',
+      | 'may-not-store'
+      | 'no-certificate',
     message: string,
   ) {
     super(message);
@@ -90,16 +99,24 @@ export function checkedLocal(value: unknown): LocalDicom {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw invalid('The local settings are an object.');
   }
-  const { enabled, port, aeTitle, ...more } = value as Record<string, unknown>;
+  const {
+    enabled,
+    port,
+    aeTitle,
+    // Left out by what was kept, or is sent, from before there was such a thing: without.
+    tls = false,
+    ...more
+  } = value as Record<string, unknown>;
   if (Object.keys(more).length > 0) {
-    throw invalid('The local settings are enabled, port and aeTitle, and nothing else.');
+    throw invalid('The local settings are enabled, port, aeTitle and tls, and nothing else.');
   }
   if (typeof enabled !== 'boolean') throw invalid('enabled is true or false.');
+  if (typeof tls !== 'boolean') throw invalid('tls is true or false.');
   if (!isPort(port, 0)) throw invalid('port is a whole number from 0 to 65535.');
   if (typeof aeTitle !== 'string' || !isAeTitle(aeTitle)) {
     throw invalid('aeTitle is 1 to 16 printable ASCII characters, with no backslash.');
   }
-  return { enabled, port, aeTitle };
+  return { enabled, port, aeTitle, tls };
 }
 
 /** A remote system as it was given, checked. Throws {@link DicomSettingsError}. */
@@ -115,11 +132,12 @@ export function checkedRemote(value: unknown): RemoteInput {
     mayStore,
     // Left out by what was kept, or is sent, from before there was such a thing: it may not.
     mayRetrieve = false,
+    tls = false,
     ...more
   } = value as Record<string, unknown>;
   if (Object.keys(more).length > 0) {
     throw invalid(
-      'A remote system is name, aeTitle, host, port, mayStore and mayRetrieve, and nothing else.',
+      'A remote system is name, aeTitle, host, port, mayStore, mayRetrieve and tls, and nothing else.',
     );
   }
   if (
@@ -147,7 +165,10 @@ export function checkedRemote(value: unknown): RemoteInput {
   }
   if (typeof mayStore !== 'boolean') throw invalid('mayStore is true or false.');
   if (typeof mayRetrieve !== 'boolean') throw invalid('mayRetrieve is true or false.');
-  return { name, aeTitle, host, port, mayStore, mayRetrieve };
+  if (typeof tls !== 'boolean') throw invalid('tls is true or false.');
+  // It says how the server calls: a system that only calls is not called.
+  if (tls && host === null) throw invalid('tls is for a system that has an address to call.');
+  return { name, aeTitle, host, port, mayStore, mayRetrieve, tls };
 }
 
 /** A new id for a remote system. */

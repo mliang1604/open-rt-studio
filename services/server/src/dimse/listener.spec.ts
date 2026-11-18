@@ -285,7 +285,8 @@ describe('the listener', () => {
   it('takes no more connections than it says', async () => {
     const { port } = await listening();
     for (let i = 0; i < ASSOCIATIONS_AT_MOST; i++) await idle(port);
-    expect((await echo(port)).outcome).toBe('unreachable');
+    // Taken and closed with no answer, which is not the same as nothing being there.
+    expect((await echo(port)).outcome).toBe('broken');
     // One goes, and there is room again.
     const gone = new Promise((resolve) => sockets[0].once('close', resolve));
     sockets[0].destroy();

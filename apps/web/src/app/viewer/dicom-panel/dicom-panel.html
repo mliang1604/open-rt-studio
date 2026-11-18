@@ -41,6 +41,17 @@
           (input)="onLocalText('port', $event)"
         />
       </div>
+      <label class="check">
+        <input
+          id="dicom-local-tls"
+          type="checkbox"
+          aria-describedby="dicom-tls-note"
+          [checked]="tls()"
+          [disabled]="!tlsOffered()"
+          (change)="onTls($event)"
+        />
+        Listen with TLS
+      </label>
       <button type="submit" [disabled]="busy()">Save</button>
     </form>
     <p class="dicom-note" [class.warned]="exposed()">
@@ -49,6 +60,17 @@
       what it holds.
       @if (exposed()) {
         This server is reached from other machines.
+      }
+    </p>
+    <p class="dicom-note" id="dicom-tls-note">
+      @if (!now.tlsAvailable) {
+        This server was given no certificate for DICOM, so it cannot listen with TLS. Its
+        configuration names one (OPEN_RT_STUDIO_DICOM_TLS_CERT and _KEY), read when it starts.
+      } @else if (tls()) {
+        With TLS, every system that calls must call with TLS, and is shown the certificate the
+        server’s configuration names.
+      } @else {
+        Without TLS, what is sent to this server and what it answers crosses the network as it is.
       }
     </p>
   </section>
@@ -77,6 +99,9 @@
                 <td class="dicom-address">
                   @if (remote.host !== null) {
                     {{ remote.host }}:{{ remote.port }}
+                    @if (remote.tls) {
+                      <span class="dicom-tls" title="The server calls it with TLS">TLS</span>
+                    }
                   } @else {
                     <span class="muted">Only calls</span>
                   }
@@ -198,6 +223,22 @@
           />
           May query and retrieve
         </label>
+        <label class="check">
+          <input
+            id="dicom-system-tls"
+            type="checkbox"
+            [checked]="typed.tls"
+            (change)="onFormMay('tls', $event)"
+          />
+          Call it with TLS
+        </label>
+        @if (typed.tls) {
+          <p class="note" id="dicom-system-tls-note">
+            The server checks the system’s certificate, for the host given here, before it sends or
+            asks anything. Whether the system must use TLS when it calls is this server’s own
+            setting, above.
+          </p>
+        }
         @if (typed.mayRetrieve) {
           <p class="note" id="dicom-retrieve-note">
             It is answered what the server holds, of every patient, and can have it sent to itself

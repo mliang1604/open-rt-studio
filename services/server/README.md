@@ -294,8 +294,9 @@ address, and a certificate the browser trusts; a self-signed one has to be
 trusted in the browser first, or the viewer can only say that the server
 could not be reached.
 
-Not there: TLS for DICOM associations (#57), a certificate re-read without
-a restart, client certificates.
+Not there: a certificate re-read without a restart, and client certificates
+for the API. TLS for DICOM associations is a matter of its own, with a
+certificate of its own: see [TLS for DICOM](#tls-for-dicom).
 
 ## DICOM
 
@@ -322,7 +323,9 @@ npm start -w @open-rt-studio/server
   or read all that the server holds. The listener is on the server's own
   address (`host`), which is this machine alone by default. On any other
   address the log says `dicom-without-login`; reach for a network that only
-  the systems on the list are on. Associations are not encrypted (#57).
+  the systems on the list are on. Associations are not encrypted unless the
+  listener is given [TLS](#tls-for-dicom), which can also ask a caller for a
+  certificate.
 - **What it takes**: CT, MR, PET and nuclear medicine images (the enhanced
   kinds too), secondary captures, RT Image, RT Dose, RT Structure Set, RT
   Plan, RT Ion Plan, and both kinds of registration
@@ -355,7 +358,8 @@ npm start -w @open-rt-studio/server -- dicom-echo 192.0.2.10 104 THEIR_AE
 ```
 
 It calls under the server's AE title and exits with 0 when the other system
-answers. The other system has to know that title.
+answers. The other system has to know that title. With `--tls` at the end
+it calls with [TLS](#tls-for-dicom), as the server would.
 
 ### Changed while the server runs
 
@@ -363,19 +367,20 @@ An administrator can change all of this from the viewer (the server card's
 "DICOM") or through the API, and a change takes effect at once, with no
 restart:
 
-| Request                               | What it does                                                                     |
-| ------------------------------------- | -------------------------------------------------------------------------------- |
-| `GET /api/v1/dicom`                   | The settings, the systems the server knows, and where it listens now             |
-| `PUT /api/v1/dicom/local`             | Listener on or off, its port and the server's AE title                           |
-| `POST /api/v1/dicom/remotes`          | Add a system: `{ "name", "aeTitle", "host", "port", "mayStore", "mayRetrieve" }` |
-| `PUT /api/v1/dicom/remotes/:id`       | Replace what is known of one                                                     |
-| `DELETE /api/v1/dicom/remotes/:id`    | Forget one                                                                       |
-| `POST /api/v1/dicom/remotes/:id/echo` | C-ECHO to one: `ok`, `rejected`, `unreachable` or `failed` with a status         |
+| Request                               | What it does                                                                                                                             |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/dicom`                   | The settings, the systems the server knows, and where it listens now                                                                     |
+| `PUT /api/v1/dicom/local`             | Listener on or off, its port, the server's AE title, and whether it speaks TLS                                                           |
+| `POST /api/v1/dicom/remotes`          | Add a system: `{ "name", "aeTitle", "host", "port", "mayStore", "mayRetrieve", "tls" }`                                                  |
+| `PUT /api/v1/dicom/remotes/:id`       | Replace what is known of one                                                                                                             |
+| `DELETE /api/v1/dicom/remotes/:id`    | Forget one                                                                                                                               |
+| `POST /api/v1/dicom/remotes/:id/echo` | C-ECHO to one: `ok`, `rejected`, `unreachable`, `broken`, `failed` with a status, or [why no secure connection was made](#tls-for-dicom) |
 
 - **A system** has a name for people, its AE title, where it listens (a
   host and a port, or neither for a system that only calls this server),
   whether it may send objects here (`mayStore`), and whether it may query
-  and retrieve (`mayRetrieve`, which is `false` when it is left out). A
+  and retrieve (`mayRetrieve`, which is `false` when it is left out), and
+  whether the server calls it with TLS (`tls`, `false` when left out). A
   system that may do either is let in when it calls, for that. No two have
   one AE title.
 - **At once** means at the next association: the listener asks for its AE
@@ -384,10 +389,11 @@ restart:
   `port-unavailable`). The listener stays at the server's own address
   (`host`); that is not changed here.
 - **The changes are kept** in `dicom.json` in the data directory, and from
-  the first change on that file is what the server goes by: the three
-  `dicom...` settings are then only what a server that has kept nothing
-  starts from, and the log says `dicom-settings-kept` when they are not
-  asked. Delete the file to go back to them. Without a data directory the
+  the first change on that file is what the server goes by: `dicomPort`,
+  `dicomAeTitle` and `dicomCallers` are then only what a server that has
+  kept nothing starts from, and the log says `dicom-settings-kept` when they
+  are not asked. (The certificate files for [TLS](#tls-for-dicom) are not
+  among them: they are the configuration's, always.) Delete the file to go back to them. Without a data directory the
   changes last as long as the server runs. A server whose listener is on
   and cannot have its port does not start (exit code 1), whether the port
   is from the file or from the configuration: free the port, or delete the
@@ -397,6 +403,87 @@ restart:
   title of the system as its `object`. An echo makes the server open a
   connection to the address it was given, which is why it is not for every
   user.
+
+### TLS for DICOM
+
+Off unless asked for, in two places that are set apart: how the server
+**listens**, and how it **calls** each system.
+
+```sh
+export OPEN_RT_STUDIO_DICOM_TLS_CERT=/etc/open-rt-studio/dicom-cert.pem
+export OPEN_RT_STUDIO_DICOM_TLS_KEY=/etc/open-rt-studio/dicom-key.pem
+export OPEN_RT_STUDIO_DICOM_TLS_CA=/etc/open-rt-studio/dicom-authorities.pem   # optional
+```
+
+The certificate is the server's own for DICOM (it may be the one it has for
+HTTPS, named again), and the third file holds the certificates of the
+authorities that other systems' certificates are signed by. All three are
+PEM, are read when the server starts, and are checked then as the
+[HTTPS](#https) certificate is, with the same messages and exit code 2.
+
+- **Listening with TLS** is the listener's `tls` setting ("Listen with TLS"
+  in the viewer). A port speaks TLS or it does not: with it on, every system
+  that calls must call with TLS, 1.2 or later, and one that does not gets no
+  answer. A server that is given a certificate and has kept no settings
+  listens with TLS; from then on the kept setting decides, like the rest.
+  Turning it on or off closes the listener and opens it again on its port.
+  It takes the certificate: without one the change is refused (`409`,
+  `no-certificate`), and a server whose kept settings say TLS and that has
+  no certificate any more does not start, and says so, rather than listen
+  without.
+- **Who calls** is still decided by the AE title, as [above](#dicom). TLS
+  alone keeps what is sent from being read on the way and says nothing of
+  who sends it. With `dicomTlsCa`, a system that calls must also show a
+  certificate signed by one of those authorities, or it is not heard: that
+  is as near to a login as DICOM comes. Which certificate goes with which
+  AE title is not checked: any system with a certificate of those
+  authorities may give any AE title on the list.
+- **Calling a system with TLS** is that system's `tls` setting ("Call it
+  with TLS"): echoes, sends, questions and retrieves to it are then
+  encrypted, and so is what a C-MOVE has the server send it. The server
+  checks the system's certificate before it says anything: that it is
+  signed by an authority in `dicomTlsCa` (or, without that file, by one the
+  machine knows, as a browser would), that it is in its time, and that it is
+  for the host name the system is called by. A system with a certificate of
+  its own making is trusted by putting that certificate in the authorities
+  file. If the system asks who is calling, the server shows its certificate.
+  This needs no certificate of the server's unless the other system asks.
+
+When no secure connection can be made, the answer to an echo, a send, a
+question or a retrieve says why, and the viewer puts it in words:
+
+| Outcome         | What is wrong                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| `tls-untrusted` | The system's certificate is of no authority the server trusts                                       |
+| `tls-expired`   | Its certificate has expired, or is not valid yet                                                    |
+| `tls-name`      | Its certificate is for another name than the host it is called by                                   |
+| `tls-refused`   | It ended the connection as the handshake was made: it wants a certificate, or refuses the one shown |
+| `tls-failed`    | No handshake could be made: it may not speak TLS at that port                                       |
+| `broken`        | Called without TLS, it took the connection and gave no answer: it may expect TLS                    |
+
+To learn which, the server asks the address for a handshake once more after
+a call has failed; that is one more connection, and no DICOM is said on it.
+
+What the listener's log says of a caller that did not get as far as an
+association: `tls-handshake-failed` (it did not speak TLS, or not a version
+or cipher the server takes) and `tls-caller-not-trusted` (it showed no
+certificate, or one of no authority in the file), each with the reason as
+OpenSSL names it and nothing of the certificate. Neither is in the audit
+log: no AE title has been given at that point, so there is no one to name.
+
+With DCMTK's tools as the other side, which is how CI tests it:
+
+```sh
+echoscu  --anonymous-tls --add-cert-file authorities.pem --aetitle PLANNING --call OPENRTSTUDIO pacs.example.org 11112
+storescu --enable-tls key.pem cert.pem --add-cert-file authorities.pem --aetitle PLANNING --call OPENRTSTUDIO pacs.example.org 11112 *.dcm
+```
+
+The first is for a listener that asks for no certificate, the second for
+one that does. DCMTK's default profile takes RSA certificates for TLS 1.2.
+
+Not there: one certificate and one list of authorities serve every system
+(none per system, and no pinning of one system's certificate); revocation
+lists are not read; the files are not read again without a restart.
 
 ### Sending
 
@@ -544,8 +631,6 @@ through the API:
 - **Whom it asks is the administrator's choice.** A user picks among the
   systems on the list and cannot name an address.
 
-Not there yet: TLS (#57).
-
 Who sent, asked or retrieved what by DICOM is in [the audit log](#the-audit-log),
 and nowhere in the application log, which holds no AE title of another
 system. A server without a data directory has no audit log, and so no
@@ -581,8 +666,20 @@ and no one can log in; its log says `no-accounts`.
 - **Reached from this machine only**, as the compose file publishes the
   port. The server in the container speaks plain HTTP unless it is given a
   certificate. Before the port is opened to other machines, give it one
-  (mount the files and set `OPEN_RT_STUDIO_TLS_CERT` and `_KEY`; see
-  [HTTPS](#https)) or put a proxy that speaks HTTPS in front.
+  or put a proxy that speaks HTTPS in front. `compose.https.yaml` is the
+  first of the two: it mounts a directory of yours that holds `cert.pem` and
+  `key.pem`, and names them to the server:
+
+  ```sh
+  export OPEN_RT_STUDIO_CERT_DIR=/etc/open-rt-studio/certs
+  docker compose -f compose.yaml -f compose.https.yaml up --build --detach
+  curl https://pacs.example.org:4300/health
+  ```
+
+  The server in the container runs as user 1000 and has to be able to read
+  both files; let no one else read the key. See [HTTPS](#https) for what is
+  checked when it starts.
+
 - **Settings are environment variables**, as [below](#settings). The compose
   file passes `OPEN_RT_STUDIO_ALLOWED_ORIGINS` and
   `OPEN_RT_STUDIO_AUDIT_RETENTION_DAYS` from the shell or an `.env` file, and
@@ -592,7 +689,9 @@ health`), which asks the server with the same settings, on the same
   machine, and exits with 0 when it answers. Over HTTPS it does not check
   the certificate: the question is whether the server answers, not who it is.
 - `scripts/container-check.sh` builds the image, starts it and checks it from
-  outside; CI runs it (the `Container` job). It needs Docker.
+  outside, first over HTTP and then, with `compose.https.yaml` and a
+  certificate it makes for the purpose, over HTTPS; CI runs it (the
+  `Container` job). It needs Docker and OpenSSL.
 
 Not there yet: the image is not published anywhere, and the compose file has
 no PostgreSQL (#44) and does not turn the [DICOM](#dicom) listener on: that
@@ -623,6 +722,9 @@ code 2).
 | `dicomPort`          | `OPEN_RT_STUDIO_DICOM_PORT`           | none           | Port for DICOM associations, at `host`. Without one there is no DICOM listener; see [DICOM](#dicom)                                                                                  |
 | `dicomAeTitle`       | `OPEN_RT_STUDIO_DICOM_AE_TITLE`       | `OPENRTSTUDIO` | The AE title other systems must address, and the one the server calls under                                                                                                          |
 | `dicomCallers`       | `OPEN_RT_STUDIO_DICOM_CALLERS`        | none           | The calling AE titles that are let in. A list in the file; separated by commas in the environment. None lets nobody in                                                               |
+| `dicomTlsCert`       | `OPEN_RT_STUDIO_DICOM_TLS_CERT`       | none           | File with the certificate the server shows over DICOM (PEM). With `dicomTlsKey`, the listener can speak TLS; see [TLS for DICOM](#tls-for-dicom)                                     |
+| `dicomTlsKey`        | `OPEN_RT_STUDIO_DICOM_TLS_KEY`        | none           | File with that certificate's private key (PEM, no passphrase)                                                                                                                        |
+| `dicomTlsCa`         | `OPEN_RT_STUDIO_DICOM_TLS_CA`         | none           | File with the certificates of the authorities other DICOM systems are trusted by (PEM). With it, a system that calls with TLS must show a certificate of theirs                      |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -735,7 +837,9 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   `parts.ts` reads stored instances a few at a time, `ask.ts` asks another
   system (C-FIND, C-MOVE) and `ask-keys.ts` is what may be asked and what is
   read of an answer, `retrieve-manager.ts` the retrieves under way and made
-  (#51), `echo.ts` asks another system for a C-ECHO,
+  (#51), `echo.ts` asks another system for a C-ECHO, `tls.ts` is what the
+  server brings to a call over TLS and what it says went wrong with one
+  (#57),
   `part10.ts` writes the file header in front of a received data set, and
   `sop-classes.ts` is what the listener agrees to. `library.ts` is the only
   file that imports the DIMSE library (a lint rule holds the rest to that).
@@ -1019,5 +1123,7 @@ They use ports of `127.0.0.1` that the operating system hands out, and
 `main.spec.ts` runs the built server as a process and stops it with a signal
 (skipped on Windows, which has no `SIGTERM` to catch).
 `src/dimse/dcmtk.spec.ts` tries the DICOM listener against DCMTK's
-command-line tools as another system; it is skipped where DCMTK is not
-installed, and CI's `DIMSE interop` job installs it.
+command-line tools as another system, with TLS and without; it is skipped
+where DCMTK is not installed, and CI's `DIMSE interop` job installs it.
+Certificates for the TLS specs are made on the spot (`src/tls-testing.ts`);
+none is kept in the repository.

@@ -25,6 +25,7 @@ import {
 } from '@open-rt-studio/testdata';
 
 import { sopInstanceUidOf } from '../store/testing.js';
+import { testCertificate, type TestCertificate } from '../tls-testing.js';
 import { dicomEcho } from './echo.js';
 import { dataSetOf, outgoingFrom } from './part10.js';
 import { findAt, moveFrom } from './ask.js';
@@ -38,6 +39,7 @@ import {
   type TestListener,
 } from './testing/peer.js';
 import { syntheticSummedDose } from './testing/summed-dose.js';
+import type { ClientTls } from './tls.js';
 
 const run = promisify(execFile);
 const installed = (tool: string): boolean =>
@@ -100,17 +102,22 @@ async function said(name: string, args: readonly string[]): Promise<{ ok: boolea
   );
 }
 
-const echo = (port: number, called: string) =>
+const echo = (port: number, called: string, tls?: ClientTls) =>
   dicomEcho({
     host: '127.0.0.1',
     port,
     callingAeTitle: LISTENER_AE,
     calledAeTitle: called,
     timeoutMs: 2_000,
+    ...(tls ? { tls } : {}),
   });
 
 /** Start DCMTK's storescp writing into a folder, and wait until it answers. */
-async function storescp(more: readonly string[] = []): Promise<{ port: number; folder: string }> {
+async function storescp(
+  more: readonly string[] = [],
+  /** What to call it with, when it was started with TLS. */
+  tls?: ClientTls,
+): Promise<{ port: number; folder: string }> {
   const port = await freePort();
   const folder = await mkdtemp(join(directory, 'storescp-'));
   const child = spawn(
@@ -120,7 +127,7 @@ async function storescp(more: readonly string[] = []): Promise<{ port: number; f
   );
   children.push(child);
   for (let tries = 0; tries < 50; tries++) {
-    if ((await echo(port, 'DCMTK')).outcome === 'ok') return { port, folder };
+    if ((await echo(port, 'DCMTK', tls)).outcome === 'ok') return { port, folder };
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('storescp did not start listening');
@@ -537,6 +544,130 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
     expect(await here.core.pacs!.index.counts()).toMatchObject({
       instances: 8 + SYNTHETIC_RT_COURSE.followUpCtSlices,
     });
+  });
+});
+
+// #57, the issue's second "done when": a TLS association with a test peer
+// that speaks TLS. The certificates are made here, with RSA keys: the
+// ciphersuites of DCMTK's default profile for TLS 1.2 are for those.
+describe.skipIf(!dcmtk)('against DCMTK, over TLS', () => {
+  let authority: TestCertificate;
+  let ours: TestCertificate;
+  let theirs: TestCertificate;
+  /** The same as files, for DCMTK's tools. */
+  let ca = '';
+  let theirCert = '';
+  let theirKey = '';
+
+  beforeAll(async () => {
+    authority = testCertificate({ authority: true, rsa: true });
+    ours = testCertificate({ signedBy: authority, rsa: true });
+    theirs = testCertificate({ signedBy: authority, rsa: true });
+    const folder = await mkdtemp(join(directory, 'tls-'));
+    [ca, theirCert, theirKey] = ['ca.pem', 'cert.pem', 'key.pem'].map((name) => join(folder, name));
+    await writeFile(ca, authority.cert);
+    await writeFile(theirCert, theirs.cert);
+    await writeFile(theirKey, theirs.key, { mode: 0o600 });
+  });
+
+  async function secure(askWhoCalls: boolean): Promise<TestListener> {
+    const started = await startTestListener({
+      tls: { ...ours, ca: askWhoCalls ? authority.cert : null },
+    });
+    open.push(started);
+    return started;
+  }
+
+  it('echoscu is answered over TLS when it trusts the certificate, and not without TLS', async () => {
+    const { port } = await secure(false);
+    const address = ['--aetitle', PEER_AE, '--call', LISTENER_AE, '127.0.0.1', String(port)];
+    expect(await tool('echoscu', ['--anonymous-tls', '--add-cert-file', ca, ...address])).toBe(
+      true,
+    );
+    // Without TLS, and with it but with no authority to trust the listener by.
+    expect(await tool('echoscu', address)).toBe(false);
+    expect(await tool('echoscu', ['--anonymous-tls', ...address])).toBe(false);
+  });
+
+  it('storescu shows a certificate to a listener that asks who calls, and what it sends is stored', async () => {
+    const { port, core } = await secure(true);
+    const files = syntheticCtSeries(3, 16);
+    const address = [
+      ...['--aetitle', PEER_AE, '--call', LISTENER_AE],
+      ...['127.0.0.1', String(port), ...(await onDisk(files))],
+    ];
+    // With no certificate to show, it is not heard.
+    expect(await tool('storescu', ['--anonymous-tls', '--add-cert-file', ca, ...address])).toBe(
+      false,
+    );
+    expect(await core.pacs!.index.findInstances()).toHaveLength(0);
+    const sent = await tool('storescu', [
+      ...['--enable-tls', theirKey, theirCert, '--null-passwd', '--add-cert-file', ca],
+      ...address,
+    ]);
+    expect(sent).toBe(true);
+    expect(await core.pacs!.index.findInstances()).toHaveLength(files.length);
+    for (const file of files) {
+      const pieces: Buffer[] = [];
+      const stream = await core.pacs!.store.get(sopInstanceUidOf(file.bytes));
+      for await (const piece of stream) pieces.push(piece as Buffer);
+      expect(
+        Buffer.from(dataSetOf(Buffer.concat(pieces))!).equals(Buffer.from(dataSetOf(file.bytes)!)),
+        file.name,
+      ).toBe(true);
+    }
+  });
+
+  it('storescp with TLS answers our echo and takes what the server sends, each data set byte for byte', async () => {
+    // It asks who calls, as it does unless told not to: the server shows its certificate.
+    const shown: ClientTls = { ca: authority.cert, cert: ours.cert, key: ours.key };
+    const { port, folder } = await storescp(
+      [
+        ...['--enable-tls', theirKey, theirCert, '--null-passwd', '--add-cert-file', ca],
+        '--bit-preserving',
+      ],
+      shown,
+    );
+    expect(await echo(port, 'DCMTK', shown)).toEqual({ outcome: 'ok' });
+    // Not trusted by the authorities the machine knows; and it does not take a caller without TLS.
+    expect(await echo(port, 'DCMTK', {})).toEqual({ outcome: 'tls-untrusted' });
+    expect((await echo(port, 'DCMTK')).outcome).not.toBe('ok');
+
+    const files = syntheticRtCourse();
+    const objects = files.map((file) => outgoingFrom(file.bytes)!);
+    const target = {
+      host: '127.0.0.1',
+      port,
+      calledAeTitle: 'DCMTK',
+      callingAeTitle: PEER_AE,
+      timeoutMs: 10_000,
+      tls: shown,
+    };
+    expect(await sendObjects(target, objects)).toEqual(
+      objects.map(() => ({ outcome: 'stored', status: 0, rewritten: false })),
+    );
+    const written = await Promise.all(
+      (await readdir(folder)).map((name) => readFile(join(folder, name))),
+    );
+    const there = written.map((file) => Buffer.from(dataSetOf(file)!));
+    expect(there).toHaveLength(files.length);
+    for (const [i, object] of objects.entries()) {
+      const sent = Buffer.from(object.dataSet);
+      expect(
+        there.some((one) => one.equals(sent)),
+        files[i].name,
+      ).toBe(true);
+    }
+  });
+
+  it('storescp that asks who calls is told apart from one that is not trusted', async () => {
+    const shown: ClientTls = { ca: authority.cert, cert: ours.cert, key: ours.key };
+    const { port } = await storescp(
+      ['--enable-tls', theirKey, theirCert, '--null-passwd', '--add-cert-file', ca],
+      shown,
+    );
+    // With no certificate to show it, the server is refused; why is said as a refusal.
+    expect(await echo(port, 'DCMTK', { ca: authority.cert })).toEqual({ outcome: 'tls-refused' });
   });
 });
 

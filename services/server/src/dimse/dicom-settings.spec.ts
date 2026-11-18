@@ -17,7 +17,7 @@ import {
   type DicomSettings,
 } from './dicom-settings.js';
 
-const LOCAL = { enabled: true, port: 11112, aeTitle: 'ORS' };
+const LOCAL = { enabled: true, port: 11112, aeTitle: 'ORS', tls: false };
 const REMOTE = {
   name: 'Planning',
   aeTitle: 'PLANNING',
@@ -25,6 +25,7 @@ const REMOTE = {
   port: 104,
   mayStore: true,
   mayRetrieve: false,
+  tls: false,
 };
 
 const refusal = (work: () => unknown): string => {
@@ -51,7 +52,7 @@ describe('the local settings', () => {
   it('are refused when one is not what it has to be, without repeating it', () => {
     expect(refusal(() => checkedLocal(null))).toBe('The local settings are an object.');
     expect(refusal(() => checkedLocal({ ...LOCAL, host: '0.0.0.0' }))).toBe(
-      'The local settings are enabled, port and aeTitle, and nothing else.',
+      'The local settings are enabled, port, aeTitle and tls, and nothing else.',
     );
     expect(refusal(() => checkedLocal({ ...LOCAL, enabled: 'yes' }))).toBe(
       'enabled is true or false.',
@@ -90,7 +91,7 @@ describe('a remote system', () => {
   it('is refused when a part is not what it has to be', () => {
     expect(refusal(() => checkedRemote([]))).toBe('A remote system is an object.');
     expect(refusal(() => checkedRemote({ ...REMOTE, id: 'mine' }))).toBe(
-      'A remote system is name, aeTitle, host, port, mayStore and mayRetrieve, and nothing else.',
+      'A remote system is name, aeTitle, host, port, mayStore, mayRetrieve and tls, and nothing else.',
     );
     for (const name of ['', ' Planning', 'Planning ', 'two\nlines', 'x'.repeat(65), 7]) {
       expect(refusal(() => checkedRemote({ ...REMOTE, name }))).toContain('name is one line');
@@ -125,6 +126,31 @@ describe('a remote system', () => {
     expect(kept?.remotes).toEqual([{ id: '0123456789abcdef', ...REMOTE }]);
   });
 
+  // #57.
+  it('is called with TLS when it is said to be, and without when nothing is said', () => {
+    expect(checkedRemote({ ...REMOTE, tls: true }).tls).toBe(true);
+    const { tls: remoteTls, ...remote } = REMOTE;
+    const { tls: localTls, ...local } = LOCAL;
+    expect([remoteTls, localTls]).toEqual([false, false]);
+    expect(checkedRemote(remote)).toEqual(REMOTE);
+    expect(checkedLocal(local)).toEqual(LOCAL);
+    expect(checkedLocal({ ...LOCAL, tls: true }).tls).toBe(true);
+    // Settings that were kept before there was such a thing are read, and are without.
+    const kept = settingsOf({
+      version: 1,
+      local,
+      remotes: [{ id: '0123456789abcdef', ...remote }],
+    });
+    expect(kept).toEqual({ local: LOCAL, remotes: [{ id: '0123456789abcdef', ...REMOTE }] });
+
+    expect(refusal(() => checkedRemote({ ...REMOTE, tls: 'yes' }))).toBe('tls is true or false.');
+    expect(refusal(() => checkedLocal({ ...LOCAL, tls: 1 }))).toBe('tls is true or false.');
+    // It says how the server calls: a system with no address is not called.
+    expect(refusal(() => checkedRemote({ ...REMOTE, host: null, port: null, tls: true }))).toBe(
+      'tls is for a system that has an address to call.',
+    );
+  });
+
   it('gets an id of its own', () => {
     const ids = new Set(Array.from({ length: 50 }, newRemoteId));
     expect(ids.size).toBe(50);
@@ -145,6 +171,7 @@ describe('kept settings', () => {
         port: null,
         mayStore: false,
         mayRetrieve: false,
+        tls: false,
       },
     ],
   };

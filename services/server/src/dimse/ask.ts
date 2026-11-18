@@ -26,6 +26,7 @@ import {
 } from './library.js';
 import type { Identifier } from './query.js';
 import type { SendTarget } from './send.js';
+import { securityOptions, withTlsProblem } from './tls.js';
 
 const PATIENT_ROOT = '1.2.840.10008.5.1.4.1.2.1';
 const STUDY_ROOT = '1.2.840.10008.5.1.4.1.2.2';
@@ -69,7 +70,7 @@ export function findAt<L extends AskLevel>(
 ): Promise<FindAnswer<L>> {
   const timeoutMs = target.timeoutMs ?? 30_000;
   const sopClassUid = `${level === 'patient' ? PATIENT_ROOT : STUDY_ROOT}.1`;
-  return new Promise((resolve) => {
+  return new Promise<FindAnswer<L>>((resolve) => {
     const client = new Client();
     const request = new CFindRequest();
     request.setAffectedSopClassUid(sopClassUid);
@@ -135,8 +136,9 @@ export function findAt<L extends AskLevel>(
       connectTimeout: timeoutMs,
       associationTimeout: timeoutMs,
       pduTimeout: timeoutMs,
+      ...(target.tls ? { securityOptions: securityOptions(target.tls) } : {}),
     });
-  });
+  }).then((result) => withTlsProblem(target, result, timeoutMs));
 }
 
 /** How far a move is, as the other system tells it. */
@@ -179,7 +181,7 @@ export function moveFrom(
 ): Promise<MoveAnswer> {
   const timeoutMs = target.timeoutMs ?? 120_000;
   const sopClassUid = `${STUDY_ROOT}.2`;
-  return new Promise((resolve) => {
+  return new Promise<MoveAnswer>((resolve) => {
     const client = new Client();
     const request = new CMoveRequest();
     request.setAffectedSopClassUid(sopClassUid);
@@ -260,6 +262,7 @@ export function moveFrom(
       connectTimeout: timeoutMs,
       associationTimeout: timeoutMs,
       pduTimeout: timeoutMs,
+      ...(target.tls ? { securityOptions: securityOptions(target.tls) } : {}),
     });
-  });
+  }).then((result) => withTlsProblem(target, result, timeoutMs));
 }

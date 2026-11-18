@@ -25,6 +25,7 @@ import {
 } from './library.js';
 import type { OutgoingObject } from './part10.js';
 import { EXPLICIT_VR_LE, IMPLICIT_VR_LE } from './sop-classes.js';
+import { securityOptions, withTlsProblem, type ClientTls, type TlsFailure } from './tls.js';
 
 export { outgoingFrom, type OutgoingObject } from './part10.js';
 
@@ -46,7 +47,9 @@ export type SendOutcome =
   /** Nothing answered at the address. */
   | { readonly outcome: 'unreachable' }
   /** The connection ended before the object was answered. */
-  | { readonly outcome: 'broken' };
+  | { readonly outcome: 'broken' }
+  /** No secure connection could be made, and why. */
+  | { readonly outcome: TlsFailure };
 
 export interface SendTarget {
   readonly host: string;
@@ -55,6 +58,8 @@ export interface SendTarget {
   readonly callingAeTitle: string;
   /** How long to wait for the connection, the association and each answer. */
   readonly timeoutMs?: number;
+  /** Call with TLS, with this; without, the call is not encrypted. */
+  readonly tls?: ClientTls;
 }
 
 /** Warnings of the storage service (PS3.4, B.2.3): the object was stored. */
@@ -92,7 +97,7 @@ export function sendObjects(
   objects: readonly OutgoingObject[],
 ): Promise<SendOutcome[]> {
   const timeoutMs = target.timeoutMs ?? 30_000;
-  return new Promise((resolve) => {
+  return new Promise<SendOutcome[]>((resolve) => {
     if (objects.length === 0) return resolve([]);
     const client = new Client();
     const statuses: (number | null)[] = objects.map(() => null);
@@ -158,6 +163,14 @@ export function sendObjects(
       connectTimeout: timeoutMs,
       associationTimeout: timeoutMs,
       pduTimeout: timeoutMs,
+      ...(target.tls ? { securityOptions: securityOptions(target.tls) } : {}),
     });
+  }).then(async (outcomes) => {
+    // Nothing was answered over TLS: once asked why, it is said of each object.
+    const nothing = (one: SendOutcome): boolean =>
+      one.outcome === 'unreachable' || one.outcome === 'broken';
+    if (!target.tls || outcomes.length === 0 || !outcomes.every(nothing)) return outcomes;
+    const why = await withTlsProblem(target, outcomes[0], timeoutMs);
+    return why === outcomes[0] ? outcomes : outcomes.map(() => why);
   });
 }
