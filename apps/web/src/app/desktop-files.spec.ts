@@ -13,6 +13,7 @@ import {
   isStoredGrant,
 } from './desktop-files';
 import { fakeDesktopFiles, fakeGrantId } from './desktop-files-testing';
+import { fakeDesktopLibrary } from './desktop-library-testing';
 import { fakeDesktopServer } from './desktop-server-testing';
 import { filePickers, filesOf } from './file-access';
 
@@ -164,6 +165,7 @@ describe('folders and files in the desktop application', () => {
         info: async () => null,
         files: desktop,
         server: fakeDesktopServer(() => Promise.reject(new Error('no server in this spec'))),
+        library: fakeDesktopLibrary(() => Promise.reject(new Error('no library in this spec'))),
       },
       showDirectoryPicker: browser,
       showOpenFilePicker: browser,

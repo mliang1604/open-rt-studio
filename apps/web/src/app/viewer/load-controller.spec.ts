@@ -68,6 +68,8 @@ function built(series: Series): LoadResult {
 interface Made {
   readonly controller: LoadController;
   readonly source: FakeDataSource;
+  /** What the viewer gave the controller. */
+  readonly init: LoadInit;
   readonly load: WritableSignal<LoadState>;
   readonly notice: WritableSignal<string | null>;
   /** Every status the view went through, in order. */
@@ -152,6 +154,7 @@ function setup(): Made {
   return {
     controller,
     source,
+    init,
     load,
     notice,
     statuses,
@@ -177,6 +180,21 @@ describe('picking a series from a data source', () => {
     expect(source.fetches.map((fetch) => fetch.seriesUid)).toEqual(['1.1.1']);
     // Idle to ready: the view never said "loading".
     expect(statuses).toEqual(['ready']);
+  });
+
+  it('waits for a renderer that is still being made, and then shows the series', async () => {
+    const { controller, source, shown, init } = setup();
+    // The viewer has just started: its timeline is there before its renderer.
+    const made = init.renderer();
+    let ready = false;
+    (init as { renderer: () => SliceRenderer | null }).renderer = () => (ready ? made : null);
+    const picked = controller.loadSeriesFromPanel('1.1.1');
+    await settle();
+    expect(source.fetches).toEqual([]);
+    expect(shown()).toBeNull();
+    ready = true;
+    await picked;
+    expect(shown()).toBe('1.1.1');
   });
 
   it('shows the progress a slower source reports, then the series', async () => {
@@ -366,6 +384,7 @@ describe('changing the data source', () => {
       source: other,
       other,
       sources,
+      init,
       load,
       notice,
       statuses,

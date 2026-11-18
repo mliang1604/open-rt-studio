@@ -100,6 +100,7 @@ import { RangeFill } from './range-fill';
 import { HistoryPanel } from './history-panel/history-panel';
 import { ServerPanel } from './server-panel/server-panel';
 import { ActiveDataSource } from '../data-source/active-data-source';
+import { LIBRARY_LABEL } from '../desktop-library';
 import { placePanes, placementAt, type PanePlacement } from './pane-placement';
 import { confirmDelete, downloadBlob, dropHeadlineText } from './viewer-dom';
 import { paneKeyOf } from './pane-placement';
@@ -365,6 +366,10 @@ export class Viewer {
   /** What to call the server in use; null while the viewer reads opened files. */
   protected readonly serverLabel = computed(() =>
     this.sources.isFiles() ? null : this.sources.source().label,
+  );
+  /** What a save goes to when it does not go to a file: a server, or the desktop application's library. */
+  protected readonly savesTo = computed(() =>
+    this.serverLabel() === LIBRARY_LABEL ? 'library' : 'server',
   );
   /**
    * The patients to switch between from the history bar: those whose files

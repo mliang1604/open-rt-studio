@@ -744,14 +744,16 @@
           [disabled]="!isReady() || !brushCtl.canExport() || brushCtl.saving()"
           [title]="
             serverLabel()
-              ? 'Save the active authored set to the server as a new DICOM RT Structure Set'
+              ? 'Save the active authored set to the ' +
+                savesTo() +
+                ' as a new DICOM RT Structure Set'
               : 'Save the active authored set as a DICOM RT Structure Set file'
           "
         >
           @if (brushCtl.saving()) {
             Saving…
           } @else if (serverLabel()) {
-            Save to server ⤒
+            Save to {{ savesTo() }} ⤒
           } @else {
             Export RTSTRUCT ⤓
           }

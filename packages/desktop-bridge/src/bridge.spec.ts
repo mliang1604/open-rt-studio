@@ -15,6 +15,7 @@ import {
   isServerPath,
   isServerRequest,
   type DesktopFiles,
+  type DesktopLibrary,
   type DesktopServer,
   type DesktopInfo,
 } from './index.js';
@@ -43,6 +44,13 @@ const SERVER: DesktopServer = {
   request: async () => null,
   cancel: async () => null,
 };
+const LIBRARY: DesktopLibrary = {
+  request: async () => ({ failed: 'unreachable' }),
+  cancel: async () => null,
+  importFolder: async () => ({ not: 'chosen' }),
+  importProgress: async () => null,
+  cancelImport: async () => null,
+};
 const ID = 'Zm9sZGVyLW9mLXRlc3RzIQ';
 
 describe('the bridge of the desktop application', () => {
@@ -55,6 +63,11 @@ describe('the bridge of the desktop application', () => {
       'files:pick-files',
       'files:pick-folder',
       'files:read',
+      'library:cancel',
+      'library:cancel-import',
+      'library:import-folder',
+      'library:import-progress',
+      'library:request',
       'server:cancel',
       'server:connect',
       'server:connections',
@@ -69,6 +82,7 @@ describe('the bridge of the desktop application', () => {
       info: async () => INFO,
       files: FILES,
       server: SERVER,
+      library: LIBRARY,
     };
     expect(desktopBridge({ [BRIDGE_GLOBAL]: bridge })).toBe(bridge);
     // A browser.
@@ -80,7 +94,13 @@ describe('the bridge of the desktop application', () => {
 
   it('is not used when it is of another version, or not a bridge', () => {
     const info = async () => INFO;
-    const whole = { version: BRIDGE_VERSION, info, files: FILES, server: SERVER };
+    const whole = {
+      version: BRIDGE_VERSION,
+      info,
+      files: FILES,
+      server: SERVER,
+      library: LIBRARY,
+    };
     expect(
       desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, version: BRIDGE_VERSION + 1 } }),
     ).toBeNull();
@@ -96,6 +116,12 @@ describe('the bridge of the desktop application', () => {
     expect(desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, server: undefined } })).toBeNull();
     expect(
       desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, server: { ...SERVER, cancel: 1 } } }),
+    ).toBeNull();
+    expect(desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, library: undefined } })).toBeNull();
+    expect(
+      desktopBridge({
+        [BRIDGE_GLOBAL]: { ...whole, library: { ...LIBRARY, importFolder: undefined } },
+      }),
     ).toBeNull();
     expect(desktopBridge({ [BRIDGE_GLOBAL]: 'bridge' })).toBeNull();
     expect(desktopBridge({ [BRIDGE_GLOBAL]: null })).toBeNull();

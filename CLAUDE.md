@@ -48,7 +48,11 @@ application. Never commit patient data or real DICOM files
   store holds in an index again, as ingest would),
   `src/jobs` runs command-line workers (a job kind is registered in code and
   builds the command; never take a program from a request);
-  `src/host` is HTTP on `node:http` and `src/api` the routes it serves. A
+  `src/host` is HTTP on `node:http` and `src/api` the routes it serves
+  (`src/host/dispatch.ts` is which route answers, who may have the answer and
+  its audit record, with no HTTP in it: the host and the embedded server of
+  the desktop application both go through it, so a rule about routes is
+  written there once). A
   route carries its own description, from which the OpenAPI document is made. Logs carry no
   patient identifiers: log a route, a count or a duration, never a name, an
   ID or the address that was asked for. `src/accounts` is who may use the
@@ -86,8 +90,11 @@ application. Never commit patient data or real DICOM files
   an id the main process makes; the page never names a place on the disk and
   is never told one) and `src/connections.ts` (the servers it may ask: those
   the user agreed to in a dialog of the main process, their API only, with
-  the token of a login held there and never given to the page), which need
-  no Electron and are unit tested; only `src/main.ts` and `src/preload.cts`
+  the token of a login held there and never given to the page) and
+  `src/library.ts` (the library on this computer: the server embedded in the
+  main process with `openEmbeddedServer`, no port and no login; a folder is
+  imported there from the system's dialog, and the page is told counts, never
+  a name or a place), which need no Electron and are unit tested; only `src/main.ts` and `src/preload.cts`
   import Electron. Do not loosen the policy to make something work: the page
   fetches from nowhere, a server is asked through the bridge, and files are
   read through it. Electron is pinned to an exact version.

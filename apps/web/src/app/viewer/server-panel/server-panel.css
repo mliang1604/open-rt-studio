@@ -91,3 +91,11 @@ p {
 :host(.wide) {
   width: min(860px, calc(100% - 24px));
 }
+
+/* The library, above the address of a server. */
+.server-library {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}

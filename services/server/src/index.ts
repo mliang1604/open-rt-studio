@@ -201,7 +201,23 @@ export {
   openSqliteIndex,
   type SqliteIndexOptions,
 } from './pacs-index/sqlite-index.js';
-export { startServer, type RunningServer, type ServerParts } from './server.js';
+export {
+  openEmbeddedServer,
+  startServer,
+  type EmbeddedAnswer,
+  type EmbeddedOptions,
+  type EmbeddedRequest,
+  type EmbeddedServer,
+  type RunningServer,
+  type ServerParts,
+} from './server.js';
+export {
+  createDispatcher,
+  type Call,
+  type Dispatched,
+  type Dispatcher,
+  type DispatcherOptions,
+} from './host/dispatch.js';
 export {
   EmptyInstanceError,
   InstanceNotFoundError,

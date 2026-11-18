@@ -889,6 +889,9 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   embedded in the desktop application's main process for standalone mode. It
   counts the work it is given (`core.run`), so that `dispose()` can wait for
   that work.
+  `openEmbeddedServer()` (in `src/server.ts`) is the whole server without
+  the HTTP host, for that: the same PACS and routes on a data directory,
+  asked with `ask()` and no port, with no accounts.
 - `src/host/`: HTTP in front of a core, on Node's `node:http`. No framework;
   see [docs/architecture.md](../../docs/architecture.md), "Server and PACS",
   for why. A route is a method, a path pattern, a function and its

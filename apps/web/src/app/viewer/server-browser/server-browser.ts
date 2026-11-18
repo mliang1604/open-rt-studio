@@ -65,6 +65,8 @@ export class ServerBrowser {
   readonly chosenKey = input<string | null>(null);
   /** True while the card around this is busy with the server: nothing can be chosen meanwhile. */
   readonly disabled = input(false);
+  /** Goes up when what the server holds was changed from here (an import): the list is asked for again. */
+  readonly changed = input(0);
   /** A study was chosen: turn to its patient. */
   readonly choose = output<PatientSummary>();
 
@@ -92,6 +94,7 @@ export class ServerBrowser {
     // Every study, the latest first, as soon as there is a server; again for another server.
     effect(() => {
       this.server();
+      this.changed();
       untracked(() => void this.search({ order: this.order() }));
     });
   }

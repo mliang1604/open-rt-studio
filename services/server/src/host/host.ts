@@ -12,19 +12,12 @@ import { createServer as createTlsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { pipeline } from 'node:stream/promises';
 
-import type { Accounts, Session } from '../accounts/accounts.js';
-import { outcomeOf, type AuditLog } from '../audit/audit.js';
+import type { Accounts } from '../accounts/accounts.js';
+import type { AuditLog } from '../audit/audit.js';
 import type { ServerCore } from '../core/core.js';
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
-import {
-  healthRoute,
-  HttpError,
-  matchPath,
-  type AuditNote,
-  type Route,
-  type RouteRequest,
-  type RouteResponse,
-} from './routes.js';
+import { createDispatcher, refusal, type Call } from './dispatch.js';
+import { healthRoute, HttpError, type Route, type RouteResponse } from './routes.js';
 
 export interface HostOptions {
   readonly host: string;
@@ -104,12 +97,6 @@ const CORS_REQUEST_HEADERS = 'Authorization, Content-Type, Range, If-None-Match'
 /** What such a page may read of an answer besides the plain headers. */
 const CORS_EXPOSED_HEADERS = 'ETag, Content-Range, Accept-Ranges, Content-Length, Location';
 
-/** The token of an `Authorization: Bearer <token>` header; null for anything else. */
-function bearerToken(header: string | undefined): string | null {
-  const match = /^Bearer +([A-Za-z0-9._~+/-]+=*)$/i.exec(header?.trim() ?? '');
-  return match ? match[1] : null;
-}
-
 /** The host of a `Host` header without its port: `[::1]:4300` gives `[::1]`. */
 function hostName(header: string | undefined): string {
   return (header ?? '').trim().toLowerCase().replace(/:\d+$/, '');
@@ -126,8 +113,13 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
    */
   const loopbackOnly = LOOPBACK_ADDRESSES.has(options.host);
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
-  const accounts = options.accounts ?? null;
-  const audit = options.audit ?? null;
+  // Which route answers, who may have the answer, and the record of it.
+  const dispatcher = createDispatcher({
+    routes,
+    accounts: options.accounts,
+    audit: options.audit,
+    logger,
+  });
   let inFlight = 0;
   let closing: Promise<HostClosure> | null = null;
   /** Called each time a request is answered while a close is waiting. */
@@ -166,25 +158,13 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
   };
 
   const fail = (response: ServerResponse, error: HttpError): Promise<void> =>
-    send(response, {
-      status: error.status,
-      body: { error: error.code, message: error.message },
-      headers: error.headers,
-    });
+    send(response, refusal(error));
 
-  const requestOf = (
-    request: IncomingMessage,
-    params: Record<string, string>,
-    query: URLSearchParams,
-    session: Session | null,
-    token: string | null,
-    note: AuditNote,
-  ): RouteRequest => ({
-    params,
-    query,
-    session,
-    token,
-    audit: (more) => void Object.assign(note, more),
+  /** A request as the call it is, whatever it came over. */
+  const callOf = (request: IncomingMessage, url: URL): Call => ({
+    method: request.method ?? '',
+    pathname: url.pathname,
+    query: url.searchParams,
     header: (name) => {
       const value = request.headers[name];
       return Array.isArray(value) ? value[0] : value;
@@ -203,43 +183,6 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
       return Buffer.concat(pieces);
     },
   });
-
-  /**
-   * Write the audit record of a request. False when it could not be written:
-   * the request is then not answered, so that nothing leaves the server
-   * without a record of who had it.
-   */
-  const recorded = (
-    route: Route,
-    params: Readonly<Record<string, string>>,
-    session: Session | null,
-    note: AuditNote,
-    status: number,
-  ): boolean => {
-    if (!audit || route.audit === false) return true;
-    const action = route.audit ?? 'request';
-    // A route that says nothing of itself is known by its pattern and what stood in it.
-    const unnamed = action === 'request';
-    try {
-      audit.record({
-        actor: note.actor !== undefined ? note.actor : (session?.account.name ?? null),
-        origin: 'api',
-        action,
-        outcome: outcomeOf(status),
-        patientId: note.patientId ?? null,
-        studyUid: note.studyUid ?? null,
-        seriesUid: note.seriesUid ?? null,
-        object: note.object ?? (unnamed ? `${route.method} ${route.path}` : null),
-        detail:
-          note.detail ??
-          (unnamed && Object.keys(params).length > 0 ? JSON.stringify(params) : null),
-      });
-      return true;
-    } catch (error) {
-      logger.error('audit-failed', { route: route.path, ...errorFields(error) });
-      return false;
-    }
-  };
 
   /** Answer one request; says which route it was, for the log. */
   const answer = async (request: IncomingMessage, response: ServerResponse): Promise<string> => {
@@ -286,22 +229,16 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
       await fail(response, new HttpError(400, 'bad-request', 'The address could not be read.'));
       return 'unreadable';
     }
-    const onPath = routes.flatMap((route) => {
-      const params = matchPath(route.path, url.pathname);
-      return params ? [{ route, params }] : [];
-    });
-    if (onPath.length === 0) {
-      await fail(response, new HttpError(404, 'not-found', 'There is nothing at this address.'));
-      return 'unmatched';
-    }
     // A browser asking, before the real request, whether it may send it.
+    const methods = dispatcher.methodsAt(url.pathname);
     if (
+      methods.length > 0 &&
       request.method === 'OPTIONS' &&
       origin !== undefined &&
       request.headers['access-control-request-method'] !== undefined
     ) {
       begin(response, 204, {
-        'Access-Control-Allow-Methods': onPath.map(({ route }) => route.method).join(', '),
+        'Access-Control-Allow-Methods': methods.join(', '),
         'Access-Control-Allow-Headers': CORS_REQUEST_HEADERS,
         'Access-Control-Max-Age': '600',
         // Chrome asks this of a public page that calls a server on a private
@@ -313,82 +250,23 @@ export function createHost(core: ServerCore, options: HostOptions): ServerHost {
       response.end();
       return 'preflight';
     }
-    const match = onPath.find(({ route }) => route.method === request.method);
-    if (!match) {
-      const allow = onPath.map(({ route }) => route.method).join(', ');
-      await fail(
-        response,
-        new HttpError(405, 'method-not-allowed', 'This address does not take that method.', {
-          Allow: allow,
-        }),
-      );
-      return onPath[0].route.path;
-    }
-    const { route, params } = match;
-    // Who is asking. A token is looked at on a public route too, so that the
-    // route can tell a logged-in caller; only its absence is let through there.
-    let session: Session | null = null;
-    let token: string | null = null;
-    if (accounts) {
-      token = bearerToken(request.headers.authorization);
-      session = token === null ? null : accounts.authenticate(token);
-      if (session === null) token = null;
-      const access = route.access ?? 'user';
-      if (access !== 'public' && session === null) {
-        await fail(
-          response,
-          new HttpError(401, 'unauthenticated', 'Log in to use this server.', {
-            'WWW-Authenticate': 'Bearer',
-          }),
-        );
-        return route.path;
-      }
-      if (access === 'admin' && session?.account.role !== 'admin') {
-        // Who tried what they may not is kept; the answer is the same whether it could be.
-        recorded(route, params, session, {}, 403);
-        await fail(response, new HttpError(403, 'forbidden', 'This is for an administrator.'));
-        return route.path;
-      }
-    }
-    const note: AuditNote = {};
-    let result: RouteResponse | null = null;
-    let thrown: { readonly error: unknown } | null = null;
+    const { route, answer: result } = await dispatcher.dispatch(callOf(request, url));
     try {
-      result = await route.handle(
-        requestOf(request, params, url.searchParams, session, token, note),
-      );
-    } catch (error) {
-      thrown = { error };
-    }
-    const status = result
-      ? result.status
-      : thrown?.error instanceof HttpError
-        ? thrown.error.status
-        : 500;
-    if (!recorded(route, params, session, note, status)) {
-      if (result && 'stream' in result) result.stream.destroy();
-      await fail(response, new HttpError(500, 'internal', 'The server could not answer.'));
-      return route.path;
-    }
-    try {
-      if (thrown) throw thrown.error;
-      await send(response, result!);
+      // A refused upload may still be arriving: do not keep the connection for it.
+      if (result.status === 413) response.setHeader('Connection', 'close');
+      await send(response, result);
     } catch (error) {
       if (response.headersSent) {
         // Part of an answer is out already; the rest cannot be taken back.
-        logger.error('response-failed', { route: route.path, ...errorFields(error) });
+        logger.error('response-failed', { route, ...errorFields(error) });
         response.destroy();
-      } else if (error instanceof HttpError) {
-        // A refused upload may still be arriving: do not keep the connection for it.
-        if (error.status === 413) response.setHeader('Connection', 'close');
-        await fail(response, error);
       } else {
         // What went wrong is for the log; the caller is told only that it did.
-        logger.error('route-failed', { route: route.path, ...errorFields(error) });
+        logger.error('route-failed', { route, ...errorFields(error) });
         await fail(response, new HttpError(500, 'internal', 'The server could not answer.'));
       }
     }
-    return route.path;
+    return route;
   };
 
   const listener: RequestListener = (request, response) => {

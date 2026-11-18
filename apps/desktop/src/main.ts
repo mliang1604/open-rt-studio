@@ -38,6 +38,8 @@ import { respond } from './content.js';
 import { fileAnswers, type Pickers } from './files.js';
 import { openGrants } from './grants.js';
 import { serveBridge } from './ipc.js';
+import { libraryAnswers } from './library-calls.js';
+import { openLibrary, type Library } from './library.js';
 import { serverAnswers } from './server-calls.js';
 import {
   APP_HOME,
@@ -52,6 +54,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const NAME = 'Open RT Studio';
 const GRANTS_FILE = 'file-grants.json';
 const CONNECTIONS_FILE = 'server-connections.json';
+/** The library on this computer: its instances, its index and its settings, in the profile. */
+const LIBRARY_DIRECTORY = 'library';
 
 /** Settings for working on the application. An installed one reads none of them. */
 const DEV_SERVER = 'OPEN_RT_STUDIO_DESKTOP_DEV_SERVER';
@@ -250,6 +254,18 @@ function systemSeal(): Seal | null {
   };
 }
 
+/** The library, once the application has started. */
+let library: Library | null = null;
+let closing = false;
+
+/** Before the application goes: what the library was doing is finished, and it is closed. */
+function closeLibraryThenQuit(event: { preventDefault(): void }): void {
+  if (closing || library === null) return;
+  closing = true;
+  event.preventDefault();
+  void library.stop().finally(() => app.quit());
+}
+
 async function start(): Promise<void> {
   if (devServer === null && !existsSync(join(webRoot, 'index.html'))) {
     fail('The viewer has not been built. Run "npm run build" in the repository first.');
@@ -286,10 +302,23 @@ async function start(): Promise<void> {
   });
   // Kept grants are in the profile: they say where the user's data is, and nothing of it.
   const grants = await openGrants({ file: join(app.getPath('userData'), GRANTS_FILE) });
+  // The server of this repository, inside this process: no port, no login.
+  library = openLibrary({
+    directory: join(app.getPath('userData'), LIBRARY_DIRECTORY),
+    pickFolder: async () => {
+      const chosen = await showOpenDialog({
+        title: 'Import a folder into the library',
+        buttonLabel: 'Import',
+        properties: ['openDirectory'],
+      });
+      return chosen[0] ?? null;
+    },
+  });
   serveBridge(ipcMain, (address) => mayNavigate(address, home), {
     'desktop:info': { accepts: (args) => args.length === 0, answer: desktopInfo },
     ...fileAnswers(grants, pickers),
     ...serverAnswers(connections),
+    ...libraryAnswers(library),
   });
 
   openWindow();
@@ -313,6 +342,7 @@ if (!app.requestSingleInstanceLock()) {
     window.focus();
   });
   app.on('web-contents-created', (_event, contents) => confine(contents));
+  app.on('before-quit', closeLibraryThenQuit);
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });

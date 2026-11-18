@@ -4,11 +4,15 @@
 
 import { BRIDGE_CHANNELS, type DesktopInfo } from '@open-rt-studio/desktop-bridge';
 
+import { SILENT_LOGGER } from '@open-rt-studio/server';
+
 import { openConnections } from './connections.js';
 import { fileAnswers } from './files.js';
 import { openGrants } from './grants.js';
 import { BridgeRefusedError, serveBridge, type CallEvent } from './ipc.js';
 import { APP_HOME, mayNavigate } from './policy.js';
+import { libraryAnswers } from './library-calls.js';
+import { openLibrary } from './library.js';
 import { serverAnswers } from './server-calls.js';
 
 const INFO: DesktopInfo = {
@@ -44,6 +48,14 @@ async function served() {
           fetch: () => Promise.reject(new Error('no network in this spec')),
           approve: async () => false,
           seal: null,
+        }),
+      ),
+      ...libraryAnswers(
+        openLibrary({
+          directory: 'not-opened-in-this-spec',
+          pickFolder: async () => null,
+          open: () => Promise.reject(new Error('no library in this spec')),
+          logger: SILENT_LOGGER,
         }),
       ),
     },

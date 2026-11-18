@@ -16,6 +16,7 @@
       "@open-rt-studio/desktop-bridge": ["./packages/desktop-bridge/src/index.ts"],
       "@open-rt-studio/dicom": ["./packages/dicom/src/index.ts"],
       "@open-rt-studio/render": ["./packages/render/src/index.ts"],
+      "@open-rt-studio/server": ["./services/server/src/index.ts"],
       "@open-rt-studio/testdata": ["./packages/testdata/src/index.ts"]
     }
   }

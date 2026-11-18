@@ -14,6 +14,10 @@ The calls: `info()`, and under `files` the system's dialogs
 no call takes or gives a place on the disk. Under `server`, the servers
 the user agreed to (`connect`, `connections`, `forget`) and a request to
 one's API (`request`, `cancel`); the token of a login is never in an answer.
+Under `library`, the library on this computer: a request to its API, which
+is the server's (`request`, `cancel`), and the import of a folder
+(`importFolder`, `importProgress`, `cancelImport`), which takes nothing and
+answers with counts: the folder is chosen in the main process's dialog.
 
 It has no dependencies and runs anywhere. See the rules at the top of
 `src/bridge.ts` before adding a call, and

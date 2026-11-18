@@ -29,7 +29,7 @@ function call<C extends BridgeChannel>(
 }
 
 const NAME: typeof BRIDGE_GLOBAL = 'openRtStudioDesktop';
-const VERSION: typeof BRIDGE_VERSION = 3;
+const VERSION: typeof BRIDGE_VERSION = 4;
 
 const bridge: DesktopBridge = {
   version: VERSION,
@@ -48,6 +48,13 @@ const bridge: DesktopBridge = {
     forget: (id) => call('server:forget', id),
     request: (id, request) => call('server:request', id, request),
     cancel: (request) => call('server:cancel', request),
+  },
+  library: {
+    request: (request) => call('library:request', request),
+    cancel: (request) => call('library:cancel', request),
+    importFolder: () => call('library:import-folder'),
+    importProgress: () => call('library:import-progress'),
+    cancelImport: () => call('library:cancel-import'),
   },
 };
 

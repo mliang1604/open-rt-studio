@@ -99,6 +99,13 @@ export interface ServerSourceOptions {
    * more of why than a browser tells: the whole sentence.
    */
   readonly unreachable?: (host: string, error: unknown) => string;
+  /**
+   * What to call it, when it is not a server at an address: the desktop
+   * application's library on this computer (`desktop-library.ts`). `label`
+   * stands where "Server at host" would, and `the` begins a sentence about
+   * it, as "The server at host" would.
+   */
+  readonly named?: { readonly label: string; readonly the: string };
 }
 
 // The server's answers, as far as they are read here (see its OpenAPI document).
@@ -679,6 +686,8 @@ export class ServerSource implements DataSource {
    */
   private token: string | null;
   private readonly unreachable: ((host: string, error: unknown) => string) | null;
+  /** How a sentence about it begins: "The server at host". */
+  private readonly the: string;
   private readonly loginState = signal<ServerLogin>({ kind: 'none' });
   /** Whether the server wants a login, and who is logged in. */
   readonly login = this.loginState.asReadonly();
@@ -704,7 +713,8 @@ export class ServerSource implements DataSource {
     readonly address: string,
     options: ServerSourceOptions = {},
   ) {
-    this.label = `Server at ${new URL(address).host}`;
+    this.label = options.named?.label ?? `Server at ${new URL(address).host}`;
+    this.the = options.named?.the ?? `The server at ${new URL(address).host}`;
     // Called as a plain function: a browser's fetch refuses another `this`.
     this.fetcher = options.fetch ?? ((input, init) => fetch(input, init));
     this.parse = options.parse ?? parseFilesInWorkers;
@@ -754,7 +764,7 @@ export class ServerSource implements DataSource {
     } catch (error) {
       if (isAbortError(error)) throw error;
       throw new ServerError(
-        this.unreachable?.(this.host, error) ?? `The server at ${this.host} could not be reached.`,
+        this.unreachable?.(this.host, error) ?? `${this.the} could not be reached.`,
         null,
         true,
       );
@@ -880,7 +890,7 @@ export class ServerSource implements DataSource {
       return await response.blob();
     } catch (error) {
       if (isAbortError(error)) throw error;
-      throw new ServerError(`The server at ${this.host} stopped answering.`, null, true);
+      throw new ServerError(`${this.the} stopped answering.`, null, true);
     }
   }
 
@@ -1597,7 +1607,7 @@ export class ServerSource implements DataSource {
       bytes = await response.arrayBuffer();
     } catch (error) {
       if (isAbortError(error)) throw error;
-      throw new ServerError(`The server at ${this.host} stopped answering.`, null, true);
+      throw new ServerError(`${this.the} stopped answering.`, null, true);
     }
     if (bytes.byteLength !== instance.size) {
       throw new ServerError('A file arrived incomplete from the server.', null);
@@ -1625,10 +1635,7 @@ export class ServerSource implements DataSource {
       return (await response.json()) as T;
     } catch (error) {
       if (isAbortError(error)) throw error;
-      throw new ServerError(
-        `The server at ${this.host} gave an answer that could not be read.`,
-        null,
-      );
+      throw new ServerError(`${this.the} gave an answer that could not be read.`, null);
     }
   }
 
@@ -1672,7 +1679,7 @@ export class ServerSource implements DataSource {
       // A browser gives no reason; these are the two there are.
       throw new ServerError(
         this.unreachable?.(this.host, error) ??
-          `The server at ${this.host} could not be reached. It may not be running, or it may not allow this page (its allowedOrigins setting).${this.unreachableBecause()}`,
+          `${this.the} could not be reached. It may not be running, or it may not allow this page (its allowedOrigins setting).${this.unreachableBecause()}`,
         null,
         true,
       );
@@ -1689,7 +1696,7 @@ export class ServerSource implements DataSource {
       throw new ServerError(
         ended
           ? `Your login at ${this.host} has ended. Choose "Server…" to log in again.`
-          : `The server at ${this.host} asks for a login.`,
+          : `${this.the} asks for a login.`,
         401,
       );
     }
