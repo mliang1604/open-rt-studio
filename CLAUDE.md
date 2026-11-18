@@ -35,7 +35,12 @@ application. Never commit patient data or real DICOM files
 - `services/server`: the Node server, a small PACS. `src/core` is the server
   without the network (no port, no environment), which the desktop
   application will embed; `src/store` keeps instances, `src/pacs-index`
-  knows them (SQLite through `node:sqlite`), `src/ingest` is the one way in,
+  knows them (SQLite through `node:sqlite`, or PostgreSQL for a server that
+  is given a database: a rule of the index is a test in `index-suite.ts`,
+  which both run; a change to what it keeps is a step in `migrations.ts`
+  and one in `postgres-migrations.ts`; only `postgres.ts` imports `pg`, and
+  nothing of what the database says of a failure leaves it but a code),
+  `src/ingest` is the one way in,
   `src/jobs` runs command-line workers (a job kind is registered in code and
   builds the command; never take a program from a request);
   `src/host` is HTTP on `node:http` and `src/api` the routes it serves. A
@@ -113,7 +118,11 @@ touches the server, the Dockerfile or `compose.yaml`. A fifth, `DIMSE
 interop`, runs `services/server/src/dimse` against DCMTK's command-line
 tools, which it installs on the runner as a test peer; those tests are
 skipped where DCMTK is not installed, so wait for the job when a change
-touches DICOM networking.
+touches DICOM networking. A sixth, `PostgreSQL index`, runs the index's
+tests and a whole server against a PostgreSQL it starts as a service; those
+tests are skipped where `OPEN_RT_STUDIO_TEST_POSTGRES` names none, so wait
+for the job when a change touches `src/pacs-index` or how the server opens
+its index.
 
 ## Patterns
 

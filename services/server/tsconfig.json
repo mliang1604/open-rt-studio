@@ -13,7 +13,13 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.spec.ts", "src/**/testing.ts", "src/**/testing/**"],
+  "exclude": [
+    "src/**/*.spec.ts",
+    "src/**/testing.ts",
+    "src/**/testing/**",
+    "src/pacs-index/index-suite.ts",
+    "src/pacs-index/postgres-testing.ts"
+  ],
   "references": [
     {
       "path": "../../packages/dicom"

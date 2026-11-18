@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createPrivateKey, X509Certificate, type KeyObject } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,8 @@ import {
 } from './dimse/dicom-settings.js';
 import type { JobKind } from './jobs/job.js';
 import { errorFields, type LogFields, type Logger } from './logger.js';
+import { IndexVersionError } from './pacs-index/migrations.js';
+import { IndexDatabaseError } from './pacs-index/pacs-index.js';
 import { openSqliteIndex } from './pacs-index/sqlite-index.js';
 import { openFileStore } from './store/file-store.js';
 import { createMemoryStore } from './store/memory-store.js';
@@ -66,8 +68,33 @@ async function openPacs(config: ServerConfig, logger: Logger) {
   }
   await mkdir(config.dataDir, { recursive: true });
   const store = await openFileStore(join(config.dataDir, 'store'), { logger });
-  const index = await openSqliteIndex(join(config.dataDir, 'index.sqlite'), { logger });
-  return { store, index };
+  const sqliteFile = join(config.dataDir, 'index.sqlite');
+  if (config.databaseUrl === null) {
+    return { store, index: await openSqliteIndex(sqliteFile, { logger }) };
+  }
+  // An index that was kept here before is not read, and not moved either.
+  if (existsSync(sqliteFile)) logger.warn('index-in-sqlite-not-used');
+  // Loaded only by a server that is told to use it: one without does not
+  // need node-postgres to be there.
+  const { openPostgresIndex } = await import('./pacs-index/postgres-index.js');
+  try {
+    return { store, index: await openPostgresIndex(config.databaseUrl, { logger }) };
+  } catch (error) {
+    if (error instanceof IndexVersionError) {
+      // The message is the index's own, and says nothing of the address.
+      throw new ConfigError(
+        `The PostgreSQL database that ${ENVIRONMENT_VARIABLES.databaseUrl} names cannot hold ` +
+          `the index. ${error.message} Give the index a database, or a schema, of its own.`,
+      );
+    }
+    if (!(error instanceof IndexDatabaseError)) throw error;
+    // Only the code: what the database or the network said may quote the address.
+    throw new ConfigError(
+      `The index could not be opened in the PostgreSQL database that ` +
+        `${ENVIRONMENT_VARIABLES.databaseUrl} names (${error.code}). Check the address, the ` +
+        `database, the user and the password, and that the database can be reached from here.`,
+    );
+  }
 }
 
 /** What an embedder or a test adds to a server. */

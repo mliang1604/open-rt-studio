@@ -78,6 +78,11 @@ export default tseslint.config(
               message:
                 'Only src/dimse/library.ts imports the DIMSE library (docs/dimse-library.md).',
             },
+            {
+              group: ['pg', 'pg-*'],
+              message:
+                'Only src/pacs-index/postgres.ts imports node-postgres: nothing of what the database says of a failure leaves it but a code.',
+            },
           ],
         },
       ],

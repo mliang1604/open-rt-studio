@@ -179,6 +179,48 @@ jobs:
           REQUIRE_DCMTK: '1'
         run: npx vitest run src/dimse
 
+  # The index in PostgreSQL (#44): the tests every index must pass, and a
+  # whole server on it, against a PostgreSQL that the job starts as a service
+  # container. It is a test peer here and never bundled. Not a required
+  # check. REQUIRE_POSTGRES makes a missing PostgreSQL a failure here and not
+  # a skip. The password is of this job's own database, which is gone with
+  # the job: it keeps nothing and is reached by nothing else.
+  postgres-index:
+    name: PostgreSQL index
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: for-this-job-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Index and server tests against PostgreSQL
+        working-directory: services/server
+        env:
+          REQUIRE_POSTGRES: '1'
+          OPEN_RT_STUDIO_TEST_POSTGRES: postgresql://postgres:for-this-job-only@127.0.0.1:5432/postgres
+        run: npx vitest run src/pacs-index src/postgres-server.spec.ts src/log-identifiers.spec.ts
+
   # The server's container image: built, started as compose.yaml starts it,
   # and checked from outside (healthy, closed without a login, open to an
   # account made by its command, not root, data kept, a clean stop). Not a

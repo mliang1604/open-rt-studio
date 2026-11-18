@@ -61,6 +61,7 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_LOG_LEVEL: 'silent',
       OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS: '0',
       OPEN_RT_STUDIO_DATA_DIR: ' /var/lib/open-rt-studio ',
+      OPEN_RT_STUDIO_DATABASE_URL: ' postgresql://ors@db.example/ors ',
       OPEN_RT_STUDIO_MAX_UPLOAD_BYTES: '1048576',
       OPEN_RT_STUDIO_JOB_CONCURRENCY: '4',
       OPEN_RT_STUDIO_ALLOWED_ORIGINS: 'http://localhost:4200, https://Example.org',
@@ -82,6 +83,7 @@ describe('resolveConfig', () => {
       logLevel: 'silent',
       shutdownTimeoutMs: 0,
       dataDir: '/var/lib/open-rt-studio',
+      databaseUrl: 'postgresql://ors@db.example/ors',
       maxUploadBytes: 1_048_576,
       jobConcurrency: 4,
       allowedOrigins: ['http://localhost:4200', 'https://example.org'],
@@ -189,6 +191,45 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig(file)).toThrow(new ConfigError(message));
   });
 
+  it('keeps the index in SQLite unless it is given a PostgreSQL database, which needs a data directory', () => {
+    expect(resolveConfig(undefined).databaseUrl).toBeNull();
+    const url = 'postgresql://ors@db.example:5432/open_rt_studio';
+    expect(resolveConfig({ dataDir: '/var/lib/ors', databaseUrl: ` ${url} ` }).databaseUrl).toBe(
+      url,
+    );
+    expect(
+      resolveConfig(
+        { dataDir: '/var/lib/ors' },
+        { OPEN_RT_STUDIO_DATABASE_URL: 'postgres://ors@localhost/ors' },
+      ).databaseUrl,
+    ).toBe('postgres://ors@localhost/ors');
+    expect(() => resolveConfig({ databaseUrl: url })).toThrow(
+      new ConfigError(
+        'An index in PostgreSQL (OPEN_RT_STUDIO_DATABASE_URL) needs a data directory for the instances it is the index of: set OPEN_RT_STUDIO_DATA_DIR too.',
+      ),
+    );
+  });
+
+  it.each([
+    'mysql://ors:a-password-in-the-address@db.example/ors',
+    'db.example:5432/ors a-password-in-the-address',
+    'postgresql://',
+    '',
+    5,
+  ])('refuses what is no PostgreSQL address, and does not repeat it (%j)', (databaseUrl) => {
+    const refused = (): unknown => resolveConfig({ dataDir: '/var/lib/ors', databaseUrl });
+    expect(refused).toThrow(
+      new ConfigError(
+        'The config file\'s "databaseUrl" must be the address of a PostgreSQL database (postgresql://user@host:5432/database), or null.',
+      ),
+    );
+    if (typeof databaseUrl === 'string' && databaseUrl !== '') {
+      expect(() =>
+        resolveConfig({ dataDir: '/var/lib/ors' }, { OPEN_RT_STUDIO_DATABASE_URL: databaseUrl }),
+      ).toThrow(/^OPEN_RT_STUDIO_DATABASE_URL must be the address of a PostgreSQL database/);
+    }
+  });
+
   it('allows no origin unless told to, and takes a list from the file or the environment', () => {
     expect(DEFAULT_CONFIG.allowedOrigins).toEqual([]);
     expect(
@@ -257,7 +298,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey, auditRetentionDays, dicomPort, dicomAeTitle, dicomCallers, dicomTlsCert, dicomTlsKey, dicomTlsCa.',
+        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, databaseUrl, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey, auditRetentionDays, dicomPort, dicomAeTitle, dicomCallers, dicomTlsCert, dicomTlsKey, dicomTlsCa.',
       ),
     );
   });

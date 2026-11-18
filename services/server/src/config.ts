@@ -32,6 +32,15 @@ export interface ServerConfig {
    * them in memory: gone when the server stops, which is for trying it out.
    */
   readonly dataDir: string | null;
+  /**
+   * The PostgreSQL database the index is kept in, as a connection string
+   * (`postgresql://user@host:5432/database`), for a server with many users.
+   * Null, the default, keeps the index in a SQLite file in the data
+   * directory. The instances stay in the data directory either way, so one
+   * is needed. The string may hold a password: it is never logged, and no
+   * error quotes it.
+   */
+  readonly databaseUrl: string | null;
   /** The largest instance an upload may hold, in bytes. */
   readonly maxUploadBytes: number;
   /** How many jobs run at once; the rest wait their turn. */
@@ -102,6 +111,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   logLevel: 'info',
   shutdownTimeoutMs: 10_000,
   dataDir: null,
+  databaseUrl: null,
   maxUploadBytes: 512 * 1024 * 1024,
   jobConcurrency: 1,
   allowedOrigins: [],
@@ -127,6 +137,7 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   logLevel: 'OPEN_RT_STUDIO_LOG_LEVEL',
   shutdownTimeoutMs: 'OPEN_RT_STUDIO_SHUTDOWN_TIMEOUT_MS',
   dataDir: 'OPEN_RT_STUDIO_DATA_DIR',
+  databaseUrl: 'OPEN_RT_STUDIO_DATABASE_URL',
   maxUploadBytes: 'OPEN_RT_STUDIO_MAX_UPLOAD_BYTES',
   jobConcurrency: 'OPEN_RT_STUDIO_JOB_CONCURRENCY',
   allowedOrigins: 'OPEN_RT_STUDIO_ALLOWED_ORIGINS',
@@ -185,6 +196,14 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
       value === null || (typeof value === 'string' && value.trim() !== '')
         ? { value: value === null ? null : value.trim() }
         : { wrong: 'must be a directory, or null to keep nothing' },
+    // What is wrong never quotes the value: it may hold a password.
+    databaseUrl: (value) =>
+      value === null || (typeof value === 'string' && /^postgres(ql)?:\/\/\S+$/.test(value.trim()))
+        ? { value: value === null ? null : value.trim() }
+        : {
+            wrong:
+              'must be the address of a PostgreSQL database (postgresql://user@host:5432/database), or null',
+          },
     maxUploadBytes: (value) =>
       typeof value === 'number' && Number.isInteger(value) && value >= 1
         ? { value }
@@ -322,6 +341,12 @@ export function resolveConfig(file: unknown, environment: Environment = {}): Ser
     throw new ConfigError(
       `HTTPS takes a certificate and its key: set both ${ENVIRONMENT_VARIABLES.tlsCert} and ` +
         `${ENVIRONMENT_VARIABLES.tlsKey}, or neither.`,
+    );
+  }
+  if (resolved.databaseUrl !== null && resolved.dataDir === null) {
+    throw new ConfigError(
+      `An index in PostgreSQL (${ENVIRONMENT_VARIABLES.databaseUrl}) needs a data directory for ` +
+        `the instances it is the index of: set ${ENVIRONMENT_VARIABLES.dataDir} too.`,
     );
   }
   if ((resolved.dicomTlsCert === null) !== (resolved.dicomTlsKey === null)) {
