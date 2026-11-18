@@ -137,6 +137,8 @@ jobs:
           ls -l bin licenses licenses/*
           ./bin/ors-volume-info --version
           ./bin/ors-register-rigid --version
+          ./bin/ors-register-deformable --version
+          ls presets/deformable
           case "$RUNNER_OS" in
             Linux)
               ldd bin/ors-volume-info
@@ -194,6 +196,7 @@ jobs:
           tar -xzf native-tools-macos-arm64.tar.gz -C arm64
           tar -xzf native-tools-macos-x64.tar.gz -C x64
           cp -R arm64/licenses universal/licenses
+          cp -R arm64/presets universal/presets
           for tool in arm64/bin/*; do
             name=$(basename "$tool")
             lipo -create -output "universal/bin/$name" "arm64/bin/$name" "x64/bin/$name"

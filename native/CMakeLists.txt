@@ -74,7 +74,10 @@ configure_file(cmake/ors_version.h.in generated/ors_version.h @ONLY)
 
 add_subdirectory(tools/volume-info)
 add_subdirectory(tools/register-rigid)
+add_subdirectory(tools/register-deformable)
 
+# The presets of the deformable registration: files, beside the tools.
+install(DIRECTORY presets/ DESTINATION presets FILES_MATCHING PATTERN "*.txt")
 install(DIRECTORY "${ORS_LICENSES_DIR}/" DESTINATION licenses)
 install(FILES THIRD-PARTY.md DESTINATION licenses)
 install(FILES ../LICENSE DESTINATION licenses RENAME open-rt-studio-LICENSE)

@@ -61,3 +61,28 @@ add_test(NAME register-rigid
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/register-rigid
     -P ${CMAKE_CURRENT_SOURCE_DIR}/register_rigid_test.cmake)
 set_tests_properties(register-rigid PROPERTIES TIMEOUT 1200)
+
+# --- ors-register-deformable (#81) --------------------------------------------
+
+# Writes the synthetic deformed pair and says how near a result is to the
+# deformation the pair was made with. Nothing of ITK or elastix is in it.
+add_executable(ors-make-deformed-pair make_deformed_pair.cxx)
+ors_self_contained(ors-make-deformed-pair)
+ors_warnings(ors-make-deformed-pair)
+
+add_test(NAME register-deformable-version COMMAND ors-register-deformable --version)
+set_tests_properties(register-deformable-version PROPERTIES PASS_REGULAR_EXPRESSION
+  "^{\"tool\":\"ors-register-deformable\",\"version\":\"${PROJECT_VERSION}\",\"itk\":\"${ORS_ITK_VERSION}\",\"elastix\":\"${ORS_ELASTIX_VERSION}\"}")
+
+# The tool finds the known deformation of the synthetic pair with each of
+# its presets, gives the same answer twice for one seed, starts from a
+# matrix that is near and from none, takes a parameter set over the preset,
+# and refuses what it cannot use.
+add_test(NAME register-deformable
+  COMMAND ${CMAKE_COMMAND}
+    -DTOOL=$<TARGET_FILE:ors-register-deformable>
+    -DPAIR=$<TARGET_FILE:ors-make-deformed-pair>
+    -DPRESETS=${PROJECT_SOURCE_DIR}/presets/deformable
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/register-deformable
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/register_deformable_test.cmake)
+set_tests_properties(register-deformable PROPERTIES TIMEOUT 3000)
