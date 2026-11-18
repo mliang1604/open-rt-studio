@@ -50,16 +50,16 @@ A change to the shell itself (`src/`) needs `npm run desktop:dev` again.
 The page is the same code as in a browser, and is given less than a browser
 gives a web site, not more.
 
-|                  |                                                                                                                                                                      |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node             | None. Every page process is sandboxed, with context isolation and no Node integration, in workers and frames too.                                                    |
-| Its files        | The web client's build, served by the main process under `app://open-rt-studio/`. A request reaches a file of that build or nothing.                                 |
-| Scripts          | Only the application's own files. No script written into the page runs; no text is evaluated.                                                                        |
-| The network      | None of its own: the page fetches from the application itself. A server is asked through the main process, and only one the user agreed to. See [Servers](#servers). |
-| Going elsewhere  | It goes to no other address, opens no window and embeds no page. A file dropped on the window is the viewer's to open.                                               |
-| The disk         | The folders and files the user chose in the system's dialog, to read. See [Folders and files](#folders-and-files).                                                   |
-| Permissions      | To read a file or folder that is dropped on the window. Nothing else: no camera, microphone, location, notifications, clipboard reading, screen capture or devices.  |
-| The main process | The calls declared in [`packages/desktop-bridge`](../../packages/desktop-bridge), and no other: `info()`, the calls about files and the calls about servers.         |
+|                  |                                                                                                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node             | None. Every page process is sandboxed, with context isolation and no Node integration, in workers and frames too.                                                     |
+| Its files        | The web client's build, served by the main process under `app://open-rt-studio/`. A request reaches a file of that build or nothing.                                  |
+| Scripts          | Only the application's own files. No script written into the page runs; no text is evaluated.                                                                         |
+| The network      | None of its own: the page fetches from the application itself. A server is asked through the main process, and only one the user agreed to. See [Servers](#servers).  |
+| Going elsewhere  | It goes to no other address, opens no window and embeds no page. A file dropped on the window is the viewer's to open.                                                |
+| The disk         | The folders and files the user chose in the system's dialog, to read. See [Folders and files](#folders-and-files).                                                    |
+| Permissions      | To read a file or folder that is dropped on the window. Nothing else: no camera, microphone, location, notifications, clipboard reading, screen capture or devices.   |
+| The main process | The calls declared in [`packages/desktop-bridge`](../../packages/desktop-bridge), and no other: `info()`, the calls about files, about servers and about the library. |
 
 The reasons are in [docs/architecture.md](../../docs/architecture.md),
 "Desktop".
@@ -112,6 +112,25 @@ differs is how the request gets there, and what is kept.
   to, and the application says that this is why. There is no way to connect
   anyway: have the computer trust the certificate.
 
+## The library on this computer
+
+The application works with no server. Choose **Open the library, or connect
+to a server…**, then **Open the library on this computer**.
+
+- **Import a folder…** copies the DICOM files in a folder you choose into
+  the library, and says how many were added, were there already or were not
+  DICOM. A folder can be imported again; what is there is not taken twice.
+- The studies are searched and chosen as on a server, a series is viewed as
+  any is, and what you make in the viewer (a structure set, a registration,
+  a resampled series) is saved to the library.
+- It is kept in the profile, in `library/`, and is there the next time.
+  **Open folder…** is another thing: it reads files where they are and
+  copies nothing.
+- It is the server of this repository inside the application. **No port is
+  opened and nobody logs in**: nothing but this application can ask it.
+- Its DICOM listener is off. It can be turned on under **DICOM** on the
+  library's card, and then listens on this computer only.
+
 ## Layout
 
 ```
@@ -124,12 +143,14 @@ src/grants.ts     what the page may read of the disk
 src/files.ts      the bridge's calls about files, answered from the grants
 src/connections.ts   the servers the page may ask, and the login held for each
 src/server-calls.ts  the bridge's calls about servers, answered from the connections
+src/library.ts       the library on this computer: the server, inside the main process
+src/library-calls.ts the bridge's calls about the library, answered from it
 scripts/dev.mjs   npm run desktop:dev
 e2e/              the shell as it runs, with Playwright
 ```
 
-`policy.ts`, `content.ts`, `ipc.ts`, `grants.ts`, `files.ts`, `connections.ts` and
-`server-calls.ts` need no Electron, so each rule has a
+`policy.ts`, `content.ts`, `ipc.ts`, `grants.ts`, `files.ts`, `connections.ts`,
+`server-calls.ts`, `library.ts` and `library-calls.ts` need no Electron, so each rule has a
 unit test; only `main.ts` and `preload.cts` import Electron, and lint holds
 the rest to it.
 
@@ -167,7 +188,9 @@ process's is replaced by one that answers as the user would. A third
 account and connects to it: through the bridge everywhere, and through the
 application's own card, down to a series on screen, where there is a GPU.
 It gives Chromium a stand-in for the keychain, so that a test writes nothing
-into yours. `E2E_NO_WEBGPU=1` takes the GPU away, to see on a machine that
+into yours. A fourth (`e2e/library.spec.ts`) has no server at all: it
+imports a folder into the library, browses it, views a series, saves a
+painted structure, and finds all of it after a restart. `E2E_NO_WEBGPU=1` takes the GPU away, to see on a machine that
 has one what a runner without one sees.
 
 It needs a display. On Linux without one: `xvfb-run --auto-servernum npm run

@@ -22,9 +22,11 @@ import {
   HELD_LOGIN,
   SERVER_REQUEST_HEADERS,
   type DesktopServer,
+  type ServerAnswer,
   type ServerConnection,
   type ServerFailure,
   type ServerMethod,
+  type ServerRequest,
 } from '@open-rt-studio/desktop-bridge';
 
 import { connectToServer, serverAddress, type ServerSource } from './data-source/server-source';
@@ -59,9 +61,27 @@ const aborted = (): DOMException => new DOMException('The request was given up.'
  * said here: the main process adds the login it holds.
  */
 export function desktopFetch(server: DesktopServer, connection: ServerConnection): typeof fetch {
+  return bridgeFetch(connection.address, {
+    request: (request) => server.request(connection.id, request),
+    cancel: (request) => server.cancel(request),
+  });
+}
+
+/** What answers a request on the other side of the bridge: a server's connection, or the library. */
+export interface BridgeAsker {
+  /** Null when there is nothing to ask any more. */
+  request(request: ServerRequest): Promise<ServerAnswer | null>;
+  cancel(request: string): Promise<null>;
+}
+
+/**
+ * A `fetch` for what is at `address`, which asks through the bridge and
+ * gives the answer as a `Response`. It asks for nothing that is elsewhere.
+ */
+export function bridgeFetch(address: string, asker: BridgeAsker): typeof fetch {
   return async (input, init = {}) => {
     const url = input instanceof Request ? input.url : String(input);
-    if (!url.startsWith(`${connection.address}/`)) throw new DesktopFetchError('unreachable');
+    if (!url.startsWith(`${address}/`)) throw new DesktopFetchError('unreachable');
     const signal = init.signal ?? null;
     if (signal?.aborted) throw aborted();
 
@@ -74,10 +94,10 @@ export function desktopFetch(server: DesktopServer, connection: ServerConnection
         ? null
         : new Uint8Array(await new Response(init.body).arrayBuffer());
     const request = requestName();
-    const asked = server.request(connection.id, {
+    const asked = asker.request({
       request,
       method: (init.method ?? 'GET').toUpperCase() as ServerMethod,
-      path: url.slice(connection.address.length),
+      path: url.slice(address.length),
       headers,
       body,
     });
@@ -90,7 +110,7 @@ export function desktopFetch(server: DesktopServer, connection: ServerConnection
             signal.addEventListener(
               'abort',
               () => {
-                void server.cancel(request);
+                void asker.cancel(request);
                 reject(aborted());
               },
               { once: true },

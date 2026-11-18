@@ -3,7 +3,7 @@
    - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
 
 <div class="server-head">
-  <h2 id="server-panel-title">Server</h2>
+  <h2 id="server-panel-title">{{ inLibrary() ? 'Library' : 'Server' }}</h2>
   <button type="button" (click)="closed.emit()" title="Close this card">Close</button>
 </div>
 
@@ -76,8 +76,31 @@
           : 'Go back to opened files. The viewport is emptied'
       "
     >
-      {{ loggedInAs() ? 'Log out and disconnect' : 'Disconnect' }}
+      @if (inLibrary()) {
+        Close the library
+      } @else {
+        {{ loggedInAs() ? 'Log out and disconnect' : 'Disconnect' }}
+      }
     </button>
+    @if (inLibrary()) {
+      @if (importing(); as progress) {
+        <button
+          type="button"
+          (click)="onStopImport()"
+          title="Stop after the file in hand. What was imported stays"
+        >
+          Stop importing
+        </button>
+      } @else {
+        <button
+          type="button"
+          (click)="onImport()"
+          title="Choose a folder, and copy the DICOM files in it into the library"
+        >
+          Import a folder…
+        </button>
+      }
+    }
     @if (shown() !== 'studies') {
       <button type="button" (click)="onView('studies')" title="Back to the studies on the server">
         Studies
@@ -133,6 +156,17 @@
       </button>
     }
   </div>
+  @if (importing(); as progress) {
+    <p class="server-import" role="status">
+      @if (progress.total > 0) {
+        Importing: {{ progress.done }} of {{ progress.total }} files.
+      } @else {
+        Importing…
+      }
+    </p>
+  } @else if (imported(); as said) {
+    <p class="server-import" role="status">{{ said }}</p>
+  }
   @if (shown() === 'audit') {
     <app-audit-panel [server]="connected" />
   } @else if (shown() === 'send') {
@@ -148,10 +182,28 @@
       [server]="connected"
       [chosenKey]="chosenKey()"
       [disabled]="busy()"
+      [changed]="libraryChanged()"
       (choose)="onPatient($event)"
     />
   }
 } @else {
+  @if (library) {
+    <!-- The desktop application's own library: on this computer, with no server. -->
+    <div class="server-library">
+      <button
+        type="button"
+        [disabled]="busy()"
+        (click)="onLibrary()"
+        title="The studies this application keeps on this computer. Nothing is contacted"
+      >
+        Open the library on this computer
+      </button>
+      <p class="server-note">
+        The library is kept by this application on this computer, and needs no server and no
+        network. Or connect to a server:
+      </p>
+    </div>
+  }
   <form (submit)="onConnect($event)">
     <label for="server-address">Address of an Open RT Studio server</label>
     <div class="server-row">

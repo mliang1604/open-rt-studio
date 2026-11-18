@@ -116,11 +116,19 @@ test('the bridge is the declared calls and nothing more', async () => {
       keys: Object.keys(bridge).sort(),
       files: Object.keys(bridge['files'] as object).sort(),
       server: Object.keys(bridge['server'] as object).sort(),
+      library: Object.keys(bridge['library'] as object).sort(),
       version: bridge['version'],
       info,
     };
   }, BRIDGE_GLOBAL);
-  expect(seen.keys).toEqual(['files', 'info', 'server', 'version']);
+  expect(seen.keys).toEqual(['files', 'info', 'library', 'server', 'version']);
+  expect(seen.library).toEqual([
+    'cancel',
+    'cancelImport',
+    'importFolder',
+    'importProgress',
+    'request',
+  ]);
   expect(seen.server).toEqual(['cancel', 'connect', 'connections', 'forget', 'request']);
   expect(seen.files).toEqual(['forget', 'keep', 'list', 'pickFiles', 'pickFolder', 'read']);
   expect(seen.version).toBe(BRIDGE_VERSION);

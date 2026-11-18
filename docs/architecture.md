@@ -607,9 +607,40 @@ Decided for the shell (#61):
     uses (`apps/web/src/app/desktop-server.ts`); nothing else knows.
   - An answer is taken whole, up to 1 GiB. The viewer fetches a series one
     file at a time, so this bounds a file and not a study.
+- **Standalone: the server is inside the main process** (#64), as the
+  library on this computer. With no server and no network the user imports,
+  browses, views and saves.
+  - It is the server of this repository **without its HTTP host**
+    (`openEmbeddedServer`): the same store, index (SQLite), ingest, audit
+    log, jobs and DICOM service, and the same routes. **No port is opened
+    for it.** A request is a bridge call, and the main process hands it to
+    the routes directly (`services/server/src/host/dispatch.ts`, which the
+    HTTP host uses too: which route answers, who may have the answer, and
+    the audit record are one piece of code for both).
+  - **No login.** There are no accounts: whoever runs the application is
+    its one user, and nothing but the application's own page can ask.
+  - It is kept in the profile, under `library/`: the instances as files,
+    `index.sqlite`, the audit log, the DICOM settings. It is there in the
+    next run. Nothing of it is in the page's own storage.
+  - **A folder is imported by the main process**, from the disk, with the
+    server's own folder import. The user chooses the folder in the system's
+    dialog; the page asks for an import and names nothing, and is told how
+    many files were taken, were there already or were not DICOM: counts, and
+    no names and no place.
+  - In the page it is a `ServerSource` with another name
+    (`apps/web/src/app/desktop-library.ts`): the same study browser and
+    timeline, and what is made in the viewer is saved to it as to a server.
+    **Open folder…** stays what it was: files read where they are, and not
+    copied into the library.
+  - **Its DICOM listener is off** unless it is turned on in the library's
+    DICOM settings, and then it listens on this machine only (`127.0.0.1`).
+    Listening to other machines from a desktop application with no login is
+    not offered.
+  - The library is closed before the application quits: what it was doing
+    is finished first, for at most five seconds.
 - **What the shell decides needs no Electron** (`policy.ts`, `content.ts`,
-  `ipc.ts`, `grants.ts`, `files.ts`, `connections.ts`, `server-calls.ts`),
-  so each rule has a unit test; only `main.ts` and `preload.cts`
+  `ipc.ts`, `grants.ts`, `files.ts`, `connections.ts`, `server-calls.ts`,
+  `library.ts`, `library-calls.ts`), so each rule has a unit test; only `main.ts` and `preload.cts`
   import Electron, and a lint rule holds the rest to it.
 - **Development** runs the shell on the web client's development server
   (`npm run desktop:dev`), with the same policy plus that server's socket for
@@ -617,14 +648,16 @@ Decided for the shell (#61):
   installed application reads none of the development settings.
 - **Electron 45** (Chromium 156, Node 24.22). It is pinned to an exact
   version: a new Chromium is a change to look at, not one to drift into.
-  Its Node has `node:sqlite`, which #64 needs.
+  Its Node has `node:sqlite`, which the library uses.
 - **WebGPU** is on in that Chromium on macOS and Windows with nothing set.
   Linux is #69.
 
 Status: **decided, and Michael's to overturn**: the scheme, that the web
 build gives up inlined critical styles for the policy, that a server is
-reached through the main process and agreed to in its dialog, and that the
-token of a login is kept and the password is not.
+reached through the main process and agreed to in its dialog, that the
+token of a login is kept and the password is not, that the library is
+opened by choice and **Open folder…** does not copy into it, and that its
+DICOM listener is for this machine only.
 
 ## Server and PACS
 
@@ -886,9 +919,8 @@ token of a login is kept and the password is not.
   adds no dependency and no native module to rebuild for Electron. Node
   documents the module as a release candidate from v24.15, which is this
   repository's minimum; Electron 45, which the shell uses, carries Node
-  24.22, and that it works there is to be checked in #64. If it does not, the alternative is
-  `better-sqlite3` (MIT), behind the same interface. Status: **decided for
-  the server, to be confirmed for the desktop application.**
+  24.22, where it works: the desktop application's library runs on it (#64).
+  Status: **decided.**
 - The index in PostgreSQL (#44) is a second implementation of the same
   interface, on **node-postgres (`pg`, MIT)**, for a server that is given
   `OPEN_RT_STUDIO_DATABASE_URL`. It is loaded only then, so the desktop

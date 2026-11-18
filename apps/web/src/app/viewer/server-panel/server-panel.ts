@@ -18,6 +18,7 @@ import { ActiveDataSource } from '../../data-source/active-data-source';
 import type { DataSource, PatientSummary } from '../../data-source/data-source';
 import type { ServerConnection } from '@open-rt-studio/desktop-bridge';
 import { connectToServer, serverAddress, ServerSource } from '../../data-source/server-source';
+import { DESKTOP_LIBRARY, importSaid, isLibrary, openDesktopLibrary } from '../../desktop-library';
 import { DESKTOP_SERVER, desktopConnector } from '../../desktop-server';
 import { PreferencesStore } from '../../preferences-store';
 import { AccountsPanel } from '../accounts-panel/accounts-panel';
@@ -30,6 +31,9 @@ import { confirmLeavePatient } from '../viewer-dom';
 
 /** The address a server listens on unless it was told otherwise. */
 export const DEFAULT_SERVER_ADDRESS = 'http://127.0.0.1:4300';
+
+/** How often the card asks how far an import has come, in milliseconds. */
+const IMPORT_PROGRESS_MS = 300;
 
 /** What the card holds once a server is connected. */
 type ServerView = 'studies' | 'send' | 'retrieve' | 'audit' | 'dicom' | 'accounts';
@@ -110,6 +114,61 @@ export class ServerPanel {
     await this.refreshSaved();
   }
 
+  /** The desktop application's library on this computer; null in a browser. */
+  protected readonly library = inject(DESKTOP_LIBRARY);
+  /** Whether what is connected is the library, and not a server. */
+  protected readonly inLibrary = computed(() => isLibrary(this.server()));
+  /** How far an import into the library has come; null when none is under way. */
+  protected readonly importing = signal<{ done: number; total: number } | null>(null);
+  /** What the last import came to. */
+  protected readonly imported = signal<string | null>(null);
+  /** Goes up when the library was added to, so that its studies are listed again. */
+  protected readonly libraryChanged = signal(0);
+
+  /** Open the library on this computer: nothing is contacted, and nobody logs in. */
+  protected async onLibrary(): Promise<void> {
+    const library = this.library;
+    if (!library || this.busy()) return;
+    this.imported.set(null);
+    await this.attempt(async () => this.use.emit(await openDesktopLibrary(library)));
+  }
+
+  /** Take a folder into the library: the main process asks which, and reads it. */
+  protected async onImport(): Promise<void> {
+    const library = this.library;
+    const server = this.server();
+    if (!library || !server || this.importing() !== null) return;
+    this.problem.set(null);
+    this.imported.set(null);
+    this.importing.set({ done: 0, total: 0 });
+    // The import answers when it is over; how far it has come is asked meanwhile.
+    const watch = setInterval(() => {
+      void library.importProgress().then(
+        (progress) => {
+          if (progress !== null && this.importing() !== null) this.importing.set(progress);
+        },
+        () => undefined,
+      );
+    }, IMPORT_PROGRESS_MS);
+    try {
+      const result = await library.importFolder();
+      this.imported.set(importSaid(result));
+      if ('imported' in result) {
+        await server.refresh();
+        this.libraryChanged.update((count) => count + 1);
+      }
+    } catch (error) {
+      this.problem.set(error instanceof Error ? error.message : String(error));
+    } finally {
+      clearInterval(watch);
+      this.importing.set(null);
+    }
+  }
+
+  protected onStopImport(): void {
+    void this.library?.cancelImport();
+  }
+
   /** Whether a series is on screen, which turning to another patient would take away. */
   readonly showing = input(false);
   /** Asks before a displayed series is given up for another patient; a spec gives its own. */
@@ -161,6 +220,7 @@ export class ServerPanel {
   });
   /** "Connected: Server at host, as ada." */
   protected readonly connectedLine = computed(() => {
+    if (this.inLibrary()) return `${this.server()?.label ?? ''}: kept by this application.`;
     const who = this.loggedInAs();
     return `Connected: ${this.server()?.label ?? ''}${who ? `, as ${who}` : ''}.`;
   });
@@ -274,6 +334,7 @@ export class ServerPanel {
   protected onDisconnect(): void {
     this.view.set('studies');
     this.problem.set(null);
+    this.imported.set(null);
     this.forgetPassword();
     // The server is told to end the login; the viewer has forgotten it already.
     void this.server()?.logOut();

@@ -22,7 +22,7 @@
 export const BRIDGE_GLOBAL = 'openRtStudioDesktop';
 
 /** Raised when a call changes what it takes or gives. */
-export const BRIDGE_VERSION = 3;
+export const BRIDGE_VERSION = 4;
 
 /** The systems the desktop application runs on, as Node names them. */
 export const DESKTOP_PLATFORMS = ['darwin', 'win32', 'linux'] as const;
@@ -188,6 +188,29 @@ export interface BridgeCalls {
   };
   /** Give up a request that has not been answered. */
   'server:cancel': { readonly args: readonly [request: string]; readonly result: null };
+  /**
+   * Ask the API of the library on this computer: the server's own, answered
+   * inside the application with no network (#64). There is one library and
+   * no login to it.
+   */
+  'library:request': {
+    readonly args: readonly [request: ServerRequest];
+    readonly result: ServerAnswer;
+  };
+  /** Give up a request to the library that has not been answered. */
+  'library:cancel': { readonly args: readonly [request: string]; readonly result: null };
+  /**
+   * Show the system's dialog for a folder, and take the DICOM files in it
+   * into the library. Answers when the import is over.
+   */
+  'library:import-folder': { readonly args: readonly []; readonly result: LibraryImportResult };
+  /** How far the import under way has come. Null when there is none. */
+  'library:import-progress': {
+    readonly args: readonly [];
+    readonly result: LibraryProgress | null;
+  };
+  /** Stop the import under way after the file in hand. What was taken in stays. */
+  'library:cancel-import': { readonly args: readonly []; readonly result: null };
 }
 export type BridgeChannel = keyof BridgeCalls;
 
@@ -204,6 +227,11 @@ const CHANNELS: { readonly [C in BridgeChannel]: true } = {
   'server:forget': true,
   'server:request': true,
   'server:cancel': true,
+  'library:request': true,
+  'library:cancel': true,
+  'library:import-folder': true,
+  'library:import-progress': true,
+  'library:cancel-import': true,
 };
 /** The channels, for a main process that must serve each one. */
 export const BRIDGE_CHANNELS = Object.keys(CHANNELS) as readonly BridgeChannel[];
@@ -217,7 +245,61 @@ export interface DesktopBridge {
   readonly files: DesktopFiles;
   /** The servers the user connected to. One method for each `server:` call. */
   readonly server: DesktopServer;
+  /** The library on this computer. One method for each `library:` call. */
+  readonly library: DesktopLibrary;
 }
+
+/**
+ * What an import of a folder into the library came to: counts, and no names.
+ * The folder is chosen in the main process's dialog and read there; the page
+ * is told how it went and not where it was.
+ */
+export interface LibraryImport {
+  /** Files found in the folder and below it. */
+  readonly total: number;
+  /** Files that are now in the library and were not before. */
+  readonly stored: number;
+  /** Files the library already held, the same. */
+  readonly unchanged: number;
+  /** Files that took the place of another version of the same object. */
+  readonly replaced: number;
+  /** Files that were not taken: not DICOM, or not an object the library keeps. */
+  readonly refused: number;
+  /** Files that could not be read or kept. */
+  readonly failed: number;
+  /** True when the import was stopped before the last file. */
+  readonly cancelled: boolean;
+}
+
+/**
+ * How asking for an import ended: with an import, or without one because no
+ * folder was chosen, another import is under way, or the library could not
+ * be opened.
+ */
+export type LibraryImportResult =
+  { readonly imported: LibraryImport } | { readonly not: 'chosen' | 'busy' | 'unavailable' };
+
+/** How far an import has come, in files. */
+export interface LibraryProgress {
+  readonly done: number;
+  readonly total: number;
+}
+
+export interface DesktopLibrary {
+  request(request: ServerRequest): Promise<ServerAnswer>;
+  cancel(request: string): Promise<null>;
+  importFolder(): Promise<LibraryImportResult>;
+  importProgress(): Promise<LibraryProgress | null>;
+  cancelImport(): Promise<null>;
+}
+
+const LIBRARY_CALLS: { readonly [M in keyof DesktopLibrary]: true } = {
+  request: true,
+  cancel: true,
+  importFolder: true,
+  importProgress: true,
+  cancelImport: true,
+};
 
 export interface DesktopServer {
   connect(address: string): Promise<ServerConnection | null>;
@@ -340,11 +422,12 @@ export function desktopBridge(host: unknown = globalThis): DesktopBridge | null 
   if (typeof host !== 'object' || host === null) return null;
   const bridge = (host as Record<string, unknown>)[BRIDGE_GLOBAL];
   if (typeof bridge !== 'object' || bridge === null) return null;
-  const { version, info, files, server } = bridge as Record<string, unknown>;
+  const { version, info, files, server, library } = bridge as Record<string, unknown>;
   if (version !== BRIDGE_VERSION || typeof info !== 'function') return null;
   for (const [part, names] of [
     [files, FILE_METHODS],
     [server, SERVER_CALLS],
+    [library, LIBRARY_CALLS],
   ] as const) {
     if (typeof part !== 'object' || part === null) return null;
     const methods = part as Record<string, unknown>;

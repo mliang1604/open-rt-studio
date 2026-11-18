@@ -17,16 +17,17 @@ import { jobRoutes } from './api/job-routes.js';
 import { timepointRoutes } from './api/timepoint-routes.js';
 import { openSqliteAuditStore } from './audit/audit-store.js';
 import { createAuditLog, type AuditLog } from './audit/audit.js';
-import { ConfigError, ENVIRONMENT_VARIABLES, type ServerConfig } from './config.js';
-import { createCore, type ServerCore } from './core/core.js';
+import { ConfigError, DEFAULT_CONFIG, ENVIRONMENT_VARIABLES, type ServerConfig } from './config.js';
+import { CoreStoppingError, createCore, type ServerCore } from './core/core.js';
+import { createDispatcher } from './host/dispatch.js';
 import { createHost, type HostAddress } from './host/host.js';
-import { healthRoute } from './host/routes.js';
+import { healthRoute, HttpError, type Route, type RouteResponse } from './host/routes.js';
 import { createJobManager } from './jobs/job-manager.js';
 import { openSqliteJobStore } from './jobs/job-store.js';
 import { dicomRoutes } from './api/dicom-routes.js';
 import { dicomAudit } from './dimse/dicom-audit.js';
 import type { DicomTls } from './dimse/tls.js';
-import { createDicomService } from './dimse/dicom-service.js';
+import { createDicomService, type DicomService } from './dimse/dicom-service.js';
 import {
   createMemorySettingsStore,
   newRemoteId,
@@ -437,16 +438,30 @@ async function openJobs(config: ServerConfig, logger: Logger, kinds: readonly Jo
   return { jobs, clear };
 }
 
-/** Open the PACS and the jobs, make a core on them, put the HTTP host in front and listen. */
-export async function startServer(
+/** A server put together, with nothing in front of it yet. */
+interface Assembled {
+  readonly core: ServerCore;
+  /** Every route of the API, the health endpoint aside. */
+  readonly routes: readonly Route[];
+  readonly audit: AuditLog | null;
+  readonly dicom: DicomService;
+  /** Let go of what was opened besides the core and the accounts. */
+  close(): Promise<void>;
+}
+
+/**
+ * Open the PACS, the jobs, the audit log and the DICOM service, make a core
+ * on them, and say what the API's routes are. What listens (the HTTP host)
+ * or asks without a network (an embedded server) is put in front by the
+ * caller.
+ */
+async function assemble(
   config: ServerConfig,
   logger: Logger,
-  parts: ServerParts = {},
-): Promise<RunningServer> {
-  // First: a configuration that is refused opens nothing.
-  const tls = openTls(config, logger);
-  const dicomTls = openDicomTls(config, logger);
-  const accounts = openAccounts(config, logger, parts.accounts);
+  parts: ServerParts,
+  accounts: Accounts | null,
+  dicomTls: DicomTls | null,
+): Promise<Assembled> {
   const audit = openAudit(config.dataDir, parts.audit);
   const stopClearing = keepAuditRetention(audit, config.auditRetentionDays, logger);
   const pacs = await openPacs(config, logger);
@@ -492,6 +507,31 @@ export async function startServer(
       audit: audit !== null,
     }),
   ];
+  return {
+    core,
+    routes,
+    audit,
+    dicom,
+    async close() {
+      await clear();
+      stopClearing();
+      audit?.close();
+    },
+  };
+}
+
+/** Open the PACS and the jobs, make a core on them, put the HTTP host in front and listen. */
+export async function startServer(
+  config: ServerConfig,
+  logger: Logger,
+  parts: ServerParts = {},
+): Promise<RunningServer> {
+  // First: a configuration that is refused opens nothing.
+  const tls = openTls(config, logger);
+  const dicomTls = openDicomTls(config, logger);
+  const accounts = openAccounts(config, logger, parts.accounts);
+  const assembled = await assemble(config, logger, parts, accounts, dicomTls);
+  const { core, routes, audit, dicom } = assembled;
   const host = createHost(core, { ...config, logger, routes, accounts, audit, tls });
   const warnings = startWarnings(config, {
     accounts: accounts ? accounts.list().length : null,
@@ -504,10 +544,8 @@ export async function startServer(
   } catch (error) {
     // Nothing is left open by a server that could not start.
     await core.dispose();
-    await clear();
-    stopClearing();
+    await assembled.close();
     accounts?.close();
-    audit?.close();
     throw error;
   }
   logger.info('listening', { host: address.host, port: address.port, tls: tls !== null });
@@ -518,10 +556,8 @@ export async function startServer(
   } catch (error) {
     await host.close();
     await core.dispose();
-    await clear();
-    stopClearing();
+    await assembled.close();
     accounts?.close();
-    audit?.close();
     if ((error as { code?: unknown } | null)?.code === 'no-certificate') {
       // Never without TLS where TLS was asked for: it does not start, and says how it would.
       throw new ConfigError(
@@ -547,11 +583,193 @@ export async function startServer(
         const released = await dicom.close();
         const closure = await host.close();
         const disposal = await core.dispose({ timeoutMs: config.shutdownTimeoutMs });
-        await clear();
-        stopClearing();
+        await assembled.close();
         accounts?.close();
-        audit?.close();
         const clean = released && closure.finished && disposal.finished;
+        logger.info('stopped', { clean });
+        return clean;
+      })();
+      return stopped;
+    },
+  };
+}
+
+/** A request to an embedded server: what a request over HTTP says, without the network. */
+export interface EmbeddedRequest {
+  readonly method: string;
+  /** The path, with its query: `/api/v1/studies?limit=10`. */
+  readonly path: string;
+  /** By their lower-case names. */
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: Uint8Array | null;
+}
+
+/** Its answer, whole. */
+export interface EmbeddedAnswer {
+  readonly status: number;
+  /** By their lower-case names. */
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: Uint8Array;
+}
+
+export interface EmbeddedOptions {
+  /** Where everything is kept. */
+  readonly dataDir: string;
+  /** The largest object taken in one request, in bytes. The server's default without. */
+  readonly maxUploadBytes?: number;
+  /** How long stopping waits for work in flight, in milliseconds. The server's default without. */
+  readonly shutdownTimeoutMs?: number;
+}
+
+/** A server inside another program: the same API, asked without a network. */
+export interface EmbeddedServer {
+  readonly core: ServerCore;
+  /**
+   * Ask the API, as a request over HTTP would. Always answers: what goes
+   * wrong is a status, as it is over HTTP. `signal` gives up waiting for an
+   * answer that is a stream of bytes.
+   */
+  ask(request: EmbeddedRequest, signal?: AbortSignal): Promise<EmbeddedAnswer>;
+  /** Where it listens for DICOM associations, or null: it does not unless its settings say so. */
+  readonly dicom: { readonly host: string; readonly port: number; readonly tls: boolean } | null;
+  /** Stop cleanly; true when nothing had to be abandoned. Asking again gives the first answer. */
+  stop(): Promise<boolean>;
+}
+
+const JSON_TYPE = 'application/json; charset=utf-8';
+
+/**
+ * The server without its HTTP host, for a program that embeds it (the
+ * desktop application's main process, #64): the PACS in `dataDir`, with the
+ * index in SQLite, and the whole API, asked with `ask`. It opens no port for
+ * HTTP and has no accounts: whoever runs the program is its one user. Its
+ * DICOM listener is off unless its settings, which are changed through the
+ * API, say otherwise, and then listens on this machine only.
+ */
+export async function openEmbeddedServer(
+  options: EmbeddedOptions,
+  logger: Logger,
+  parts: Omit<ServerParts, 'accounts'> = {},
+): Promise<EmbeddedServer> {
+  const config: ServerConfig = {
+    ...DEFAULT_CONFIG,
+    auth: 'none',
+    dataDir: options.dataDir,
+    maxUploadBytes: options.maxUploadBytes ?? DEFAULT_CONFIG.maxUploadBytes,
+    shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_CONFIG.shutdownTimeoutMs,
+  };
+  const assembled = await assemble(config, logger, parts, null, null);
+  const { core, dicom } = assembled;
+  const dispatcher = createDispatcher({
+    routes: [healthRoute(core), ...assembled.routes],
+    audit: assembled.audit,
+    logger,
+  });
+  try {
+    // Opens the DICOM listener, when the settings that were kept ask for one.
+    await dicom.start();
+  } catch (error) {
+    await core.dispose();
+    await assembled.close();
+    throw error;
+  }
+
+  let stopped: Promise<boolean> | null = null;
+  return {
+    core,
+    get dicom() {
+      return dicom.state().listening;
+    },
+
+    async ask(request, signal) {
+      const began = performance.now();
+      const headers: Record<string, string> = { 'cache-control': 'no-store' };
+      const answered = (status: number, body: Uint8Array, route: string): EmbeddedAnswer => {
+        // The route's own pattern, never the path asked for.
+        logger.info('request', {
+          method: request.method,
+          route,
+          status,
+          ms: Math.round(performance.now() - began),
+        });
+        return { status, headers, body };
+      };
+      const json = (status: number, body: unknown, route: string): EmbeddedAnswer => {
+        headers['content-type'] = JSON_TYPE;
+        return answered(status, Buffer.from(JSON.stringify(body)), route);
+      };
+      const internal = (route: string): EmbeddedAnswer =>
+        json(500, { error: 'internal', message: 'The server could not answer.' }, route);
+
+      const url = URL.parse(request.path, 'http://embedded');
+      if (url === null || url.origin !== 'http://embedded') {
+        return json(
+          400,
+          { error: 'bad-request', message: 'The address could not be read.' },
+          'unreadable',
+        );
+      }
+      const { route, answer } = await core
+        .run(() =>
+          dispatcher.dispatch({
+            method: request.method,
+            pathname: url.pathname,
+            query: url.searchParams,
+            header: (name) => request.headers[name],
+            async body(maxBytes) {
+              const bytes = request.body ?? new Uint8Array(0);
+              if (bytes.byteLength > maxBytes) {
+                throw new HttpError(
+                  413,
+                  'too-large',
+                  `The body is longer than the ${maxBytes} bytes allowed.`,
+                );
+              }
+              return bytes;
+            },
+          }),
+        )
+        .catch((error: unknown) => {
+          if (!(error instanceof CoreStoppingError)) throw error;
+          return {
+            route: 'stopping',
+            answer: {
+              status: 503,
+              body: { error: 'stopping', message: 'The server is stopping.' },
+            } as RouteResponse,
+          };
+        });
+      for (const [name, value] of Object.entries(answer.headers ?? {})) {
+        headers[name.toLowerCase()] = value;
+      }
+      try {
+        if ('stream' in answer) {
+          const pieces: Buffer[] = [];
+          const gone = (): void => void answer.stream.destroy(new Error('given up'));
+          signal?.addEventListener('abort', gone, { once: true });
+          if (signal?.aborted) gone();
+          try {
+            for await (const piece of answer.stream) pieces.push(piece as Buffer);
+          } finally {
+            signal?.removeEventListener('abort', gone);
+          }
+          return answered(answer.status, Buffer.concat(pieces), route);
+        }
+        if (answer.status === 204) return answered(204, new Uint8Array(0), route);
+        return json(answer.status, answer.body, route);
+      } catch (error) {
+        // What went wrong is for the log; the caller is told only that it did.
+        logger.error('response-failed', { route, ...errorFields(error) });
+        return internal(route);
+      }
+    },
+
+    stop() {
+      stopped ??= (async () => {
+        const released = await dicom.close();
+        const disposal = await core.dispose({ timeoutMs: config.shutdownTimeoutMs });
+        await assembled.close();
+        const clean = released && disposal.finished;
         logger.info('stopped', { clean });
         return clean;
       })();

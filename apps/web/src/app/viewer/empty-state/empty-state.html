@@ -10,7 +10,7 @@
        into the pane tags behind it. -->
   <br />
   <button type="button" class="server" (click)="openServer.emit()">
-    {{ server() ? 'Choose a patient on the server…' : 'Connect to a server…' }}
+    {{ serverEntry() }}
   </button>
 </p>
 <button type="button" class="demo" (click)="loadDemo.emit()" [disabled]="busy()">

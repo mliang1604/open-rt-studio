@@ -113,6 +113,9 @@ export interface LoadInit {
   readonly activeCompareGroup: WritableSignal<number>;
 }
 
+/** How long a pick from the timeline waits for a renderer that is still being made, in milliseconds. */
+const PICK_WAITS_FOR_RENDERER_MS = 10_000;
+
 /**
  * Owns the load/import flow: the file/series-chip drop overlay, the file-picker
  * and history-panel entry points, and the resolve→apply pipeline that routes a
@@ -414,7 +417,12 @@ export class LoadController {
    */
   async loadSeriesFromPanel(seriesUid: string, intent: DropIntent = 'primary'): Promise<void> {
     const d = this.deps;
-    if (!d || d.renderer() === null) return; // GPU not ready; nothing to draw into yet
+    if (!d) return;
+    // The renderer is made while the viewer starts, and a timeline can be
+    // there sooner (a server's, or the desktop application's library). A
+    // pick made in between waits for the renderer instead of doing nothing.
+    // Without a GPU it never comes, and the GPU notice says why.
+    if (d.renderer() === null && !(await this.rendererReady(PICK_WAITS_FOR_RENDERER_MS))) return;
     // While files are being read the view state is the progress readout, and the
     // import puts back what was showing when it ends. A pick made now would be
     // shown for a moment and then lost, so it is refused, with the way out named.

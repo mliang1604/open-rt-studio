@@ -14,6 +14,8 @@ export default defineConfig({
         '../../packages/desktop-bridge/src/index.ts',
         import.meta.url,
       ).pathname,
+      '@open-rt-studio/server': new URL('../../services/server/src/index.ts', import.meta.url)
+        .pathname,
     },
   },
   test: {

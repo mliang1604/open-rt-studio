@@ -6,5 +6,10 @@
     "lib": ["ES2023"],
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "src/**/*.cts"]
+  "include": ["src/**/*.ts", "src/**/*.cts"],
+  "references": [
+    {
+      "path": "../../services/server"
+    }
+  ]
 }

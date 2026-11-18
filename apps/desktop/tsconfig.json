@@ -12,5 +12,12 @@
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.spec.ts"],
-  "references": [{ "path": "../../packages/desktop-bridge" }]
+  "references": [
+    {
+      "path": "../../packages/desktop-bridge"
+    },
+    {
+      "path": "../../services/server"
+    }
+  ]
 }

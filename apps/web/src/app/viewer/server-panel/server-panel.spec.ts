@@ -21,6 +21,8 @@ import {
   type FakeAccount,
   type FakeServer,
 } from '../../data-source/server-testing';
+import { DESKTOP_LIBRARY, LIBRARY_LABEL } from '../../desktop-library';
+import { fakeDesktopLibrary, type FakeDesktopLibrary } from '../../desktop-library-testing';
 import { DESKTOP_SERVER } from '../../desktop-server';
 import { fakeDesktopServer, type FakeDesktopServer } from '../../desktop-server-testing';
 import { PreferencesStore } from '../../preferences-store';
@@ -33,6 +35,8 @@ interface Rendered {
   readonly server: FakeServer;
   /** The stand-in for the desktop application's main process, when the panel is rendered in it. */
   readonly desktop: FakeDesktopServer | null;
+  /** The stand-in for the desktop application's library, when the panel is rendered in it. */
+  readonly library: FakeDesktopLibrary | null;
   /** What the panel asked of the viewer, in order. */
   readonly said: string[];
   /** The addresses a connection was tried to. */
@@ -59,8 +63,15 @@ async function render(
 ): Promise<Rendered> {
   const server = fakeServer([...syntheticRtCourse(), ...more], accounts, audit);
   const desktop = inDesktop ? fakeDesktopServer(server.fetch) : null;
+  // The library is the same server, inside the application.
+  const library = inDesktop ? fakeDesktopLibrary(server.fetch) : null;
   if (desktop) {
-    TestBed.configureTestingModule({ providers: [{ provide: DESKTOP_SERVER, useValue: desktop }] });
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: DESKTOP_SERVER, useValue: desktop },
+        { provide: DESKTOP_LIBRARY, useValue: library },
+      ],
+    });
   }
   const fixture = TestBed.createComponent(ServerPanel);
   const sources = TestBed.inject(ActiveDataSource);
@@ -97,6 +108,7 @@ async function render(
     host,
     server,
     desktop,
+    library,
     said,
     tried,
     text: (selector) =>
@@ -594,7 +606,7 @@ describe('ServerPanel in the desktop application', () => {
 
   it('says what is otherwise there, and offers no saved server before there is one', async () => {
     const { host, text, desktop } = await render(true, [], undefined, undefined, true);
-    expect(text('.server-note')[0]).toContain(
+    expect(text('.server-note').join(' ')).toContain(
       'a server you have not connected to before is put to you first',
     );
     expect(host.querySelector('datalist')).toBeNull();
@@ -676,5 +688,130 @@ describe('ServerPanel in the desktop application', () => {
     expect(text('.server-state')).toEqual(['Connected: Server at 127.0.0.1:4300, as ada.']);
     expect([...desktop!.tokens.values()]).toEqual(server.tokens());
     expect(desktop!.requests.every((request) => !('authorization' in request.headers))).toBe(true);
+  });
+});
+
+describe('ServerPanel with the library on this computer', () => {
+  beforeEach(() => localStorage.clear());
+  const counts = {
+    total: 0,
+    stored: 0,
+    unchanged: 0,
+    replaced: 0,
+    refused: 0,
+    failed: 0,
+    cancelled: false,
+  };
+
+  it('is not offered in a browser', async () => {
+    const { text } = await render();
+    expect(text('button')).not.toContain('Open the library on this computer');
+  });
+
+  it('opens with nothing asked of the user or of a server, and lists its studies', async () => {
+    const { click, text, said, host, desktop, library } = await render(
+      true,
+      [],
+      undefined,
+      undefined,
+      true,
+    );
+    expect(text('.server-library .server-note')[0]).toContain('needs no server and no network');
+    expect(library!.requests).toEqual([]);
+    await click('Open the library on this computer');
+    expect(said).toEqual([`use ${LIBRARY_LABEL}`]);
+    expect(text('h2')).toEqual(['Library']);
+    expect(text('.server-state')).toEqual([`${LIBRARY_LABEL}: kept by this application.`]);
+    expect(text('.study-patient')).toEqual([
+      SYNTHETIC_STUDY.patient.name,
+      SYNTHETIC_STUDY.patient.name,
+    ]);
+    expect(host.classList.contains('wide')).toBe(true);
+    // No server was asked about, connected to or remembered.
+    expect(desktop!.asked).toEqual([]);
+    expect(desktop!.requests).toEqual([]);
+    expect(TestBed.inject(PreferencesStore).preferences().serverAddress).toBeNull();
+    // Closing it goes back to opened files.
+    await click('Close the library');
+    expect(said.at(-1)).toBe('use files');
+    expect(text('h2')).toEqual(['Server']);
+  });
+
+  it('imports a folder, says how far it is and what it came to, and lists what is new', async () => {
+    const { click, text, fixture, library, server } = await render(
+      true,
+      [],
+      undefined,
+      undefined,
+      true,
+    );
+    await click('Open the library on this computer');
+    expect(text('.study-id')).not.toContain(OTHER.id);
+
+    let finish: () => void = () => undefined;
+    library!.onImport = () =>
+      new Promise((resolve) => {
+        finish = () => {
+          // The folder held another patient's files: the library has them now.
+          void Promise.all(
+            OTHERS_FILES.map((file) =>
+              server.fetch('http://library.invalid/api/v1/instances', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/dicom' },
+                body: new Uint8Array(file.bytes),
+              }),
+            ),
+          ).then(() =>
+            resolve({
+              imported: {
+                ...counts,
+                total: OTHERS_FILES.length + 1,
+                stored: OTHERS_FILES.length,
+                refused: 1,
+              },
+            }),
+          );
+        };
+      });
+    library!.progress = { done: 3, total: OTHERS_FILES.length + 1 };
+    const importing = click('Import a folder…');
+    // Under way: how far, and a way to stop it; not a second import.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await fixture.whenStable();
+    expect(text('.server-import')).toEqual([`Importing: 3 of ${OTHERS_FILES.length + 1} files.`]);
+    expect(text('button')).not.toContain('Import a folder…');
+    await click('Stop importing');
+    expect(library!.stops).toBe(1);
+
+    finish();
+    await importing;
+    // The import answers when the main process is done with the folder.
+    for (let turn = 0; turn < 100 && !text('.server-import')[0]?.startsWith('Imported'); turn++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await fixture.whenStable();
+    }
+    for (let turn = 0; turn < 100 && !text('.study-id').includes(OTHER.id); turn++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await fixture.whenStable();
+    }
+    expect(text('.server-import')[0]).toContain(`Imported: ${OTHERS_FILES.length} files added`);
+    expect(text('.server-import')[0]).toContain('1 not taken');
+    expect(text('button')).toContain('Import a folder…');
+    // The list was asked for again, and has the patient that came in.
+    expect(text('.study-id')).toContain(OTHER.id);
+    expect(library!.imports).toBe(1);
+  });
+
+  it('says so when no folder was chosen, and when the library cannot be opened', async () => {
+    const { click, text, library, said } = await render(true, [], undefined, undefined, true);
+    library!.broken = true;
+    await click('Open the library on this computer');
+    expect(text('.server-problem')).toEqual(['The library on this computer could not be opened.']);
+    expect(said).toEqual([]);
+
+    library!.broken = false;
+    await click('Open the library on this computer');
+    await click('Import a folder…');
+    expect(text('.server-import')).toEqual(['No folder was chosen.']);
   });
 });
