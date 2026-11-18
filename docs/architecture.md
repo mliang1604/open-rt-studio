@@ -2168,6 +2168,53 @@ elastix (rigid and deformable registration, resampling). They read and write
 files, report progress on standard output and have no network access. The
 desktop installers bundle them.
 
+Decided in #79, the toolchain:
+
+- **Pinned by checksum.** ITK 5.4.7 and elastix 5.3.1, both Apache 2.0.
+  Each is fetched as a source archive from where its project publishes it
+  and checked against a checksum before anything of it is used
+  (`native/cmake/versions.cmake`, the one place a version is named). ITK's
+  checksum is the one its release publishes; elastix publishes none, so
+  its archive is that of the commit the release tag names, with a checksum
+  taken when it was pinned.
+- **Two builds.** `native/deps` builds ITK and elastix, which takes a
+  quarter of an hour to half an hour and seldom changes; `native/` builds the tools against the
+  result in a minute or two. CI keeps the first in the Actions cache. A
+  stamp in the kept folder says what was built and how, and the build
+  believes the stamp and not the cache key.
+- **Static, and self-contained.** Each tool is one file: ITK and elastix
+  are static libraries, the C++ runtime is linked in on Linux and the whole
+  runtime on Windows. The C library on Linux is the system's (glibc 2.34 or
+  newer, from building on Ubuntu 22.04).
+- **macOS universal by joining.** ITK works out what the processor can do
+  when it is configured, so one build for two processors is refused. Each
+  processor is built on its own kind of machine and the tools are joined
+  with `lipo`.
+- **Only what is needed, and nothing copyleft.** ITK is built with the
+  modules elastix asks for and the formats the tools read; elastix with its
+  libraries only, for three dimensions and one pixel type. FFTW (GPL) and
+  elastix's one metric that needs ANN (LGPL) are off, Eigen is built
+  MPL-only, and ITK may fetch nothing while it builds. The modules ITK was
+  built with are written down (`native/cmake/itk_modules.cmake`); the build
+  stops when they differ, and `native/THIRD-PARTY.md` lists each library
+  inside with its licence.
+- **elastix is used from where it was built**, not installed: that is how
+  elastix's own example program links it.
+- **A tool talks JSON.** One line on standard output for the answer; on a
+  failure one line on standard error with a code, and a status that is not
+  zero. A failure names no file, since a path can hold a patient's name.
+- **Volumes go to the tools as files of a plain format** (MetaImage, NRRD,
+  NIfTI), in millimetres and patient coordinates. The tools read no DICOM:
+  what a DICOM series' geometry is stays decided in one place,
+  `packages/dicom`. How the server writes those files is #80's.
+- **Tests make their data** from a formula, as everywhere else. One of them
+  runs elastix itself on two synthetic volumes with a known shift, to say
+  that the libraries work on each system.
+- **Not built on a developer's machine by anything else.** `npm run build`
+  and `npm test` do not touch `native/`; `node scripts/native.mjs` does.
+
+Status: **decided, and Michael's to overturn**.
+
 ## Continuous integration
 
 - `Build & test` (required on pull requests): install, license-header check,
@@ -2181,6 +2228,10 @@ desktop installers bundle them.
   not a required check.
 - A merge to `main` deploys the web client to GitHub Pages
   (`.github/workflows/deploy.yml`).
+- `Native tools` (`.github/workflows/native.yml`) is a workflow of its own
+  that runs when `native/` or its build script changes: it builds ITK,
+  elastix and the tools on Linux, macOS (each processor, then joined) and
+  Windows, runs the tools' tests and uploads the tools. Not required.
 
 The job names `Build & test` and `End-to-end smoke` are what the `main`
 ruleset requires. Keep them stable.

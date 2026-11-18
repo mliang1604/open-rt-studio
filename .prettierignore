@@ -12,3 +12,6 @@ package-lock.json
 
 # Third-party files keep their own formatting
 third_party/
+
+# What CMake builds of the native tools
+native/build/

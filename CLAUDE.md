@@ -98,7 +98,14 @@ application. Never commit patient data or real DICOM files
   import Electron. Do not loosen the policy to make something work: the page
   fetches from nowhere, a server is asked through the bridge, and files are
   read through it. Electron is pinned to an exact version.
-- `native/`: a placeholder until M3.
+- `native/`: the C++ command-line tools on ITK and elastix (#79), a CMake
+  project and not an npm workspace. `deps/` builds ITK and elastix from
+  sources pinned by checksum in `cmake/versions.cmake` (the one place a
+  version is named); `CMakeLists.txt` builds the tools against that. A tool
+  prints one line of JSON, and a failure never names a file. Nothing GPL or
+  LGPL is built in: a new module of ITK or component of elastix is written
+  down in `cmake/itk_modules.cmake` and `THIRD-PARTY.md` with its licence
+  first. Tests make their volumes from `tests/synthetic_volume.h`.
 - `docs/`: architecture, license headers, test data policy, the parity
   audit against dicom-workspace, the DICOM conformance statement
   ([docs/dicom-conformance.md](docs/dicom-conformance.md)): its tables are
@@ -140,6 +147,10 @@ chromium` in `apps/web` once). See `apps/web/README.md`.
   and gives no adapter on macOS). Electron's program is not in the npm package:
   `node node_modules/electron/install.js` fetches it once. See
   `apps/desktop/README.md`.
+- The native tools: `node scripts/native.mjs deps`, then `build`, then
+  `test` (CMake and a C++ compiler; `deps` fetches and builds ITK and
+  elastix, 15 to 30 minutes, once). `npm run build` and `npm test` leave
+  `native/` alone. See `native/README.md`.
 
 CI runs the same commands in the `Build & test` job. It and `End-to-end smoke`
 (`npm run e2e:smoke`, only `apps/web/e2e/smoke.spec.ts`) are the required
@@ -166,7 +177,13 @@ web client's build and runs `apps/desktop/e2e`; wait for all three when a
 change touches `apps/desktop`, `packages/desktop-bridge` or how the web
 client is built. A separate workflow, `Publish the
 server image`, pushes the image of `main` to GHCR after merging; look at
-its run when a change touches the Dockerfile or `compose.yaml`.
+its run when a change touches the Dockerfile or `compose.yaml`. Another,
+`Native tools`, runs only when `native/` or `scripts/native.mjs` changes:
+five jobs (`Native (Linux)`, `(macOS arm64)`, `(macOS x86_64)`, `(Windows)`,
+then `(macOS universal)`) build ITK, elastix and the tools and run the
+tools' tests; wait for all five. With ITK and elastix in the cache it takes
+a minute or two; after a change to `native/deps` or the versions, up to
+half an hour, and the macOS arm64 runner can be long in coming.
 
 ## Patterns
 

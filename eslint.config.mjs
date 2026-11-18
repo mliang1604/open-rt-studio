@@ -36,6 +36,8 @@ export default tseslint.config(
       '**/playwright-report/**',
       '**/test-results/**',
       '**/third_party/**',
+      // What CMake builds: ITK and elastix are unpacked there.
+      'native/build/**',
     ],
   },
   js.configs.recommended,
