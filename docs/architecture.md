@@ -2177,8 +2177,8 @@ Decided in #79, the toolchain:
   checksum is the one its release publishes; elastix publishes none, so
   its archive is that of the commit the release tag names, with a checksum
   taken when it was pinned.
-- **Two builds.** `native/deps` builds ITK and elastix, which takes an hour
-  or more and seldom changes; `native/` builds the tools against the
+- **Two builds.** `native/deps` builds ITK and elastix, which takes a
+  quarter of an hour to half an hour and seldom changes; `native/` builds the tools against the
   result in a minute or two. CI keeps the first in the Actions cache. A
   stamp in the kept folder says what was built and how, and the build
   believes the stamp and not the cache key.

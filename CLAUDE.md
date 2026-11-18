@@ -149,7 +149,7 @@ chromium` in `apps/web` once). See `apps/web/README.md`.
   `apps/desktop/README.md`.
 - The native tools: `node scripts/native.mjs deps`, then `build`, then
   `test` (CMake and a C++ compiler; `deps` fetches and builds ITK and
-  elastix, an hour or more, once). `npm run build` and `npm test` leave
+  elastix, 15 to 30 minutes, once). `npm run build` and `npm test` leave
   `native/` alone. See `native/README.md`.
 
 CI runs the same commands in the `Build & test` job. It and `End-to-end smoke`
@@ -182,7 +182,8 @@ its run when a change touches the Dockerfile or `compose.yaml`. Another,
 five jobs (`Native (Linux)`, `(macOS arm64)`, `(macOS x86_64)`, `(Windows)`,
 then `(macOS universal)`) build ITK, elastix and the tools and run the
 tools' tests; wait for all five. With ITK and elastix in the cache it takes
-minutes; after a change to `native/deps` or the versions, an hour or more.
+a minute or two; after a change to `native/deps` or the versions, up to
+half an hour, and the macOS arm64 runner can be long in coming.
 
 ## Patterns
 

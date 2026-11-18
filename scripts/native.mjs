@@ -6,8 +6,8 @@
 // machine and in CI, on Linux, macOS and Windows.
 //
 //   node scripts/native.mjs deps [--only itk] [--prune]
-//       ITK and elastix, from their pinned sources. Long (an hour or more
-//       the first time); a second run finds them built and does nothing.
+//       ITK and elastix, from their pinned sources. Long (a quarter of an
+//       hour to half an hour); a second run finds them built and does nothing.
 //       --only itk stops after ITK. --prune removes what only the build of
 //       them needed, for a folder that is kept between CI runs.
 //   node scripts/native.mjs build
@@ -161,7 +161,10 @@ function main(argv) {
       run('cmake', ['--install', at.tools, '--config', 'Release'], { env });
       return;
     case 'test':
-      run('ctest', ['--test-dir', at.tools, '-C', 'Release', '--output-on-failure'], { env });
+      // Verbose, so that a log says what each test found and not only that it passed.
+      run('ctest', ['--test-dir', at.tools, '-C', 'Release', '--output-on-failure', '--verbose'], {
+        env,
+      });
       return;
     default:
       console.error(

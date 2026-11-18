@@ -27,7 +27,7 @@ Visual Studio 2022). Ninja is used when it is installed. From the repository
 root:
 
 ```sh
-node scripts/native.mjs deps     # ITK and elastix: an hour or more, once
+node scripts/native.mjs deps     # ITK and elastix: 15 to 30 minutes, once
 node scripts/native.mjs build    # the tools, into native/build/dist
 node scripts/native.mjs test     # their tests
 ```

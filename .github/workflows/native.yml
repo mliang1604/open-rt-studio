@@ -6,7 +6,8 @@ name: Native tools
 # build script changes; `workflow_call` is for the installers, which will
 # want the tools it makes.
 #
-# ITK and elastix take an hour or more to build. They are kept in the Actions
+# ITK and elastix take a quarter of an hour to half an hour to build on a
+# runner. They are kept in the Actions
 # cache, keyed by what they are built from, so that a change to a tool does
 # not build them again. A stamp inside the kept folder says exactly what was
 # built, and the build believes the stamp, not the key: a cache that is not
@@ -37,7 +38,7 @@ jobs:
   build:
     name: Native (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 300
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -116,8 +117,26 @@ jobs:
           ls -l bin licenses licenses/*
           ./bin/ors-volume-info --version
           case "$RUNNER_OS" in
-            Linux) ldd bin/ors-volume-info ;;
-            macOS) otool -L bin/ors-volume-info; lipo -archs bin/ors-volume-info ;;
+            Linux)
+              ldd bin/ors-volume-info
+              echo "newest glibc symbol: $(objdump -T bin/ors-volume-info | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1)"
+              # The C++ runtime is inside the tool.
+              if ldd bin/ors-volume-info | grep -q 'libstdc++\|libgcc_s'; then exit 1; fi
+              ;;
+            macOS)
+              otool -L bin/ors-volume-info
+              lipo -archs bin/ors-volume-info
+              vtool -show-build bin/ors-volume-info | grep -E 'minos|platform'
+              ;;
+            Windows)
+              # No runtime DLL of Visual C++ beside the system's own.
+              if command -v objdump >/dev/null; then
+                objdump -p bin/ors-volume-info.exe | grep 'DLL Name' | sort -u
+                if objdump -p bin/ors-volume-info.exe | grep -qi 'DLL Name: \(vcruntime\|msvcp\|ucrtbase\|api-ms-win-crt\)'; then exit 1; fi
+              else
+                echo "No objdump on this runner: what the program imports was not looked at."
+              fi
+              ;;
           esac
 
       # As an archive: an uploaded folder loses which files are programs.
