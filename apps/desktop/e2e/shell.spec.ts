@@ -27,7 +27,7 @@ import {
 
 import { APP_HOME, contentSecurityPolicy } from '../src/policy.js';
 
-import { gpuArgs } from './gpu.js';
+import { draws, gpuArgs, gpuEnv, gpuOffer } from './gpu.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** An address that is nobody's (RFC 2606): nothing is ever sent to it, here or anywhere. */
@@ -52,7 +52,7 @@ test.beforeAll(async () => {
     args: [DESKTOP, ...gpuArgs()],
     cwd: DESKTOP,
     // A profile of its own: the test finds no acknowledgement and leaves none.
-    env: { ...env, OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
+    env: { ...env, ...gpuEnv(), OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
   });
   page = await application.firstWindow();
   page.on('pageerror', (error) => problems.push(String(error)));
@@ -143,7 +143,9 @@ test('the bridge is the declared calls and nothing more', async () => {
     arch: process.arch,
     packaged: app.isPackaged,
   }));
-  expect(seen.info as DesktopInfo).toEqual(main);
+  // Drawing in software is a setting of the run, which the application passes on.
+  const softwareGpu = Object.keys(gpuEnv()).length > 0;
+  expect(seen.info as DesktopInfo).toEqual({ ...main, softwareGpu });
   expect(main.packaged).toBe(false);
 });
 
@@ -220,17 +222,10 @@ test('the page is permitted to read what the user picks, and nothing else', asyn
 });
 
 test('WebGPU is there for the viewer', async () => {
-  const gpu = await page.evaluate(async () => {
-    if (!navigator.gpu) return { api: false, adapter: false };
-    try {
-      return { api: true, adapter: (await navigator.gpu.requestAdapter()) !== null };
-    } catch {
-      return { api: true, adapter: false };
-    }
-  });
+  const gpu = await gpuOffer(page);
   test.info().annotations.push({
     type: 'WebGPU',
-    description: `${process.platform}: API ${gpu.api ? 'present' : 'missing'}, adapter ${gpu.adapter ? 'available' : 'not available'}`,
+    description: `${process.platform}: API ${gpu.api ? 'present' : 'missing'}, adapter ${gpu.adapter ? (gpu.software ? 'software' : 'available') : 'not available'}`,
   });
   console.log(`WebGPU on ${process.platform}: ${JSON.stringify(gpu)}`);
   expect(gpu.api).toBe(true);
@@ -241,12 +236,18 @@ test('WebGPU is there for the viewer', async () => {
     expect(gpu.adapter).toBe(true);
   }
 
-  // Without an adapter (a runner with no GPU) the viewer says what is missing,
-  // in words for this application on this system: nothing of a browser.
-  if (!gpu.adapter) {
+  // With nothing to draw on (a runner with no GPU) the viewer says what is
+  // missing, in words for this application on this system: nothing of a
+  // browser. On Linux that is also a machine that offers only a software
+  // adapter nobody asked for, which the viewer does not take.
+  if (!draws(gpu)) {
     const notice = page.locator('.gpu-notice');
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText('No graphics adapter is available for WebGPU');
+    await expect(notice).toContainText(
+      gpu.adapter
+        ? 'Only a software graphics adapter was found'
+        : 'No graphics adapter is available for WebGPU',
+    );
     await expect(notice).not.toContainText(/browser|chrome:\/\/|flags/i);
     await expect(notice.getByRole('button', { name: 'Start the viewer again' })).toBeVisible();
     if (process.platform === 'linux') {

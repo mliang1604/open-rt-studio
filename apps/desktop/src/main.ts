@@ -61,7 +61,10 @@ const LIBRARY_DIRECTORY = 'library';
 /** Settings for working on the application. An installed one reads none of them. */
 const DEV_SERVER = 'OPEN_RT_STUDIO_DESKTOP_DEV_SERVER';
 const USER_DATA = 'OPEN_RT_STUDIO_DESKTOP_USER_DATA';
+const SOFTWARE_GPU = 'OPEN_RT_STUDIO_DESKTOP_SOFTWARE_GPU';
 const settings: NodeJS.ProcessEnv = app.isPackaged ? {} : process.env;
+/** Whether the application was told to draw in software, for want of a graphics card. */
+const softwareGpu = settings[SOFTWARE_GPU] === '1';
 
 function fail(message: string): never {
   dialog.showErrorBox(NAME, message);
@@ -111,6 +114,7 @@ function desktopInfo(): DesktopInfo {
     platform: process.platform as DesktopPlatform,
     arch: process.arch,
     packaged: app.isPackaged,
+    softwareGpu,
   };
 }
 
@@ -333,6 +337,7 @@ async function start(): Promise<void> {
 for (const told of gpuSwitches(
   process.platform,
   app.commandLine.getSwitchValue('enable-features'),
+  softwareGpu,
 )) {
   if (told.value === undefined) app.commandLine.appendSwitch(told.name);
   else app.commandLine.appendSwitch(told.name, told.value);

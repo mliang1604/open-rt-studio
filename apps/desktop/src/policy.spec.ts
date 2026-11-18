@@ -197,6 +197,23 @@ describe('what Chromium is told at start for WebGPU', () => {
     expect(gpuSwitches('linux', ' , ')[1].value).toBe('Vulkan');
   });
 
+  it('is the software rasterizer too when that is asked for, on any system', () => {
+    const software = [
+      { name: 'use-webgpu-adapter', value: 'swiftshader' },
+      { name: 'use-angle', value: 'swiftshader' },
+      { name: 'use-vulkan', value: 'swiftshader' },
+    ];
+    for (const platform of ['linux', 'darwin', 'win32']) {
+      expect(gpuSwitches(platform, '', true), platform).toEqual([
+        { name: 'enable-unsafe-webgpu' },
+        { name: 'enable-features', value: 'Vulkan' },
+        ...software,
+      ]);
+    }
+    // And never by itself.
+    expect(gpuSwitches('linux').map((one) => one.name)).not.toContain('use-webgpu-adapter');
+  });
+
   it('does not ask for a blocked graphics card to be used anyway', () => {
     const told = gpuSwitches('linux').map((one) => one.name);
     expect(told).not.toContain('ignore-gpu-blocklist');

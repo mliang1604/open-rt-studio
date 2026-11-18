@@ -658,12 +658,23 @@ Decided for the shell (#61):
   stays blocked (no `ignore-gpu-blocklist`), and nothing is drawn in
   software by itself: without a usable Vulkan driver the viewer says so,
   with what to install and how to check (`vulkaninfo --summary`).
+  - **A software adapter that was not asked for is refused.** With those
+    switches Chromium offers one on a Linux machine that has no Vulkan
+    driver for a graphics card, and its device is lost soon after the first
+    picture (seen on the CI runner). The viewer asks the renderer to take
+    none there (`refuseSoftware`, `desktop-gpu.ts`) and shows the notice.
+  - **Drawing in software is a setting** for tests and for working on the
+    application (`OPEN_RT_STUDIO_DESKTOP_SOFTWARE_GPU=1`, not read by an
+    installed one): the shell then asks for Chromium's rasterizer
+    throughout, which holds, and tells the page so (`softwareGpu`).
   - The notice for a missing GPU is written for the application when it is
     one (`GpuEnvironment.desktop`): there is no browser to update and no
     flags page, so it speaks of the driver and the computer.
-  - **Checked in CI with a software adapter**, which the Linux runner gets
-    when the tests ask Chromium for one (`E2E_SOFTWARE_GPU=1`): the viewer
-    draws there. No Linux machine with a graphics card has run it.
+  - **Checked in CI in software**, which is how the Linux job runs the
+    tests (`E2E_SOFTWARE_GPU=1`): the viewer draws there. The same job
+    then starts the application as the runner comes, and with the GPU
+    taken away, and reads the notice. No Linux machine with a graphics
+    card has run it.
 
 Status: **decided, and Michael's to overturn**: the scheme, that the web
 build gives up inlined critical styles for the policy, that a server is

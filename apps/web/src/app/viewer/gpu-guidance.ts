@@ -193,6 +193,25 @@ function noAdapter(env: GpuEnvironment): GpuGuidance {
   };
 }
 
+/**
+ * The only adapter offered draws on the processor, and the viewer does not
+ * take it: the desktop application on Linux, on a machine with no Vulkan
+ * driver for a graphics card (#69).
+ */
+function softwareOnly(env: GpuEnvironment, detail: string | null): GpuGuidance {
+  // Only the desktop application refuses one; a browser is told as for no adapter.
+  if (!env.desktop) return noAdapter(env);
+  const found = detail?.trim();
+  return {
+    ...desktopWithoutGpu(env, true),
+    title: 'Only a software graphics adapter was found',
+    cause:
+      'Open RT Studio draws images with WebGPU on a graphics card. This computer offers it only an adapter that draws on the processor' +
+      (found ? ` (${found})` : '') +
+      ', which it does not use: such an adapter stops working soon after it starts. Usually the driver for the graphics card is missing or out of date.',
+  };
+}
+
 /** An adapter exists but no device or canvas context could be created. */
 function couldNotStart(detail: string | null, desktop: boolean): GpuGuidance {
   return {
@@ -245,6 +264,8 @@ export function gpuGuidance(state: GpuProblemState, env: GpuEnvironment): GpuGui
       return noApi(env);
     case 'no-adapter':
       return noAdapter(env);
+    case 'software-adapter':
+      return softwareOnly(env, state.detail);
     case 'no-device':
     case 'no-context':
       return couldNotStart(state.detail, env.desktop === true);

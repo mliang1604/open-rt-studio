@@ -2,35 +2,76 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// What the tests tell Chromium about the GPU, the same in every file.
+// What the tests tell the application about the GPU, the same in every file.
 //
 //   E2E_NO_WEBGPU=1     take the GPU away, to see on a machine that has one
 //                       what a machine without one sees
-//   E2E_SOFTWARE_GPU=1  ask for a WebGPU adapter that is software, so that a
+//   E2E_SOFTWARE_GPU=1  have the application draw in software, so that a
 //                       machine without a GPU (a CI runner) draws all the same.
 //                       For Linux: Electron for macOS carries the software
 //                       renderer without the Vulkan loader it is reached
 //                       through, so there this gives no adapter at all.
 
-/**
- * The switches for this run, to add to the application's own arguments.
- *
- * The software adapter is SwiftShader, as in the web client's tests
- * (`apps/web/playwright.config.ts`, which says why `--use-vulkan` is one of
- * the three). The first two are what the application itself sets on Linux
- * (#69), and are given again here: the application keeps what it is given.
- */
+import type { Page } from '@playwright/test';
+
+/** Chromium switches for this run, to add to the application's own arguments. */
 export function gpuArgs(): string[] {
   // Without GPU access Chromium has no adapter to give: requestAdapter() is null.
-  if (process.env['E2E_NO_WEBGPU']) return ['--disable-gpu'];
-  if (process.env['E2E_SOFTWARE_GPU']) {
-    return [
-      '--enable-unsafe-webgpu',
-      '--enable-features=Vulkan',
-      '--use-webgpu-adapter=swiftshader',
-      '--use-angle=swiftshader',
-      '--use-vulkan=swiftshader',
-    ];
-  }
-  return [];
+  return process.env['E2E_NO_WEBGPU'] ? ['--disable-gpu'] : [];
+}
+
+/**
+ * Settings for this run, to add to the application's environment. Drawing in
+ * software is the application's own setting: it knows which switches that
+ * takes, and tells the viewer that a software adapter is meant.
+ */
+export function gpuEnv(): Record<string, string> {
+  return process.env['E2E_SOFTWARE_GPU'] && !process.env['E2E_NO_WEBGPU']
+    ? { OPEN_RT_STUDIO_DESKTOP_SOFTWARE_GPU: '1' }
+    : {};
+}
+
+/** What the page is offered to draw with. */
+export interface GpuOffer {
+  readonly api: boolean;
+  readonly adapter: boolean;
+  /** Whether the adapter draws on the processor. */
+  readonly software: boolean;
+  /** What the adapter says of itself. */
+  readonly info: string;
+}
+
+export function gpuOffer(page: Page): Promise<GpuOffer> {
+  return page.evaluate(async () => {
+    const none = { api: !!navigator.gpu, adapter: false, software: false, info: '' };
+    if (!navigator.gpu) return none;
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter === null) return none;
+      const info = (adapter as unknown as { info?: Record<string, unknown> }).info ?? {};
+      const said = ['vendor', 'architecture', 'device', 'description']
+        .map((name) => `${name}=${String(info[name] ?? '')}`)
+        .join(' ');
+      const fallback = info['isFallbackAdapter'] === true;
+      return {
+        api: true,
+        adapter: true,
+        software: fallback || /swiftshader|llvmpipe|lavapipe|softpipe/i.test(said),
+        info: `${said} fallback=${String(info['isFallbackAdapter'])}`,
+      };
+    } catch {
+      return none;
+    }
+  });
+}
+
+/**
+ * Whether the viewer draws in this run: there is an adapter, and it is not a
+ * software one that the application on Linux refuses (#69).
+ */
+export function draws(offer: GpuOffer): boolean {
+  if (!offer.adapter) return false;
+  const refused =
+    process.platform === 'linux' && offer.software && !process.env['E2E_SOFTWARE_GPU'];
+  return !refused;
 }

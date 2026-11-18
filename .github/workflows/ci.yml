@@ -202,7 +202,7 @@ jobs:
 
       # Linux (#69): WebGPU there runs on Vulkan, which the application asks
       # Chromium for at start. The runner has no graphics card, so the tests
-      # ask for Chromium's software adapter: everything is drawn, slowly.
+      # have the application draw in software: everything is drawn, slowly.
       - name: End-to-end (on a virtual display, drawing with a software adapter)
         if: runner.os == 'Linux'
         env:
@@ -210,8 +210,9 @@ jobs:
         run: xvfb-run --auto-servernum npm run e2e -w @open-rt-studio/desktop
 
       # And as a Linux machine with no usable graphics driver is: first the
-      # runner as it comes, then with the GPU taken away outright. The viewer
-      # must say what is missing, in words for Linux.
+      # runner as it comes, where Chromium offers a software adapter nobody
+      # asked for and the viewer does not take it, then with the GPU taken
+      # away outright. The viewer must say what is missing, in words for Linux.
       - name: End-to-end without a graphics adapter (Linux)
         if: runner.os == 'Linux'
         run: |

@@ -134,7 +134,14 @@ describe('gpuGuidance', () => {
 
 describe('gpuGuidance in the desktop application (#69)', () => {
   const desktop = (os: HostOs): GpuEnvironment => ({ ...env(os, 'chrome'), desktop: true });
-  const PROBLEMS: GpuProblem[] = ['no-api', 'no-adapter', 'no-device', 'no-context', 'device-lost'];
+  const PROBLEMS: GpuProblem[] = [
+    'no-api',
+    'no-adapter',
+    'software-adapter',
+    'no-device',
+    'no-context',
+    'device-lost',
+  ];
   const OSES: HostOs[] = ['linux', 'windows', 'mac', 'other'];
 
   it('speaks of the computer and the application, never of a browser to change', () => {
@@ -177,6 +184,25 @@ describe('gpuGuidance in the desktop application (#69)', () => {
     );
     expect(guide('no-api', desktop('linux')).title).toBe(
       'WebGPU is not available on this computer',
+    );
+  });
+
+  it('says so when only a software adapter was found, with its name and the same way out', () => {
+    const guidance = guide('software-adapter', desktop('linux'), 'llvmpipe (LLVM 19.1.1)');
+    expect(guidance.title).toBe('Only a software graphics adapter was found');
+    expect(guidance.cause).toContain('draws on the processor (llvmpipe (LLVM 19.1.1))');
+    expect(guidance.cause).toContain('stops working soon after it starts');
+    const all = text(guidance);
+    expect(all).toContain('On Linux, WebGPU runs on Vulkan');
+    expect(all).toContain('vulkaninfo --summary');
+    expect(guidance.reloadLabel).toBe('Start the viewer again');
+    // With no name, none is given.
+    expect(guide('software-adapter', desktop('linux')).cause).toContain(
+      'draws on the processor, which',
+    );
+    // A browser refuses none; were it told of one, it says what it says of no adapter.
+    expect(guide('software-adapter', env('linux', 'chrome')).title).toBe(
+      guide('no-adapter', env('linux', 'chrome')).title,
     );
   });
 

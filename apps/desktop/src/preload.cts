@@ -29,7 +29,7 @@ function call<C extends BridgeChannel>(
 }
 
 const NAME: typeof BRIDGE_GLOBAL = 'openRtStudioDesktop';
-const VERSION: typeof BRIDGE_VERSION = 4;
+const VERSION: typeof BRIDGE_VERSION = 5;
 
 const bridge: DesktopBridge = {
   version: VERSION,

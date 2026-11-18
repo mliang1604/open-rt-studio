@@ -35,7 +35,7 @@ import {
   type Page,
 } from '@playwright/test';
 
-import { gpuArgs } from './gpu.js';
+import { draws, gpuArgs, gpuEnv, gpuOffer } from './gpu.js';
 import { startTestServer, type TestServer } from './test-server.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -62,7 +62,7 @@ async function start(): Promise<void> {
   application = await electron.launch({
     args,
     cwd: DESKTOP,
-    env: { ...env, OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
+    env: { ...env, ...gpuEnv(), OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
   });
   page = await application.firstWindow();
   await expect(page.locator('app-root')).toBeAttached();
@@ -94,14 +94,8 @@ const protects = (): Promise<boolean> =>
       (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
   );
 
-const hasGpu = (): Promise<boolean> =>
-  page.evaluate(async () => {
-    try {
-      return !!navigator.gpu && (await navigator.gpu.requestAdapter()) !== null;
-    } catch {
-      return false;
-    }
-  });
+/** Whether the viewer draws here: a GPU, or software that was asked for. */
+const hasGpu = async (): Promise<boolean> => draws(await gpuOffer(page));
 
 /** Ask the server through the bridge, as the page does, and read the answer as JSON. */
 async function ask(
