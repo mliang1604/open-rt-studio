@@ -84,10 +84,13 @@ application. Never commit patient data or real DICOM files
   files), `src/ipc.ts` (its calls) and `src/grants.ts` (what it may read of
   the disk: the folders and files the user chose in the system's dialog, by
   an id the main process makes; the page never names a place on the disk and
-  is never told one), which need no Electron and are unit tested; only `src/main.ts` and `src/preload.cts` import Electron. Do not
-  loosen the policy to make something work: a server is reached from the
-  desktop application in #63, files through the bridge in #62. Electron is
-  pinned to an exact version.
+  is never told one) and `src/connections.ts` (the servers it may ask: those
+  the user agreed to in a dialog of the main process, their API only, with
+  the token of a login held there and never given to the page), which need
+  no Electron and are unit tested; only `src/main.ts` and `src/preload.cts`
+  import Electron. Do not loosen the policy to make something work: the page
+  fetches from nowhere, a server is asked through the bridge, and files are
+  read through it. Electron is pinned to an exact version.
 - `native/`: a placeholder until M3.
 - `docs/`: architecture, license headers, test data policy, the parity
   audit against dicom-workspace, the DICOM conformance statement

@@ -12,7 +12,10 @@ import {
   isDesktopInfo,
   isFileGrant,
   isGrantId,
+  isServerPath,
+  isServerRequest,
   type DesktopFiles,
+  type DesktopServer,
   type DesktopInfo,
 } from './index.js';
 
@@ -33,6 +36,13 @@ const FILES: DesktopFiles = {
   keep: async () => false,
   forget: async () => null,
 };
+const SERVER: DesktopServer = {
+  connect: async () => null,
+  connections: async () => [],
+  forget: async () => null,
+  request: async () => null,
+  cancel: async () => null,
+};
 const ID = 'Zm9sZGVyLW9mLXRlc3RzIQ';
 
 describe('the bridge of the desktop application', () => {
@@ -45,11 +55,21 @@ describe('the bridge of the desktop application', () => {
       'files:pick-files',
       'files:pick-folder',
       'files:read',
+      'server:cancel',
+      'server:connect',
+      'server:connections',
+      'server:forget',
+      'server:request',
     ]);
   });
 
   it('is found on a window that has it, and nowhere else', () => {
-    const bridge = { version: BRIDGE_VERSION, info: async () => INFO, files: FILES };
+    const bridge = {
+      version: BRIDGE_VERSION,
+      info: async () => INFO,
+      files: FILES,
+      server: SERVER,
+    };
     expect(desktopBridge({ [BRIDGE_GLOBAL]: bridge })).toBe(bridge);
     // A browser.
     expect(desktopBridge({})).toBeNull();
@@ -60,7 +80,7 @@ describe('the bridge of the desktop application', () => {
 
   it('is not used when it is of another version, or not a bridge', () => {
     const info = async () => INFO;
-    const whole = { version: BRIDGE_VERSION, info, files: FILES };
+    const whole = { version: BRIDGE_VERSION, info, files: FILES, server: SERVER };
     expect(
       desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, version: BRIDGE_VERSION + 1 } }),
     ).toBeNull();
@@ -72,6 +92,10 @@ describe('the bridge of the desktop application', () => {
     expect(desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, files: undefined } })).toBeNull();
     expect(
       desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, files: { ...FILES, read: undefined } } }),
+    ).toBeNull();
+    expect(desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, server: undefined } })).toBeNull();
+    expect(
+      desktopBridge({ [BRIDGE_GLOBAL]: { ...whole, server: { ...SERVER, cancel: 1 } } }),
     ).toBeNull();
     expect(desktopBridge({ [BRIDGE_GLOBAL]: 'bridge' })).toBeNull();
     expect(desktopBridge({ [BRIDGE_GLOBAL]: null })).toBeNull();
@@ -136,6 +160,75 @@ describe('the bridge of the desktop application', () => {
       ['CT'],
     ]) {
       expect(grantPathParts(wrong), String(wrong).slice(0, 30)).toBeNull();
+    }
+  });
+
+  it("takes a path of a server's API, and nothing that leads elsewhere", () => {
+    for (const path of [
+      '/api/v1/session',
+      '/api/v1/patients?limit=50&offset=0',
+      '/api/v1/instances/1.2.826.0.1.3680043.1/file',
+      '/api/v1/studies?patientName=D%C3%BCrer%5EAlbrecht',
+    ]) {
+      expect(isServerPath(path), path).toBe(true);
+    }
+    for (const path of [
+      '',
+      '/',
+      '/api/v1',
+      '/health',
+      '/api/v2/session',
+      'api/v1/session',
+      '//elsewhere.example/api/v1/session',
+      'https://elsewhere.example/api/v1/session',
+      '/api/v1/../../admin',
+      '/api/v1/./session',
+      '/api/v1/%2e%2e/admin',
+      '/api/v1/%2E%2E/admin',
+      '/api/v1/session#fragment',
+      '/api/v1/a\\b',
+      '/api/v1/a b',
+      '/api/v1/a\nHost: elsewhere',
+      '/api/v1/dürer',
+      `/api/v1/${'x'.repeat(9000)}`,
+      7,
+      null,
+    ]) {
+      expect(isServerPath(path), String(path).slice(0, 40)).toBe(false);
+    }
+  });
+
+  it('takes a request with a method, a path, plain headers of a few names, and bytes or nothing', () => {
+    const request = {
+      request: ID,
+      method: 'POST',
+      path: '/api/v1/instances',
+      headers: { 'content-type': 'application/dicom' },
+      body: new Uint8Array([1, 2, 3]),
+    };
+    expect(isServerRequest(request)).toBe(true);
+    expect(isServerRequest({ ...request, method: 'GET', headers: {}, body: null })).toBe(true);
+    for (const wrong of [
+      { ...request, request: 'not-an-id' },
+      { ...request, method: 'CONNECT' },
+      { ...request, method: 'get' },
+      { ...request, path: '/health' },
+      // Who is asking is not the page's to say, nor where the answer goes.
+      { ...request, headers: { authorization: 'Bearer stolen' } },
+      { ...request, headers: { host: 'elsewhere.example' } },
+      { ...request, headers: { cookie: 'a=b' } },
+      { ...request, headers: { 'Content-Type': 'application/json' } },
+      { ...request, headers: { 'content-type': 'text/plain\r\nAuthorization: Bearer x' } },
+      { ...request, headers: { 'content-type': 7 } },
+      { ...request, headers: ['content-type'] },
+      { ...request, headers: null },
+      { ...request, body: 'text' },
+      { ...request, body: [1, 2, 3] },
+      { ...request, body: undefined },
+      null,
+      'GET /api/v1/session',
+    ]) {
+      expect(isServerRequest(wrong), JSON.stringify(wrong)?.slice(0, 80)).toBe(false);
     }
   });
 });

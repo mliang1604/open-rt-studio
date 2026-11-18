@@ -13,6 +13,7 @@ import {
   isStoredGrant,
 } from './desktop-files';
 import { fakeDesktopFiles, fakeGrantId } from './desktop-files-testing';
+import { fakeDesktopServer } from './desktop-server-testing';
 import { filePickers, filesOf } from './file-access';
 
 const bytes = (...values: number[]) => new Uint8Array(values);
@@ -158,7 +159,12 @@ describe('folders and files in the desktop application', () => {
     desktop.next = desktop.add('folder', 'thorax', {});
     const browser = () => Promise.reject(new Error('the browser picker was used'));
     const host = {
-      [BRIDGE_GLOBAL]: { version: BRIDGE_VERSION, info: async () => null, files: desktop },
+      [BRIDGE_GLOBAL]: {
+        version: BRIDGE_VERSION,
+        info: async () => null,
+        files: desktop,
+        server: fakeDesktopServer(() => Promise.reject(new Error('no server in this spec'))),
+      },
       showDirectoryPicker: browser,
       showOpenFilePicker: browser,
     };

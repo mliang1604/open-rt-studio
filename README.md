@@ -103,8 +103,9 @@ npm run desktop
 
 It shows the same notice and is not for clinical use either. It opens
 folders and files with the system's dialogs, and a recent folder opens again
-after a restart without picking it; connecting to a server from it comes
-later. See [apps/desktop/README.md](apps/desktop/README.md).
+after a restart without picking it. It connects to a server as the web
+client does, after asking you about a server it has not been connected to,
+and keeps your login in the system's keychain. See [apps/desktop/README.md](apps/desktop/README.md).
 
 ### What the viewer does
 

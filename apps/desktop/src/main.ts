@@ -18,8 +18,11 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  net,
   protocol,
+  safeStorage,
   session,
+  type MessageBoxOptions,
   type OpenDialogOptions,
   type WebContents,
 } from 'electron';
@@ -30,10 +33,12 @@ import {
   type DesktopPlatform,
 } from '@open-rt-studio/desktop-bridge';
 
+import { openConnections, type Seal } from './connections.js';
 import { respond } from './content.js';
 import { fileAnswers, type Pickers } from './files.js';
 import { openGrants } from './grants.js';
 import { serveBridge } from './ipc.js';
+import { serverAnswers } from './server-calls.js';
 import {
   APP_HOME,
   APP_SCHEME,
@@ -46,6 +51,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const NAME = 'Open RT Studio';
 const GRANTS_FILE = 'file-grants.json';
+const CONNECTIONS_FILE = 'server-connections.json';
 
 /** Settings for working on the application. An installed one reads none of them. */
 const DEV_SERVER = 'OPEN_RT_STUDIO_DESKTOP_DEV_SERVER';
@@ -175,12 +181,73 @@ const pickers: Pickers = {
 };
 
 async function showOpenDialog(options: OpenDialogOptions): Promise<readonly string[]> {
-  const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows().at(0);
+  const window = ownWindow();
   const answer =
     window === undefined
       ? await dialog.showOpenDialog(options)
       : await dialog.showOpenDialog(window, options);
   return answer.canceled ? [] : answer.filePaths;
+}
+
+/** The window a dialog belongs to. */
+const ownWindow = (): BrowserWindow | undefined =>
+  BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows().at(0);
+
+/**
+ * Ask the user whether the application may talk to a server. The address is
+ * the page's to name and the user's to agree to: nothing is sent before.
+ */
+async function approveServer(address: string, plain: boolean): Promise<boolean> {
+  const options: MessageBoxOptions = {
+    type: plain ? 'warning' : 'question',
+    title: NAME,
+    message: `Connect to ${address}?`,
+    detail:
+      'The application will read patient data from this server, and send it what you save ' +
+      'there and your name and password when you log in. Connect only to a server you know.' +
+      (plain
+        ? '\n\nThis address is not encrypted (http): what is sent, your password too, can be ' +
+          'read on the network between here and there.'
+        : ''),
+    buttons: ['Connect', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const window = ownWindow();
+  const answer =
+    window === undefined
+      ? await dialog.showMessageBox(options)
+      : await dialog.showMessageBox(window, options);
+  return answer.response === 0;
+}
+
+/**
+ * The system's protection for a secret, when it has one that is worth the
+ * name. On Linux without a keyring Electron falls back to a key that is in
+ * its own source, which protects nothing: a login is then not written down.
+ */
+function systemSeal(): Seal | null {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
+    return null;
+  }
+  return {
+    seal: (text) => {
+      try {
+        return safeStorage.encryptString(text).toString('base64');
+      } catch {
+        return null;
+      }
+    },
+    open: (sealed) => {
+      try {
+        return safeStorage.decryptString(Buffer.from(sealed, 'base64'));
+      } catch {
+        return null;
+      }
+    },
+  };
 }
 
 async function start(): Promise<void> {
@@ -209,11 +276,20 @@ async function start(): Promise<void> {
     });
   }
 
+  // Requests to a server go out from here, with the system's proxy and its
+  // trusted certificates, and with no page's name on them.
+  const connections = await openConnections({
+    file: join(app.getPath('userData'), CONNECTIONS_FILE),
+    fetch: (input, init) => net.fetch(input as string | Request, init),
+    approve: approveServer,
+    seal: systemSeal(),
+  });
   // Kept grants are in the profile: they say where the user's data is, and nothing of it.
   const grants = await openGrants({ file: join(app.getPath('userData'), GRANTS_FILE) });
   serveBridge(ipcMain, (address) => mayNavigate(address, home), {
     'desktop:info': { accepts: (args) => args.length === 0, answer: desktopInfo },
     ...fileAnswers(grants, pickers),
+    ...serverAnswers(connections),
   });
 
   openWindow();

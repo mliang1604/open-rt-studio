@@ -533,9 +533,8 @@ Decided for the shell (#61):
     styles** (`inlineCritical: false` in `angular.json`): inlining needs a
     script written into the page, which the policy refuses, and the style
     sheet then never takes effect. The same build is the one on GitHub Pages.
-  - `connect-src` is the application itself. **A server cannot be reached
-    from the desktop application until #63**, which is to open the policy to
-    the server the user connects to, and to that one.
+  - `connect-src` is the application itself, and stays so: a server is
+    reached through the main process (#63, below), not by opening the policy.
 - **The page stays where it is.** It goes to no address outside the
   application, opens no window, embeds no page, and is not navigated by a
   file dropped on it. Links to other sites, if the application gets any,
@@ -578,8 +577,39 @@ Decided for the shell (#61):
     (`apps/web/src/app/desktop-files.ts`).
   - A file or folder **dropped** on the window still comes as the browser's
     own handle, which is why the page keeps the one permission it has.
+- **A server is reached through the main process** (#63). The page asks
+  through the bridge, of a _connection_; the main process sends the request
+  and gives back the status, the headers and the bytes, which the page takes
+  as data. The page's own policy is not opened: it still fetches from
+  nowhere.
+  - **The user agrees to a server before anything is sent to it**, in a
+    dialog of the main process that names the address, and says so when the
+    address is `http` to another machine. A server that was agreed to is
+    saved and not asked about again; it can be forgotten. At most 16 are
+    saved.
+  - **Only the server's API** (`/api/v1/`), with a method, a few plain
+    headers and bytes. Who is asking is not the page's to say.
+  - **The token of a login never reaches the page.** The main process takes
+    it out of the server's answer to a login, gives the page a marker in its
+    place, and adds the token to what it sends. It is dropped when the page
+    logs out, and when the server no longer knows it.
+  - **The login is kept across runs where the system protects it**: sealed
+    with Electron's `safeStorage` (the Keychain on macOS, DPAPI on Windows,
+    a keyring on Linux) in `server-connections.json` in the profile. On
+    Linux without a keyring Electron's fallback protects nothing, so the
+    login is then not written down and lasts for the run. The password is
+    never kept, anywhere.
+  - Requests go out with Electron's `net`, so with the system's proxy and
+    its trusted certificates, and with no `Origin`: the server takes that
+    for a caller that is not a page, which is what its origin rule was
+    written for. A redirect is not followed.
+  - In the page this is a `fetch` given to the same `ServerSource` a browser
+    uses (`apps/web/src/app/desktop-server.ts`); nothing else knows.
+  - An answer is taken whole, up to 1 GiB. The viewer fetches a series one
+    file at a time, so this bounds a file and not a study.
 - **What the shell decides needs no Electron** (`policy.ts`, `content.ts`,
-  `ipc.ts`, `grants.ts`, `files.ts`), so each rule has a unit test; only `main.ts` and `preload.cts`
+  `ipc.ts`, `grants.ts`, `files.ts`, `connections.ts`, `server-calls.ts`),
+  so each rule has a unit test; only `main.ts` and `preload.cts`
   import Electron, and a lint rule holds the rest to it.
 - **Development** runs the shell on the web client's development server
   (`npm run desktop:dev`), with the same policy plus that server's socket for
@@ -592,8 +622,9 @@ Decided for the shell (#61):
   Linux is #69.
 
 Status: **decided, and Michael's to overturn**: the scheme, that the web
-build gives up inlined critical styles for the policy, and that the desktop
-application reaches no server until #63.
+build gives up inlined critical styles for the policy, that a server is
+reached through the main process and agreed to in its dialog, and that the
+token of a login is kept and the password is not.
 
 ## Server and PACS
 
