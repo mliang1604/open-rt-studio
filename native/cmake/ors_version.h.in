@@ -1,0 +1,15 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#ifndef ors_version_h
+#define ors_version_h
+
+/* The version of the native tools: all of them carry the same. */
+#define ORS_NATIVE_VERSION "@PROJECT_VERSION@"
+
+/* What they were built on: the pinned versions, which the build insists on. */
+#define ORS_ITK_VERSION "@ORS_ITK_VERSION@"
+#define ORS_ELASTIX_VERSION "@ORS_ELASTIX_VERSION@"
+
+#endif

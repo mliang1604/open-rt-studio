@@ -192,7 +192,8 @@ npm test              # unit tests
 
 The workspaces are `packages/dicom`, `packages/render`, `packages/testdata`,
 `packages/desktop-bridge`, `apps/web`, `apps/desktop` and `services/server`;
-`native/` holds the C++ tools.
+`native/` holds the C++ tools, which have a build of their own
+([native/README.md](native/README.md)).
 
 ## License
 

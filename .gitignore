@@ -35,3 +35,6 @@ Thumbs.db
 /data/
 /sample-data/
 *.dcm
+
+# The native tools: what CMake builds (native/README.md)
+/native/build/

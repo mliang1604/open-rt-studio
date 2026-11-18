@@ -1,0 +1,183 @@
+name: Native tools
+
+# Builds the C++ tools in native/ on the three systems they are for (#79):
+# ITK and elastix from their pinned sources, then the tools against them,
+# then the tools' tests. Not a required check. It runs when native/ or its
+# build script changes; `workflow_call` is for the installers, which will
+# want the tools it makes.
+#
+# ITK and elastix take an hour or more to build. They are kept in the Actions
+# cache, keyed by what they are built from, so that a change to a tool does
+# not build them again. A stamp inside the kept folder says exactly what was
+# built, and the build believes the stamp, not the key: a cache that is not
+# quite the right one costs time and never gives a wrong library.
+on:
+  pull_request:
+    paths:
+      - 'native/**'
+      - 'scripts/native.mjs'
+      - '.github/workflows/native.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - 'scripts/native.mjs'
+      - '.github/workflows/native.yml'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Native (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04 and not the latest: a tool runs on the C library it
+          # was built on or a newer one.
+          - { name: Linux, id: linux-x64, os: ubuntu-22.04, build: native/build }
+          # macOS: one build for each processor, each on its own kind of
+          # machine. `universal` below joins the two.
+          - { name: macOS arm64, id: macos-arm64, os: macos-15, build: native/build }
+          - { name: macOS x86_64, id: macos-x64, os: macos-15-intel, build: native/build }
+          # A short path: ITK refuses a long one on Windows.
+          - { name: Windows, id: windows-x64, os: windows-2022, build: 'C:/ors' }
+    env:
+      ORS_NATIVE_BUILD_DIR: ${{ matrix.build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: What builds
+        shell: bash
+        run: |
+          cmake --version | head -n 1
+          node scripts/native.mjs where
+
+      # The newest kept ITK and elastix for this system, if any. An exact
+      # match means there is nothing to build; anything else is a start.
+      - name: Restore ITK and elastix
+        id: kept
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ matrix.build }}/prefix
+          key: native-deps-${{ matrix.id }}-${{ hashFiles('native/deps/**', 'native/cmake/versions.cmake', 'native/cmake/platform.cmake') }}
+          restore-keys: |
+            native-deps-${{ matrix.id }}-
+            native-itk-${{ matrix.id }}-
+
+      - name: Build ITK
+        run: node scripts/native.mjs deps --only itk
+
+      # Kept by itself, so that a failure in what follows does not cost it.
+      - name: Keep ITK
+        if: steps.kept.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ matrix.build }}/prefix
+          key: native-itk-${{ matrix.id }}-${{ hashFiles('native/deps/**', 'native/cmake/versions.cmake', 'native/cmake/platform.cmake') }}
+
+      - name: Build elastix
+        run: node scripts/native.mjs deps --prune
+
+      - name: Keep ITK and elastix
+        if: steps.kept.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ matrix.build }}/prefix
+          key: native-deps-${{ matrix.id }}-${{ hashFiles('native/deps/**', 'native/cmake/versions.cmake', 'native/cmake/platform.cmake') }}
+
+      - name: Build the tools
+        run: node scripts/native.mjs build
+
+      - name: Test
+        run: node scripts/native.mjs test
+
+      # A tool is one file with nothing to install beside it: say what it
+      # still asks of the system.
+      - name: What the tools need
+        shell: bash
+        run: |
+          cd "$ORS_NATIVE_BUILD_DIR/dist"
+          ls -l bin licenses licenses/*
+          ./bin/ors-volume-info --version
+          case "$RUNNER_OS" in
+            Linux) ldd bin/ors-volume-info ;;
+            macOS) otool -L bin/ors-volume-info; lipo -archs bin/ors-volume-info ;;
+          esac
+
+      # As an archive: an uploaded folder loses which files are programs.
+      - name: Pack
+        shell: bash
+        run: |
+          cd "$ORS_NATIVE_BUILD_DIR/dist"
+          tar -czf ../native-tools-${{ matrix.id }}.tar.gz .
+
+      - name: Upload the tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-tools-${{ matrix.id }}
+          path: ${{ matrix.build }}/native-tools-${{ matrix.id }}.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  # macOS: the two builds joined into programs that run on either processor.
+  universal:
+    name: Native (macOS universal)
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Download the two builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-tools-macos-*
+          merge-multiple: true
+
+      - name: Join them
+        run: |
+          mkdir arm64 x64 universal universal/bin
+          tar -xzf native-tools-macos-arm64.tar.gz -C arm64
+          tar -xzf native-tools-macos-x64.tar.gz -C x64
+          cp -R arm64/licenses universal/licenses
+          for tool in arm64/bin/*; do
+            name=$(basename "$tool")
+            lipo -create -output "universal/bin/$name" "arm64/bin/$name" "x64/bin/$name"
+            lipo "universal/bin/$name" -verify_arch arm64 x86_64
+            echo "$name: $(lipo -archs "universal/bin/$name")"
+          done
+
+      - name: Run them, as each processor
+        run: |
+          arch -arm64 universal/bin/ors-volume-info --version
+          # Intel programs run here only where Rosetta is installed.
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            arch -x86_64 universal/bin/ors-volume-info --version
+          else
+            echo "No Rosetta on this runner: the Intel half was run in its own job."
+          fi
+
+      - name: Pack
+        run: tar -czf native-tools-macos-universal.tar.gz -C universal .
+
+      - name: Upload the tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-tools-macos-universal
+          path: native-tools-macos-universal.tar.gz
+          retention-days: 14
+          if-no-files-found: error
