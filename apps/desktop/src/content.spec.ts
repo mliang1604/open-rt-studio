@@ -100,8 +100,9 @@ describe("the application's files", () => {
     for (const folded of [`${APP_HOME}../secret.txt`, `${APP_HOME}assets/../../secret.txt`]) {
       expect(await fileFor(root, folded), folded).toBe(404);
     }
-    // An absolute path in the address is a path in the build.
-    expect(await fileFor(root, `${APP_HOME}/${join(scratch, 'secret.txt')}`)).toBe(404);
+    // An absolute path in the address is a path in the build, or (with a
+    // drive and Windows' separators) no path at all.
+    expect([400, 404]).toContain(await fileFor(root, `${APP_HOME}/${join(scratch, 'secret.txt')}`));
   });
 
   it.skipIf(process.platform === 'win32')('do not follow a link out of the build', async () => {
