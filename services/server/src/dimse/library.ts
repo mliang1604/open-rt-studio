@@ -19,8 +19,10 @@ dimse.log.setLevel('silent');
 
 export const { Client, Dataset, Scp } = dimse;
 export const { PresentationContext } = dimse.association;
-export const { CEchoRequest, CStoreRequest } = dimse.requests;
-export const { CEchoResponse, CStoreResponse } = dimse.responses;
+export const { CEchoRequest, CFindRequest, CGetRequest, CMoveRequest, CStoreRequest } =
+  dimse.requests;
+export const { CEchoResponse, CFindResponse, CGetResponse, CMoveResponse, CStoreResponse } =
+  dimse.responses;
 
 // The library's constants, as far as the server uses them. They are given
 // types of our own: the library's cannot be named in a declaration file.
@@ -43,6 +45,13 @@ export type LibraryEchoRequest = InstanceType<typeof dimse.requests.CEchoRequest
 export type LibraryEchoResponse = InstanceType<typeof dimse.responses.CEchoResponse>;
 export type LibraryStoreRequest = InstanceType<typeof dimse.requests.CStoreRequest>;
 export type LibraryStoreResponse = InstanceType<typeof dimse.responses.CStoreResponse>;
+export type LibraryFindRequest = InstanceType<typeof dimse.requests.CFindRequest>;
+export type LibraryFindResponse = InstanceType<typeof dimse.responses.CFindResponse>;
+export type LibraryMoveRequest = InstanceType<typeof dimse.requests.CMoveRequest>;
+export type LibraryMoveResponse = InstanceType<typeof dimse.responses.CMoveResponse>;
+export type LibraryGetRequest = InstanceType<typeof dimse.requests.CGetRequest>;
+export type LibraryGetResponse = InstanceType<typeof dimse.responses.CGetResponse>;
+export type LibraryCancelRequest = InstanceType<typeof dimse.requests.CCancelRequest>;
 
 /** What a data set that is sent as it is stored is made from. */
 export interface StoredObject {

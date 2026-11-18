@@ -24,7 +24,13 @@ let destination: TestServer;
 /** The id the source knows the destination by, and where the destination listens. */
 let planning: { id: string; port: number };
 
-const PLANNING = { name: 'Planning', aeTitle: 'DEST', host: '127.0.0.1', mayStore: false };
+const PLANNING = {
+  name: 'Planning',
+  aeTitle: 'DEST',
+  host: '127.0.0.1',
+  mayStore: false,
+  mayRetrieve: false,
+};
 
 test.beforeAll(async () => {
   source = await startTestServer([PAGE_ORIGIN]);

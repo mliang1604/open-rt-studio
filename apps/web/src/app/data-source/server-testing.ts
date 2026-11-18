@@ -95,6 +95,7 @@ export interface FakeDicom {
     host: string | null;
     port: number | null;
     mayStore: boolean;
+    mayRetrieve: boolean;
   }[];
   /** The address the server itself is on. */
   host: string;

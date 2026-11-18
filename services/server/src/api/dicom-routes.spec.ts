@@ -15,7 +15,13 @@ import { openSqliteAuditStore, type AuditRecord } from '../audit/audit-store.js'
 import { createAuditLog } from '../audit/audit.js';
 import { DEFAULT_CONFIG, type ServerConfig } from '../config.js';
 import { dicomEcho } from '../dimse/echo.js';
-import { freePort, sendFiles, startTestListener } from '../dimse/testing/peer.js';
+import {
+  converse,
+  findRequest,
+  freePort,
+  sendFiles,
+  startTestListener,
+} from '../dimse/testing/peer.js';
 import { createLogger } from '../logger.js';
 import { startServer, type RunningServer } from '../server.js';
 import { API_PREFIX } from './api-routes.js';
@@ -114,7 +120,14 @@ interface State {
   listening: { host: string; port: number } | null;
 }
 
-const PEER = { name: 'Planning', aeTitle: 'PLANNING', host: null, port: null, mayStore: true };
+const PEER = {
+  name: 'Planning',
+  aeTitle: 'PLANNING',
+  host: null,
+  port: null,
+  mayStore: true,
+  mayRetrieve: false,
+};
 
 describe('the DICOM settings of the API', () => {
   it('start as the configuration has them: off, with a title and nobody known', async () => {
@@ -145,12 +158,87 @@ describe('the DICOM settings of the API', () => {
     expect(state.local).toEqual({ enabled: true, port: 0, aeTitle: 'ORS' });
     expect(state.listening).toEqual(made.server.dicom);
     expect(state.remotes.map(({ id, ...rest }) => (id.length === 16 ? rest : null))).toEqual([
-      { name: 'PLANNING', aeTitle: 'PLANNING', host: null, port: null, mayStore: true },
-      { name: 'LINAC2', aeTitle: 'LINAC2', host: null, port: null, mayStore: true },
+      {
+        name: 'PLANNING',
+        aeTitle: 'PLANNING',
+        host: null,
+        port: null,
+        mayStore: true,
+        mayRetrieve: false,
+      },
+      {
+        name: 'LINAC2',
+        aeTitle: 'LINAC2',
+        host: null,
+        port: null,
+        mayStore: true,
+        mayRetrieve: false,
+      },
     ]);
   });
 
   // The issue's first "done when": added, tested with C-ECHO and used at once.
+  // #52: who may query and retrieve is set here, and is for the next association.
+  it('let a system query and retrieve, when that is said and not when nothing is said', async () => {
+    const made = await make();
+    const { admin } = made;
+    const on = held<State>(
+      await made.call('PUT', '/dicom/local', {
+        token: admin,
+        body: { enabled: true, port: 0, aeTitle: 'ORS' },
+      }),
+      200,
+      'DicomState',
+    );
+    const port = on.listening!.port;
+    for (const file of syntheticCtSeries(2, 16)) {
+      await made.server.core.pacs!.ingest.ingest(file.bytes);
+    }
+    const everyStudy = async () =>
+      converse(
+        port,
+        [
+          findRequest('1.2.840.10008.5.1.4.1.2.2.1', {
+            QueryRetrieveLevel: 'STUDY',
+            StudyInstanceUID: '',
+          }),
+        ],
+        { callingAeTitle: 'PLANNING', calledAeTitle: 'ORS' },
+      );
+
+    // As a client from before would send it: nothing of retrieving, which is then not allowed.
+    const { mayRetrieve: _unsaid, ...before } = PEER;
+    expect(_unsaid).toBe(false);
+    const added = held<State['remotes'][number] & { mayRetrieve: boolean }>(
+      await made.call('POST', '/dicom/remotes', { token: admin, body: before }),
+      201,
+      'DicomRemote',
+    );
+    expect(added.mayRetrieve).toBe(false);
+    expect((await everyStudy()).answers[0]).toEqual([]);
+
+    const changed = held<{ mayRetrieve: boolean }>(
+      await made.call('PUT', `/dicom/remotes/${added.id}`, {
+        token: admin,
+        body: { ...PEER, mayRetrieve: true },
+      }),
+      200,
+      'DicomRemote',
+    );
+    expect(changed.mayRetrieve).toBe(true);
+    const answered = await everyStudy();
+    expect(answered.answers[0].map((answer) => answer.status)).toEqual([0xff00, 0]);
+
+    expect(
+      (
+        await made.call('PUT', `/dicom/remotes/${added.id}`, {
+          token: admin,
+          body: { ...PEER, mayRetrieve: 'yes' },
+        })
+      ).status,
+    ).toBe(400);
+  });
+
   it('add a system that is echoed, and that sends objects, with no restart', async () => {
     const other = await startTestListener({ aeTitle: 'PLANNING', callers: ['ORS'] });
     closing.push(() => other.close());
@@ -214,7 +302,13 @@ describe('the DICOM settings of the API', () => {
     const moved = held<State['remotes'][number]>(
       await made.call('PUT', `/dicom/remotes/${added.id}`, {
         token: admin,
-        body: { ...PEER, host: '127.0.0.1', port: await freePort(), mayStore: false },
+        body: {
+          ...PEER,
+          host: '127.0.0.1',
+          port: await freePort(),
+          mayStore: false,
+          mayRetrieve: false,
+        },
       }),
       200,
       'DicomRemote',
@@ -366,7 +460,7 @@ describe('the DICOM settings of the API', () => {
     await made.call('POST', `/dicom/remotes/${id}/echo`, { token: admin });
     await made.call('PUT', `/dicom/remotes/${id}`, {
       token: admin,
-      body: { ...PEER, aeTitle: 'RENAMED', mayStore: false },
+      body: { ...PEER, aeTitle: 'RENAMED', mayStore: false, mayRetrieve: false },
     });
     await made.call('DELETE', `/dicom/remotes/${id}`, { token: admin });
     await made.call('POST', '/dicom/remotes', { token: made.user, body: PEER });
@@ -383,9 +477,9 @@ describe('the DICOM settings of the API', () => {
     ).toEqual([
       ['dicom-settings-read', 'root', 'ok', null, null],
       ['dicom-settings-change', 'root', 'ok', 'ORS', 'enabled=true port=0'],
-      ['dicom-remote-add', 'root', 'ok', 'PLANNING', 'mayStore=true'],
+      ['dicom-remote-add', 'root', 'ok', 'PLANNING', 'mayStore=true mayRetrieve=false'],
       ['dicom-echo', 'root', 'ok', 'PLANNING', 'unreachable'],
-      ['dicom-remote-change', 'root', 'ok', 'RENAMED', 'mayStore=false'],
+      ['dicom-remote-change', 'root', 'ok', 'RENAMED', 'mayStore=false mayRetrieve=false'],
       ['dicom-remote-remove', 'root', 'ok', 'RENAMED', null],
       ['dicom-remote-add', 'ada', 'refused', null, null],
     ]);
@@ -410,7 +504,13 @@ describe('the DICOM settings of the API', () => {
         await made.server.core.pacs!.ingest.ingest(file.bytes);
       }
       const held = await made.server.core.pacs!.index.findInstances();
-      const there = { ...PEER, host: '127.0.0.1', port: other.port, mayStore: false };
+      const there = {
+        ...PEER,
+        host: '127.0.0.1',
+        port: other.port,
+        mayStore: false,
+        mayRetrieve: false,
+      };
       const added = await made.call('POST', '/dicom/remotes', { token: made.admin, body: there });
       const destination = (added.body as { id: string }).id;
       /** The record of a send once it is done, as a user reads it. */

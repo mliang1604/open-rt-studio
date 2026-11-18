@@ -19,7 +19,7 @@ import { API_PREFIX } from './api/api-routes.js';
 import type { AuditRecord } from './audit/audit-store.js';
 import { DEFAULT_CONFIG } from './config.js';
 import { dicomEcho } from './dimse/echo.js';
-import { sendFiles } from './dimse/testing/peer.js';
+import { converse, findRequest, getRequest, moveRequest, sendFiles } from './dimse/testing/peer.js';
 import { createLogger } from './logger.js';
 import { startServer, type RunningServer } from './server.js';
 
@@ -41,6 +41,8 @@ const ABSENT_UID = '1.2.826.0.1.3680043.999.77';
 const ABSENT_PATIENT = 'ZZ-NOT-A-PATIENT-4242';
 /** A system that is let in by DICOM. */
 const DICOM_PEER = 'GUARD-PEER';
+/** A system that may query and retrieve by DICOM, and not store. */
+const DICOM_ASKER = 'GUARD-ASKER';
 /** What an administrator calls another system. */
 const SYSTEM_NAME = 'Yarrow Hospital planning';
 
@@ -317,19 +319,38 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   const system = { name: SYSTEM_NAME, aeTitle: 'GUARD-OTHER', host: '127.0.0.1', port: 9 };
   const known = await call('POST', api('/dicom/remotes'), {
     token: admin,
-    body: { ...system, mayStore: false },
+    body: { ...system, mayStore: false, mayRetrieve: false },
   });
   expect(known.status).toBe(201);
   const systemId = (known.body as { id: string }).id;
+  // A system that may query and retrieve, for what is asked by DICOM below.
+  const asker = await call('POST', api('/dicom/remotes'), {
+    token: admin,
+    body: {
+      name: 'Asker',
+      aeTitle: DICOM_ASKER,
+      host: null,
+      port: null,
+      mayStore: false,
+      mayRetrieve: true,
+    },
+  });
+  expect(asker.status).toBe(201);
   await call('POST', api('/dicom/remotes'), {
     token: admin,
-    body: { ...system, name: PATIENT.name, aeTitle: ABSENT_PATIENT, mayStore: true },
+    body: {
+      ...system,
+      name: PATIENT.name,
+      aeTitle: ABSENT_PATIENT,
+      mayStore: true,
+      mayRetrieve: false,
+    },
   });
   await call('POST', api(`/dicom/remotes/${systemId}/echo`), { token: admin });
   await call('POST', api(`/dicom/remotes/${ABSENT_PATIENT}/echo`), { token: admin });
   await call('PUT', api(`/dicom/remotes/${systemId}`), {
     token: admin,
-    body: { ...system, name: `${SYSTEM_NAME} 2`, mayStore: true },
+    body: { ...system, name: `${SYSTEM_NAME} 2`, mayStore: true, mayRetrieve: false },
   });
   await call('PUT', api(`/dicom/remotes/${ABSENT_PATIENT}`), { token: admin, body: system });
   // A send to it, of a series of the patient: asked for, followed, sent
@@ -398,6 +419,42 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   expect(await dicomEcho({ ...dicom, ...addressed, callingAeTitle: DICOM_PEER })).toEqual({
     outcome: 'ok',
   });
+  // Asked what it holds, and to send it (#52): by the patient's name and ID,
+  // rightly and wrongly, to a destination that is none, and back to the asker.
+  const STUDY_ROOT = '1.2.840.10008.5.1.4.1.2.2';
+  const PATIENT_ROOT = '1.2.840.10008.5.1.4.1.2.1';
+  const byDicom = await converse(
+    dicom.port,
+    [
+      findRequest(`${PATIENT_ROOT}.1`, {
+        QueryRetrieveLevel: 'PATIENT',
+        PatientName: PATIENT.name,
+        PatientID: PATIENT.id,
+      }),
+      findRequest(`${STUDY_ROOT}.1`, {
+        QueryRetrieveLevel: 'STUDY',
+        PatientID: PATIENT.id,
+        PatientName: `${PATIENT.name.slice(0, 3)}*`,
+        StudyInstanceUID: '',
+        AccessionNumber: ABSENT_PATIENT,
+      }),
+      findRequest(`${STUDY_ROOT}.1`, { QueryRetrieveLevel: 'STUDY', StudyInstanceUID: '1.2.*' }),
+      findRequest(`${STUDY_ROOT}.1`, { QueryRetrieveLevel: PATIENT.id }),
+      moveRequest(`${PATIENT_ROOT}.2`, ABSENT_PATIENT.slice(0, 16), {
+        QueryRetrieveLevel: 'PATIENT',
+        PatientID: PATIENT.id,
+      }),
+      moveRequest(`${STUDY_ROOT}.2`, DICOM_PEER, { QueryRetrieveLevel: 'STUDY' }),
+      getRequest(`${PATIENT_ROOT}.3`, { QueryRetrieveLevel: 'PATIENT', PatientID: PATIENT.id }),
+      getRequest(`${PATIENT_ROOT}.3`, { QueryRetrieveLevel: 'PATIENT', PatientID: ABSENT_PATIENT }),
+    ],
+    { ...addressed, callingAeTitle: DICOM_ASKER },
+  );
+  expect(byDicom.rejected).toBe(false);
+  // The patient was found by name and ID, and the images came back.
+  expect(byDicom.answers[0].length).toBeGreaterThan(1);
+  expect(byDicom.received.length).toBeGreaterThan(0);
+  expect(byDicom.answers.every((answers) => answers.length > 0)).toBe(true);
 
   await server.stop();
   server = null;
@@ -410,6 +467,9 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   // And a line for each object that came by DICOM, and for the caller turned away.
   expect(logged.filter((line) => line['event'] === 'object-received')).toHaveLength(FILES.length);
   expect(logged.some((line) => line['event'] === 'association-rejected')).toBe(true);
+  // And one for each question and each retrieve that was asked by DICOM.
+  expect(logged.filter((line) => line['event'] === 'query-answered')).toHaveLength(4);
+  expect(logged.filter((line) => line['event'] === 'retrieve-answered')).toHaveLength(4);
   const forbidden: Record<string, string> = {
     'the Patient ID': PATIENT.id,
     'the patient’s name': PATIENT.name,
@@ -419,6 +479,7 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     'a UID that was asked for and is not there': ABSENT_UID,
     'a Patient ID that was asked for and is not there': ABSENT_PATIENT,
     'the same, as a page’s origin': ABSENT_PATIENT.toLowerCase(),
+    'the same, as far as an AE title holds it': ABSENT_PATIENT.slice(0, 16),
     'the administrator’s name': ADMIN.name,
     'the user’s name': USER.name,
     'a new account’s name': 'yarrow-new',

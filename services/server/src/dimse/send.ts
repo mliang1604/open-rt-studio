@@ -58,9 +58,10 @@ export interface SendTarget {
 }
 
 /** Warnings of the storage service (PS3.4, B.2.3): the object was stored. */
-const WARNINGS = new Set([0xb000, 0xb006, 0xb007]);
+export const STORE_WARNINGS: ReadonlySet<number> = new Set([0xb000, 0xb006, 0xb007]);
 
-const uncompressed = (transferSyntax: string): boolean =>
+/** Whether an object in this transfer syntax can be written anew in the other such. */
+export const uncompressed = (transferSyntax: string): boolean =>
   transferSyntax === IMPLICIT_VR_LE || transferSyntax === EXPLICIT_VR_LE;
 
 /** How the association that was accepted will carry an object. */
@@ -129,7 +130,7 @@ export function sendObjects(
           const status = statuses[i];
           const way = how?.[i];
           if (status !== null) {
-            return status === 0 || WARNINGS.has(status)
+            return status === 0 || STORE_WARNINGS.has(status)
               ? { outcome: 'stored', status, rewritten: way === 'rewritten' }
               : { outcome: 'refused', status };
           }

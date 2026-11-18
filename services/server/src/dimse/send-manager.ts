@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 
 import type { Pacs } from '../core/core.js';
 import { SILENT_LOGGER, type Logger } from '../logger.js';
-import { outgoingFrom, type OutgoingObject } from './part10.js';
+import { BYTES_AT_ONCE, INSTANCES_AT_ONCE, takePart } from './parts.js';
 // Types alone: the sender brings the DIMSE library, which is loaded by the first send.
 import type { sendObjects, SendOutcome, SendTarget } from './send.js';
 
@@ -100,8 +100,6 @@ export interface SendManager {
 }
 
 export const SENDS_KEPT = 100;
-const INSTANCES_AT_ONCE = 25;
-const BYTES_AT_ONCE = 64 * 1024 * 1024;
 
 const WAITING: Omit<SendInstance, 'sopInstanceUid'> = {
   state: 'waiting',
@@ -172,17 +170,6 @@ export function createSendManager(options: SendManagerOptions): SendManager {
     };
   };
 
-  /** A stored instance, read whole. Null when the store does not hold it. */
-  const read = async (sopInstanceUid: string): Promise<Uint8Array | null> => {
-    try {
-      const pieces: Buffer[] = [];
-      for await (const piece of await pacs.store.get(sopInstanceUid)) pieces.push(piece as Buffer);
-      return Buffer.concat(pieces);
-    } catch {
-      return null;
-    }
-  };
-
   const run = async (one: Held): Promise<void> => {
     const started = Date.now();
     note(one, new Map(), { state: 'running' });
@@ -191,23 +178,10 @@ export function createSendManager(options: SendManagerOptions): SendManager {
     let given: SendFailure | null = null;
     while (waiting.length > 0 && given === null && !closed) {
       // The next few: as many as fit the count and the bytes, and one at least.
-      const objects: OutgoingObject[] = [];
-      const changes = new Map<string, Omit<SendInstance, 'sopInstanceUid'>>();
-      let bytes = 0;
-      while (waiting.length > 0 && objects.length < instancesAtOnce) {
-        const size = (await pacs.store.stat(waiting[0]))?.size ?? 0;
-        if (objects.length > 0 && bytes + size > bytesAtOnce) break;
-        const uid = waiting.shift()!;
-        const file = await read(uid);
-        const object = file ? outgoingFrom(file) : null;
-        // Sent under the UID the server knows it by, which is the one it has.
-        if (object && object.sopInstanceUid === uid) {
-          objects.push(object);
-          bytes += size;
-        } else {
-          changes.set(uid, failedAs('missing'));
-        }
-      }
+      const { objects, missing } = await takePart(pacs, waiting, { instancesAtOnce, bytesAtOnce });
+      const changes = new Map<string, Omit<SendInstance, 'sopInstanceUid'>>(
+        missing.map((uid) => [uid, failedAs('missing')]),
+      );
       const outcomes = await send(one.target, objects);
       objects.forEach((object, i) => changes.set(object.sopInstanceUid, recorded(outcomes[i])));
       note(one, changes);

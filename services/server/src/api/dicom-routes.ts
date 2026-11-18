@@ -71,7 +71,7 @@ const ERRORS = {
 } as const;
 
 const REMOTE_BODY =
-  'Send `{ "name", "aeTitle", "host", "port", "mayStore" }` as JSON. `host` and `port` are where the system listens, or both `null` for one that only calls this server. `mayStore` lets it in when it calls: it may then send objects here, and DICOM asks it for no login.';
+  'Send `{ "name", "aeTitle", "host", "port", "mayStore" }` as JSON. `host` and `port` are where the system listens, or both `null` for one that only calls this server. `mayStore` lets it send objects here when it calls, and `mayRetrieve` (false when left out) lets it ask what the server holds and have it sent, to itself or to any system on this list that has an address: all that the server holds. DICOM asks a caller for no login.';
 
 /** What the AE title of a system in a request's body is, for the audit record; null when there is none to read. */
 const aeTitleIn = (body: unknown): string | null => {
@@ -208,7 +208,10 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
         request.audit({ object: aeTitleIn(body) });
         try {
           const made = await dicom.addRemote(body);
-          request.audit({ object: made.aeTitle, detail: `mayStore=${made.mayStore}` });
+          request.audit({
+            object: made.aeTitle,
+            detail: `mayStore=${made.mayStore} mayRetrieve=${made.mayRetrieve}`,
+          });
           return { status: 201, body: made };
         } catch (error) {
           return refused(error);
@@ -243,7 +246,10 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
         const body = await jsonOf(request);
         try {
           const changed = await dicom.changeRemote(id, body);
-          request.audit({ object: changed.aeTitle, detail: `mayStore=${changed.mayStore}` });
+          request.audit({
+            object: changed.aeTitle,
+            detail: `mayStore=${changed.mayStore} mayRetrieve=${changed.mayRetrieve}`,
+          });
           return { status: 200, body: changed };
         } catch (error) {
           return refused(error);

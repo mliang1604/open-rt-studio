@@ -32,8 +32,13 @@ export interface RemoteSystem {
   /** Where it listens; null for a system that only calls this one. */
   readonly host: string | null;
   readonly port: number | null;
-  /** Whether it is let in when it calls: whether it may send objects here. */
+  /** Whether it may send objects here when it calls. */
   readonly mayStore: boolean;
+  /**
+   * Whether it may ask what the server holds and have it sent (C-FIND,
+   * C-MOVE, C-GET) when it calls: all that the server holds.
+   */
+  readonly mayRetrieve: boolean;
 }
 
 export interface DicomSettings {
@@ -100,9 +105,20 @@ export function checkedRemote(value: unknown): RemoteInput {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw invalid('A remote system is an object.');
   }
-  const { name, aeTitle, host, port, mayStore, ...more } = value as Record<string, unknown>;
+  const {
+    name,
+    aeTitle,
+    host,
+    port,
+    mayStore,
+    // Left out by what was kept, or is sent, from before there was such a thing: it may not.
+    mayRetrieve = false,
+    ...more
+  } = value as Record<string, unknown>;
   if (Object.keys(more).length > 0) {
-    throw invalid('A remote system is name, aeTitle, host, port and mayStore, and nothing else.');
+    throw invalid(
+      'A remote system is name, aeTitle, host, port, mayStore and mayRetrieve, and nothing else.',
+    );
   }
   if (
     typeof name !== 'string' ||
@@ -128,7 +144,8 @@ export function checkedRemote(value: unknown): RemoteInput {
     throw invalid('host and port are given together, or are both null.');
   }
   if (typeof mayStore !== 'boolean') throw invalid('mayStore is true or false.');
-  return { name, aeTitle, host, port, mayStore };
+  if (typeof mayRetrieve !== 'boolean') throw invalid('mayRetrieve is true or false.');
+  return { name, aeTitle, host, port, mayStore, mayRetrieve };
 }
 
 /** A new id for a remote system. */

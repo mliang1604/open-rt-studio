@@ -4,17 +4,21 @@
 
 // The server's DICOM listener: other systems verify that it is there
 // (C-ECHO) and send it objects (C-STORE), which go through the ingest like
-// anything uploaded.
+// anything uploaded; and those that may ask it what it holds (C-FIND) and
+// have it sent to a system the server knows (C-MOVE) or back to them
+// (C-GET).
 //
 // The listener is Node's own, bound where the configuration says; each
 // connection is handed to the library's protocol class (see
 // docs/dimse-library.md for why not the library's server).
 //
-// DIMSE has no login. Who may send is decided by the AE title the caller
-// gives, which is a name and not a proof: anyone who can reach the port and
-// knows a name on the list can store objects. So the port is off unless it
-// is asked for, the list is empty unless it is filled, and the address is
-// the server's own, which is this machine alone by default.
+// DIMSE has no login. Who may send, and who may query and retrieve, is
+// decided by the AE title the caller gives, which is a name and not a
+// proof: anyone who can reach the port and knows a name on a list can do
+// what the list allows, and a name that may retrieve reads everything the
+// server holds. So the port is off unless it is asked for, each list is
+// empty unless it is filled, and the address is the server's own, which is
+// this machine alone by default.
 //
 // Logs: AE titles are names of systems and are logged. Nothing of an object
 // is: not a UID, not a name, only what came of it.
@@ -29,6 +33,10 @@ import type { IngestResult } from '../ingest/ingest.js';
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
 import {
   CEchoResponse,
+  CFindResponse,
+  CGetResponse,
+  CMoveResponse,
+  CStoreRequest,
   CStoreResponse,
   Dataset,
   PresentationContextResult,
@@ -36,18 +44,46 @@ import {
   RejectResult,
   RejectSource,
   Scp,
+  storedDataset,
   type LibraryAssociation,
   type LibraryDataset,
   type LibraryEchoRequest,
   type LibraryEchoResponse,
+  type LibraryFindRequest,
+  type LibraryFindResponse,
+  type LibraryGetRequest,
+  type LibraryGetResponse,
+  type LibraryMoveRequest,
+  type LibraryMoveResponse,
   type LibraryPresentationContext,
   type LibraryStoreRequest,
   type LibraryStoreResponse,
 } from './library.js';
-import { dataSetOf, part10, type ReceivedDataSet } from './part10.js';
+import { dataSetOf, part10, type OutgoingObject, type ReceivedDataSet } from './part10.js';
+import { BYTES_AT_ONCE, INSTANCES_AT_ONCE, type PartLimits } from './parts.js';
+import {
+  FIND_MATCHES_AT_MOST,
+  IdentifierError,
+  RETRIEVE_INSTANCES_AT_MOST,
+  findMatches,
+  retrieveInstances,
+  type Identifier,
+} from './query.js';
+import {
+  RETRIEVE_STATUS,
+  moved,
+  retrieveStatus,
+  runRetrieve,
+  type PartSender,
+  type RetrieveCounts,
+  type SubOperation,
+} from './retrieve.js';
+import { STORE_WARNINGS, sendObjects, uncompressed } from './send.js';
 import {
   chooseTransferSyntax,
+  EXPLICIT_VR_LE,
   IMPLICIT_VR_LE,
+  QUERY_RETRIEVE_SOP_CLASSES,
   STORAGE_SOP_CLASSES,
   VERIFICATION,
 } from './sop-classes.js';
@@ -65,6 +101,20 @@ export const STORE_STATUS = {
   duplicate: 0x0111,
   /** The object places something the PACS knows somewhere else, or the PACS failed. */
   processingFailure: 0x0110,
+  /** The caller may retrieve from the server, and may not store to it. */
+  notAuthorized: 0x0124,
+} as const;
+
+/** The statuses a C-FIND is answered with (PS3.4, C.4.1.1.4). */
+export const FIND_STATUS = {
+  success: 0x0000,
+  pending: 0xff00,
+  /** A match, of a question with a key that is not answered. */
+  pendingKeysLeftOut: 0xff01,
+  /** Out of resources: there were more matches than are answered. */
+  tooMany: 0xa700,
+  identifierMismatch: 0xa900,
+  unableToProcess: 0xc000,
 } as const;
 
 /** How many associations are open at once before a new connection is closed unanswered. */
@@ -91,10 +141,27 @@ export interface DicomListenerOptions {
    */
   readonly aeTitle: string | (() => string);
   /**
-   * The calling AE titles that are let in. An empty list lets nobody in. A
-   * function is asked at each association.
+   * The calling AE titles that may store objects here. An empty list lets
+   * nobody store. A function is asked at each association.
    */
   readonly callers: readonly string[] | (() => readonly string[]);
+  /**
+   * The calling AE titles that may query the server and retrieve from it:
+   * all that it holds. Nobody, unless it is given.
+   */
+  readonly retrievers?: readonly string[] | (() => readonly string[]);
+  /**
+   * Where the system of an AE title listens, for a C-MOVE to it; null for
+   * one the server does not know, or knows no address of. Without it no
+   * move has a destination.
+   */
+  readonly destinationOf?: (aeTitle: string) => { host: string; port: number } | null;
+  /** How long an association to a move's destination may take over each step. */
+  readonly moveTimeoutMs?: number;
+  /** In place of the bounds of a retrieve and of a query's answer, for a test. */
+  readonly retrieveLimits?: Partial<PartLimits>;
+  readonly findAtMost?: number;
+  readonly retrieveAtMost?: number;
   /** The largest object taken, in bytes: the data set as it arrives. */
   readonly maxObjectBytes: number;
   /**
@@ -215,13 +282,49 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
     typeof options.aeTitle === 'function' ? options.aeTitle() : options.aeTitle;
   const callers = (): readonly string[] =>
     typeof options.callers === 'function' ? options.callers() : options.callers;
+  const retrievers = (): readonly string[] =>
+    typeof options.retrievers === 'function' ? options.retrievers() : (options.retrievers ?? []);
+  const limits: PartLimits = {
+    instancesAtOnce: options.retrieveLimits?.instancesAtOnce ?? INSTANCES_AT_ONCE,
+    bytesAtOnce: options.retrieveLimits?.bytesAtOnce ?? BYTES_AT_ONCE,
+  };
   const sockets = new Set<Socket>();
+  let closing = false;
+  /** One retrieve at a time, whatever the associations: each holds a part in memory. */
+  let turn: Promise<void> = Promise.resolve();
 
   class Association extends Scp {
     private calling = '';
+    private mayStore = false;
+    private mayRetrieve = false;
+    /** The kinds of object the caller takes back on this association, for a C-GET. */
+    private readonly takenBack = new Set<string>();
     private incoming: Gathered | null = null;
     private stored = 0;
     private refused = 0;
+    private queries = 0;
+    private retrieves = 0;
+    /** True while a retrieve waits its turn or sends to a third system: no byte passes here then. */
+    busy = false;
+    private cancelRequested = false;
+    private gone = false;
+    private whenGone: (() => void) | null = null;
+
+    /** The connection has ended: what waits on it waits no longer. */
+    ended(): void {
+      this.gone = true;
+      this.whenGone?.();
+    }
+
+    /** The transfer syntax that was agreed for the context a request came on. */
+    private syntaxOf(request: LibraryFindRequest | LibraryMoveRequest | LibraryGetRequest): string {
+      const association = (this as unknown as { association: LibraryAssociation }).association;
+      return (
+        association
+          .getAcceptedPresentationContextFromRequest(request)
+          ?.getAcceptedTransferSyntaxUid() ?? IMPLICIT_VR_LE
+      );
+    }
 
     override associationRequested(association: LibraryAssociation): void {
       this.calling = association.getCallingAeTitle().trim();
@@ -231,31 +334,47 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         this.sendAssociationReject(RejectResult.Permanent, RejectSource.ServiceUser, reason);
       };
       if (called !== aeTitle()) return reject(RejectReason.CalledAeNotRecognized, 'called-ae');
-      if (!callers().includes(this.calling)) {
+      this.mayStore = callers().includes(this.calling);
+      this.mayRetrieve = retrievers().includes(this.calling);
+      if (!this.mayStore && !this.mayRetrieve) {
         return reject(RejectReason.CallingAeNotRecognized, 'calling-ae');
       }
       for (const proposed of association.getPresentationContexts()) {
         const context = association.getPresentationContext(proposed.id);
         const abstract = context.getAbstractSyntaxUid();
-        if (abstract !== VERIFICATION && !(abstract in STORAGE_SOP_CLASSES)) {
+        const offered = context.getTransferSyntaxUids();
+        const storage = abstract in STORAGE_SOP_CLASSES;
+        // A caller that says it will take a kind of object (the SCP role) is
+        // sent it by a C-GET, if it may retrieve.
+        const back = storage && this.mayRetrieve && context.getProviderRole() === true;
+        const queryRetrieve = abstract in QUERY_RETRIEVE_SOP_CLASSES;
+        if (
+          !(abstract === VERIFICATION) &&
+          !(storage && (this.mayStore || back)) &&
+          !(queryRetrieve && this.mayRetrieve)
+        ) {
           context.setResult(PresentationContextResult.RejectAbstractSyntaxNotSupported);
           continue;
         }
-        const offered = context.getTransferSyntaxUids();
-        const syntax = options.transferSyntaxes
-          ? (options.transferSyntaxes.find((one) => offered.includes(one)) ?? null)
-          : chooseTransferSyntax(offered);
+        // An identifier is written by the library, which writes these two.
+        const syntax = queryRetrieve
+          ? ([EXPLICIT_VR_LE, IMPLICIT_VR_LE].find((one) => offered.includes(one)) ?? null)
+          : options.transferSyntaxes
+            ? (options.transferSyntaxes.find((one) => offered.includes(one)) ?? null)
+            : chooseTransferSyntax(offered);
         if (syntax) context.setResult(PresentationContextResult.Accept, syntax);
         else context.setResult(PresentationContextResult.RejectTransferSyntaxesNotSupported);
+        if (syntax && back) this.takenBack.add(abstract);
       }
       logger.info('association-accepted', { callingAe: this.calling });
       this.sendAssociationAccept();
     }
 
     override createStoreWritableStream(context: LibraryPresentationContext): Writable {
+      // From a caller that may not store, nothing is kept while it arrives.
       this.incoming = new Gathered(
         context.getAcceptedTransferSyntaxUid() ?? IMPLICIT_VR_LE,
-        maxObjectBytes,
+        this.mayStore ? maxObjectBytes : 0,
       );
       return this.incoming;
     }
@@ -293,6 +412,7 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         response.setStatus(status);
         callback(response);
       };
+      if (!this.mayStore) return answer(STORE_STATUS.notAuthorized, 'not-allowed');
       if (!incoming) return answer(STORE_STATUS.cannotUnderstand, 'no-data-set');
       if (incoming.tooLarge) return answer(STORE_STATUS.outOfResources, 'too-large');
       takeObject(pacs, {
@@ -313,15 +433,278 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
       );
     }
 
+    override cFindRequest(
+      request: LibraryFindRequest,
+      callback: (responses: LibraryFindResponse[]) => void,
+    ): void {
+      const started = Date.now();
+      const sopClass = request.getAffectedSopClassUid();
+      const kind = QUERY_RETRIEVE_SOP_CLASSES[sopClass];
+      // The library's response says it is of the study root, whatever was asked.
+      const response = (status: number): LibraryFindResponse => {
+        const one = CFindResponse.fromRequest(request);
+        one.setAffectedSopClassUid(sopClass);
+        one.setStatus(status);
+        return one;
+      };
+      const end = (status: number, outcome: string, matches: LibraryFindResponse[] = []): void => {
+        this.queries++;
+        logger.info('query-answered', {
+          outcome,
+          status,
+          matches: matches.length,
+          ms: Date.now() - started,
+        });
+        callback([...matches, response(status)]);
+      };
+      if (!this.mayRetrieve || kind?.service !== 'find') {
+        return end(FIND_STATUS.unableToProcess, 'not-allowed');
+      }
+      const syntax = this.syntaxOf(request);
+      findMatches(
+        pacs.index,
+        kind.root,
+        identifierOf(request),
+        aeTitle(),
+        options.findAtMost ?? FIND_MATCHES_AT_MOST,
+      ).then(
+        (answer) => {
+          const pending = answer.keysLeftOut ? FIND_STATUS.pendingKeysLeftOut : FIND_STATUS.pending;
+          const matches = answer.matches.map((match) => {
+            const one = response(pending);
+            one.setDataset(new Dataset(match, syntax));
+            return one;
+          });
+          if (answer.more) end(FIND_STATUS.tooMany, 'too-many', matches);
+          else end(FIND_STATUS.success, 'answered', matches);
+        },
+        (error: unknown) => {
+          if (error instanceof IdentifierError) {
+            return end(FIND_STATUS.identifierMismatch, 'identifier');
+          }
+          logger.error('query-failed', errorFields(error));
+          return end(FIND_STATUS.unableToProcess, 'failed');
+        },
+      );
+    }
+
+    /**
+     * A C-MOVE or a C-GET: the instances the identifier names go out a few
+     * at a time, with the counts told after each part, and the last answer
+     * says how it ended.
+     */
+    private retrieve<R extends LibraryMoveResponse | LibraryGetResponse>(
+      how: 'move' | 'get',
+      request: LibraryMoveRequest | LibraryGetRequest,
+      make: () => R,
+      callback: (responses: R[]) => void,
+      sender: () => PartSender | number,
+    ): void {
+      const started = Date.now();
+      const sopClass = request.getAffectedSopClassUid();
+      const kind = QUERY_RETRIEVE_SOP_CLASSES[sopClass];
+      const syntax = this.syntaxOf(request);
+      const response = (status: number, counts?: RetrieveCounts, failed: string[] = []): R => {
+        const one = make();
+        one.setAffectedSopClassUid(sopClass);
+        one.setStatus(status);
+        if (counts) {
+          // What remains is said while more is to come, and of what a cancel left.
+          if (status === RETRIEVE_STATUS.pending || status === RETRIEVE_STATUS.cancelled) {
+            one.setRemaining(counts.remaining);
+          }
+          one.setCompleted(counts.completed);
+          one.setFailures(counts.failed);
+          one.setWarnings(counts.warning);
+        }
+        if (failed.length > 0) {
+          one.setDataset(new Dataset({ FailedSOPInstanceUIDList: failed }, syntax));
+        }
+        return one;
+      };
+      let ended = false;
+      const end = (
+        status: number,
+        outcome: string,
+        counts?: RetrieveCounts,
+        failed?: string[],
+      ): void => {
+        // Once: a second answer through the callback is an error of the library's.
+        if (ended) return;
+        ended = true;
+        this.retrieves++;
+        logger.info('retrieve-answered', {
+          how,
+          outcome,
+          status,
+          completed: counts?.completed ?? 0,
+          failed: counts?.failed ?? 0,
+          ms: Date.now() - started,
+        });
+        callback([response(status, counts, failed)]);
+      };
+      if (!this.mayRetrieve || kind?.service !== how) {
+        return end(RETRIEVE_STATUS.unableToProcess, 'not-allowed');
+      }
+      const sendPart = sender();
+      if (typeof sendPart === 'number') return end(sendPart, 'no-destination');
+      this.cancelRequested = false;
+      const run = async (): Promise<void> => {
+        const named = await retrieveInstances(
+          pacs.index,
+          kind.root,
+          identifierOf(request),
+          options.retrieveAtMost ?? RETRIEVE_INSTANCES_AT_MOST,
+        );
+        if (named.more) return end(RETRIEVE_STATUS.tooMany, 'too-many');
+        const result = await runRetrieve({
+          pacs,
+          instances: named.instances.map((one) => one.sopInstanceUid),
+          limits,
+          sendPart,
+          // The library takes one answer through the callback, which is the
+          // last; how far it is goes out beside it.
+          progress: (counts) =>
+            this.sendResponse(request, response(RETRIEVE_STATUS.pending, counts)),
+          cancelled: () => this.cancelRequested || this.gone || closing,
+        });
+        end(
+          retrieveStatus(result),
+          result.cancelled ? 'cancelled' : 'done',
+          result.counts,
+          result.failed,
+        );
+      };
+      // A move sends elsewhere and a retrieve that waits sends nothing: no
+      // byte passes on this connection meanwhile, and it is not idle for that.
+      this.busy = true;
+      const mine = turn.then(async () => {
+        this.busy = how === 'move';
+        try {
+          if (this.gone) return;
+          await run();
+        } catch (error) {
+          if (error instanceof IdentifierError) {
+            return end(RETRIEVE_STATUS.identifierMismatch, 'identifier');
+          }
+          if (!(error instanceof CoreStoppingError)) {
+            logger.error('retrieve-failed', errorFields(error));
+          }
+          return end(RETRIEVE_STATUS.unableToProcess, 'failed');
+        } finally {
+          this.busy = false;
+        }
+      });
+      turn = mine.catch(() => undefined);
+    }
+
+    override cMoveRequest(
+      request: LibraryMoveRequest,
+      callback: (responses: LibraryMoveResponse[]) => void,
+    ): void {
+      this.retrieve(
+        'move',
+        request,
+        () => CMoveResponse.fromRequest(request),
+        callback,
+        () => {
+          const destination = String(
+            request.getCommandDataset().getElement('MoveDestination') ?? '',
+          ).trim();
+          const there = options.destinationOf?.(destination) ?? null;
+          if (!there) return RETRIEVE_STATUS.destinationUnknown;
+          return async (objects) =>
+            moved(
+              await sendObjects(
+                {
+                  ...there,
+                  calledAeTitle: destination,
+                  callingAeTitle: aeTitle(),
+                  ...(options.moveTimeoutMs === undefined
+                    ? {}
+                    : { timeoutMs: options.moveTimeoutMs }),
+                },
+                objects,
+              ),
+            );
+        },
+      );
+    }
+
+    override cGetRequest(
+      request: LibraryGetRequest,
+      callback: (responses: LibraryGetResponse[]) => void,
+    ): void {
+      this.retrieve(
+        'get',
+        request,
+        () => CGetResponse.fromRequest(request),
+        callback,
+        () => (objects) => this.storeBack(objects),
+      );
+    }
+
+    /** Send objects to the caller on its own association, each by a C-STORE. */
+    private storeBack(objects: readonly OutgoingObject[]): Promise<SubOperation[] | null> {
+      if (this.gone) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        const became: SubOperation[] = objects.map(() => 'failed');
+        const requests: InstanceType<typeof CStoreRequest>[] = [];
+        const finish = (): void => {
+          this.whenGone = null;
+          resolve(became);
+        };
+        let left = 0;
+        objects.forEach((object, i) => {
+          // What the caller did not say it takes is not sent to it.
+          if (!this.takenBack.has(object.sopClassUid)) return;
+          const request = new CStoreRequest(
+            storedDataset({ ...object, rewritable: uncompressed(object.transferSyntax) }),
+          );
+          request.on('response', (response: { getStatus(): number }) => {
+            const status = response.getStatus();
+            became[i] =
+              status === STORE_STATUS.success
+                ? 'completed'
+                : STORE_WARNINGS.has(status)
+                  ? 'warning'
+                  : 'failed';
+          });
+          // Done with an answer, or without: what could not be written in the
+          // transfer syntax that was agreed is not sent.
+          request.on('done', () => {
+            left -= 1;
+            if (left === 0) finish();
+          });
+          requests.push(request);
+          left += 1;
+        });
+        if (left === 0) return finish();
+        this.whenGone = () => resolve(null);
+        this.sendRequests(requests);
+      });
+    }
+
+    override cCancelRequest(): void {
+      this.cancelRequested = true;
+    }
+
     override associationReleaseRequested(): void {
       logger.info('association-released', {
         callingAe: this.calling,
         stored: this.stored,
         refused: this.refused,
+        queries: this.queries,
+        retrieves: this.retrieves,
       });
       this.sendAssociationReleaseResponse();
     }
   }
+
+  /** The identifier of a request, as the library read it. */
+  const identifierOf = (
+    request: LibraryFindRequest | LibraryMoveRequest | LibraryGetRequest,
+  ): Identifier => (request.getDataset()?.getElements() ?? {}) as Identifier;
 
   const server: NetServer = createServer((socket) => {
     if (sockets.size >= ASSOCIATIONS_AT_MOST) {
@@ -336,7 +719,7 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
     let seen = -1;
     const watch = setInterval(() => {
       const passed = socket.bytesRead + socket.bytesWritten;
-      if (passed !== seen) {
+      if (passed !== seen || association.busy) {
         seen = passed;
         return;
       }
@@ -346,9 +729,11 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
     watch.unref();
     socket.once('close', () => clearInterval(watch));
     // A connection that breaks is the caller's affair; it must not be an unhandled error.
-    new Association(socket, {}).on('networkError', (error: unknown) => {
+    const association = new Association(socket, {});
+    association.on('networkError', (error: unknown) => {
       logger.debug('association-broken', errorFields(error));
     });
+    socket.once('close', () => association.ended());
   });
 
   const port = await new Promise<number>((resolve, reject) => {
@@ -359,12 +744,13 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
       resolve(typeof address === 'object' && address ? address.port : options.port);
     });
   });
-  if (callers().length === 0) logger.warn('dicom-no-callers');
+  if (callers().length === 0 && retrievers().length === 0) logger.warn('dicom-no-callers');
   logger.info('dicom-listening', {
     host: options.host,
     port,
     aeTitle: aeTitle(),
     callers: callers().length,
+    retrievers: retrievers().length,
   });
 
   let closed: Promise<boolean> | null = null;
@@ -372,6 +758,7 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
     host: options.host,
     port,
     close({ timeoutMs = 0 } = {}) {
+      closing = true;
       closed ??= new Promise<boolean>((resolve) => {
         // What is still open when the time is up is cut off.
         const timer = setTimeout(() => {

@@ -293,6 +293,10 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     host: { type: ['string', 'null'], description: 'Null for a system that only calls.' },
     port: { type: ['integer', 'null'], minimum: 1, maximum: 65535 },
     mayStore: { type: 'boolean', description: 'Whether it may send objects to this server.' },
+    mayRetrieve: {
+      type: 'boolean',
+      description: 'Whether it may query this server and retrieve from it (C-FIND, C-MOVE, C-GET).',
+    },
   }),
   DicomState: object({
     local: ref('DicomLocal'),

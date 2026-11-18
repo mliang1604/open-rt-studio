@@ -175,7 +175,9 @@ Viewer (`src/app/viewer`):
 - `dicom-panel/`: a server's DICOM settings, for its administrator (the
   server card's "DICOM"): whether the server listens for DICOM, on which
   port and under which AE title, and the other systems it knows, each with
-  a "Test" button that has the server ask it for a C-ECHO and says what
+  whether it may send objects here and whether it may query and retrieve
+  (#52; the form says what the second lets a system read), and a "Test"
+  button that has the server ask it for a C-ECHO and says what
   came of it. Every change is the server's at once; the page keeps nothing.
   It says that DICOM asks for no login, and says so in the warning colour
   when the listener is reached from other machines. `e2e/dicom-settings.spec.ts`

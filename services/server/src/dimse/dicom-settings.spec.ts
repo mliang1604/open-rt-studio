@@ -24,6 +24,7 @@ const REMOTE = {
   host: '192.0.2.10',
   port: 104,
   mayStore: true,
+  mayRetrieve: false,
 };
 
 const refusal = (work: () => unknown): string => {
@@ -89,7 +90,7 @@ describe('a remote system', () => {
   it('is refused when a part is not what it has to be', () => {
     expect(refusal(() => checkedRemote([]))).toBe('A remote system is an object.');
     expect(refusal(() => checkedRemote({ ...REMOTE, id: 'mine' }))).toBe(
-      'A remote system is name, aeTitle, host, port and mayStore, and nothing else.',
+      'A remote system is name, aeTitle, host, port, mayStore and mayRetrieve, and nothing else.',
     );
     for (const name of ['', ' Planning', 'Planning ', 'two\nlines', 'x'.repeat(65), 7]) {
       expect(refusal(() => checkedRemote({ ...REMOTE, name }))).toContain('name is one line');
@@ -105,6 +106,23 @@ describe('a remote system', () => {
     expect(refusal(() => checkedRemote({ ...REMOTE, mayStore: 1 }))).toBe(
       'mayStore is true or false.',
     );
+    expect(refusal(() => checkedRemote({ ...REMOTE, mayRetrieve: 'yes' }))).toBe(
+      'mayRetrieve is true or false.',
+    );
+  });
+
+  it('may query and retrieve when it is said to, and may not when nothing is said', () => {
+    expect(checkedRemote({ ...REMOTE, mayRetrieve: true }).mayRetrieve).toBe(true);
+    const { mayRetrieve: _left, ...before } = REMOTE;
+    expect(_left).toBe(false);
+    expect(checkedRemote(before)).toEqual(REMOTE);
+    // Settings that were kept before there was such a thing are read, and let nobody retrieve.
+    const kept = settingsOf({
+      version: 1,
+      local: LOCAL,
+      remotes: [{ id: '0123456789abcdef', ...before }],
+    });
+    expect(kept?.remotes).toEqual([{ id: '0123456789abcdef', ...REMOTE }]);
   });
 
   it('gets an id of its own', () => {
@@ -126,6 +144,7 @@ describe('kept settings', () => {
         host: null,
         port: null,
         mayStore: false,
+        mayRetrieve: false,
       },
     ],
   };

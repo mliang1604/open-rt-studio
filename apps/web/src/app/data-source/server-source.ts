@@ -311,6 +311,8 @@ export interface DicomRemoteInput {
   readonly port: number | null;
   /** Whether it may send objects to the server. */
   readonly mayStore: boolean;
+  /** Whether it may ask what the server holds, and have it sent (C-FIND, C-MOVE, C-GET). */
+  readonly mayRetrieve: boolean;
 }
 
 export interface DicomRemote extends DicomRemoteInput {

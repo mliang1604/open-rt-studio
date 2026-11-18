@@ -32,6 +32,21 @@ export const STORAGE_SOP_CLASSES: Readonly<Record<string, string>> = {
   '1.2.840.10008.5.1.4.1.1.66.3': 'Deformable Spatial Registration',
 };
 
+/**
+ * Query and retrieve (#52): C-FIND, C-MOVE and C-GET of the two information
+ * models, of which one starts at the patient and the other at the study.
+ */
+export const QUERY_RETRIEVE_SOP_CLASSES: Readonly<
+  Record<string, { readonly root: 'patient' | 'study'; readonly service: 'find' | 'move' | 'get' }>
+> = {
+  '1.2.840.10008.5.1.4.1.2.1.1': { root: 'patient', service: 'find' },
+  '1.2.840.10008.5.1.4.1.2.1.2': { root: 'patient', service: 'move' },
+  '1.2.840.10008.5.1.4.1.2.1.3': { root: 'patient', service: 'get' },
+  '1.2.840.10008.5.1.4.1.2.2.1': { root: 'study', service: 'find' },
+  '1.2.840.10008.5.1.4.1.2.2.2': { root: 'study', service: 'move' },
+  '1.2.840.10008.5.1.4.1.2.2.3': { root: 'study', service: 'get' },
+};
+
 export const EXPLICIT_VR_LE = '1.2.840.10008.1.2.1';
 export const IMPLICIT_VR_LE = '1.2.840.10008.1.2';
 
