@@ -69,7 +69,11 @@ application. Never commit patient data or real DICOM files
   identifiers.
 - `apps/desktop`, `native/`: placeholders until M2 and M3.
 - `docs/`: architecture, license headers, test data policy, the parity
-  audit against dicom-workspace, and the two validation documents, of
+  audit against dicom-workspace, the DICOM conformance statement
+  ([docs/dicom-conformance.md](docs/dicom-conformance.md)): its tables are
+  the server's, and `services/server/src/dimse/conformance.spec.ts` fails
+  when they differ, so a change to DICOM networking changes it too; and the
+  two validation documents, of
   resampling ([docs/resampling-validation.md](docs/resampling-validation.md))
   and of dose mapping, summation and conversion
   ([docs/dose-validation.md](docs/dose-validation.md)): their tolerances

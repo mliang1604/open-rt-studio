@@ -706,6 +706,20 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   Status: **decided, and Michael's to overturn**, most of all the choice to
   stop answering when the log cannot be written.
 
+- **The conformance statement** (#60) is `docs/dicom-conformance.md`, in
+  the order of the template in PS3.2, and says what the server does and no
+  more: it claims no security profile and names what it has been tried
+  against. Its tables (SOP classes, transfer syntaxes, attributes,
+  statuses, limits) sit between markers, and
+  `services/server/src/dimse/conformance.spec.ts` compares each with the
+  constants the listener and the clients use, so the statement cannot fall
+  behind the code without a test saying so. The prose is not checked. For
+  the statement to be true the server now names itself on an association
+  (the library named itself), and says of a question with a key outside
+  ASCII that it is in UTF-8.
+
+  Status: **decided, and Michael's to overturn**.
+
 - **The server in a container** (part of #59). One image, built from the
   repository root in stages: the last holds the built server, the DICOM
   package and their runtime dependencies, and runs as a user that is not

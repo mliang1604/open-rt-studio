@@ -15,7 +15,8 @@ import { createLogger } from '../logger.js';
 import { sopInstanceUidOf } from '../store/testing.js';
 import { dicomEcho } from './echo.js';
 import { ASSOCIATIONS_AT_MOST, STORE_STATUS, storeStatus, takeObject } from './listener.js';
-import { dataSetOf, IMPLEMENTATION_CLASS_UID } from './part10.js';
+import { CEchoRequest, Client, MAX_PDU_LENGTH, type LibraryAssociation } from './library.js';
+import { dataSetOf, IMPLEMENTATION_CLASS_UID, IMPLEMENTATION_VERSION_NAME } from './part10.js';
 import { EXPLICIT_VR_LE } from './sop-classes.js';
 import {
   freePort,
@@ -80,6 +81,33 @@ describe('C-ECHO', () => {
   it('is answered to a caller on the list', async () => {
     const { port } = await listening();
     expect(await echo(port)).toEqual({ outcome: 'ok' });
+  });
+
+  // What the conformance statement gives as the implementation (#60).
+  it('says what it is on the association, as in the header of a file it writes', async () => {
+    const { port } = await listening();
+    const said = await new Promise<{ uid: string; version: string; maxPdu: number }>(
+      (resolve, reject) => {
+        const client = new Client();
+        client.addRequest(new CEchoRequest());
+        client.on('associationAccepted', (association: LibraryAssociation) =>
+          resolve({
+            uid: association.getImplementationClassUid(),
+            version: association.getImplementationVersion(),
+            maxPdu: association.getMaxPduLength(),
+          }),
+        );
+        client.on('networkError', reject);
+        client.send('127.0.0.1', port, PEER_AE, LISTENER_AE);
+      },
+    );
+    expect(said).toEqual({
+      uid: IMPLEMENTATION_CLASS_UID,
+      version: IMPLEMENTATION_VERSION_NAME,
+      maxPdu: MAX_PDU_LENGTH,
+    });
+    expect(IMPLEMENTATION_VERSION_NAME).toMatch(/^ORS_[0-9A-Za-z_]{1,12}$/);
+    expect(MAX_PDU_LENGTH).toBe(262_144);
   });
 
   it('is refused to a calling AE title that is not on the list', async () => {

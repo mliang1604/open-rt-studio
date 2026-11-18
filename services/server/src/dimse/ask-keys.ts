@@ -108,6 +108,16 @@ export function checkedKeys(level: AskLevel, value: unknown): AskKeys {
 
 /** The identifier of a question: its keys, and what is to come back. */
 export function askIdentifier(level: AskLevel, keys: AskKeys): Record<string, unknown> {
+  const identifier = keysIdentifier(level, keys);
+  // A key outside ASCII is written in UTF-8, and the identifier says so:
+  // without, the other system reads it a byte to a character.
+  // eslint-disable-next-line no-control-regex
+  return Object.values(keys).some((value) => /[^\x00-\x7f]/.test(String(value ?? '')))
+    ? { SpecificCharacterSet: 'ISO_IR 192', ...identifier }
+    : identifier;
+}
+
+function keysIdentifier(level: AskLevel, keys: AskKeys): Record<string, unknown> {
   switch (level) {
     case 'patient':
       return {

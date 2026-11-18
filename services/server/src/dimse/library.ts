@@ -13,9 +13,19 @@
 // eslint-disable-next-line no-restricted-imports
 import dimse from 'dcmjs-dimse';
 
+import { IMPLEMENTATION_CLASS_UID, IMPLEMENTATION_VERSION_NAME } from './part10.js';
+
 // It logs every association and message to the console. This server has a
 // log of its own, which holds no identifiers; the library's is turned off.
 dimse.log.setLevel('silent');
+
+// On an association the server says what it is, as it does in the header of
+// a file it writes, and not what library it is made with.
+dimse.Implementation.setImplementationClassUid(IMPLEMENTATION_CLASS_UID);
+dimse.Implementation.setImplementationVersion(IMPLEMENTATION_VERSION_NAME);
+
+/** The largest PDU the server says it takes, and sends when the other side takes as much: the library's. */
+export const MAX_PDU_LENGTH: number = dimse.Implementation.getMaxPduLength();
 
 export const { Client, Dataset, Scp } = dimse;
 export const { PresentationContext } = dimse.association;
