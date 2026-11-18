@@ -73,6 +73,7 @@ endfunction()
 configure_file(cmake/ors_version.h.in generated/ors_version.h @ONLY)
 
 add_subdirectory(tools/volume-info)
+add_subdirectory(tools/register-rigid)
 
 install(DIRECTORY "${ORS_LICENSES_DIR}/" DESTINATION licenses)
 install(FILES THIRD-PARTY.md DESTINATION licenses)

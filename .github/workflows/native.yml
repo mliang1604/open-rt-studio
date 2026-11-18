@@ -116,6 +116,7 @@ jobs:
           cd "$ORS_NATIVE_BUILD_DIR/dist"
           ls -l bin licenses licenses/*
           ./bin/ors-volume-info --version
+          ./bin/ors-register-rigid --version
           case "$RUNNER_OS" in
             Linux)
               ldd bin/ors-volume-info
