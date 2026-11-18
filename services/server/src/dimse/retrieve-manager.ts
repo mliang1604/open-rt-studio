@@ -61,6 +61,8 @@ export interface RetrieveRequest {
   /** The AE title the other system is to send to: this server's own. */
   readonly destinationAeTitle: string;
   readonly what: MoveOf;
+  /** The account that asked for it; null where there is none. */
+  readonly by?: string | null;
 }
 
 export interface RetrieveManagerOptions {
@@ -70,6 +72,8 @@ export interface RetrieveManagerOptions {
   readonly kept?: number;
   /** In place of {@link moveFrom}, for a test. */
   readonly move?: typeof moveFrom;
+  /** Told of each retrieve once it is done, however it ended, with who asked for it. */
+  readonly ended?: (record: RetrieveRecord, by: string | null) => void;
 }
 
 export interface RetrieveManager {
@@ -181,7 +185,7 @@ export function createRetrieveManager(options: RetrieveManagerOptions): Retrieve
         if (held[i].record.state === 'done') held.splice(i, 1);
         else i += 1;
       }
-      turn = turn.then(async () => {
+      const carriedOut = async (): Promise<void> => {
         if (closed) {
           one.record = {
             ...one.record,
@@ -205,6 +209,14 @@ export function createRetrieveManager(options: RetrieveManagerOptions): Retrieve
             result: 'failed',
             failure: 'broken',
           };
+        }
+      };
+      turn = turn.then(async () => {
+        await carriedOut();
+        try {
+          options.ended?.(one.record, request.by ?? null);
+        } catch {
+          // What is told of a retrieve does not undo it.
         }
       });
       return record;

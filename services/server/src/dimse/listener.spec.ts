@@ -220,10 +220,10 @@ describe('takeObject', () => {
       sourceAeTitle: PEER_AE,
       dataSet: dataSetOf(file.bytes)!,
     };
-    expect(await takeObject(core.pacs!, object)).toEqual({
-      status: STORE_STATUS.dataSetMismatch,
-      outcome: 'mismatch',
-    });
+    const taken = await takeObject(core.pacs!, object);
+    expect(taken).toMatchObject({ status: STORE_STATUS.dataSetMismatch, outcome: 'mismatch' });
+    // Whose it says it is, for the record of what was refused.
+    expect(taken.of?.studyUid).toMatch(/^[\d.]+$/);
     expect(await core.pacs!.index.findInstances()).toHaveLength(0);
   });
 
@@ -302,7 +302,7 @@ describe('the listener', () => {
     expect(await echo(port)).toEqual({ outcome: 'ok' });
   });
 
-  it('logs AE titles and what came of each object, and nothing of the object', async () => {
+  it('logs what came of each object, and neither the object nor who sent it (#212)', async () => {
     const lines: string[] = [];
     const logger = createLogger({ level: 'debug', write: (line) => lines.push(line) });
     const { port } = await listening({ logger });
@@ -313,7 +313,9 @@ describe('the listener', () => {
     const log = lines.join('\n');
     expect(log).toContain('"event":"object-received"');
     expect(log).toContain('"event":"association-rejected"');
-    expect(log).toContain(PEER_AE);
+    // Who called is the audit log's to say.
+    expect(log).not.toContain(PEER_AE);
+    expect(log).not.toContain('SOMEONE');
     for (const file of files) expect(log).not.toContain(sopInstanceUidOf(file.bytes));
     expect(log).not.toContain('SYNTHETIC');
   });

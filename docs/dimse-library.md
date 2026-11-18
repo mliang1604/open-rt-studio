@@ -282,6 +282,15 @@ class, and what it found on the way:
   for which no context was agreed is skipped by the library without a
   word, so the listener sends only what the caller said it takes.
 
+### What #212 did with this
+
+The audit records of associations are written by our own code in the
+library's handlers: when an association is refused, when a C-STORE is
+answered, and before a C-FIND, C-MOVE or C-GET is answered. The library
+calls a handler's callback once, so the record of a query is written
+before the matches are handed over, and one that cannot be written
+replaces them with a failure.
+
 ### What #51 did with this
 
 The server asks other systems with the library's client: a C-FIND, and a

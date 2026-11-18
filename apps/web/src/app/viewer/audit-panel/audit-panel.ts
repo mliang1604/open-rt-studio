@@ -54,6 +54,8 @@ export function auditWhen(record: AuditEntry): string {
 export function auditWho(record: AuditEntry): string {
   if (record.actor) return record.actor;
   if (record.origin === 'command') return 'A command on the server';
+  // Over a DICOM association, which knows no account: the record's object is its AE title.
+  if (record.origin === 'dicom') return 'Another system, by DICOM';
   // What the server does by a rule it was set to keep: clearing old records.
   return record.origin === 'server' ? 'The server itself' : 'No one logged in';
 }

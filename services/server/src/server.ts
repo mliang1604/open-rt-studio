@@ -24,6 +24,7 @@ import { healthRoute } from './host/routes.js';
 import { createJobManager } from './jobs/job-manager.js';
 import { openSqliteJobStore } from './jobs/job-store.js';
 import { dicomRoutes } from './api/dicom-routes.js';
+import { dicomAudit } from './dimse/dicom-audit.js';
 import { createDicomService } from './dimse/dicom-service.js';
 import {
   createMemorySettingsStore,
@@ -347,6 +348,7 @@ export async function startServer(
         : openFileSettingsStore(join(config.dataDir, DICOM_SETTINGS_FILE)),
     defaults: dicomDefaults(config),
     closeTimeoutMs: config.shutdownTimeoutMs,
+    audit: dicomAudit(audit, logger),
     logger,
   });
   const dicomApi = dicomRoutes(dicom, core.pacs!.index);

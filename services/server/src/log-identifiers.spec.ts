@@ -507,6 +507,9 @@ it('does everything the API can be asked, and logs no identifier of a patient or
   expect(byDicom.answers[0].length).toBeGreaterThan(1);
   expect(byDicom.received.length).toBeGreaterThan(0);
   expect(byDicom.answers.every((answers) => answers.length > 0)).toBe(true);
+  // The audit log once more, now that things were done by DICOM (#212).
+  const afterDicom = await call('GET', api('/audit/export?format=ndjson'), { token: admin });
+  expect(afterDicom.status).toBe(200);
 
   await server.stop();
   server = null;
@@ -540,6 +543,11 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     'what was typed as a name': TYPED_AS_NAME,
     'the name of a timepoint': TIMEPOINT_NAME,
     'the name of a DICOM system': SYSTEM_NAME,
+    // Who called by DICOM is the audit log's to say (#212).
+    'the AE title of a system that stored': DICOM_PEER,
+    'the AE title of a system that asked': DICOM_ASKER,
+    'the AE title of a system that was turned away': 'NOT-ON-THE-LIST',
+    'the AE title of a system that is sent to': 'GUARD-OTHER',
     'the administrator’s password': ADMIN.password,
     'the user’s password': USER.password,
     'a new password': NEW_PASSWORD,
@@ -606,4 +614,65 @@ it('does everything the API can be asked, and logs no identifier of a patient or
     expect(Number.isNaN(Date.parse(record.time))).toBe(false);
     expect(record.count).toBeGreaterThanOrEqual(1);
   }
+
+  // ---- What was done by DICOM is in the audit log too (#212): who, by AE
+  // title, when, whose, and how it ended.
+  const byAe = afterDicom.text
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as AuditRecord)
+    .filter((record) => record.origin === 'dicom');
+  const of = (action: string): AuditRecord[] => byAe.filter((record) => record.action === action);
+  for (const record of byAe) expect(Number.isNaN(Date.parse(record.time))).toBe(false);
+  // Every object the system on the list sent, as records of its series,
+  const stored = of('dicom-store');
+  expect(stored.reduce((sum, record) => sum + record.count, 0)).toBe(FILES.length);
+  for (const record of stored) {
+    expect(record).toMatchObject({ actor: null, object: DICOM_PEER, patientId: PATIENT.id });
+    expect(record.studyUid).toBeTruthy();
+    expect(record.seriesUid).toBeTruthy();
+  }
+  // the system that was turned away,
+  expect(of('dicom-association')).toMatchObject([
+    { outcome: 'refused', object: 'NOT-ON-THE-LIST', patientId: null },
+  ]);
+  // each question, with whom it was about and what was asked,
+  expect(of('dicom-find')).toHaveLength(4);
+  expect(of('dicom-find').map((record) => [record.object, record.outcome])).toEqual([
+    [DICOM_ASKER, 'ok'],
+    [DICOM_ASKER, 'ok'],
+    [DICOM_ASKER, 'rejected'],
+    [DICOM_ASKER, 'rejected'],
+  ]);
+  expect(of('dicom-find')[0]).toMatchObject({ patientId: PATIENT.id });
+  expect(of('dicom-find')[0].detail).toContain(PATIENT.name);
+  // each retrieve that was asked for, to a destination that is none and back to the asker,
+  expect(of('dicom-move').map((record) => [record.object, record.outcome])).toEqual([
+    [DICOM_ASKER, 'refused'],
+    [DICOM_ASKER, 'refused'],
+  ]);
+  expect(
+    of('dicom-get').map((record) => [record.object, record.outcome, record.patientId]),
+  ).toEqual([
+    [DICOM_ASKER, 'ok', PATIENT.id],
+    [DICOM_ASKER, 'ok', ABSENT_PATIENT],
+  ]);
+  // and how what left the server ended: the images that went back to the
+  // asker, and the sends a user asked for, which found nothing at the address.
+  const left = of('dicom-sent');
+  // (The asker took back the images and no other kind of object, so not all was sent.)
+  const back = left.filter((record) => record.object === DICOM_ASKER);
+  expect(back).toMatchObject([{ actor: null, outcome: 'failed', patientId: PATIENT.id }]);
+  expect(back[0].detail).toMatch(/^get, [1-9]\d* of \d+ sent$/);
+  const sends = left.filter((record) => record.object === 'GUARD-OTHER');
+  expect(sends.length).toBeGreaterThan(0);
+  for (const record of sends) {
+    expect(record).toMatchObject({ actor: USER.name, outcome: 'failed', patientId: PATIENT.id });
+    expect(record.detail).toContain('unreachable');
+  }
+  // The retrieve a user asked for, from the same address: by whom, and that nothing came.
+  expect(of('dicom-retrieved')).toMatchObject([
+    { actor: USER.name, outcome: 'failed', object: 'GUARD-OTHER' },
+  ]);
+  expect(of('dicom-retrieved')[0].detail).toContain('unreachable');
 }, 60_000);

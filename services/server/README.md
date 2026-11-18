@@ -128,6 +128,12 @@ changed).
 | `dicom-send`, `dicom-send-read`                         | A series or an object is sent to a system; a send is followed     |
 | `dicom-sources-read`, `dicom-query`                     | The systems that can be asked are listed; one is asked (C-FIND)   |
 | `dicom-retrieve`, `dicom-retrieve-read`                 | A study or a series is retrieved from a system; that is followed  |
+| `dicom-association`                                     | Another system was refused an association (by DICOM)              |
+| `dicom-store`                                           | Another system stored an object here (by DICOM)                   |
+| `dicom-find`                                            | Another system asked what the server holds (by DICOM)             |
+| `dicom-move`, `dicom-get`                               | Another system asked for objects to be sent on, or back to it     |
+| `dicom-sent`                                            | How a send, a move or a get ended: how much left, and where to    |
+| `dicom-retrieved`                                       | How a retrieve the server asked for ended                         |
 
 What to know about it:
 
@@ -166,6 +172,22 @@ What to know about it:
   stopped; shortening the period clears at the next start.
 - **The `account` command writes to it too**, as origin `command`, with the
   name the operating system gives for whoever ran it.
+- **What is done over DICOM is in it, as origin `dicom`.** DICOM knows no
+  account: who it was is the other system's AE title, which is the record's
+  `object`, and an AE title is what a caller says it is and no proof. The
+  account is there as well when a user asked the server for it (the end of
+  a send or of a retrieve). The instances of a series stored one after
+  another are one record, as for the API. A query's record says what was
+  asked, like a search's; a move's says where to.
+- **By DICOM too, nothing leaves without a record.** A query, a C-MOVE and
+  a C-GET are recorded before the answer goes out or the first object is
+  sent; if the record cannot be written, they are answered "unable to
+  process" and nothing is told or sent. How the sending ended is a second
+  record (`dicom-sent`): `ok` when all of it went, `failed` with how much
+  when not. An object that was stored and could not be recorded is
+  answered as a failure; it is held, and sent again it is the same object.
+- **An echo is not recorded**, nor an association that only echoes: it is
+  nothing of anyone's. One that is refused is, with who called.
 - A server without a data directory keeps nothing, an audit log no more than
   anything else. A server without accounts records what is done by no one in
   particular.
@@ -190,8 +212,7 @@ curl -H "Authorization: Bearer $TOKEN" -o audit.csv \
 
 In the CSV a value that a spreadsheet would take for a formula is given a
 leading apostrophe. The viewer shows the log to an administrator (the server
-card's "Audit log"). DIMSE sends and retrievals will be recorded when
-there is DIMSE (#212).
+card's "Audit log").
 
 `SIGTERM` or `SIGINT` (Ctrl+C) stops it: it takes no new connections, answers
 the requests it has, lets the core finish its work, and exits with 0. If the
@@ -523,10 +544,13 @@ through the API:
 - **Whom it asks is the administrator's choice.** A user picks among the
   systems on the list and cannot name an address.
 
-Not there yet: TLS (#57) and audit records for associations (#212). Until #212 the audit log has the
-request for a send or a retrieve and not the associations it made, and
-nothing of what other systems send here or ask; the file header of each
-received object names the AE title that sent it.
+Not there yet: TLS (#57).
+
+Who sent, asked or retrieved what by DICOM is in [the audit log](#the-audit-log),
+and nowhere in the application log, which holds no AE title of another
+system. A server without a data directory has no audit log, and so no
+record of who called; the file header of each received object still names
+the AE title that sent it.
 
 The library underneath is `dcmjs-dimse`, which only `src/dimse/library.ts`
 imports; [docs/dimse-library.md](../../docs/dimse-library.md) says why it
@@ -982,9 +1006,11 @@ everything the API can be asked, rightly and wrongly, to synthetic data with
 known identifiers, and then searches the whole log, at its most talkative,
 for each of them: Patient ID, name, every UID, account names, passwords,
 tokens, what was searched for. When you add a route, add a call to it there.
-It sends the same objects by DICOM too. The DICOM listener logs AE titles,
-which name systems, and what came of each object; nothing of the object.
-Who did what belongs in [the audit log](#the-audit-log).
+It sends the same objects by DICOM too, and asks and retrieves by DICOM.
+The DICOM listener logs what came of each object, question and retrieve:
+nothing of the object, and not the AE title of the system that called,
+which the test searches for as well. Who did what belongs in
+[the audit log](#the-audit-log).
 
 ## Tests
 

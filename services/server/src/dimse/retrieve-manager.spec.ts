@@ -235,6 +235,37 @@ describe('the retrieves the server asks for', () => {
     expect(made.get(second.id)).toMatchObject({ state: 'done', result: 'retrieved' });
   });
 
+  it('tell of each once it is done, however it ended, with who asked for it (#212)', async () => {
+    const told: [string, string | null, string | null, string | null][] = [];
+    let calls = 0;
+    const made = createRetrieveManager({
+      index: core.pacs!.index,
+      move: async () => {
+        calls += 1;
+        if (calls === 2) throw new Error('no library');
+        return { outcome: 'answered', status: 0, counts: counts(3) };
+      },
+      ended: (record, by) => {
+        told.push([record.id, record.state, record.result, by]);
+        // What is told of a retrieve does not undo it, nor stop the next.
+        throw new Error('the one that is told fails');
+      },
+    });
+    const first = made.start({ ...request(), by: 'ada' });
+    const second = made.start(request());
+    expect(told).toEqual([]);
+    await made.idle();
+    await made.close();
+    const late = made.start({ ...request(), by: 'grace' });
+    await made.idle();
+    expect(told).toEqual([
+      [first.id, 'done', 'retrieved', 'ada'],
+      [second.id, 'done', 'failed', null],
+      [late.id, 'done', 'failed', 'grace'],
+    ]);
+    expect(made.get(late.id)?.failure).toBe('stopped');
+  });
+
   it('do not make what waits once the server is stopping', async () => {
     let release!: () => void;
     let calls = 0;

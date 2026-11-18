@@ -31,6 +31,7 @@ import { readInstanceHeader } from '@open-rt-studio/dicom';
 import { CoreStoppingError, type Pacs } from '../core/core.js';
 import type { IngestResult } from '../ingest/ingest.js';
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
+import { askedOf, NO_DICOM_AUDIT, type DicomAudit } from './dicom-audit.js';
 import {
   CEchoResponse,
   CFindResponse,
@@ -162,6 +163,12 @@ export interface DicomListenerOptions {
   readonly retrieveLimits?: Partial<PartLimits>;
   readonly findAtMost?: number;
   readonly retrieveAtMost?: number;
+  /**
+   * Where the audit records go (#212): of each object received, each query
+   * and retrieve answered, and each association refused. When a record of
+   * what is about to leave cannot be written, it does not leave.
+   */
+  readonly audit?: DicomAudit;
   /** The largest object taken, in bytes: the data set as it arrives. */
   readonly maxObjectBytes: number;
   /**
@@ -228,6 +235,22 @@ export function storeStatus(result: IngestResult): number {
   }
 }
 
+/** What came of taking a received object, and whose it is where it could be read. */
+export interface TakenObject {
+  readonly status: number;
+  readonly outcome: IngestResult['outcome'] | 'mismatch';
+  /** Why the PACS refused it, when it did. */
+  readonly reason?: string;
+  readonly of: {
+    readonly patientId: string | null;
+    readonly studyUid: string;
+    readonly seriesUid: string;
+  } | null;
+}
+
+/** An AE title as another system wrote it, for a record: what can be printed of it. */
+const printable = (aeTitle: string): string => aeTitle.replace(/[^\x20-\x7e]/g, '?').slice(0, 16);
+
 async function bytesOf(pacs: Pacs, sopInstanceUid: string): Promise<Buffer> {
   const pieces: Buffer[] = [];
   for await (const piece of await pacs.store.get(sopInstanceUid)) pieces.push(piece as Buffer);
@@ -243,18 +266,22 @@ async function bytesOf(pacs: Pacs, sopInstanceUid: string): Promise<Buffer> {
  * this data set in this transfer syntax, nothing is written and the answer
  * is success.
  */
-export async function takeObject(
-  pacs: Pacs,
-  object: ReceivedDataSet,
-): Promise<{ status: number; outcome: IngestResult['outcome'] | 'mismatch' }> {
+export async function takeObject(pacs: Pacs, object: ReceivedDataSet): Promise<TakenObject> {
   const file = part10(object);
   const header = readInstanceHeader(file);
+  const of = header.ok
+    ? {
+        patientId: header.header.patient.id || null,
+        studyUid: header.header.study.uid,
+        seriesUid: header.header.series.uid,
+      }
+    : null;
   if (
     header.ok &&
     (header.header.sopInstanceUid !== object.sopInstanceUid ||
       header.header.sopClassUid !== object.sopClassUid)
   ) {
-    return { status: STORE_STATUS.dataSetMismatch, outcome: 'mismatch' };
+    return { status: STORE_STATUS.dataSetMismatch, outcome: 'mismatch', of };
   }
   const held = await pacs.store.stat(object.sopInstanceUid);
   if (held) {
@@ -267,17 +294,23 @@ export async function takeObject(
       (keptSyntax ?? IMPLICIT_VR_LE) === object.transferSyntax &&
       Buffer.from(keptDataSet).equals(Buffer.from(object.dataSet))
     ) {
-      return { status: STORE_STATUS.success, outcome: 'unchanged' };
+      return { status: STORE_STATUS.success, outcome: 'unchanged', of };
     }
   }
   const result = await pacs.ingest.ingest(file);
-  return { status: storeStatus(result), outcome: result.outcome };
+  return {
+    status: storeStatus(result),
+    outcome: result.outcome,
+    of,
+    ...(result.outcome === 'refused' ? { reason: result.reason } : {}),
+  };
 }
 
 /** Start listening for DICOM associations. Rejects when the port cannot be had. */
 export async function startDicomListener(options: DicomListenerOptions): Promise<DicomListener> {
   const logger = (options.logger ?? SILENT_LOGGER).child({ part: 'dicom' });
   const { pacs, maxObjectBytes } = options;
+  const audit = options.audit ?? NO_DICOM_AUDIT;
   const aeTitle = (): string =>
     typeof options.aeTitle === 'function' ? options.aeTitle() : options.aeTitle;
   const callers = (): readonly string[] =>
@@ -330,7 +363,17 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
       this.calling = association.getCallingAeTitle().trim();
       const called = association.getCalledAeTitle().trim();
       const reject = (reason: number, why: string): void => {
-        logger.warn('association-rejected', { why, callingAe: this.calling });
+        // Who it was is the audit log's to say, not this log's.
+        logger.warn('association-rejected', { why });
+        audit({
+          action: 'dicom-association',
+          outcome: 'refused',
+          aeTitle: printable(this.calling),
+          detail:
+            why === 'called-ae'
+              ? 'called by an AE title that is not this server’s'
+              : 'not among the systems that are let in',
+        });
         this.sendAssociationReject(RejectResult.Permanent, RejectSource.ServiceUser, reason);
       };
       if (called !== aeTitle()) return reject(RejectReason.CalledAeNotRecognized, 'called-ae');
@@ -366,7 +409,10 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         else context.setResult(PresentationContextResult.RejectTransferSyntaxesNotSupported);
         if (syntax && back) this.takenBack.add(abstract);
       }
-      logger.info('association-accepted', { callingAe: this.calling });
+      logger.info('association-accepted', {
+        mayStore: this.mayStore,
+        mayRetrieve: this.mayRetrieve,
+      });
       this.sendAssociationAccept();
     }
 
@@ -404,7 +450,30 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
     ): void {
       const incoming = this.incoming;
       this.incoming = null;
-      const answer = (status: number, outcome: string): void => {
+      const answer = (given: number, how: string, taken?: TakenObject): void => {
+        let [status, outcome] = [given, how];
+        const recorded = audit({
+          action: 'dicom-store',
+          outcome:
+            status === STORE_STATUS.success
+              ? 'ok'
+              : outcome === 'not-allowed'
+                ? 'refused'
+                : outcome === 'failed' || outcome === 'stopping'
+                  ? 'failed'
+                  : 'rejected',
+          aeTitle: printable(this.calling),
+          patientId: taken?.of?.patientId ?? null,
+          studyUid: taken?.of?.studyUid ?? null,
+          seriesUid: taken?.of?.seriesUid ?? null,
+          // The instances of a series, stored one after another, are one record.
+          detail: outcome === 'stored' ? null : (taken?.reason ?? outcome),
+        });
+        // It is here, and there is no record of who sent it: the caller is
+        // told that it failed, and what it sends again is the same object.
+        if (!recorded && status === STORE_STATUS.success) {
+          [status, outcome] = [STORE_STATUS.processingFailure, 'unrecorded'];
+        }
         if (status === STORE_STATUS.success) this.stored++;
         else this.refused++;
         logger.info('object-received', { outcome, status });
@@ -422,7 +491,7 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         sourceAeTitle: this.calling,
         dataSet: incoming.bytes(),
       }).then(
-        ({ status, outcome }) => answer(status, outcome),
+        (taken) => answer(taken.status, taken.outcome, taken),
         (error: unknown) => {
           if (error instanceof CoreStoppingError) {
             return answer(STORE_STATUS.outOfResources, 'stopping');
@@ -447,7 +516,31 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         one.setStatus(status);
         return one;
       };
-      const end = (status: number, outcome: string, matches: LibraryFindResponse[] = []): void => {
+      const asked = askedOf(identifierOf(request));
+      const end = (given: number, how: string, found: LibraryFindResponse[] = []): void => {
+        let [status, outcome, matches] = [given, how, found];
+        const recorded = audit({
+          action: 'dicom-find',
+          outcome:
+            outcome === 'answered' || outcome === 'too-many'
+              ? 'ok'
+              : outcome === 'not-allowed'
+                ? 'refused'
+                : outcome === 'identifier'
+                  ? 'rejected'
+                  : 'failed',
+          aeTitle: printable(this.calling),
+          patientId: asked.patientId,
+          studyUid: asked.studyUid,
+          seriesUid: asked.seriesUid,
+          detail: [
+            `${(asked.level ?? 'no level').toLowerCase()}: ${matches.length} matches`,
+            ...(outcome === 'too-many' ? ['not all'] : []),
+            ...(asked.keys ? [asked.keys] : []),
+          ].join(', '),
+        });
+        // Nothing of what the server holds is told without a record of who asked.
+        if (!recorded) [status, outcome, matches] = [FIND_STATUS.unableToProcess, 'unrecorded', []];
         this.queries++;
         logger.info('query-answered', {
           outcome,
@@ -499,8 +592,30 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
       make: () => R,
       callback: (responses: R[]) => void,
       sender: () => PartSender | number,
+      /** The AE title a move sends to, as the caller wrote it. */
+      to: string | null = null,
     ): void {
       const started = Date.now();
+      const asked = askedOf(identifierOf(request));
+      /** Whose it is: the patient the identifier names, or the one of the study it names. */
+      let patientId = asked.patientId;
+      /** The record of what was asked for; false when it could not be written. */
+      const note = (outcome: 'ok' | 'refused' | 'rejected' | 'failed', said: string): boolean =>
+        audit({
+          action: how === 'move' ? 'dicom-move' : 'dicom-get',
+          outcome,
+          aeTitle: printable(this.calling),
+          patientId,
+          studyUid: asked.studyUid,
+          seriesUid: asked.seriesUid,
+          detail: [
+            ...(to === null ? [] : [`to ${printable(to) || 'no destination'}`]),
+            said,
+            ...(asked.keys ? [asked.keys] : []),
+          ].join(', '),
+        });
+      /** True once the record of what was asked for is written, and objects may leave. */
+      let begun = false;
       const sopClass = request.getAffectedSopClassUid();
       const kind = QUERY_RETRIEVE_SOP_CLASSES[sopClass];
       const syntax = this.syntaxOf(request);
@@ -544,10 +659,14 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         callback([response(status, counts, failed)]);
       };
       if (!this.mayRetrieve || kind?.service !== how) {
+        note('refused', 'not allowed');
         return end(RETRIEVE_STATUS.unableToProcess, 'not-allowed');
       }
       const sendPart = sender();
-      if (typeof sendPart === 'number') return end(sendPart, 'no-destination');
+      if (typeof sendPart === 'number') {
+        note('refused', 'the server knows no such destination');
+        return end(sendPart, 'no-destination');
+      }
       this.cancelRequested = false;
       const run = async (): Promise<void> => {
         const named = await retrieveInstances(
@@ -556,7 +675,19 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
           identifierOf(request),
           options.retrieveAtMost ?? RETRIEVE_INSTANCES_AT_MOST,
         );
-        if (named.more) return end(RETRIEVE_STATUS.tooMany, 'too-many');
+        if (named.more) {
+          note('rejected', 'more instances than are sent at a request');
+          return end(RETRIEVE_STATUS.tooMany, 'too-many');
+        }
+        const total = named.instances.length;
+        if (patientId === null && asked.studyUid !== null) {
+          patientId = (await pacs.index.getStudy(asked.studyUid))?.patientId || null;
+        }
+        // Nothing leaves the server without a record of who asked for it.
+        if (!note('ok', `${total} ${total === 1 ? 'instance' : 'instances'}`)) {
+          return end(RETRIEVE_STATUS.unableToProcess, 'unrecorded');
+        }
+        begun = true;
         const result = await runRetrieve({
           pacs,
           instances: named.instances.map((one) => one.sopInstanceUid),
@@ -568,6 +699,23 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
             this.sendResponse(request, response(RETRIEVE_STATUS.pending, counts)),
           cancelled: () => this.cancelRequested || this.gone || closing,
         });
+        // How it ended, with where it went: the caller itself, or a move's destination.
+        const sent = result.counts.completed + result.counts.warning;
+        if (total > 0) {
+          audit({
+            action: 'dicom-sent',
+            outcome: sent === total ? 'ok' : 'failed',
+            aeTitle: printable(how === 'move' ? (to ?? '') : this.calling),
+            patientId,
+            studyUid: asked.studyUid,
+            seriesUid: asked.seriesUid,
+            detail: [
+              how === 'move' ? `move for ${printable(this.calling)}` : 'get',
+              `${sent} of ${total} sent`,
+              ...(result.cancelled ? ['cancelled'] : []),
+            ].join(', '),
+          });
+        }
         end(
           retrieveStatus(result),
           result.cancelled ? 'cancelled' : 'done',
@@ -585,10 +733,24 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
           await run();
         } catch (error) {
           if (error instanceof IdentifierError) {
+            note('rejected', 'an identifier that cannot be answered');
             return end(RETRIEVE_STATUS.identifierMismatch, 'identifier');
           }
           if (!(error instanceof CoreStoppingError)) {
             logger.error('retrieve-failed', errorFields(error));
+          }
+          // Before anything left, it is the request that failed; after, the sending.
+          if (!begun) note('failed', 'the server could not answer');
+          else {
+            audit({
+              action: 'dicom-sent',
+              outcome: 'failed',
+              aeTitle: printable(how === 'move' ? (to ?? '') : this.calling),
+              patientId,
+              studyUid: asked.studyUid,
+              seriesUid: asked.seriesUid,
+              detail: `${how === 'move' ? `move for ${printable(this.calling)}` : 'get'}, not ended`,
+            });
           }
           return end(RETRIEVE_STATUS.unableToProcess, 'failed');
         } finally {
@@ -602,15 +764,15 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
       request: LibraryMoveRequest,
       callback: (responses: LibraryMoveResponse[]) => void,
     ): void {
+      const destination = String(
+        request.getCommandDataset().getElement('MoveDestination') ?? '',
+      ).trim();
       this.retrieve(
         'move',
         request,
         () => CMoveResponse.fromRequest(request),
         callback,
         () => {
-          const destination = String(
-            request.getCommandDataset().getElement('MoveDestination') ?? '',
-          ).trim();
           const there = options.destinationOf?.(destination) ?? null;
           if (!there) return RETRIEVE_STATUS.destinationUnknown;
           return async (objects) =>
@@ -628,6 +790,7 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
               ),
             );
         },
+        destination,
       );
     }
 
@@ -691,7 +854,6 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
 
     override associationReleaseRequested(): void {
       logger.info('association-released', {
-        callingAe: this.calling,
         stored: this.stored,
         refused: this.refused,
         queries: this.queries,

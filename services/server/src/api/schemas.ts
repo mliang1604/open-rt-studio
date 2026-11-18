@@ -131,7 +131,12 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
         description:
           'The account. Null when no one was logged in: a server without accounts, a command, a login with a name that is no account.',
       },
-      origin: { type: 'string', enum: ['api', 'command', 'server'] },
+      origin: {
+        type: 'string',
+        enum: ['api', 'command', 'server', 'dicom'],
+        description:
+          'Through what it was done. For `dicom`, a DICOM association, the other system’s AE title is the `object`.',
+      },
       action: text,
       outcome: { type: 'string', enum: ['ok', 'refused', 'not-found', 'rejected', 'failed'] },
       patientId: nullableText,

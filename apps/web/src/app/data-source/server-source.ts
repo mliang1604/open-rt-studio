@@ -282,6 +282,13 @@ export const AUDIT_ACTIONS = [
     'dicom-query',
     'dicom-retrieve',
     'dicom-retrieve-read',
+    'dicom-association',
+    'dicom-store',
+    'dicom-find',
+    'dicom-move',
+    'dicom-get',
+    'dicom-sent',
+    'dicom-retrieved',
     'request',
   ],
 ] as const;

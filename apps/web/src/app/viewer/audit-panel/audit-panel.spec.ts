@@ -140,6 +140,11 @@ describe('how a record reads', () => {
     expect(auditWho(record(1, { actor: null }))).toBe('No one logged in');
     expect(auditWho(record(1, { actor: null, origin: 'command' }))).toBe('A command on the server');
     expect(auditWho(record(1, { actor: null, origin: 'server' }))).toBe('The server itself');
+    // By DICOM there is no account, unless a user asked the server for it.
+    expect(auditWho(record(1, { actor: null, origin: 'dicom', object: 'PLANNING' }))).toBe(
+      'Another system, by DICOM',
+    );
+    expect(auditWho(record(1, { origin: 'dicom', object: 'PLANNING' }))).toBe('ada');
   });
 
   it('says what of: an account or a job by name, a study or a series by the end of its UID', () => {

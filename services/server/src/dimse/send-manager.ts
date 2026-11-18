@@ -70,6 +70,8 @@ export interface SendRequest {
   readonly seriesInstanceUid: string;
   readonly sopInstanceUids: readonly string[];
   readonly retryOf?: string;
+  /** The account that asked for it; null where there is none. */
+  readonly by?: string | null;
 }
 
 export interface SendManagerOptions {
@@ -83,6 +85,8 @@ export interface SendManagerOptions {
   readonly kept?: number;
   /** In place of {@link sendObjects}, for a test. */
   readonly send?: typeof sendObjects;
+  /** Told of each send once it is done, however it ended, with who asked for it. */
+  readonly ended?: (record: SendRecord, by: string | null) => void;
 }
 
 export interface SendManager {
@@ -139,6 +143,7 @@ function recorded(outcome: SendOutcome): Omit<SendInstance, 'sopInstanceUid'> {
 interface Held {
   record: SendRecord;
   readonly target: SendTarget;
+  readonly by: string | null;
 }
 
 export function createSendManager(options: SendManagerOptions): SendManager {
@@ -222,14 +227,14 @@ export function createSendManager(options: SendManagerOptions): SendManager {
           ...WAITING,
         })),
       };
-      const one: Held = { record, target: request.target };
+      const one: Held = { record, target: request.target, by: request.by ?? null };
       held.push(one);
       // The earliest that are done make room; one that is not done is never dropped.
       for (let i = 0; held.length > kept && i < held.length;) {
         if (held[i].record.state === 'done') held.splice(i, 1);
         else i += 1;
       }
-      turn = turn.then(() =>
+      const carriedOut = (): void | Promise<void> =>
         closed
           ? note(
               one,
@@ -248,8 +253,14 @@ export function createSendManager(options: SendManagerOptions): SendManager {
                 { state: 'done', finishedAt: new Date().toISOString() },
               );
               logger.error('dicom-send-failed');
-            }),
-      );
+            });
+      turn = turn.then(carriedOut).then(() => {
+        try {
+          options.ended?.(one.record, one.by);
+        } catch {
+          // What is told of a send does not undo it.
+        }
+      });
       return record;
     },
     get: (id) => held.find((one) => one.record.id === id)?.record ?? null,
