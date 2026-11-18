@@ -697,10 +697,74 @@ health`), which asks the server with the same settings, on the same
   certificate it makes for the purpose, over HTTPS; CI runs it (the
   `Container` job). It needs Docker and OpenSSL.
 
-Not there yet: the image is not published anywhere, and the compose file has
-no PostgreSQL (#44) and does not turn the [DICOM](#dicom) listener on: that
-takes `OPEN_RT_STUDIO_DICOM_PORT` and `_CALLERS` in its `environment`, a
-second line under `ports`, and a network you trust the callers on.
+### With PostgreSQL
+
+`compose.postgres.yaml` goes over `compose.yaml` and gives the server a
+PostgreSQL to keep [its index in](#in-postgresql):
+
+```sh
+export OPEN_RT_STUDIO_DATABASE_PASSWORD="$(openssl rand -hex 24)"
+docker compose -f compose.yaml -f compose.postgres.yaml up --build --detach
+docker compose -f compose.yaml -f compose.postgres.yaml run --rm server account add <name> --admin
+```
+
+- **The password** is of the database in this compose project. Keep it: an
+  `.env` file beside the compose files will do, and Git ignores it.
+  PostgreSQL takes it when its volume is first made; a different one later
+  is refused, not adopted.
+- **PostgreSQL has no port on this machine.** Only the server reaches it,
+  on the project's own network. The server is given the address without the
+  password, and the password as `PGPASSWORD`.
+- **Two volumes**: `index` (PostgreSQL: patient names and IDs) and `data`
+  (instances, accounts, the audit log, jobs, DICOM settings). Back both up,
+  and together: an index without its instances lists what cannot be opened.
+- A server that already has data starts with an empty index here; see
+  [In PostgreSQL](#in-postgresql).
+
+### The published image
+
+The image of `main` is published to the GitHub Container Registry by the
+`Publish the server image` workflow, after the container check has passed
+on it: `ghcr.io/mliang1604/open-rt-studio-server:main`, and
+`:sha-<commit>` for one commit. To run it in place of building one:
+
+```sh
+export OPEN_RT_STUDIO_IMAGE=ghcr.io/mliang1604/open-rt-studio-server:main
+docker compose up --no-build --detach
+```
+
+The workflow does that itself after pushing, with the image it pushed. It is
+a prototype's image and **not for clinical use**; it has no version numbers
+yet, only `main` and commits.
+
+### The integration check
+
+`scripts/integration-check.sh` runs the server as it is deployed, with
+PostgreSQL, and has two other DICOM systems talk to it; CI runs it (the
+`Integration` job). It needs Docker, DCMTK's tools and `npm ci`.
+
+| What happens                                                  | With                |
+| ------------------------------------------------------------- | ------------------- |
+| The DICOM listener is turned on through the API               | the API             |
+| C-ECHO to the server; a system it was not told of is refused  | DCMTK `echoscu`     |
+| A study is stored in the server; the API lists it             | DCMTK `storescu`    |
+| C-FIND to the server                                          | DCMTK `findscu`     |
+| The server's C-ECHO, and a study sent by C-STORE              | Orthanc as receiver |
+| The server asks by C-FIND and retrieves by C-MOVE             | Orthanc as provider |
+| C-ECHO and C-FIND to the server                               | Orthanc as caller   |
+| C-MOVE and C-GET from the server                              | Orthanc as caller   |
+| The audit log names each system for what it did               | the API             |
+| New containers find the instances, the index and the settings | compose             |
+
+The scenarios are `src/integration.spec.ts`, which is skipped everywhere
+else. Orthanc is GPL: it is pulled as its own image for the check
+(`compose.integration.yaml`), spoken to over the network, and is no part of
+the server or its image. Everything stored is generated, synthetic data.
+
+Not there yet: the compose files do not turn the [DICOM](#dicom) listener
+on by themselves. That takes a line under `ports` for it (as
+`compose.integration.yaml` has), turning it on in the viewer or through the
+API, and a network you trust the callers on.
 
 ## Settings
 
@@ -1186,6 +1250,8 @@ which the test searches for as well. Who did what belongs in
 They use ports of `127.0.0.1` that the operating system hands out, and
 `main.spec.ts` runs the built server as a process and stops it with a signal
 (skipped on Windows, which has no `SIGTERM` to catch).
+`src/integration.spec.ts` is the server in its container, from outside, and
+runs only from [`scripts/integration-check.sh`](#the-integration-check).
 `src/dimse/dcmtk.spec.ts` tries the DICOM listener against DCMTK's
 command-line tools as another system, with TLS and without; it is skipped
 where DCMTK is not installed, and CI's `DIMSE interop` job installs it.

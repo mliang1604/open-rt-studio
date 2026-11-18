@@ -72,8 +72,10 @@ say "the server, PostgreSQL and Orthanc start, and the server reports itself hea
   fail "the server did not open its index in PostgreSQL"
 say "the server's index is in PostgreSQL"
 
-[ -z "$("${compose[@]}" port postgres 5432 2>/dev/null)" ] ||
-  fail "PostgreSQL has a port on this machine"
+# A port that is published is listed as "address:port->5432/tcp"; one that is not, as "5432/tcp".
+case "$("${compose[@]}" ps --format '{{.Ports}}' postgres)" in
+*'->'*) fail "PostgreSQL has a port on this machine" ;;
+esac
 say "PostgreSQL is reached by the server only"
 
 printf '%s\n' "$password" | "${compose[@]}" run --rm -T server account add "$name" --admin
