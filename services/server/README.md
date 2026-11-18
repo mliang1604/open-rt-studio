@@ -302,7 +302,9 @@ certificate of its own: see [TLS for DICOM](#tls-for-dicom).
 
 Other systems can verify that the server is there (C-ECHO), send it
 objects (C-STORE), and, those that [may](#query-and-retrieve), ask what it
-holds and have it sent (C-FIND, C-MOVE, C-GET). The listener is off unless
+holds and have it sent (C-FIND, C-MOVE, C-GET). What it does on a DICOM
+network is set out for another system's administrator in the
+[conformance statement](../../docs/dicom-conformance.md). The listener is off unless
 it is given a port:
 
 ```sh
@@ -624,10 +626,12 @@ through the API:
 - **An association that hears nothing for two minutes** is given up on
   (`broken`), though the other system may still be sending.
 - **The records are kept while the server runs**, the latest hundred. The
-  audit log has who asked which system (`dicom-query`, with the level and
-  how many matches, and not the keys: a name that was typed is no one's
-  yet), who retrieved which study from where (`dicom-retrieve`), and, in
-  the record of following it, whose study it turned out to be.
+  audit log has who asked which system (`dicom-query`, with the level, how
+  many matches and the keys that were asked with), who retrieved which
+  study from where (`dicom-retrieve`), and, in the record of following it,
+  whose study it turned out to be.
+- **A key outside ASCII** is sent in UTF-8, and the question says so
+  (Specific Character Set `ISO_IR 192`).
 - **Whom it asks is the administrator's choice.** A user picks among the
   systems on the list and cannot name an address.
 
@@ -1126,4 +1130,6 @@ They use ports of `127.0.0.1` that the operating system hands out, and
 command-line tools as another system, with TLS and without; it is skipped
 where DCMTK is not installed, and CI's `DIMSE interop` job installs it.
 Certificates for the TLS specs are made on the spot (`src/tls-testing.ts`);
-none is kept in the repository.
+none is kept in the repository. `src/dimse/conformance.spec.ts` reads
+[the conformance statement](../../docs/dicom-conformance.md) and fails when
+its tables are not what the server has.

@@ -321,6 +321,22 @@ TLS is Node's on both sides, and the library is told of it and no more.
   `storescp` with TLS in CI, with RSA certificates: the ciphersuites of
   DCMTK's default profile for TLS 1.2 are for those.
 
+### What #60 did with this
+
+Writing the conformance statement turned up two things, both put right:
+
+- **The library names itself on an association** (its own Implementation
+  Class UID and Version Name) unless it is told otherwise. The server's
+  were only in the header of the files it writes. `library.ts` now sets
+  them, so an association and a file say the same.
+- **The library's client writes a key outside ASCII in UTF-8 and says
+  nothing of it**, and the other system then reads it a byte to a
+  character and finds no match. A question with such a key now has Specific
+  Character Set `ISO_IR 192`.
+
+The maximum PDU length is the library's default, 262144 bytes, and is in
+the statement as that.
+
 ### What #51 did with this
 
 The server asks other systems with the library's client: a C-FIND, and a

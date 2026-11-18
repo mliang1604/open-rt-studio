@@ -146,6 +146,32 @@ const UNIQUE_KEYS: Readonly<Record<QueryLevel, readonly string[]>> = {
 };
 
 /** Keys of an identifier that say how it is to be read, and are no question. */
+/**
+ * The attributes a C-FIND is answered at each level, by keyword: what the
+ * conformance statement lists (`docs/dicom-conformance.md`), which a test
+ * holds to this.
+ */
+export const ANSWERED_KEYS: Readonly<Record<QueryLevel, readonly string[]>> = {
+  PATIENT: Object.keys(PATIENT_KEYS),
+  STUDY: Object.keys(STUDY_KEYS),
+  SERIES: Object.keys(SERIES_KEYS),
+  IMAGE: Object.keys(IMAGE_KEYS),
+};
+
+/**
+ * Of those, the ones a value is matched against ({@link findMatches}); the
+ * rest are answered and not matched.
+ */
+export const MATCHED_KEYS: Readonly<Record<QueryLevel, readonly string[]>> = {
+  PATIENT: ['PatientName', 'PatientID'],
+  STUDY: [
+    ...['PatientName', 'PatientID', 'StudyInstanceUID', 'StudyDate'],
+    ...['StudyDescription', 'AccessionNumber', 'ModalitiesInStudy'],
+  ],
+  SERIES: ['StudyInstanceUID', 'SeriesInstanceUID', 'Modality'],
+  IMAGE: ['StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID', 'SOPClassUID'],
+};
+
 const NOT_ASKED = new Set(['_vrMap', 'QueryRetrieveLevel', 'SpecificCharacterSet']);
 
 // eslint-disable-next-line no-control-regex

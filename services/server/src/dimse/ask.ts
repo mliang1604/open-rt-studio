@@ -31,6 +31,16 @@ import { securityOptions, withTlsProblem } from './tls.js';
 const PATIENT_ROOT = '1.2.840.10008.5.1.4.1.2.1';
 const STUDY_ROOT = '1.2.840.10008.5.1.4.1.2.2';
 
+/**
+ * The query and retrieve SOP classes the server proposes when it asks
+ * another system: what the conformance statement gives it as SCU.
+ */
+export const ASKED_SOP_CLASSES: readonly string[] = [
+  `${PATIENT_ROOT}.1`,
+  `${STUDY_ROOT}.1`,
+  `${STUDY_ROOT}.2`,
+];
+
 export * from './ask-keys.js';
 
 /** Whether an association has an accepted context for a SOP class. */

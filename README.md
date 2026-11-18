@@ -54,6 +54,8 @@ It is not a treatment planning system and does not replace one.
   converted doses are held to on doses that are formulas, and what they
   measured
 - [Contributing](CONTRIBUTING.md), including the required CI check
+- [DICOM conformance statement](docs/dicom-conformance.md): what the server
+  does on a DICOM network, held to the code by a test
 - [Test data policy](docs/test-data.md): synthetic or clearly shareable data only
 - [License headers](docs/license-headers.md)
 - [Security policy](SECURITY.md)

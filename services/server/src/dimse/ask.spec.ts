@@ -8,7 +8,13 @@
 
 import { createServer, type Server } from 'node:net';
 
-import { SYNTHETIC_RT_COURSE, syntheticRtCourse } from '@open-rt-studio/testdata';
+import {
+  SYNTHETIC_LATIN1_PATIENT,
+  SYNTHETIC_RT_COURSE,
+  SYNTHETIC_UTF8_PATIENT,
+  syntheticCharacterSetPatient,
+  syntheticRtCourse,
+} from '@open-rt-studio/testdata';
 
 import type { Pacs } from '../core/core.js';
 import {
@@ -132,6 +138,19 @@ describe('the keys of a question', () => {
       ModalitiesInStudy: '',
     });
   });
+
+  it('say that they are in UTF-8 when one is outside ASCII, and nothing of it otherwise', () => {
+    expect(askIdentifier('study', { patientName: 'SYN*' })).not.toHaveProperty(
+      'SpecificCharacterSet',
+    );
+    expect(askIdentifier('patient', { patientName: 'Ødeg*' })).toMatchObject({
+      SpecificCharacterSet: 'ISO_IR 192',
+      PatientName: 'Ødeg*',
+    });
+    expect(askIdentifier('study', { studyDescription: '計画*' })).toMatchObject({
+      SpecificCharacterSet: 'ISO_IR 192',
+    });
+  });
 });
 
 describe('what another system answers', () => {
@@ -243,6 +262,28 @@ describe('asking another system what it holds', () => {
       matches: [],
       complete: true,
     });
+  });
+
+  // Found while the conformance statement was written (#60): a key outside
+  // ASCII went out with nothing said of how it was written, and matched nothing.
+  it('finds by a name and a description outside ASCII, whatever the file was written in', async () => {
+    const there = await theirs(null);
+    for (const patient of [SYNTHETIC_UTF8_PATIENT, SYNTHETIC_LATIN1_PATIENT]) {
+      for (const file of syntheticCharacterSetPatient(patient)) {
+        expect((await there.core.pacs!.ingest.ingest(file.bytes)).outcome).toBe('stored');
+      }
+    }
+    const named = async (keys: Parameters<typeof findAt>[2]) => {
+      const found = await findAt(to(there.port), 'study', keys);
+      return found.outcome === 'answered' ? found.matches.map((one) => one.patientName) : found;
+    };
+    expect(await named({ patientName: 'Łukasiewicz*' })).toEqual([SYNTHETIC_UTF8_PATIENT.name]);
+    expect(await named({ patientName: 'Ødeg*' })).toEqual([SYNTHETIC_LATIN1_PATIENT.name]);
+    expect(await named({ studyDescription: 'Étude 計画*' })).toEqual([SYNTHETIC_UTF8_PATIENT.name]);
+    const patients = await findAt(to(there.port), 'patient', { patientName: '*山田' });
+    expect(patients.outcome === 'answered' && patients.matches).toMatchObject([
+      { patientId: SYNTHETIC_UTF8_PATIENT.id, patientName: SYNTHETIC_UTF8_PATIENT.name },
+    ]);
   });
 
   it('says that a list is not all there was', async () => {
