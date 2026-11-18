@@ -1,0 +1,226 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* The whole of it scrolls when the card is too short for it. */
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+:host > * {
+  flex: none;
+}
+
+p,
+h3,
+ul {
+  margin: 0;
+}
+
+h3 {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.retrieve-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 8px;
+}
+
+/* A field alone in its row does not take the whole of it. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 110px;
+  min-width: 0;
+  max-width: 240px;
+}
+
+.field.wide {
+  flex-basis: 160px;
+}
+
+.retrieve-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* As the cards' inputs are, for a select, which the shared styles leave out. */
+select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 9px;
+  font: inherit;
+  color: var(--text);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--accent-ring);
+  outline: none;
+}
+
+.retrieve-note,
+.retrieve-from {
+  color: var(--muted);
+}
+
+.retrieve-problem {
+  color: #ff9d8a;
+}
+
+/* A long list scrolls in its own frame. */
+.retrieve-scroll {
+  max-height: 34vh;
+  overflow: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+tbody tr {
+  border-top: 1px solid var(--glass-border);
+}
+
+/* Another system's words can be long: cut (whole in the title), so that the button stays in sight. */
+.retrieve-name,
+.retrieve-description {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.retrieve-name {
+  font-weight: 500;
+}
+
+.retrieve-description {
+  color: var(--muted);
+}
+
+.retrieve-number {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A study can have many kinds of object: they go on to a second line. */
+.retrieve-modalities {
+  min-width: 70px;
+  white-space: normal;
+}
+
+/*
+ * The button stays in sight however wide the rest is: in a card too narrow
+ * for the table, the columns scroll under it.
+ */
+.retrieve-actions,
+thead th:last-child {
+  position: sticky;
+  right: 0;
+  width: 1%;
+  background: var(--panel);
+}
+
+thead th:last-child {
+  z-index: 2;
+}
+
+.retrieve-actions button,
+.retrieve-list button {
+  padding: 3px 8px;
+}
+
+.retrieve-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+/* What was asked for, then what became of it, then where to go with it. */
+.retrieve-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.retrieve-what {
+  font-weight: 500;
+}
+
+.retrieve-from {
+  font-weight: 400;
+}
+
+.retrieve-said {
+  flex: 1 1 260px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Said in the words; the colour only draws the eye to them. */
+.failed .retrieve-said {
+  color: #ff9d8a;
+}
+
+.under-way .retrieve-said {
+  color: var(--muted);
+}
+
+.unseen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

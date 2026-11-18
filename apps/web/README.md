@@ -196,6 +196,24 @@ Viewer (`src/app/viewer`):
   "Send…". `e2e/dicom-send.spec.ts` sends between two real servers and
   compares what arrived byte for byte; `e2e/dose-sum.spec.ts` does the same
   with a summed dose as the viewer saved it (#101).
+- `retrieve-panel/`: find studies on another system and bring them to the
+  server (the server card's "Retrieve…", for everyone who is logged in).
+  A system among those the server's administrator has given an address, a
+  search by patient name, Patient ID, study dates, accession number and
+  modality, and the studies that system answers with, the newest first,
+  each with a "Retrieve" button. The server does the asking and the
+  retrieving (#51); the panel asks after a retrieve until it is done and
+  says what became of it in a sentence, going by what the server then
+  holds and not by what the other system says it sent. What arrived is
+  among the server's studies, "Open patient" turns the timeline to it, and
+  a timeline that already shows the patient is asked for again. Where a
+  retrieve could not arrive (the server does not listen for DICOM, or
+  does not let that system send objects here) the panel says so and the
+  buttons are off. What another system answers is its own text and is
+  shown as text. What is typed is who a patient is: it is sent when a
+  search is asked for, and nothing of it is kept.
+  `e2e/dicom-retrieve.spec.ts` finds and retrieves between two real
+  servers and compares what arrived byte for byte.
 - `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
   the data source and then built. A fetch that takes time shows progress, and
   is abandoned by a later pick, by Cancel or by an import.

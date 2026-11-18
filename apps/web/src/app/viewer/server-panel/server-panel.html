@@ -85,6 +85,15 @@
         Send…
       </button>
     }
+    @if (shown() !== 'retrieve') {
+      <button
+        type="button"
+        (click)="onView('retrieve')"
+        title="Find studies on another system and bring them to this server"
+      >
+        Retrieve…
+      </button>
+    }
     @if (mayAudit() && shown() !== 'audit') {
       <button
         type="button"
@@ -121,6 +130,8 @@
     <app-audit-panel [server]="connected" />
   } @else if (shown() === 'send') {
     <app-send-panel [server]="connected" />
+  } @else if (shown() === 'retrieve') {
+    <app-retrieve-panel [server]="connected" [disabled]="busy()" (choose)="onPatient($event)" />
   } @else if (shown() === 'dicom') {
     <app-dicom-panel [server]="connected" />
   } @else if (shown() === 'accounts') {

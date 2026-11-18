@@ -405,6 +405,7 @@ describe('ServerPanel', () => {
       expect(labels(host)).toEqual([
         'Log out and disconnect',
         'Send…',
+        'Retrieve…',
         'Audit log',
         'DICOM',
         'Accounts',
@@ -420,6 +421,7 @@ describe('ServerPanel', () => {
         'Log out and disconnect',
         'Studies',
         'Send…',
+        'Retrieve…',
         'DICOM',
         'Accounts',
       ]);
@@ -430,7 +432,12 @@ describe('ServerPanel', () => {
 
     it('is not offered to a user', async () => {
       const { host, server } = await loggedIn(ADA);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Send…', 'Your password']);
+      expect(labels(host)).toEqual([
+        'Log out and disconnect',
+        'Send…',
+        'Retrieve…',
+        'Your password',
+      ]);
       expect(server.asked.some((path) => path.startsWith('/audit'))).toBe(false);
     });
 
@@ -444,6 +451,7 @@ describe('ServerPanel', () => {
         'Log out and disconnect',
         'Studies',
         'Send…',
+        'Retrieve…',
         'Audit log',
         'DICOM',
       ]);
@@ -468,6 +476,7 @@ describe('ServerPanel', () => {
         'Log out and disconnect',
         'Studies',
         'Send…',
+        'Retrieve…',
         'Audit log',
         'Accounts',
       ]);
@@ -476,6 +485,51 @@ describe('ServerPanel', () => {
       await click('DICOM');
       await click('Studies');
       expect(host.querySelector('app-dicom-panel')).toBeNull();
+    });
+
+    it('gives way to retrieving from another system, and opens what was retrieved (#54)', async () => {
+      const { click, fixture, host, server, said } = await loggedIn(ADA);
+      // The server listens, and knows an archive that holds another patient.
+      server.dicom.local = { ...server.dicom.local, enabled: true };
+      server.dicom.remotes = [
+        {
+          id: 'system-a',
+          name: 'Archive',
+          aeTitle: 'ARCHIVE',
+          host: '192.0.2.10',
+          port: 104,
+          mayStore: true,
+          mayRetrieve: false,
+        },
+      ];
+      server.dicom.there.set('192.0.2.10:104', {
+        aeTitle: 'ARCHIVE',
+        knows: [server.dicom.local.aeTitle],
+        holds: OTHERS_FILES,
+      });
+      await click('Retrieve…');
+      expect(host.querySelector('app-retrieve-panel')).not.toBeNull();
+      expect(host.querySelector('app-server-browser')).toBeNull();
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Send…', 'Your password']);
+      await click('Search');
+      await click('Retrieve');
+      // The retrieve is followed, and what arrived can be opened.
+      const open = (): HTMLButtonElement | undefined =>
+        [...host.querySelectorAll<HTMLButtonElement>('.retrieve-list button')].find(
+          (one) => one.textContent.trim() === 'Open patient',
+        );
+      for (let i = 0; i < 200 && !open(); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await fixture.whenStable();
+      }
+      expect(host.querySelector('.retrieve-said')!.textContent.trim()).toMatch(
+        /^Retrieved: \d+ instances?\.$/,
+      );
+      const before = said.length;
+      await click('Open patient');
+      // As choosing a study does: the timeline is turned to the patient, and the card shuts.
+      expect(said.slice(before)).toEqual(['leave patient', 'closed']);
+      expect(server.asked.some((path) => path.startsWith('/studies?patientKey=2'))).toBe(true);
     });
 
     it('does not offer a user the DICOM settings', async () => {
@@ -490,7 +544,7 @@ describe('ServerPanel', () => {
       expect(host.querySelector('app-accounts-panel #own-password-title')).not.toBeNull();
       expect(host.querySelector('app-accounts-panel table')).toBeNull();
       expect(server.asked.some((path) => path.startsWith('/accounts'))).toBe(false);
-      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Send…']);
+      expect(labels(host)).toEqual(['Log out and disconnect', 'Studies', 'Send…', 'Retrieve…']);
     });
 
     it('goes back to the studies when the accounts are left by disconnecting', async () => {
@@ -504,7 +558,7 @@ describe('ServerPanel', () => {
     it('is offered on a server without accounts, whose one user is every role', async () => {
       const { click, host, text } = await render(true, [], undefined, LOG);
       await click('Connect');
-      expect(labels(host)).toEqual(['Disconnect', 'Send…', 'Audit log', 'DICOM']);
+      expect(labels(host)).toEqual(['Disconnect', 'Send…', 'Retrieve…', 'Audit log', 'DICOM']);
       await click('Audit log');
       expect(text('td.audit-who')).toEqual(['ada']);
     });

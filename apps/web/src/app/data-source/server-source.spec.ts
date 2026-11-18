@@ -1560,3 +1560,127 @@ describe('timepoints of a server’s patient (#39)', () => {
     await expect(source.saveTimepoints([])).rejects.toThrow('No patient is open.');
   });
 });
+
+describe('asking another system through a server (#54)', () => {
+  const ARCHIVE = {
+    id: 'system-a',
+    name: 'Archive',
+    aeTitle: 'ARCHIVE',
+    host: '192.0.2.10',
+    port: 104,
+    mayStore: true,
+    mayRetrieve: false,
+  };
+
+  /** A server that holds nothing and knows an archive that holds the course. */
+  async function asker() {
+    const server = fakeServer([]);
+    server.dicom.local = { ...server.dicom.local, enabled: true };
+    server.dicom.remotes = [ARCHIVE, { ...ARCHIVE, id: 'system-b', host: null, port: null }];
+    server.dicom.there.set('192.0.2.10:104', {
+      aeTitle: 'ARCHIVE',
+      knows: [server.dicom.local.aeTitle],
+      holds: syntheticRtCourse(),
+    });
+    const source = await connectToServer('http://127.0.0.1:4300', {
+      fetch: server.fetch,
+      parse: parseHere,
+    });
+    return { server, source };
+  }
+
+  it('lists the systems that can be asked, and whether a retrieve would arrive', async () => {
+    const { server, source } = await asker();
+    expect(await source.dicomSources()).toEqual([
+      { id: 'system-a', name: 'Archive', aeTitle: 'ARCHIVE', canRetrieve: true },
+    ]);
+    server.dicom.local = { ...server.dicom.local, enabled: false };
+    expect((await source.dicomSources())[0].canRetrieve).toBe(false);
+  });
+
+  it('asks for studies by the keys that are filled in, and gives the answer as it is', async () => {
+    const { server, source } = await asker();
+    const answer = await source.askDicomStudies('system-a', {
+      patientName: ' SYNTH* ',
+      patientId: '',
+      studyDate: '20260101-20260131',
+      modality: 'CT',
+    });
+    expect(server.dicom.queries).toEqual([
+      {
+        source: 'system-a',
+        level: 'study',
+        keys: { patientName: 'SYNTH*', studyDate: '20260101-20260131', modality: 'CT' },
+      },
+    ]);
+    expect(answer).toMatchObject({ outcome: 'answered', complete: true });
+    expect(answer.studies.map((study) => study.studyInstanceUid)).toEqual([COURSE.planningStudy]);
+    // That a system gave no answer is an answer; that the server refused is not.
+    server.dicom.there.clear();
+    expect(await source.askDicomStudies('system-a', {})).toMatchObject({
+      outcome: 'unreachable',
+      studies: [],
+    });
+    await expect(source.askDicomStudies('nobody', {})).rejects.toThrow(
+      'The server refused: The server knows no such system.',
+    );
+    await expect(source.askDicomStudies('system-a', { studyDate: 'soon' })).rejects.toThrow(
+      'The server refused: A date is YYYYMMDD, or a range.',
+    );
+  });
+
+  it('retrieves a study, follows it, and then knows whose it is', async () => {
+    const { server, source } = await asker();
+    const study = COURSE.planningStudy;
+    expect(await source.studyHeld(study)).toBeNull();
+    server.dicom.holdRetrieves = true;
+    const asked = await source.startDicomRetrieve('system-a', study);
+    expect(asked).toMatchObject({ studyInstanceUid: study, state: 'waiting', held: null });
+    expect(await source.dicomRetrieve(asked.id)).toMatchObject({
+      state: 'running',
+      counts: { remaining: 8, completed: 0 },
+    });
+    server.dicom.holdRetrieves = false;
+    expect(await source.dicomRetrieve(asked.id)).toMatchObject({
+      state: 'done',
+      result: 'retrieved',
+      held: 8,
+    });
+    expect((await source.dicomRetrieves()).map((one) => one.id)).toEqual([asked.id]);
+
+    // The server's patients are asked for again, and the study is someone's.
+    expect(source.patients()).toEqual([]);
+    await source.arrived();
+    expect(source.patients()).toHaveLength(1);
+    const held = await source.studyHeld(study);
+    expect(held).toEqual({
+      patient: { key: '1', patientId: 'SYN-0001', name: 'SYNTHETIC^PHANTOM' },
+      date: '20260105',
+    });
+    await source.selectPatient(held!.patient);
+    expect(source.currentPatient()?.studies).toHaveLength(1);
+    // More of the patient arrives: the timeline that is turned to them is asked for again.
+    await source.startDicomRetrieve('system-a', COURSE.followUpStudy);
+    await source.arrived();
+    expect(source.currentPatient()?.studies).toHaveLength(2);
+  });
+
+  it('says why the server does not ask for a retrieve', async () => {
+    const { server, source } = await asker();
+    const study = COURSE.planningStudy;
+    await expect(source.startDicomRetrieve('system-b', study)).rejects.toThrow(
+      'That system has no address',
+    );
+    server.dicom.remotes = [{ ...ARCHIVE, mayStore: false }];
+    await expect(source.startDicomRetrieve('system-a', study)).rejects.toThrow(
+      'That system may not send objects here',
+    );
+    server.dicom.local = { ...server.dicom.local, enabled: false };
+    await expect(source.startDicomRetrieve('system-a', study)).rejects.toThrow(
+      'The server does not listen for DICOM',
+    );
+    await expect(source.dicomRetrieve('retrieve-9')).rejects.toThrow(
+      'The server has no such retrieve.',
+    );
+  });
+});

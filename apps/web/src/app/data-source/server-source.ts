@@ -278,6 +278,10 @@ export const AUDIT_ACTIONS = [
     'dicom-destinations-read',
     'dicom-send',
     'dicom-send-read',
+    'dicom-sources-read',
+    'dicom-query',
+    'dicom-retrieve',
+    'dicom-retrieve-read',
     'request',
   ],
 ] as const;
@@ -370,6 +374,86 @@ export interface DicomSend {
   /** The send whose failures this one sends again. */
   readonly retryOf: string | null;
   readonly instances: readonly DicomSendInstance[];
+}
+
+/** A system a server can ask what it holds, and retrieve from. */
+export interface DicomSource extends DicomDestination {
+  /**
+   * Whether what it sends would arrive: the server listens for DICOM, and
+   * lets this system send objects to it.
+   */
+  readonly canRetrieve: boolean;
+}
+
+/** What studies are asked for of another system. What is left out or empty matches all. */
+export interface DicomStudyKeys {
+  readonly patientName?: string;
+  readonly patientId?: string;
+  /** A day as `YYYYMMDD`, or a range of days. */
+  readonly studyDate?: string;
+  readonly accessionNumber?: string;
+  readonly modality?: string;
+}
+
+/** A study another system says it holds. Every word of it is that system's. */
+export interface DicomFoundStudy {
+  readonly studyInstanceUid: string;
+  readonly patientId: string | null;
+  readonly patientName: string | null;
+  /** `YYYYMMDD`. */
+  readonly date: string | null;
+  readonly description: string | null;
+  readonly accessionNumber: string | null;
+  readonly modalities: readonly string[];
+  readonly series: number | null;
+  readonly instances: number | null;
+}
+
+/** Why another system gave no answer, as the server names it. */
+export const DICOM_ASK_FAILURES = ['rejected', 'unreachable', 'broken', 'not-taken'] as const;
+export type DicomAskFailure = (typeof DICOM_ASK_FAILURES)[number];
+
+/** What another system answered to a question about its studies, or why it did not. */
+export interface DicomStudyAnswer {
+  /** `answered`, or why not. A server may know reasons this viewer does not. */
+  readonly outcome: string;
+  /** False when the studies are not all that matched. */
+  readonly complete: boolean;
+  readonly studies: readonly DicomFoundStudy[];
+}
+
+/** Why a retrieve brought nothing, as the server names it. */
+export const DICOM_RETRIEVE_FAILURES = [
+  ...DICOM_ASK_FAILURES,
+  ...(['destination-unknown', 'refused', 'stopped'] as const),
+] as const;
+export type DicomRetrieveFailure = (typeof DICOM_RETRIEVE_FAILURES)[number];
+
+/** A retrieve of a study, or of a series of one, from another system: how far it is. */
+export interface DicomRetrieve {
+  readonly id: string;
+  readonly source: DicomDestination;
+  readonly studyInstanceUid: string;
+  /** The one series that was asked for; null for the whole study. */
+  readonly seriesInstanceUid: string | null;
+  readonly state: 'waiting' | 'running' | 'done';
+  readonly askedAt: string;
+  readonly finishedAt: string | null;
+  /** How far it is, as the other system tells it. */
+  readonly counts: {
+    readonly remaining: number;
+    readonly completed: number;
+    readonly failed: number;
+    readonly warning: number;
+  } | null;
+  /** `retrieved`, `partly` or `failed`, once it is done. */
+  readonly result: string | null;
+  /** Why it failed. A server may know reasons this viewer does not. */
+  readonly failure: string | null;
+  /** The status the other system ended with. */
+  readonly status: number | null;
+  /** The instances of it the server holds, once it is done. */
+  readonly held: number | null;
 }
 
 /** What to change of an account. What is left out stays as it is. */
@@ -849,6 +933,82 @@ export class ServerSource implements DataSource {
   /** The sends the server remembers, the latest first. */
   async dicomSends(signal?: AbortSignal): Promise<DicomSend[]> {
     return (await this.json<{ items: DicomSend[] }>('/dicom/sends', signal)).items;
+  }
+
+  /** The systems the server can ask what they hold. For everyone who is logged in. */
+  async dicomSources(signal?: AbortSignal): Promise<DicomSource[]> {
+    return (await this.json<{ items: DicomSource[] }>('/dicom/sources', signal)).items;
+  }
+
+  /**
+   * Have the server ask another system for the studies that match (C-FIND).
+   * That the system gave no answer is the answer's `outcome`, not a rejection.
+   */
+  async askDicomStudies(sourceId: string, keys: DicomStudyKeys): Promise<DicomStudyAnswer> {
+    // A key that is empty is not sent: the other system would match it to nothing.
+    const given = Object.fromEntries(
+      Object.entries(keys)
+        .map(([name, value]) => [name, (value ?? '').trim()] as const)
+        .filter(([, value]) => value !== ''),
+    );
+    const body = { source: sourceId, level: 'study', keys: given };
+    return (await (await this.send('POST', '/dicom/queries', body)).json()) as DicomStudyAnswer;
+  }
+
+  /**
+   * Have another system send a study to the server (C-MOVE). Answered at
+   * once; {@link dicomRetrieve} follows it.
+   */
+  async startDicomRetrieve(sourceId: string, studyUid: string): Promise<DicomRetrieve> {
+    const body = { source: sourceId, studyUid };
+    return (await (await this.send('POST', '/dicom/retrieves', body)).json()) as DicomRetrieve;
+  }
+
+  /** A retrieve as it is now. */
+  dicomRetrieve(id: string, signal?: AbortSignal): Promise<DicomRetrieve> {
+    return this.json<DicomRetrieve>(`/dicom/retrieves/${encodeURIComponent(id)}`, signal);
+  }
+
+  /** The retrieves the server remembers, the latest first. */
+  async dicomRetrieves(signal?: AbortSignal): Promise<DicomRetrieve[]> {
+    return (await this.json<{ items: DicomRetrieve[] }>('/dicom/retrieves', signal)).items;
+  }
+
+  /**
+   * A study the server holds: whose it is, so that the timeline can be
+   * turned to them, and of when. Null when the server holds nothing of it.
+   */
+  async studyHeld(
+    studyUid: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly patient: PatientSummary; readonly date: string | null } | null> {
+    try {
+      const study = await this.json<ServerStudy>(
+        `/studies/${encodeURIComponent(studyUid)}`,
+        signal,
+      );
+      return {
+        patient: {
+          key: String(study.patientKey),
+          patientId: study.patientId,
+          name: study.patientName,
+        },
+        date: study.date,
+      };
+    } catch (error) {
+      if (error instanceof ServerError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * The server holds more than it did (a retrieve arrived): its patients are
+   * asked for again, and what the timeline shows of the patient it is turned
+   * to. Nothing is said when this fails; what arrived is on the server.
+   */
+  async arrived(): Promise<void> {
+    await this.refresh().catch(() => undefined);
+    await this.listAgain();
   }
 
   /** Have the server send again what did not arrive, as a send of its own. */

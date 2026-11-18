@@ -719,7 +719,10 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   the library's client cannot do for RT objects). What another system
   answers is untrusted text and is cut down to that. A retrieve's record
   counts what the other system says it sent and, beside it, what the
-  server holds.
+  server holds. The viewer's screen for it (#54) is a panel of the server
+  card that asks the server for both and follows the retrieve; what
+  arrives is then on the server like anything else it holds, so the study
+  browser and the timeline need to know nothing of where it came from.
 - Query and retrieve (#52) is answered by the same listener, for the
   systems on the list that may: a second permission beside the one to
   store, since a system that sends objects here need not be one that reads
