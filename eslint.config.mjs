@@ -111,6 +111,63 @@ export default tseslint.config(
     extends: [...angular.configs.templateRecommended, ...angular.configs.templateAccessibility],
   },
   {
+    // The desktop application's main process, preload script and scripts run
+    // in Node (the preload script in a sandbox, with `electron` alone).
+    files: ['apps/desktop/src/**/*.{ts,cts}', 'apps/desktop/scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            NO_DEEP_IMPORTS,
+            { group: ['@angular/*', 'rxjs', 'rxjs/*'], message: 'The shell has no Angular.' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // What the shell decides (policy, files, the bridge's calls) needs no
+    // Electron, so that each rule has a test. `main.ts` hands it to Electron.
+    files: ['apps/desktop/src/**/*.ts'],
+    ignores: ['apps/desktop/src/main.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            NO_DEEP_IMPORTS,
+            { group: ['@angular/*', 'rxjs', 'rxjs/*'], message: 'The shell has no Angular.' },
+            {
+              group: ['electron', 'electron/*'],
+              message: 'Only main.ts and preload.cts import Electron; keep the rest testable.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // packages/desktop-bridge is types and checks that run anywhere, and
+    // depends on nothing.
+    files: ['packages/desktop-bridge/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...FRAMEWORK_AND_NODE,
+            {
+              group: ['@open-rt-studio/*', 'electron', 'electron/*'],
+              message: 'packages/desktop-bridge has no dependencies.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // packages/dicom depends on nothing else in the repository.
     files: ['packages/dicom/src/**/*.ts'],
     rules: {

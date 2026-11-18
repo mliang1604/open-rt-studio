@@ -65,21 +65,25 @@ recorded.
 ```
 apps/
   web/          Angular web client
-  desktop/      Electron shell (M2)
+  desktop/      Electron shell
 services/
   server/       Node server and PACS (M2)
 packages/
   dicom/        framework-free DICOM core
   render/       WebGPU renderer and pure geometry helpers
   testdata/     synthetic DICOM generators for tests and for the demo patient
+  desktop-bridge/  what the desktop application's page may ask of its main process
 native/         C++ ITK/elastix command-line tools (M3)
 docs/           this documentation
 scripts/        repository checks (license headers, DICOM guard)
 ```
 
-One addition to the proposal: `packages/testdata`, so unit and end-to-end
-tests share one set of synthetic generators. The web client also uses it, at
-run time and loaded on demand, for the synthetic demo patient.
+Two additions to the proposal. `packages/testdata`, so unit and end-to-end
+tests share one set of synthetic generators; the web client also uses it, at
+run time and loaded on demand, for the synthetic demo patient. And
+`packages/desktop-bridge` (#61), the one declaration of the calls between the
+desktop application's page and its main process, which both sides and the
+web client compile against ([Desktop](#desktop)).
 
 ### Dependency rules
 
@@ -90,6 +94,8 @@ These are enforced by lint where possible.
   no Angular, no DOM-only and no Node-only APIs.
 - `packages/render` depends only on `packages/dicom` and the WebGPU types.
 - `packages/testdata` depends only on `packages/dicom`.
+- `packages/desktop-bridge` depends on nothing, Electron included.
+- In `apps/desktop`, only `main.ts` and `preload.cts` import Electron.
 - `apps/*` and `services/*` may depend on packages. Packages never import from
   `apps/` or `services/`.
 - `services/server` has no Angular and does not import `packages/render` or
@@ -508,6 +514,64 @@ in the renderer) and a typed preload bridge. Two modes:
 
 Installers are built in CI and published on GitHub Releases, with auto-update.
 
+Decided for the shell (#61):
+
+- **The page is the web client's build, unchanged**, served to the window by
+  the main process under a scheme of its own, `app://open-rt-studio/`. It is
+  registered as `https` is (an origin, a secure context), which WebGPU, module
+  workers and the file pickers need and `file://` does not give. A request
+  reaches a file of the build or nothing; a path that names no file and has
+  no extension gets the index, as the application routes in the page.
+- **The page has no Node.** Every renderer is sandboxed (`app.enableSandbox()`),
+  with context isolation and without Node integration, in workers and frames
+  too. The end-to-end test asks the page what it can reach.
+- **A content security policy on every answer**: scripts, workers and what is
+  fetched come from the application's own files; no script written into the
+  page runs and no text is evaluated. Styles written into the page are
+  allowed, which is how Angular gives a component its styles.
+  - The web client's production build therefore **does not inline critical
+    styles** (`inlineCritical: false` in `angular.json`): inlining needs a
+    script written into the page, which the policy refuses, and the style
+    sheet then never takes effect. The same build is the one on GitHub Pages.
+  - `connect-src` is the application itself. **A server cannot be reached
+    from the desktop application until #63**, which is to open the policy to
+    the server the user connects to, and to that one.
+- **The page stays where it is.** It goes to no address outside the
+  application, opens no window, embeds no page, and is not navigated by a
+  file dropped on it. Links to other sites, if the application gets any,
+  are to be opened in the system's browser by the main process, by a rule
+  written then.
+- **Permissions are refused, all but one.** Electron grants a page whatever
+  it asks for unless told otherwise. The page may read the files and folders
+  the user picks in the system's dialog, which is how the viewer opens a
+  folder until #62; nothing else.
+- **One declaration of the bridge**, in `packages/desktop-bridge`: the name
+  on the window, each call with what it takes and gives, and the checks. The
+  main process must serve every declared call to compile; the preload script
+  is compiled against the same types and exposes one function per call,
+  never `ipcRenderer`; the page reads it with `desktopBridge()`, null in a
+  browser. A call is answered only from the top frame of a window that
+  shows the application, with exactly what it takes. It starts with one
+  call, `info()`.
+  - A sandboxed preload script can load `electron` and nothing else, so it
+    takes the declaration's types and no code; there is no bundler.
+- **What the shell decides needs no Electron** (`policy.ts`, `content.ts`,
+  `ipc.ts`), so each rule has a unit test; only `main.ts` and `preload.cts`
+  import Electron, and a lint rule holds the rest to it.
+- **Development** runs the shell on the web client's development server
+  (`npm run desktop:dev`), with the same policy plus that server's socket for
+  live reload. The server can only be a port of this machine, and an
+  installed application reads none of the development settings.
+- **Electron 45** (Chromium 156, Node 24.22). It is pinned to an exact
+  version: a new Chromium is a change to look at, not one to drift into.
+  Its Node has `node:sqlite`, which #64 needs.
+- **WebGPU** is on in that Chromium on macOS and Windows with nothing set.
+  Linux is #69.
+
+Status: **decided, and Michael's to overturn**: the scheme, that the web
+build gives up inlined critical styles for the policy, and that the desktop
+application reaches no server until #63.
+
 ## Server and PACS
 
 - Filesystem DICOM store behind an interface; SQLite and PostgreSQL index
@@ -767,8 +831,8 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   implementation on **`node:sqlite`, the SQLite that is part of Node**. That
   adds no dependency and no native module to rebuild for Electron. Node
   documents the module as a release candidate from v24.15, which is this
-  repository's minimum; whether the Node inside the chosen Electron version
-  has it is to be checked in #64. If it does not, the alternative is
+  repository's minimum; Electron 45, which the shell uses, carries Node
+  24.22, and that it works there is to be checked in #64. If it does not, the alternative is
   `better-sqlite3` (MIT), behind the same interface. Status: **decided for
   the server, to be confirmed for the desktop application.**
 - The index in PostgreSQL (#44) is a second implementation of the same

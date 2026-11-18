@@ -29,6 +29,9 @@
     "start": "npm start -w @open-rt-studio/web",
     "e2e": "npm run e2e -w @open-rt-studio/web --",
     "e2e:smoke": "npm run e2e:smoke -w @open-rt-studio/web --",
+    "desktop": "npm start -w @open-rt-studio/desktop",
+    "desktop:dev": "npm run dev -w @open-rt-studio/desktop",
+    "e2e:desktop": "npm run e2e -w @open-rt-studio/desktop --",
     "sample-data": "npm run build -w @open-rt-studio/testdata && node scripts/write-sample-data.mjs"
   },
   "devDependencies": {

@@ -21,6 +21,10 @@ application. Never commit patient data or real DICOM files
 - `packages/render`: WebGPU device setup, WGSL shaders and pure geometry
   helpers. Depends only on `packages/dicom` and the WebGPU types.
 - `packages/testdata`: synthetic DICOM generators for tests.
+- `packages/desktop-bridge`: the one declaration of what the desktop
+  application's page may ask of its main process. No dependencies. A new
+  call is declared there first; it takes the least it can and never a path,
+  a program or an address that the main process then trusts.
 - `apps/web`: the Angular application. The viewer is one large component
   (`src/app/viewer`) with controllers and stores beside it; newer pieces are
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
@@ -73,7 +77,16 @@ application. Never commit patient data or real DICOM files
   whose data it touched with `request.audit(...)`, and gets a call in
   `src/log-identifiers.spec.ts`, which searches the application log for
   identifiers.
-- `apps/desktop`, `native/`: placeholders until M2 and M3.
+- `apps/desktop`: the Electron shell (#61). The page is the web client's
+  build, served under `app://open-rt-studio/`, sandboxed and with no Node.
+  What the shell allows is decided in `src/policy.ts` (where the page may
+  go, its content security policy, its permissions), `src/content.ts` (its
+  files) and `src/ipc.ts` (its calls), which need no Electron and are unit
+  tested; only `src/main.ts` and `src/preload.cts` import Electron. Do not
+  loosen the policy to make something work: a server is reached from the
+  desktop application in #63, files through the bridge in #62. Electron is
+  pinned to an exact version.
+- `native/`: a placeholder until M3.
 - `docs/`: architecture, license headers, test data policy, the parity
   audit against dicom-workspace, the DICOM conformance statement
   ([docs/dicom-conformance.md](docs/dicom-conformance.md)): its tables are
@@ -108,6 +121,12 @@ All commands run from the repository root. Node 24.15 or newer is required
 - One workspace: add `-w <name>`, for example `npm test -w @open-rt-studio/dicom`
 - End-to-end tests: `npm run e2e` (Playwright; run `npx playwright install
 chromium` in `apps/web` once). See `apps/web/README.md`.
+- The desktop application: `npm run build`, then `npm run desktop`; on the
+  development server with live reload, `npm run desktop:dev`; its own
+  end-to-end test, `npm run e2e:desktop` (`E2E_NO_WEBGPU=1` to see what a
+  runner without a GPU sees). Electron's program is not in the npm package:
+  `node node_modules/electron/install.js` fetches it once. See
+  `apps/desktop/README.md`.
 
 CI runs the same commands in the `Build & test` job. It and `End-to-end smoke`
 (`npm run e2e:smoke`, only `apps/web/e2e/smoke.spec.ts`) are the required
@@ -128,7 +147,11 @@ the server's image with PostgreSQL, and DCMTK and Orthanc as other DICOM
 systems, through `services/server/src/integration.spec.ts` (skipped
 everywhere else); wait for it when a change touches the server, the
 Dockerfile or a compose file. Orthanc is GPL and DCMTK is not ours: both
-are test peers only, never a dependency. A separate workflow, `Publish the
+are test peers only, never a dependency. An eighth, `Desktop`, is three
+jobs (Linux, macOS, Windows): each starts the desktop application on the
+web client's build and runs `apps/desktop/e2e`; wait for all three when a
+change touches `apps/desktop`, `packages/desktop-bridge` or how the web
+client is built. A separate workflow, `Publish the
 server image`, pushes the image of `main` to GHCR after merging; look at
 its run when a change touches the Dockerfile or `compose.yaml`.
 

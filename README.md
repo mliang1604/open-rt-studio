@@ -89,6 +89,22 @@ and a click displays one.
 `npm run sample-data` writes the synthetic patients to `sample-data/` (ignored
 by git) if you want files on disk to open.
 
+### As a desktop application
+
+The same viewer in a window of its own, on macOS, Windows and Linux
+(Electron). There are no installers yet; it runs from the repository:
+
+```bash
+npm ci
+node node_modules/electron/install.js   # once: fetches Electron itself
+npm run build
+npm run desktop
+```
+
+It shows the same notice and is not for clinical use either. For now it
+opens files and the demo patient; connecting to a server from it comes
+later. See [apps/desktop/README.md](apps/desktop/README.md).
+
 ### What the viewer does
 
 - Axial, coronal and sagittal panes with pan, zoom, scroll, window/level and
@@ -170,8 +186,8 @@ npm test              # unit tests
 ```
 
 The workspaces are `packages/dicom`, `packages/render`, `packages/testdata`,
-`apps/web`, `apps/desktop` and `services/server`; `native/` holds the C++
-tools.
+`packages/desktop-bridge`, `apps/web`, `apps/desktop` and `services/server`;
+`native/` holds the C++ tools.
 
 ## License
 
