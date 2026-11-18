@@ -20,6 +20,7 @@
     "@open-rt-studio/server": "0.0.0"
   },
   "devDependencies": {
+    "@open-rt-studio/testdata": "0.0.0",
     "@playwright/test": "^1.65.0",
     "electron": "45.3.4"
   }

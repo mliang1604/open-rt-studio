@@ -16,6 +16,10 @@ export default defineConfig({
       ).pathname,
       '@open-rt-studio/server': new URL('../../services/server/src/index.ts', import.meta.url)
         .pathname,
+      '@open-rt-studio/dicom': new URL('../../packages/dicom/src/index.ts', import.meta.url)
+        .pathname,
+      '@open-rt-studio/testdata': new URL('../../packages/testdata/src/index.ts', import.meta.url)
+        .pathname,
     },
   },
   test: {
