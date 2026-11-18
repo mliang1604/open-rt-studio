@@ -12,6 +12,10 @@
     <!-- One dose of a series of several: what it is the dose of, where there is room for it. -->
     <span class="chip-dose-of">{{ of }}</span>
   }
+  @if (mark(); as mark) {
+    <!-- What the series is in a registration that is being set up (#82). -->
+    <span class="chip-mark">{{ mark }}</span>
+  }
   @if (series().derived) {
     <!-- The series says it was made from others (#254): not read from its name. -->
     <span class="chip-derived" [title]="derivedTitle">

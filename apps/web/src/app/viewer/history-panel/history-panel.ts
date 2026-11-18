@@ -8,11 +8,13 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   type ElementRef,
   inject,
   input,
   output,
   signal,
+  untracked,
   viewChild,
   type WritableSignal,
 } from '@angular/core';
@@ -108,6 +110,19 @@ export class HistoryPanel {
 
   /** Asks the viewer to load the given series (chip click / key / drop). */
   readonly loadSeries = output<SeriesSummary>();
+
+  /**
+   * What a click on a series chooses, while one is being picked for
+   * something other than display, such as "the fixed image" of a
+   * registration (#82); null when a click loads the series as always.
+   */
+  readonly picking = input<string | null>(null);
+  /** The series a click chose while {@link picking}. It is not loaded. */
+  readonly pickSeries = output<SeriesSummary>();
+  /** Asks for the picking to be given up. */
+  readonly pickCancelled = output<void>();
+  /** Series to mark on the timeline, by UID, each with a word for what it is. */
+  readonly marks = input<ReadonlyMap<string, string>>(new Map());
 
   /**
    * What to call the server this history comes from; null when it comes from
@@ -272,9 +287,19 @@ export class HistoryPanel {
     return this.loadedSet().has(series.uid);
   }
 
-  /** A chip asked to be loaded: forward it to the viewer's load path. */
+  /**
+   * A chip was clicked: it asks for its series to be loaded, unless a series
+   * is being picked for something else ({@link picking}), which it is then
+   * given to instead.
+   */
   protected onLoadSeries(series: SeriesSummary): void {
-    this.loadSeries.emit(series);
+    if (this.picking() !== null) this.pickSeries.emit(series);
+    else this.loadSeries.emit(series);
+  }
+
+  /** What a series is in whatever is being set up, for its chip; null when nothing. */
+  protected markOf(series: SeriesSummary): string | null {
+    return this.marks().get(series.uid) ?? null;
   }
 
   /** A short label for the focused patient (name, else id), shown in the header. */
@@ -306,6 +331,11 @@ export class HistoryPanel {
 
   /** Whether the panel is collapsed to its header bar. Restored from preferences. */
   protected readonly collapsed = signal(this.preferences.preferences().historyCollapsed);
+
+  /** A series can only be picked from a timeline that is open: picking opens it, for now. */
+  private readonly openedForPicking = effect(() => {
+    if (this.picking() !== null) untracked(() => this.collapsed.set(false));
+  });
 
   /** The active layout (`timeline` / `tree`). Restored from preferences. */
   protected readonly view = signal<HistoryView>(this.preferences.preferences().historyView);

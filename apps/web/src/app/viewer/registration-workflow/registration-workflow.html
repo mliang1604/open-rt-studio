@@ -1,0 +1,247 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (flow.review(); as review) {
+  <!-- Made: to be looked at, and then kept or let go of. -->
+  <p class="lead" role="status" data-step="review">
+    @if (review.method === 'by-hand') {
+      The moving image is in your hand: set it with the numbers under Layers, or drag it.
+    } @else if (review.shown) {
+      Registered. The moving image is placed by what was found.
+    } @else {
+      Registered and stored, but the two images could not be opened together to show it.
+    }
+  </p>
+  @if (review.shown) {
+    <div class="row" role="group" aria-label="Look at it">
+      <button
+        type="button"
+        (click)="layers.setViewMode('fusion')"
+        [class.active]="layers.isFusion()"
+        [attr.aria-pressed]="layers.isFusion()"
+        title="The moving image blended over the fixed one"
+      >
+        Fusion
+      </button>
+      <button
+        type="button"
+        (click)="layers.setViewMode('compare')"
+        [class.active]="layers.isCompare()"
+        [attr.aria-pressed]="layers.isCompare()"
+        title="The two images side by side, on the same planes"
+      >
+        Side by side
+      </button>
+    </div>
+  }
+  @if (review.facts.length > 0) {
+    <ul class="facts">
+      @for (fact of review.facts; track fact) {
+        <li>{{ fact }}</li>
+      }
+    </ul>
+  }
+  @if (review.warning; as warning) {
+    <p class="warning" role="alert">{{ warning }}</p>
+  }
+  <p class="note">
+    Nothing has checked this registration. Look at the two images together before it is used for
+    anything.
+  </p>
+  <label class="name">
+    <span>Name</span>
+    <input
+      #name
+      type="text"
+      [value]="review.name"
+      [maxLength]="nameLength"
+      [disabled]="flow.busy() !== null"
+      data-registration-name
+    />
+  </label>
+  <div class="row">
+    <button
+      type="button"
+      (click)="flow.accept(name.value)"
+      [disabled]="flow.busy() !== null"
+      data-registration="accept"
+      [title]="
+        review.method === 'by-hand'
+          ? 'Save it under this name as a DICOM Spatial Registration object'
+          : 'Keep it on the server, under this name'
+      "
+    >
+      {{ flow.busy() === 'accepting' ? 'Keeping…' : 'Accept' }}
+    </button>
+    <button
+      type="button"
+      (click)="flow.discard()"
+      [disabled]="flow.busy() !== null"
+      data-registration="discard"
+      [title]="
+        review.method === 'by-hand'
+          ? 'Let go of it: the moving image is again as the files have it'
+          : 'Remove it from the server again'
+      "
+    >
+      {{ flow.busy() === 'discarding' ? 'Discarding…' : 'Discard' }}
+    </button>
+  </div>
+  <p class="note" data-registration-state>
+    @if (review.method === 'by-hand') {
+      Not saved: it is in the viewer only until it is accepted.
+    } @else {
+      It is on the server already. Accept keeps it; Discard removes it there.
+    }
+  </p>
+} @else if (flow.run(); as run) {
+  <!-- A server is computing it. -->
+  <p class="lead" role="status" data-step="running">{{ runSaid() }}</p>
+  <progress
+    [attr.value]="percent() === null ? null : percent()"
+    max="100"
+    [attr.aria-label]="'Registration progress'"
+  ></progress>
+  @if (run.lost; as lost) {
+    <p class="warning" role="alert">
+      The server could not be asked how it is going; asking again. {{ lost }}
+    </p>
+  }
+  <div class="row">
+    <button
+      type="button"
+      (click)="flow.cancel()"
+      [disabled]="run.cancelling || run.opening"
+      data-registration="cancel"
+      title="Ask the server to stop. Nothing is stored of a registration that was cancelled"
+    >
+      Cancel
+    </button>
+    @if (run.lost) {
+      <button
+        type="button"
+        (click)="flow.forget()"
+        title="Stop following it here. The server may go on, and store what it finds"
+      >
+        Stop following
+      </button>
+    }
+  </div>
+} @else {
+  <!-- The set-up: which two, and how. -->
+  <div class="ends">
+    @for (end of ['fixed', 'moving']; track end) {
+      <div class="end" [attr.data-end]="end">
+        <span class="end-role">{{ end === 'fixed' ? 'Fixed' : 'Moving' }}</span>
+        <span
+          class="end-series"
+          [class.none]="!(end === 'fixed' ? flow.fixed() : flow.moving())"
+          [title]="said(end === 'fixed' ? flow.fixed() : flow.moving())"
+        >
+          {{ said(end === 'fixed' ? flow.fixed() : flow.moving()) }}
+        </span>
+        <button
+          type="button"
+          (click)="flow.pick(end === 'fixed' ? 'fixed' : 'moving')"
+          [class.active]="flow.picking() === end"
+          [attr.aria-pressed]="flow.picking() === end"
+          [attr.data-pick]="end"
+          [title]="
+            end === 'fixed'
+              ? 'Choose the fixed image on the timeline: the one that stays where it is'
+              : 'Choose the moving image on the timeline: the one that is brought to the fixed one'
+          "
+        >
+          Pick…
+        </button>
+      </div>
+    }
+  </div>
+  @if (flow.picking(); as picking) {
+    <p class="lead" role="status" data-picking>
+      Click a series on the timeline below for the {{ picking }} image.
+    </p>
+  }
+  <div class="row">
+    <button
+      type="button"
+      (click)="flow.swap()"
+      [disabled]="!flow.fixed() && !flow.moving()"
+      title="The fixed image becomes the moving one, and the moving one the fixed"
+    >
+      Swap
+    </button>
+  </div>
+
+  <fieldset>
+    <legend>How</legend>
+    @for (choice of methods(); track choice.method) {
+      <label [title]="choice.title" [class.unoffered]="!choice.offered">
+        <input
+          type="radio"
+          name="registration-method"
+          [value]="choice.method"
+          [checked]="flow.method() === choice.method"
+          [disabled]="!choice.offered"
+          (change)="onMethod(choice.method)"
+        />
+        {{ choice.label }}
+      </label>
+    }
+  </fieldset>
+  @if (computingSaid(); as said) {
+    <p class="note" data-computing>
+      {{ said }}
+      @if (flow.computing().kind === 'unreachable') {
+        <button type="button" class="inline" (click)="flow.askAgain()">Ask again</button>
+      }
+    </p>
+  }
+  @if (flow.method() === 'deformable') {
+    <label class="name">
+      <span>Preset</span>
+      <select (change)="onPreset($event)" data-registration-preset>
+        @for (preset of presets(); track preset.name) {
+          <option [value]="preset.name" [selected]="preset.name === flow.chosenPreset()?.name">
+            {{ preset.title }}
+          </option>
+        }
+      </select>
+    </label>
+    @if (flow.chosenPreset(); as preset) {
+      <p class="note">{{ preset.description }}</p>
+    }
+  }
+  @if (automatic() && flow.screenPlacement()) {
+    <label
+      class="check"
+      title="Give the server where the moving image is over the fixed one on screen now, to start from. Without it, it starts with the two images’ middles on each other"
+    >
+      <input
+        type="checkbox"
+        [checked]="flow.fromScreen()"
+        (change)="onFromScreen($event)"
+        data-from-screen
+      />
+      Start from where the moving image is placed now
+    </label>
+  }
+  <div class="row">
+    <button
+      type="button"
+      class="primary"
+      (click)="flow.start()"
+      [disabled]="flow.cannotStart() !== null || flow.busy() !== null"
+      data-registration="start"
+    >
+      {{ flow.busy() === 'starting' ? 'Starting…' : automatic() ? 'Register' : 'Register by hand' }}
+    </button>
+  </div>
+  @if (flow.cannotStart(); as why) {
+    <p class="note" data-cannot-start>{{ why }}</p>
+  }
+}
+@if (flow.problem(); as problem) {
+  <p class="warning" role="alert" data-registration-problem>{{ problem }}</p>
+}

@@ -186,17 +186,23 @@ export class ManualRegistrationController {
    * Save a layer's registration by hand as a DICOM Spatial Registration
    * object. Where it goes is the data source's to say: a download for opened
    * files, an upload for a server. Each save is a new object; saving twice
-   * leaves two, and neither replaces the other.
+   * leaves two, and neither replaces the other. It goes by `name` when one is
+   * given, and by when it was made otherwise. True when it was saved.
    */
-  async save(id: string): Promise<void> {
+  async save(id: string, name?: string): Promise<boolean> {
     const hand = this.store.byHand().get(id);
     const placement = this.layersCtl.layers().find((one) => one.id === id)?.placement;
-    if (!hand || !placement?.steps[0]?.byHand || this.saving() !== null) return;
+    if (!hand || !placement?.steps[0]?.byHand || this.saving() !== null) return false;
     this.saving.set(id);
-    let name = 'The registration';
+    let said = 'The registration';
     try {
-      const file = registrationByHandFile(placement, this.deps?.baseSeries() ?? null, new Date());
-      name = `“${file.name}”`;
+      const file = registrationByHandFile(
+        placement,
+        this.deps?.baseSeries() ?? null,
+        new Date(),
+        name,
+      );
+      said = `“${file.name}”`;
       const outcome = await this.source.save({
         bytes: file.bytes,
         filename: file.filename,
@@ -205,13 +211,15 @@ export class ManualRegistrationController {
       this.store.markByHandSaved(id, hand.params);
       this.deps?.notify(
         outcome.kind === 'stored'
-          ? `Saved the registration ${name} (${outcome.where}). It comes with either series the next time one is loaded.`
-          : `Saved the registration ${name} as a file. Open it with these images to place the series by it again.`,
+          ? `Saved the registration ${said} (${outcome.where}). It comes with either series the next time one is loaded.`
+          : `Saved the registration ${said} as a file. Open it with these images to place the series by it again.`,
         false,
       );
+      return true;
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
-      this.deps?.notify(`${name} was not saved. ${why}`, true);
+      this.deps?.notify(`${said} was not saved. ${why}`, true);
+      return false;
     } finally {
       this.saving.set(null);
     }

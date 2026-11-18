@@ -199,6 +199,22 @@
       </div>
     </details>
 
+    @if (status.hasCatalog()) {
+      <!-- From two series to a registration that was looked at and kept (#82).
+           Closed until it is asked for; open while something is under way. -->
+      <details
+        class="tool-group"
+        [open]="registrationOpen()"
+        (toggle)="onRegistrationToggle($event)"
+        data-registration-group
+      >
+        <summary class="tool-group-label">Registration</summary>
+        <div class="tool-group-body">
+          <app-registration-workflow />
+        </div>
+      </details>
+    }
+
     @if (layersCtl.hasLayersPanel()) {
       <details class="tool-group" open>
         <summary class="tool-group-label">Layers</summary>
@@ -1716,6 +1732,10 @@
   [server]="serverLabel()"
   [patients]="openPatients()"
   (loadSeries)="loadCtl.loadSeriesFromPanel($event.uid)"
+  [picking]="registrationPicking()"
+  [marks]="registration.marks()"
+  (pickSeries)="registration.picked($event)"
+  (pickCancelled)="registration.picking.set(null)"
   (openPair)="loadCtl.openPair($event.baseUid, $event.overlayUid)"
   (openServer)="serverPanelOpen.set(true)"
   (choosePatient)="loadCtl.switchPatient($event)"

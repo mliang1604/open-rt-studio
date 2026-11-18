@@ -6,11 +6,15 @@
 // worker. The real server is in the end-to-end tests.
 
 import {
+  deformableTransform,
+  matrixTransform,
   parseFileAsync,
   parseDeformableRegistration,
   parseSpatialRegistration,
   parseStructureSet,
   readInstanceHeader,
+  writeDeformableRegistration,
+  writeSpatialRegistration,
   type InstanceHeader,
   type Slice,
   type RegistrationObject,
@@ -19,7 +23,7 @@ import {
 import type { SyntheticFile } from '@open-rt-studio/testdata';
 
 import type { ParsedFiles } from '../parse-pool';
-import type { AuditEntry, DicomTlsFailure } from './server-source';
+import type { AuditEntry, DicomTlsFailure, RegistrationPreset, ServerJob } from './server-source';
 
 /** What the worker pool does, on this thread. */
 export async function parseHere(files: readonly File[]): Promise<ParsedFiles> {
@@ -83,6 +87,39 @@ export interface FakeServer {
   noDerived: boolean;
   /** Its DICOM settings (#53) as they now are, and the network it calls into. A spec may change them. */
   readonly dicom: FakeDicom;
+  /** Its jobs (#82): what it can compute, and what it was asked to. A spec moves a job along. */
+  readonly jobs: FakeJobs;
+}
+
+/** A job of a stand-in server. */
+export interface FakeJob extends ServerJob {
+  readonly inputs: Record<string, unknown>;
+}
+
+/** The jobs side of a stand-in server: registrations, which it does not compute. */
+export interface FakeJobs {
+  /** The kinds it runs. None to begin with: a server without the registration tools. */
+  kinds: string[];
+  presets: RegistrationPreset[];
+  /** True for a server from before it listed presets. */
+  noPresets: boolean;
+  /** What the next submission is refused with, as the kind's words; null to take it. */
+  refuse: string | null;
+  /** The jobs it was asked for, the earliest first, each as it is now. */
+  readonly list: FakeJob[];
+  /** A job says how far it is. */
+  progress(id: string, progress: number, message: string): void;
+  /**
+   * A registration job ends well: a registration object between the two
+   * series is stored, as the real job stores one, and the job names it. The
+   * moving image's coordinates are taken for the fixed image's, moved by
+   * `shift` (in mm).
+   */
+  succeed(id: string, shift?: readonly [number, number, number]): void;
+  /** A job fails, with the server's word for how and, for a step of its own, for why. */
+  fail(id: string, failure: string, message?: string): void;
+  /** From now on a discard is refused as the server does when it cannot remove what was made. */
+  discardFails: boolean;
 }
 
 /** The DICOM side of a stand-in server. */
@@ -672,9 +709,210 @@ export function fakeServer(
     return missing();
   };
 
+  // ---- Jobs (#82) ----------------------------------------------------------
+  const jobList: FakeJob[] = [];
+  const change = (id: string, patch: Partial<FakeJob>): FakeJob => {
+    const at = jobList.findIndex((one) => one.id === id);
+    if (at < 0) throw new Error(`no such job: ${id}`);
+    jobList[at] = { ...jobList[at], ...patch };
+    return jobList[at];
+  };
+  const firstOf = (seriesUid: unknown): Held => {
+    const first = held.find(
+      (one) => one.header.series.uid === seriesUid && one.header.series.frameOfReferenceUid,
+    );
+    if (!first) throw new Error('the job names a series the stand-in does not hold');
+    return first;
+  };
+  const jobs: FakeJobs = {
+    kinds: [],
+    presets: [],
+    noPresets: false,
+    refuse: null,
+    discardFails: false,
+    list: jobList,
+    progress: (id, progress, message) => void change(id, { status: 'running', progress, message }),
+    fail: (id, failure, message) =>
+      void change(id, { status: 'failed', failure, message: message ?? null }),
+    succeed(id, shift = [0, 0, 0]) {
+      const job = jobList.find((one) => one.id === id);
+      if (!job) throw new Error(`no such job: ${id}`);
+      const fixed = firstOf(job.inputs['fixedSeriesUid']).header;
+      const moving = firstOf(job.inputs['movingSeriesUid']).header;
+      const [fixedFrame, movingFrame] = [fixed, moving].map(
+        (one) => one.series.frameOfReferenceUid!,
+      );
+      const deformable = job.kind === 'deformable-registration';
+      const fixedToMoving = [
+        ...[1, 0, 0, -shift[0]],
+        ...[0, 1, 0, -shift[1]],
+        ...[0, 0, 1, -shift[2]],
+        ...[0, 0, 0, 1],
+      ];
+      const movingToFixed = fixedToMoving.map((value, at) => (at % 4 === 3 ? -value || 0 : value));
+      movingToFixed[15] = 1;
+      const filed = {
+        patientName: fixed.patient.name ?? undefined,
+        patientId: fixed.patient.id,
+        studyInstanceUid: fixed.study.uid,
+        studyDate: fixed.study.date ?? undefined,
+        seriesDescription: deformable
+          ? 'Automatic deformable registration'
+          : 'Automatic rigid registration',
+        description: deformable
+          ? `Automatic deformable ${String(job.inputs['preset'])} 2026-11-18 09:05`
+          : 'Automatic rigid 2026-11-18 09:05',
+        createdAt: new Date(2026, 10, 18, 9, 5),
+      };
+      const bytes = new Uint8Array(
+        deformable
+          ? writeDeformableRegistration(
+              {
+                registeredFrame: fixedFrame,
+                transforms: [
+                  deformableTransform({
+                    id: 'made',
+                    from: fixedFrame,
+                    to: movingFrame,
+                    // Two points each way, a millimetre moved at each.
+                    grid: {
+                      dims: [2, 2, 2],
+                      origin: [0, 0, 0],
+                      spacing: [100, 100, 100],
+                      axes: [
+                        [1, 0, 0],
+                        [0, 1, 0],
+                        [0, 0, 1],
+                      ],
+                      vectors: new Float32Array(24).fill(1),
+                    },
+                    post: fixedToMoving,
+                  }),
+                ],
+              },
+              filed,
+            )
+          : writeSpatialRegistration(
+              {
+                registeredFrame: fixedFrame,
+                transforms: [
+                  matrixTransform({
+                    id: 'made',
+                    from: movingFrame,
+                    to: fixedFrame,
+                    matrix: movingToFixed,
+                  }),
+                ],
+              },
+              filed,
+            ),
+      );
+      const read = readInstanceHeader(bytes);
+      if (!read.ok) throw new Error('the stand-in wrote what it cannot read');
+      held.push({ header: read.header, bytes });
+      change(id, {
+        status: 'succeeded',
+        progress: 1,
+        message: 'Done',
+        result: {
+          sopInstanceUid: read.header.sopInstanceUid,
+          seriesInstanceUid: read.header.series.uid,
+          studyInstanceUid: read.header.study.uid,
+          fixedFrameOfReferenceUid: fixedFrame,
+          movingFrameOfReferenceUid: movingFrame,
+          seed: 121212,
+          ...(deformable
+            ? {
+                preset: job.inputs['preset'],
+                fixedToMovingAfterField: fixedToMoving,
+                fieldSize: [2, 2, 2],
+                largestMm: 1.7321,
+                foldedPoints: 0,
+              }
+            : { movingToFixed, fixedToMoving }),
+        },
+      });
+    },
+  };
+  /** A request about jobs, answered as the server answers it. */
+  const answerJobs = (path: string, verb: string, body: () => unknown): Response => {
+    if (path === '/job-kinds') {
+      return json({ items: jobs.kinds.map((name) => ({ name, description: '' })) });
+    }
+    if (path === '/registration-presets') {
+      return jobs.noPresets ? missing() : json({ items: jobs.presets });
+    }
+    if (path === '/jobs' && verb === 'POST') {
+      const { kind, inputs = {} } = body() as { kind: string; inputs?: Record<string, unknown> };
+      if (!jobs.kinds.includes(kind)) {
+        return json(
+          { error: 'unknown-kind', message: 'The server has no job kind of that name.' },
+          400,
+        );
+      }
+      if (jobs.refuse !== null) {
+        return json({ error: 'invalid-inputs', message: jobs.refuse }, 400);
+      }
+      const job: FakeJob = {
+        id: `00000000-0000-4000-8000-${String(jobList.length + 1).padStart(12, '0')}`,
+        kind,
+        inputs,
+        status: 'queued',
+        progress: null,
+        message: null,
+        result: null,
+        failure: null,
+        discardedAt: null,
+      };
+      jobList.push(job);
+      return json(job, 202);
+    }
+    const [, , id, what] = path.split('/');
+    const job = jobList.find((one) => one.id === id);
+    if (!job) return missing();
+    if (what === undefined && verb === 'GET') return json(job);
+    if (what === 'cancel' && verb === 'POST') {
+      // One that waits is cancelled at once; one that runs, when its worker has ended.
+      if (job.status === 'queued') return json(change(job.id, { status: 'cancelled' }));
+      if (job.status === 'running') {
+        queueMicrotask(() => {
+          if (jobList.find((one) => one.id === id)?.status === 'running') {
+            change(job.id, { status: 'cancelled' });
+          }
+        });
+      }
+      return json(job);
+    }
+    if (what === 'discard' && verb === 'POST') {
+      if (job.discardedAt !== null) return json(job);
+      if (job.status !== 'succeeded' || job.result === null) {
+        return json(
+          {
+            error: 'nothing-to-discard',
+            message: 'The job made nothing that can be discarded.',
+          },
+          409,
+        );
+      }
+      if (jobs.discardFails) {
+        return json(
+          { error: 'not-discarded', message: 'What the job made could not be removed.' },
+          500,
+        );
+      }
+      const at = held.findIndex(
+        (one) => one.header.sopInstanceUid === job.result!['sopInstanceUid'],
+      );
+      if (at >= 0) held.splice(at, 1);
+      return json(change(job.id, { discardedAt: '2026-11-18T09:10:00.000Z' }));
+    }
+    return missing();
+  };
+
   const server: FakeServer = {
     asked,
     dicom,
+    jobs,
     uploads: [],
     loseUploads: () => (uploadsLost = true),
     endSessions: () => sessions.clear(),
@@ -756,6 +994,14 @@ export function fakeServer(
       }
       if (/^\/dicom\/(sources|queries|retrieves)(\/|$)/.test(path)) {
         return answerAsk(path, init?.method ?? 'GET', () => JSON.parse(String(init?.body)));
+      }
+      if (
+        path === '/job-kinds' ||
+        path === '/registration-presets' ||
+        path === '/jobs' ||
+        path.startsWith('/jobs/')
+      ) {
+        return answerJobs(path, init?.method ?? 'GET', () => JSON.parse(String(init?.body)));
       }
       if (path === '/dicom/destinations' || path.startsWith('/dicom/sends')) {
         return answerSend(path, init?.method ?? 'GET', () => JSON.parse(String(init?.body)));
