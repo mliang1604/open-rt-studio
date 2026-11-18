@@ -6,6 +6,7 @@ import { syntheticRtCourse } from '@open-rt-studio/testdata';
 import { expect, test, type Page } from '@playwright/test';
 
 import { preAcknowledge, requireWebGpu } from './fixtures/app';
+import { listenForDicom, serverApi, storedDataSet } from './fixtures/dicom-peers';
 import { startTestServer, type TestServer } from './fixtures/server';
 import { connectTo, openServerCard, studyRows } from './fixtures/server-card';
 
@@ -23,30 +24,6 @@ let destination: TestServer;
 /** The id the source knows the destination by, and where the destination listens. */
 let planning: { id: string; port: number };
 
-async function api<T>(
-  server: TestServer,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<T> {
-  const response = await fetch(`${server.address}/api/v1${path}`, {
-    method,
-    ...(body === undefined
-      ? {}
-      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  });
-  if (!response.ok) throw new Error(`${method} ${path}: ${response.status}`);
-  return (await response.json()) as T;
-}
-
-/** The data set of a stored file: what follows the preamble, `DICM` and the meta group. */
-async function dataSet(server: TestServer, sopInstanceUid: string): Promise<Buffer> {
-  const response = await fetch(`${server.address}/api/v1/instances/${sopInstanceUid}/file`);
-  expect(response.status).toBe(200);
-  const file = Buffer.from(await response.arrayBuffer());
-  return file.subarray(144 + file.readUInt32LE(140));
-}
-
 const PLANNING = { name: 'Planning', aeTitle: 'DEST', host: '127.0.0.1', mayStore: false };
 
 test.beforeAll(async () => {
@@ -54,25 +31,18 @@ test.beforeAll(async () => {
   destination = await startTestServer();
   await source.upload(syntheticRtCourse());
   // The destination listens, and lets the source in.
-  const listening = await api<{ listening: { port: number } }>(destination, 'PUT', '/dicom/local', {
-    enabled: true,
-    port: 0,
-    aeTitle: 'DEST',
-  });
-  await api(destination, 'POST', '/dicom/remotes', {
-    name: 'The source',
-    aeTitle: 'SOURCE',
-    host: null,
-    port: null,
-    mayStore: true,
-  });
+  const port = await listenForDicom(destination, 'DEST', 'SOURCE');
   // The source knows the destination, at first at an address where nothing is.
-  await api(source, 'PUT', '/dicom/local', { enabled: false, port: 11112, aeTitle: 'SOURCE' });
-  const known = await api<{ id: string }>(source, 'POST', '/dicom/remotes', {
+  await serverApi(source, 'PUT', '/dicom/local', {
+    enabled: false,
+    port: 11112,
+    aeTitle: 'SOURCE',
+  });
+  const known = await serverApi<{ id: string }>(source, 'POST', '/dicom/remotes', {
     ...PLANNING,
     port: 9,
   });
-  planning = { id: known.id, port: listening.listening.port };
+  planning = { id: known.id, port };
 });
 test.afterAll(async () => {
   await source.stop();
@@ -91,7 +61,7 @@ const sends = (page: Page) =>
       ]),
     );
 const held = async (server: TestServer): Promise<number> =>
-  (await api<{ instances: number }>(server, 'GET', '/counts')).instances;
+  (await serverApi<{ instances: number }>(server, 'GET', '/counts')).instances;
 
 test('a series and a structure set are sent to another system, and what failed is sent again', async ({
   page,
@@ -126,7 +96,10 @@ test('a series and a structure set are sent to another system, and what failed i
   expect(await held(destination)).toBe(0);
 
   // The address is put right, and what failed is sent again.
-  await api(source, 'PUT', `/dicom/remotes/${planning.id}`, { ...PLANNING, port: planning.port });
+  await serverApi(source, 'PUT', `/dicom/remotes/${planning.id}`, {
+    ...PLANNING,
+    port: planning.port,
+  });
   await panel(page)
     .getByRole('button', { name: 'Send again what failed of Synthetic CT ramp to Planning' })
     .click();
@@ -148,7 +121,7 @@ test('a series and a structure set are sent to another system, and what failed i
   expect(await held(destination)).toBe(4);
 
   // What arrived is what the source holds, byte for byte.
-  const arrived = await api<{ items: { instances: { sopInstanceUid: string }[] }[] }>(
+  const arrived = await serverApi<{ items: { instances: { sopInstanceUid: string }[] }[] }>(
     source,
     'GET',
     '/dicom/sends',
@@ -158,7 +131,10 @@ test('a series and a structure set are sent to another system, and what failed i
     .flatMap((send) => send.instances.map((one) => one.sopInstanceUid));
   expect(uids).toHaveLength(4);
   for (const uid of uids) {
-    expect((await dataSet(destination, uid)).equals(await dataSet(source, uid)), uid).toBe(true);
+    expect(
+      (await storedDataSet(destination, uid)).equals(await storedDataSet(source, uid)),
+      uid,
+    ).toBe(true);
   }
 
   // The sends are the server's: they are there for a panel opened anew.

@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { readInstanceHeader } from '@open-rt-studio/dicom';
+import { readInstanceHeader, SUM_RECORD_CREATOR } from '@open-rt-studio/dicom';
 import { syntheticCtSeries, syntheticRtCourse, type SyntheticFile } from '@open-rt-studio/testdata';
 
 import { sopInstanceUidOf } from '../store/testing.js';
@@ -31,12 +31,13 @@ import {
   startTestListener,
   type TestListener,
 } from './testing/peer.js';
+import { syntheticSummedDose } from './testing/summed-dose.js';
 
 const run = promisify(execFile);
 const installed = (tool: string): boolean =>
   spawnSync(tool, ['--version'], { stdio: 'ignore' }).status === 0;
 const required = process.env['REQUIRE_DCMTK'] === '1';
-const dcmtk = required || ['echoscu', 'storescu', 'storescp'].every(installed);
+const dcmtk = required || ['echoscu', 'storescu', 'storescp', 'dcmdump'].every(installed);
 
 let directory = '';
 const open: TestListener[] = [];
@@ -186,6 +187,22 @@ describe.skipIf(!dcmtk)('against DCMTK', () => {
         files[i].name,
       ).toBe(true);
     }
+  });
+
+  // #101: a summed dose as the viewer saves it can be sent to a test peer.
+  it('storescp takes a summed dose as it was saved, the private block with it', async () => {
+    const { port, folder } = await storescp(['--bit-preserving']);
+    const object = outgoingFrom(syntheticSummedDose())!;
+    expect(await sendObjects(target(port), [object])).toEqual([
+      { outcome: 'stored', status: 0, rewritten: false },
+    ]);
+    const theirs = await written(folder);
+    expect(theirs).toHaveLength(1);
+    expect(Buffer.from(dataSetOf(theirs[0])!).equals(Buffer.from(object.dataSet))).toBe(true);
+    // And DCMTK's own reader reads it: a dose, with the private block's creator.
+    const { stdout } = await run('dcmdump', [join(folder, (await readdir(folder))[0])]);
+    expect(stdout).toContain('RTDOSE');
+    expect(stdout).toContain(SUM_RECORD_CREATOR);
   });
 
   it('storescp that takes only Implicit VR has each object written anew, and reads it', async () => {

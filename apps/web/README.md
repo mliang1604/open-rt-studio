@@ -192,7 +192,8 @@ Viewer (`src/app/viewer`):
   server's and are there for a panel opened anew. Choosing a patient shuts
   the server card, so the way to it is "Server…" in the history bar, then
   "Send…". `e2e/dicom-send.spec.ts` sends between two real servers and
-  compares what arrived byte for byte.
+  compares what arrived byte for byte; `e2e/dose-sum.spec.ts` does the same
+  with a summed dose as the viewer saved it (#101).
 - `load-controller.ts`, `load-coordinator.ts`: a series pick is fetched from
   the data source and then built. A fetch that takes time shows progress, and
   is abandoned by a later pick, by Cancel or by an import.

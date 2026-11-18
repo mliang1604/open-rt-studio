@@ -471,6 +471,7 @@ export {
   doseKind,
   doseOrientation,
   dosePlanes,
+  SUM_RECORD_CREATOR,
   doseScaling,
   doseSumName,
   doseSumText,
