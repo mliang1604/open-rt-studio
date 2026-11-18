@@ -1,0 +1,25 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# For the integration check only (scripts/integration-check.sh, CI's
+# "Integration" job): the server's DICOM port, and Orthanc as another DICOM
+# system for it to talk to. Not a way to run the server.
+#
+# Orthanc is GPL. It is a test peer here, pulled as its own image and spoken
+# to over the network; it is not part of the server's image, not linked, and
+# not something this project ships. It holds synthetic data, for as long as
+# the check runs, on this machine only, and asks for no login.
+
+services:
+  server:
+    ports:
+      # The DICOM listener, which the check turns on through the API.
+      - '127.0.0.1:11112:11112'
+
+  orthanc:
+    image: jodogne/orthanc:1.13.1
+    ports:
+      - '127.0.0.1:8042:8042'
+    volumes:
+      - ./scripts/integration/orthanc.json:/etc/orthanc/orthanc.json:ro

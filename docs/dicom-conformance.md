@@ -587,6 +587,10 @@ In the project's continuous integration, with synthetic data only:
   objects compared byte for byte in both directions.
 - The same `echoscu`, `storescu` and `storescp` over TLS.
 - The server's own listener and clients against each other.
+- Orthanc 1.13.1, with the server in its container: the server's C-ECHO,
+  C-STORE, C-FIND and C-MOVE to Orthanc, and Orthanc's C-ECHO, C-FIND,
+  C-MOVE and C-GET to the server, without TLS. That every object arrived is
+  checked by count, not byte for byte.
 
 Nothing else: no commercial PACS, treatment planning system or modality.
 

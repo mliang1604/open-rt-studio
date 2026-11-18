@@ -122,7 +122,14 @@ touches DICOM networking. A sixth, `PostgreSQL index`, runs the index's
 tests and a whole server against a PostgreSQL it starts as a service; those
 tests are skipped where `OPEN_RT_STUDIO_TEST_POSTGRES` names none, so wait
 for the job when a change touches `src/pacs-index` or how the server opens
-its index.
+its index. A seventh, `Integration`, runs `scripts/integration-check.sh`:
+the server's image with PostgreSQL, and DCMTK and Orthanc as other DICOM
+systems, through `services/server/src/integration.spec.ts` (skipped
+everywhere else); wait for it when a change touches the server, the
+Dockerfile or a compose file. Orthanc is GPL and DCMTK is not ours: both
+are test peers only, never a dependency. A separate workflow, `Publish the
+server image`, pushes the image of `main` to GHCR after merging; look at
+its run when a change touches the Dockerfile or `compose.yaml`.
 
 ## Patterns
 

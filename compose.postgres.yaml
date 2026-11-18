@@ -1,0 +1,61 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# The server of compose.yaml with its index in PostgreSQL, for a server with
+# many users. Not for clinical use.
+#
+#   export OPEN_RT_STUDIO_DATABASE_PASSWORD="$(openssl rand -hex 24)"
+#   docker compose -f compose.yaml -f compose.postgres.yaml up --build --detach
+#   docker compose -f compose.yaml -f compose.postgres.yaml run --rm server account add <name> --admin
+#
+# The password is of the database in this project, which only the server
+# reaches: it has no port on this machine. Keep it (an .env file beside this
+# one will do, and is not committed): PostgreSQL takes it when the volume is
+# first made, and a different one later is refused, not adopted.
+#
+# The index is then in the volume `index` and the instances, accounts and
+# audit log in `data`, as before. A server that already has data starts with
+# an empty index here: see services/server/README.md ("In PostgreSQL").
+
+services:
+  server:
+    environment:
+      # No password in the address: PGPASSWORD is read by the server's
+      # PostgreSQL client, and the address is the one thing that may be shown.
+      OPEN_RT_STUDIO_DATABASE_URL: postgresql://open_rt_studio@postgres:5432/open_rt_studio
+      PGPASSWORD: ${OPEN_RT_STUDIO_DATABASE_PASSWORD:?Set OPEN_RT_STUDIO_DATABASE_PASSWORD to a password for the database of this project}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: open_rt_studio
+      POSTGRES_DB: open_rt_studio
+      POSTGRES_PASSWORD: ${OPEN_RT_STUDIO_DATABASE_PASSWORD:?Set OPEN_RT_STUDIO_DATABASE_PASSWORD to a password for the database of this project}
+    volumes:
+      # The index: patient names and IDs. Guard it like the data it is.
+      - index:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready --username open_rt_studio --dbname open_rt_studio']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      # What the image's start needs to hand its data directory to the user
+      # PostgreSQL runs as, and to become that user.
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  index:

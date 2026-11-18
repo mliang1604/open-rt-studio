@@ -729,9 +729,32 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   `curl` is installed for it. `compose.yaml` publishes the port to this
   machine only, because the server speaks plain HTTP until it is given a
   certificate. CI builds the image and checks it from outside
-  (`scripts/container-check.sh`); it publishes nothing. Not there: a
-  published image and PostgreSQL in the compose file (#59). Status: **decided, and Michael's to overturn**: the base image, and
-  whether and where an image is published.
+  (`scripts/container-check.sh`). Status: **decided, and Michael's to
+  overturn**: the base image.
+
+- **PostgreSQL in compose, the image in a registry, and an integration
+  check** (#59).
+  - **PostgreSQL is an override**, `compose.postgres.yaml`, as HTTPS is:
+    `compose.yaml` alone stays one container with nothing to set. The
+    database has no port on the machine, and its password is asked for, not
+    defaulted.
+  - **The image of `main` is published to GHCR** by a workflow of its own,
+    after the container check has passed on that very image, as `:main` and
+    `:sha-<commit>`. There are no version tags, because the server has no
+    versions yet. The workflow logs in with the job's own token and uses no
+    action but checkout.
+  - **The integration check** (`scripts/integration-check.sh`, the
+    `Integration` job) runs the image with PostgreSQL and has DCMTK and
+    Orthanc as other systems, in both directions. Orthanc is the first PACS
+    that is not DCMTK that the server has been tried against. It is GPL, so
+    it is a test peer only: pulled as its own image, spoken to over the
+    network, never bundled or linked. The scenarios are a spec
+    (`integration.spec.ts`) so that they can use the generators; it is
+    skipped unless the script runs it.
+
+  Status: **decided, and Michael's to overturn**: that the image is
+  published at all and from every change to `main`, and that PostgreSQL is
+  an override and not the default.
 
 - The file store (#42) names an instance's files by the SHA-256 of its SOP
   Instance UID, so that paths hold no patient identifier and not the UID
