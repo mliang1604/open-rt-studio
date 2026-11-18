@@ -13,7 +13,9 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
 import { expectNoProblems, preAcknowledge, requireWebGpu, watchProblems } from './fixtures/app';
+import { listenForDicom, sendAndWait, serverApi, storedDataSet } from './fixtures/dicom-peers';
 import { fuseChipByDrag, importFiles } from './fixtures/load';
+import { startTestServer } from './fixtures/server';
 
 // Summing the doses of two timepoints (#102). The synthetic patient was
 // treated twice: a first course of 30 fractions whose dose is a ramp in the
@@ -414,6 +416,61 @@ test('a sum saved as an RT Dose is the sum when it is opened again', async ({ pa
   // It is a sum already: it is not offered to be summed again.
   await page.locator('[data-dose-sum-open]').click();
   await expect(panel.locator('[data-sum-dose]')).toHaveCount(2);
+
+  // Sent to another system (#101): the file as it was saved is stored on a
+  // server, which sends it to a second by C-STORE. What arrives is the file's
+  // own data set, the private block that says where the sum is known with it.
+  const source = await startTestServer();
+  const destination = await startTestServer();
+  try {
+    await source.upload([{ name: filename, mimeType: 'application/dicom', bytes }]);
+    const port = await listenForDicom(destination, 'DEST', 'SOURCE');
+    await serverApi(source, 'PUT', '/dicom/local', {
+      enabled: false,
+      port: 11112,
+      aeTitle: 'SOURCE',
+    });
+    const peer = await serverApi<{ id: string }>(source, 'POST', '/dicom/remotes', {
+      name: 'A test peer',
+      aeTitle: 'DEST',
+      host: '127.0.0.1',
+      port,
+      mayStore: false,
+    });
+    const held = await serverApi<{ items: { studyInstanceUid: string }[] }>(
+      source,
+      'GET',
+      '/studies',
+    );
+    expect(held.items).toHaveLength(1);
+    const series = await serverApi<{ items: { seriesInstanceUid: string; modality: string }[] }>(
+      source,
+      'GET',
+      `/studies/${held.items[0].studyInstanceUid}/series`,
+    );
+    expect(series.items.map((one) => one.modality)).toEqual(['RTDOSE']);
+    const sent = await sendAndWait(source, {
+      destination: peer.id,
+      seriesUid: series.items[0].seriesInstanceUid,
+    });
+    expect(sent.instances.map((one) => [one.state, one.failure])).toEqual([['sent', null]]);
+    const arrived = await storedDataSet(destination, sent.instances[0].sopInstanceUid);
+    // After the preamble, `DICM` and the meta group, the file is its data set.
+    const file = Buffer.from(bytes);
+    expect(arrived.equals(file.subarray(144 + file.readUInt32LE(140)))).toBe(true);
+    // And the second server reads of it what the first does: a dose of the same study.
+    const there = await serverApi<{ items: { studyInstanceUid: string }[] }>(
+      destination,
+      'GET',
+      '/studies',
+    );
+    expect(there.items.map((one) => one.studyInstanceUid)).toEqual([
+      held.items[0].studyInstanceUid,
+    ]);
+  } finally {
+    await source.stop();
+    await destination.stop();
+  }
 
   expectNoProblems(problems);
 });

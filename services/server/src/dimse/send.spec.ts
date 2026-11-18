@@ -4,7 +4,7 @@
 
 import { createServer, type Server } from 'node:net';
 
-import { readInstanceHeader } from '@open-rt-studio/dicom';
+import { buildVolume, parseFile, readInstanceHeader } from '@open-rt-studio/dicom';
 import {
   JPEG_LOSSLESS_SYNTAX,
   syntheticCtSeries,
@@ -24,6 +24,7 @@ import {
   startTestListener,
   type TestListener,
 } from './testing/peer.js';
+import { syntheticSummedDose } from './testing/summed-dose.js';
 
 const open: TestListener[] = [];
 const servers: Server[] = [];
@@ -100,6 +101,28 @@ describe('sending objects to another system', () => {
       expect(Buffer.from(dataSetOf(arrived)!).equals(Buffer.from(object.dataSet))).toBe(true);
     }
     expect(await peer.core.pacs!.index.counts()).toMatchObject({ instances: files.length });
+  });
+
+  // #101: a summed dose as the viewer saves it, the private block that says
+  // where the sum is known with it.
+  it('sends a summed dose as it was saved, and it is read there as the same sum', async () => {
+    const peer = await listening();
+    const file = syntheticSummedDose();
+    const [object] = outgoing([{ name: 'sum.dcm', mimeType: 'application/dicom', bytes: file }]);
+
+    expect(await sendObjects(to(peer.port), [object])).toEqual([stored]);
+    const arrived = await kept(peer.core.pacs!, object.sopInstanceUid);
+    expect(Buffer.from(dataSetOf(arrived)!).equals(Buffer.from(object.dataSet))).toBe(true);
+
+    // A Buffer's `slice` is a view of the same memory: copied into an array of its own.
+    const read = (bytes: Uint8Array) =>
+      buildVolume(parseFile('sum.dcm', new Uint8Array(bytes).buffer));
+    const [there, here] = [read(arrived), read(file)];
+    expect(there.dose?.sum).toEqual({ doses: 2, model: 'physical' });
+    expect(there.dims).toEqual(here.dims);
+    expect(there.data).toEqual(here.data);
+    expect(there.known).toEqual(here.known);
+    expect(there.known!.includes(0) && there.known!.includes(1)).toBe(true);
   });
 
   it('sends compressed pixel data as it is, to a system that takes it', async () => {
