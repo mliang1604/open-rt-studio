@@ -197,8 +197,9 @@ its run when a change touches the Dockerfile or `compose.yaml`. Another,
 five jobs (`Native (Linux)`, `(macOS arm64)`, `(macOS x86_64)`, `(Windows)`,
 then `(macOS universal)`) build ITK, elastix and the tools and run the
 tools' tests; wait for all five. With ITK and elastix in the cache it takes
-a minute or two; after a change to `native/deps` or the versions, up to
-half an hour, and the macOS arm64 runner can be long in coming.
+five to ten minutes, most of it the registrations the tools' tests run;
+after a change to `native/deps` or the versions, up to half an hour more,
+and the macOS arm64 runner can be long in coming.
 
 ## Patterns
 

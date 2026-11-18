@@ -85,7 +85,9 @@ Linux, macOS (both processors) and Windows, and uploads the tools of each
 as an artifact, plus the universal macOS ones. On Linux it also runs the
 server's registration job with the tool it has just built. The built ITK and elastix are
 kept in the Actions cache, keyed by what they were built from, so a run
-that changes only a tool takes a few minutes.
+that changes only a tool builds in a minute or two. The tests then take
+four to nine minutes, depending on the runner: they run a dozen whole
+registrations.
 
 ## `ors-volume-info`
 
