@@ -25,7 +25,7 @@ application. Never commit patient data or real DICOM files
   (`src/app/viewer`) with controllers and stores beside it; newer pieces are
   their own components in subfolders (`cpr/`, `gpu-notice/`, `empty-state/`,
   `metadata-panel/`, `dvr-panel/`, `shortcut-help/`, `server-panel/`,
-  `server-browser/`, `audit-panel/`, `accounts-panel/`, `dicom-panel/`, `send-panel/`, `derived-series/`,
+  `server-browser/`, `audit-panel/`, `accounts-panel/`, `dicom-panel/`, `send-panel/`, `retrieve-panel/`, `derived-series/`,
   `structure-propagation/`, `provenance/`, `dose-display/`, `dvh/`,
   `alpha-beta/`, `dose-sum/`, `contour-tools/`). Every tool that changes
   painted structures is a contouring tool on the framework in

@@ -471,7 +471,8 @@ viewer, or through the API.
 
 Anyone who is logged in can have the server ask a system on the list that
 has an address what it holds (C-FIND), and have a study or a series of it
-sent to the server (C-MOVE). The viewer has no screen for it yet (#54);
+sent to the server (C-MOVE). In the viewer this is the server card's
+"Retrieve…" (#54), which asks for studies and retrieves whole studies;
 through the API:
 
 | Request                           | What it does                                                           |
@@ -522,8 +523,7 @@ through the API:
 - **Whom it asks is the administrator's choice.** A user picks among the
   systems on the list and cannot name an address.
 
-Not there yet: a screen for asking another system (#54), TLS (#57) and
-audit records for associations (#212). Until #212 the audit log has the
+Not there yet: TLS (#57) and audit records for associations (#212). Until #212 the audit log has the
 request for a send or a retrieve and not the associations it made, and
 nothing of what other systems send here or ask; the file header of each
 received object names the AE title that sent it.

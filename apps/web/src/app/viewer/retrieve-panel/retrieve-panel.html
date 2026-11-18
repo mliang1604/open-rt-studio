@@ -1,0 +1,194 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+
+@if (problem(); as message) {
+  <p class="retrieve-problem" role="alert">{{ message }}</p>
+}
+
+<section aria-labelledby="retrieve-title">
+  <h3 id="retrieve-title">Retrieve from another system</h3>
+  @if (sources(); as list) {
+    @if (list.length === 0) {
+      <p class="retrieve-note">
+        This server knows no system to ask. An administrator adds one under “DICOM”, with the
+        address it listens at.
+      </p>
+    } @else {
+      <form
+        class="retrieve-search"
+        role="search"
+        aria-label="Studies on another system"
+        (submit)="onSearch($event)"
+      >
+        <div class="field wide">
+          <label for="retrieve-source">System</label>
+          <select id="retrieve-source" [value]="chosen()" (change)="onSource($event)">
+            @for (one of list; track one.id) {
+              <option [value]="one.id" [selected]="one.id === chosen()">
+                {{ one.name }} ({{ one.aeTitle }})
+              </option>
+            }
+          </select>
+        </div>
+        <div class="field wide">
+          <label for="retrieve-name">Patient name</label>
+          <input
+            id="retrieve-name"
+            type="search"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="As it is written, or with *"
+            [value]="name()"
+            (input)="onText('name', $event)"
+          />
+        </div>
+        <div class="field">
+          <label for="retrieve-id">Patient ID</label>
+          <input
+            id="retrieve-id"
+            type="search"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="Whole, or with *"
+            [value]="patientId()"
+            (input)="onText('patientId', $event)"
+          />
+        </div>
+        <div class="field">
+          <label for="retrieve-from">From</label>
+          <input id="retrieve-from" type="date" [value]="from()" (input)="onText('from', $event)" />
+        </div>
+        <div class="field">
+          <label for="retrieve-to">To</label>
+          <input id="retrieve-to" type="date" [value]="to()" (input)="onText('to', $event)" />
+        </div>
+        <div class="field">
+          <label for="retrieve-accession">Accession number</label>
+          <input
+            id="retrieve-accession"
+            type="search"
+            spellcheck="false"
+            autocomplete="off"
+            [value]="accession()"
+            (input)="onText('accession', $event)"
+          />
+        </div>
+        <div class="field">
+          <label for="retrieve-modality">Modality</label>
+          <select id="retrieve-modality" [value]="modality()" (change)="onModality($event)">
+            <option value="">Any</option>
+            @for (one of modalities; track one) {
+              <option [value]="one">{{ one }}</option>
+            }
+          </select>
+        </div>
+        <div class="retrieve-buttons">
+          <button type="submit" [disabled]="asking()">
+            {{ asking() ? 'Asking…' : 'Search' }}
+          </button>
+          <button type="button" (click)="onClear()">Clear</button>
+        </div>
+      </form>
+      @if (source(); as from) {
+        @if (!from.canRetrieve) {
+          <p class="retrieve-note" id="retrieve-cannot">
+            {{ from.name }} can be asked what it holds, but nothing it sent would arrive: this
+            server does not listen for DICOM, or does not let {{ from.name }} send objects here. An
+            administrator changes both under “DICOM”.
+          </p>
+        }
+      }
+      @if (unanswered(); as why) {
+        <p class="retrieve-problem" role="alert">{{ why }}</p>
+      }
+      @if (found(); as answer) {
+        @if (answer.studies.length === 0) {
+          <p class="retrieve-note" role="status">No study matches.</p>
+        } @else {
+          <div class="retrieve-scroll">
+            <table aria-label="Studies found on the other system">
+              <thead>
+                <tr>
+                  <th scope="col">Patient</th>
+                  <th scope="col">ID</th>
+                  <th scope="col">Study date</th>
+                  <th scope="col">Description</th>
+                  <th scope="col">Modalities</th>
+                  <th scope="col">Size</th>
+                  <th scope="col"><span class="unseen">Retrieve it</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (study of answer.studies; track study.studyInstanceUid) {
+                  <tr>
+                    <th scope="row" class="retrieve-name" [title]="study.patientName || ''">
+                      {{ study.patientName || 'No name' }}
+                    </th>
+                    <td>{{ study.patientId || 'No ID' }}</td>
+                    <td class="retrieve-number">{{ dateLabel(study) }}</td>
+                    <td class="retrieve-description" [title]="study.description || ''">
+                      {{ study.description || '' }}
+                    </td>
+                    <td class="retrieve-modalities">{{ study.modalities.join(' ') }}</td>
+                    <td class="retrieve-number">{{ countLabel(study) }}</td>
+                    <td class="retrieve-actions">
+                      <button
+                        type="button"
+                        [disabled]="
+                          busy() || !source()?.canRetrieve || underWay().has(study.studyInstanceUid)
+                        "
+                        [attr.aria-label]="'Retrieve the study of ' + studyLabel(study)"
+                        [attr.aria-describedby]="source()?.canRetrieve ? null : 'retrieve-cannot'"
+                        (click)="onRetrieve(study)"
+                      >
+                        Retrieve
+                      </button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (!answer.complete) {
+            <p class="retrieve-note" role="status">
+              These are not all that match: the list was cut. Ask for less to see the rest.
+            </p>
+          }
+        }
+      }
+    }
+  } @else if (busy()) {
+    <p class="retrieve-note" role="status">Asking the server…</p>
+  }
+</section>
+
+@if (sources()?.length || rows().length > 0) {
+  <section aria-labelledby="retrieves-title">
+    <h3 id="retrieves-title">Retrieved</h3>
+    <ul class="retrieve-list" aria-label="Retrieves" aria-live="polite">
+      @for (row of rows(); track row.retrieve.id) {
+        <li [class.failed]="row.failed" [class.under-way]="!row.done">
+          <span class="retrieve-what"
+            >{{ row.label }}
+            <span class="retrieve-from">from {{ row.retrieve.source.name }}</span></span
+          >
+          <span class="retrieve-said">{{ row.said }}</span>
+          @if (row.here) {
+            <button
+              type="button"
+              [disabled]="busy() || disabled()"
+              [attr.aria-label]="'Open the timeline of ' + row.label"
+              title="Turn the timeline to this patient"
+              (click)="onOpen(row.retrieve)"
+            >
+              Open patient
+            </button>
+          }
+        </li>
+      } @empty {
+        <li class="retrieve-note">Nothing was retrieved since the server started.</li>
+      }
+    </ul>
+  </section>
+}

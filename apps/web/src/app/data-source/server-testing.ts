@@ -103,7 +103,18 @@ export interface FakeDicom {
    * What answers an echo, by `host:port`: the AE title that is there and the
    * AE titles it lets in. An address not named has nothing at it.
    */
-  readonly there: Map<string, { aeTitle: string; knows: string[]; status?: number }>;
+  readonly there: Map<
+    string,
+    {
+      aeTitle: string;
+      knows: string[];
+      status?: number;
+      /** What it holds, for a question or a retrieve (#54). */
+      holds?: readonly SyntheticFile[];
+      /** False for a system that does not know this server as a place to send to. */
+      knowsHere?: boolean;
+    }
+  >;
   /** Ports the server cannot listen on. */
   readonly taken: Set<number>;
   /** The sends it remembers, the earliest first. */
@@ -115,6 +126,30 @@ export interface FakeDicom {
    * status. A spec may empty it, to let a second try go through.
    */
   readonly refusedInstances: Map<string, number>;
+  /** The questions put to other systems, in order: whom, and the body as it came. */
+  readonly queries: { source: string; level: unknown; keys: Record<string, string> }[];
+  /** The retrieves it remembers, the earliest first. */
+  retrieves: FakeRetrieve[];
+  /** While true, a retrieve that is asked for stays under way, with nothing sent. */
+  holdRetrieves: boolean;
+  /** While true, an answer to a question says that it is not all there was. */
+  cutAnswers: boolean;
+}
+
+/** A retrieve as the stand-in holds it. */
+export interface FakeRetrieve {
+  id: string;
+  source: { id: string; name: string; aeTitle: string };
+  studyInstanceUid: string;
+  seriesInstanceUid: string | null;
+  state: 'waiting' | 'running' | 'done';
+  askedAt: string;
+  finishedAt: string | null;
+  counts: { remaining: number; completed: number; failed: number; warning: number } | null;
+  result: 'retrieved' | 'partly' | 'failed' | null;
+  failure: string | null;
+  status: number | null;
+  held: number | null;
 }
 
 /** A send as the stand-in holds it. */
@@ -212,6 +247,205 @@ export function fakeServer(
     sends: [],
     holdSends: false,
     refusedInstances: new Map(),
+    queries: [],
+    retrieves: [],
+    holdRetrieves: false,
+    cutAnswers: false,
+  };
+  /** A file as the stand-in holds one. */
+  const read = (file: SyntheticFile): Held => {
+    const header = readInstanceHeader(file.bytes);
+    if (!header.ok) throw new Error(`not DICOM: ${file.name}`);
+    return { header: header.header, bytes: file.bytes };
+  };
+  /** DICOM's wildcard matching, of single values, without regard to case. */
+  const matches = (key: string | undefined, value: string | null): boolean => {
+    if (key === undefined || key === '') return true;
+    const pattern = key
+      .split('')
+      .map((c) => (c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
+      .join('');
+    return new RegExp(`^${pattern}$`, 'i').test(value ?? '');
+  };
+  /** Why the system a remote names gives no answer; null when it does. */
+  const silence = (remote: FakeDicom['remotes'][number]): 'unreachable' | 'rejected' | null => {
+    const there = dicom.there.get(`${remote.host}:${remote.port}`);
+    if (!there) return 'unreachable';
+    return there.aeTitle !== remote.aeTitle || !there.knows.includes(dicom.local.aeTitle)
+      ? 'rejected'
+      : null;
+  };
+  /** Carry a retrieve out, unless retrieves are held: what the system holds of the study arrives. */
+  const bring = (retrieve: FakeRetrieve): void => {
+    const remote = dicom.remotes.find((one) => one.id === retrieve.source.id);
+    const there = remote ? dicom.there.get(`${remote.host}:${remote.port}`) : undefined;
+    const of = (there?.holds ?? [])
+      .map(read)
+      .filter((one) => one.header.study.uid === retrieve.studyInstanceUid);
+    if (dicom.holdRetrieves) {
+      retrieve.state = 'running';
+      retrieve.counts = { remaining: of.length, completed: 0, failed: 0, warning: 0 };
+      return;
+    }
+    const failure = remote ? silence(remote) : 'unreachable';
+    if (failure) {
+      Object.assign(retrieve, { result: 'failed', failure, counts: null });
+    } else if (there?.knowsHere === false) {
+      Object.assign(retrieve, {
+        result: 'failed',
+        failure: 'destination-unknown',
+        status: 0xa801,
+        counts: null,
+      });
+    } else {
+      for (const one of of) {
+        if (!held.some((had) => had.header.sopInstanceUid === one.header.sopInstanceUid)) {
+          held.push(one);
+        }
+      }
+      Object.assign(retrieve, {
+        result: 'retrieved',
+        status: 0,
+        counts: { remaining: 0, completed: of.length, failed: 0, warning: 0 },
+      });
+    }
+    retrieve.state = 'done';
+    retrieve.finishedAt = '2026-01-01T00:00:01.000Z';
+    retrieve.held = held.filter((one) => one.header.study.uid === retrieve.studyInstanceUid).length;
+  };
+  /** A request about asking another system (#51), answered as the server answers it. */
+  const answerAsk = (path: string, verb: string, body: () => unknown): Response => {
+    const refuse = (error: string, message: string, status: number): Response =>
+      json({ error, message }, status);
+    if (path === '/dicom/sources' && verb === 'GET') {
+      return json({
+        items: dicom.remotes
+          .filter((one) => one.host !== null)
+          .map(({ id, name, aeTitle, mayStore }) => ({
+            id,
+            name,
+            aeTitle,
+            canRetrieve: dicom.local.enabled && mayStore,
+          })),
+      });
+    }
+    /** The system a body names, or the refusal of it. */
+    const sourceOf = (id: string): FakeDicom['remotes'][number] | Response => {
+      const remote = dicom.remotes.find((one) => one.id === id);
+      if (!remote) return refuse('not-found', 'The server knows no such system.', 404);
+      if (remote.host === null) {
+        return refuse(
+          'no-address',
+          'That system has no address: it can call this server and cannot be called.',
+          409,
+        );
+      }
+      return remote;
+    };
+    if (path === '/dicom/queries' && verb === 'POST') {
+      const asked = body() as { source: string; level: unknown; keys?: Record<string, string> };
+      dicom.queries.push({ source: asked.source, level: asked.level, keys: asked.keys ?? {} });
+      const remote = sourceOf(asked.source);
+      if (remote instanceof Response) return remote;
+      const keys = asked.keys ?? {};
+      if (keys['studyDate'] !== undefined && !/^(\d{8})?-?(\d{8})?$/.test(keys['studyDate'])) {
+        return refuse('invalid-request', 'A date is YYYYMMDD, or a range.', 400);
+      }
+      const answer = (outcome: string, studies: unknown[], complete: boolean): Response =>
+        json({
+          level: 'study',
+          outcome,
+          status: outcome === 'answered' ? 0 : null,
+          complete,
+          patients: [],
+          studies,
+          series: [],
+        });
+      const failure = silence(remote);
+      if (failure) return answer(failure, [], false);
+      const there = dicom.there.get(`${remote.host}:${remote.port}`)!;
+      const theirs = (there.holds ?? []).map(read);
+      const [from, to] = /-/.test(keys['studyDate'] ?? '')
+        ? (keys['studyDate'] ?? '').split('-')
+        : [keys['studyDate'] ?? '', keys['studyDate'] ?? ''];
+      const first = new Map(theirs.map((one) => [one.header.study.uid, one]));
+      const studies = [...first.values()]
+        .map((one) => {
+          const inStudy = theirs.filter((file) => file.header.study.uid === one.header.study.uid);
+          return {
+            patientId: one.header.patient.id,
+            patientName: one.header.patient.name,
+            patientBirthDate: null,
+            patientSex: null,
+            studyInstanceUid: one.header.study.uid,
+            date: one.header.study.date,
+            time: null,
+            description: one.header.study.description,
+            accessionNumber: null,
+            modalities: [...new Set(inStudy.map((file) => file.header.series.modality))].sort(),
+            series: new Set(inStudy.map((file) => file.header.series.uid)).size,
+            instances: inStudy.length,
+          };
+        })
+        .filter(
+          (study) =>
+            matches(keys['patientName'], study.patientName) &&
+            matches(keys['patientId'], study.patientId) &&
+            (!from || (study.date ?? '') >= from) &&
+            (!to || (study.date ?? '99999999') <= to) &&
+            (!keys['modality'] || study.modalities.includes(keys['modality'])) &&
+            !keys['accessionNumber'],
+        )
+        .sort((a, b) => a.studyInstanceUid.localeCompare(b.studyInstanceUid));
+      return answer('answered', studies, !dicom.cutAnswers);
+    }
+    if (path === '/dicom/retrieves' && verb === 'GET') {
+      return json({ items: [...dicom.retrieves].reverse() });
+    }
+    if (path === '/dicom/retrieves' && verb === 'POST') {
+      const asked = body() as { source: string; studyUid: string; seriesUid?: string };
+      const remote = sourceOf(asked.source);
+      if (remote instanceof Response) return remote;
+      if (!dicom.local.enabled) {
+        return refuse(
+          'not-listening',
+          'The server does not listen for DICOM: what is retrieved would have nowhere to arrive.',
+          409,
+        );
+      }
+      if (!remote.mayStore) {
+        return refuse(
+          'may-not-store',
+          'That system may not send objects here: what it sent would be refused.',
+          409,
+        );
+      }
+      const retrieve: FakeRetrieve = {
+        id: `retrieve-${dicom.retrieves.length + 1}`,
+        source: { id: remote.id, name: remote.name, aeTitle: remote.aeTitle },
+        studyInstanceUid: asked.studyUid,
+        seriesInstanceUid: asked.seriesUid ?? null,
+        state: 'waiting',
+        askedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+        counts: null,
+        result: null,
+        failure: null,
+        status: null,
+        held: null,
+      };
+      dicom.retrieves.push(retrieve);
+      const answered = json(retrieve, 202);
+      bring(retrieve);
+      return answered;
+    }
+    const retrieve = dicom.retrieves.find((one) => one.id === path.split('/')[3]);
+    if (!retrieve || verb !== 'GET') {
+      return refuse('not-found', 'The server has no such retrieve.', 404);
+    }
+    // A retrieve that was held ends once retrieves are no longer held.
+    if (retrieve.state !== 'done') bring(retrieve);
+    return json(retrieve);
   };
   /** Carry a send out, unless sends are held: each instance as the system at the address takes it. */
   const carryOut = (send: FakeSend): void => {
@@ -495,6 +729,9 @@ export function fakeServer(
       if (accounts && !who) {
         return json({ error: 'unauthenticated', message: 'Log in to use this server.' }, 401);
       }
+      if (/^\/dicom\/(sources|queries|retrieves)(\/|$)/.test(path)) {
+        return answerAsk(path, init?.method ?? 'GET', () => JSON.parse(String(init?.body)));
+      }
       if (path === '/dicom/destinations' || path.startsWith('/dicom/sends')) {
         return answerSend(path, init?.method ?? 'GET', () => JSON.parse(String(init?.body)));
       }
@@ -773,6 +1010,21 @@ export function fakeServer(
             };
           }),
         );
+      }
+      if ((match = /^\/studies\/([\d.]+)$/.exec(path))) {
+        const inStudy = held.filter((one) => one.header.study.uid === match![1]);
+        if (inStudy.length === 0) return missing();
+        const [one] = inStudy;
+        return json({
+          studyInstanceUid: one.header.study.uid,
+          patientKey: keyOf(one),
+          patientId: one.header.patient.id,
+          patientName: one.header.patient.name,
+          date: one.header.study.date,
+          description: one.header.study.description,
+          modalities: [...new Set(inStudy.map((file) => file.header.series.modality))].sort(),
+          series: new Set(inStudy.map((file) => file.header.series.uid)).size,
+        });
       }
       if ((match = /^\/studies\/([\d.]+)\/series$/.exec(path))) {
         const inStudy = held.filter((one) => one.header.study.uid === match![1]);
