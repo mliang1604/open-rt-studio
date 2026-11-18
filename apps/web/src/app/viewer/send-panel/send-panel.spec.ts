@@ -5,7 +5,11 @@
 import { TestBed } from '@angular/core/testing';
 import { syntheticRtCourse } from '@open-rt-studio/testdata';
 
-import { connectToServer, type DicomSend } from '../../data-source/server-source';
+import {
+  connectToServer,
+  DICOM_TLS_FAILURES,
+  type DicomSend,
+} from '../../data-source/server-source';
 import { fakeServer, parseHere, type FakeAccount } from '../../data-source/server-testing';
 import { failureSaid, sendItems, SendPanel, sendSaid } from './send-panel';
 
@@ -182,6 +186,14 @@ describe('a send in words', () => {
     }
     expect(failureSaid('refused', null)).toBe('the system answered that it did not store it');
     expect(failureSaid('a-later-reason', null)).toBe('a-later-reason');
+    // #57: why no secure connection was made.
+    for (const failure of DICOM_TLS_FAILURES) {
+      expect(failureSaid(failure, null), failure).toMatch(/the system/);
+      expect(failureSaid(failure, null), failure).not.toContain(failure);
+    }
+    expect(failureSaid('tls-untrusted', null)).toBe(
+      'the system’s certificate is not of an authority this server trusts',
+    );
   });
 });
 

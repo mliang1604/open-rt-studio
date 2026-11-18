@@ -4,7 +4,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -502,10 +502,75 @@ describe.skipIf(process.platform === 'win32')('the server process', () => {
       const asked = run({}, ['dicom-echo', ...args]);
       expect(await asked.exited).toBe(2);
       expect(asked.stderr()).toBe(
-        'Usage: dicom-echo <host> <port> <AE title of the other system>\n',
+        'Usage: dicom-echo <host> <port> <AE title of the other system> [--tls]\n',
       );
     }
   }, 20_000);
+
+  // #57.
+  it('listens for DICOM with TLS when it has a certificate for it, and echoes with --tls', async () => {
+    const directory = join(temporary, 'dicom-tls');
+    await mkdir(directory);
+    const made = testCertificate();
+    const [cert, key] = [join(directory, 'cert.pem'), join(directory, 'key.pem')];
+    await writeFile(cert, made.cert);
+    await writeFile(key, made.key);
+    const server = run({
+      ...OPEN,
+      OPEN_RT_STUDIO_DICOM_PORT: '0',
+      OPEN_RT_STUDIO_DICOM_AE_TITLE: LISTENER_AE,
+      OPEN_RT_STUDIO_DICOM_CALLERS: PEER_AE,
+      OPEN_RT_STUDIO_DICOM_TLS_CERT: cert,
+      OPEN_RT_STUDIO_DICOM_TLS_KEY: key,
+    });
+    const dicom = await dicomPort(server);
+    expect(server.log().find((entry) => entry['event'] === 'dicom-listening')).toMatchObject({
+      tls: true,
+      callersShowCertificates: false,
+    });
+    const echo = ['dicom-echo', '127.0.0.1', String(dicom), LISTENER_AE];
+    const asking = { OPEN_RT_STUDIO_DICOM_AE_TITLE: PEER_AE };
+
+    // With TLS, trusting the listener by the certificate it shows.
+    const trusting = run(
+      {
+        ...asking,
+        OPEN_RT_STUDIO_DICOM_TLS_CA: cert,
+        OPEN_RT_STUDIO_DICOM_TLS_CERT: cert,
+        OPEN_RT_STUDIO_DICOM_TLS_KEY: key,
+      },
+      [...echo, '--tls'],
+    );
+    expect(await trusting.exited).toBe(0);
+    expect(trusting.stdout()).toBe(`${LISTENER_AE} at 127.0.0.1:${dicom} answered.\n`);
+    // With TLS, and nothing to trust it by but the authorities the machine knows.
+    const wary = run(asking, [...echo, '--tls']);
+    expect(await wary.exited).toBe(1);
+    expect(wary.stderr()).toBe(
+      `The certificate of ${LISTENER_AE} at 127.0.0.1:${dicom} is not of an authority this server trusts (OPEN_RT_STUDIO_DICOM_TLS_CA; without, those the machine knows).\n`,
+    );
+    // Without TLS: something is there, and what to try is said.
+    const plain = run(asking, echo);
+    expect(await plain.exited).toBe(1);
+    expect(plain.stderr()).toBe(
+      `127.0.0.1:${dicom} took the connection and gave no answer. It may expect TLS: try --tls.\n`,
+    );
+    // A certificate that cannot be read is said, as when the server starts.
+    const wrong = run(
+      {
+        ...asking,
+        OPEN_RT_STUDIO_DICOM_TLS_CERT: join(directory, 'absent.pem'),
+        OPEN_RT_STUDIO_DICOM_TLS_KEY: key,
+      },
+      [...echo, '--tls'],
+    );
+    expect(await wrong.exited).toBe(2);
+    expect(wrong.stderr()).toBe(
+      'The file OPEN_RT_STUDIO_DICOM_TLS_CERT names could not be read.\n',
+    );
+    // Neither the certificate nor its key is in what the server wrote.
+    expect(JSON.stringify(server.log())).not.toContain('BEGIN');
+  }, 30_000);
 
   it('exits with 1 when it cannot have its DICOM port, and leaves nothing listening', async () => {
     const first = run({ ...OPEN, OPEN_RT_STUDIO_DICOM_PORT: '0' });

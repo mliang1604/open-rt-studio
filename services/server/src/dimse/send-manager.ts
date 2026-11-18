@@ -18,6 +18,7 @@ import { SILENT_LOGGER, type Logger } from '../logger.js';
 import { BYTES_AT_ONCE, INSTANCES_AT_ONCE, takePart } from './parts.js';
 // Types alone: the sender brings the DIMSE library, which is loaded by the first send.
 import type { sendObjects, SendOutcome, SendTarget } from './send.js';
+import type { TlsFailure } from './tls.js';
 
 /** Why an instance did not arrive. */
 export type SendFailure =
@@ -33,6 +34,8 @@ export type SendFailure =
   | 'unreachable'
   /** The connection ended before the instance was answered. */
   | 'broken'
+  /** No secure connection could be made, and why. */
+  | TlsFailure
   /** The server no longer holds the instance, or cannot read it as an object. */
   | 'missing'
   /** The server stopped before the instance was sent. */
@@ -132,6 +135,11 @@ function recorded(outcome: SendOutcome): Omit<SendInstance, 'sopInstanceUid'> {
     case 'rejected':
     case 'unreachable':
     case 'broken':
+    case 'tls-untrusted':
+    case 'tls-expired':
+    case 'tls-name':
+    case 'tls-refused':
+    case 'tls-failed':
       return failedAs(outcome.outcome);
     default: {
       const exhaustive: never = outcome;
@@ -196,7 +204,13 @@ export function createSendManager(options: SendManagerOptions): SendManager {
         (outcome) => outcome.outcome === 'stored' || outcome.outcome === 'refused',
       );
       const first = outcomes[0]?.outcome;
-      if (!answered && (first === 'rejected' || first === 'unreachable' || first === 'broken')) {
+      if (
+        !answered &&
+        first !== undefined &&
+        first !== 'stored' &&
+        first !== 'refused' &&
+        first !== 'not-taken'
+      ) {
         given = first;
       }
     }

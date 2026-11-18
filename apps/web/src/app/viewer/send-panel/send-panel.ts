@@ -16,11 +16,13 @@ import {
 import { seriesInstanceUidOf, seriesKeyParts, type RtObjectKind } from '@open-rt-studio/dicom';
 
 import type { PatientHistory } from '../../data-source/data-source';
-import type {
-  DicomDestination,
-  DicomSend,
-  DicomSendFailure,
-  ServerSource,
+import {
+  dicomTlsFailureSaid,
+  isDicomTlsFailure,
+  type DicomDestination,
+  type DicomSend,
+  type DicomSendFailure,
+  type ServerSource,
 } from '../../data-source/server-source';
 import { seriesChipLabel } from '../history-panel/series-chip';
 
@@ -106,6 +108,7 @@ export function sendItems(patient: PatientHistory | null): SendItem[] {
 /** Why an instance did not arrive, in words. */
 export function failureSaid(failure: string, status: number | null): string {
   const known = failure as DicomSendFailure;
+  if (isDicomTlsFailure(known)) return dicomTlsFailureSaid(known, 'the system');
   switch (known) {
     case 'refused': {
       const code = status === null ? '' : ` (status ${hex(status)})`;

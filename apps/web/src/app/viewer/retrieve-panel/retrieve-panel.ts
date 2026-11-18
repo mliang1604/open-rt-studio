@@ -16,15 +16,17 @@ import {
 } from '@angular/core';
 
 import type { PatientSummary } from '../../data-source/data-source';
-import type {
-  DicomAskFailure,
-  DicomFoundStudy,
-  DicomRetrieve,
-  DicomRetrieveFailure,
-  DicomSource,
-  DicomStudyAnswer,
-  DicomStudyKeys,
-  ServerSource,
+import {
+  dicomTlsFailureSaid,
+  isDicomTlsFailure,
+  type DicomAskFailure,
+  type DicomFoundStudy,
+  type DicomRetrieve,
+  type DicomRetrieveFailure,
+  type DicomSource,
+  type DicomStudyAnswer,
+  type DicomStudyKeys,
+  type ServerSource,
 } from '../../data-source/server-source';
 import { dateKey, SEARCH_MODALITIES, studyDateLabel } from '../server-browser/server-browser';
 
@@ -38,6 +40,10 @@ export function dateRangeKey(from: string, to: string): string {
 /** Why a system gave no answer to a question, as a sentence. */
 export function unansweredSaid(outcome: string, name: string): string {
   const known = outcome as DicomAskFailure;
+  if (isDicomTlsFailure(known)) {
+    const said = dicomTlsFailureSaid(known, name);
+    return `${said.charAt(0).toUpperCase()}${said.slice(1)}.`;
+  }
   switch (known) {
     case 'rejected':
       return `${name} refused the association: it may not know this server’s AE title, or may go by another title itself.`;
@@ -61,6 +67,7 @@ const instances = (count: number): string => `${count} ${count === 1 ? 'instance
 /** Why a retrieve brought nothing, in words. */
 export function retrieveFailureSaid(failure: string, status: number | null): string {
   const known = failure as DicomRetrieveFailure;
+  if (isDicomTlsFailure(known)) return dicomTlsFailureSaid(known, 'the system');
   switch (known) {
     case 'rejected':
       return 'the system refused the association: it may not know this server’s AE title, or may go by another title itself';

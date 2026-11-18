@@ -24,6 +24,7 @@
 // is: not a UID, not a name, only what came of it.
 
 import { createServer, type Server as NetServer, type Socket } from 'node:net';
+import { createServer as createTlsServer, type TLSSocket } from 'node:tls';
 import { Writable } from 'node:stream';
 
 import { readInstanceHeader } from '@open-rt-studio/dicom';
@@ -32,6 +33,7 @@ import { CoreStoppingError, type Pacs } from '../core/core.js';
 import type { IngestResult } from '../ingest/ingest.js';
 import { errorFields, SILENT_LOGGER, type Logger } from '../logger.js';
 import { askedOf, NO_DICOM_AUDIT, type DicomAudit } from './dicom-audit.js';
+import { TLS_MIN_VERSION, type ClientTls, type DicomTls } from './tls.js';
 import {
   CEchoResponse,
   CFindResponse,
@@ -129,6 +131,9 @@ export const ASSOCIATIONS_AT_MOST = 32;
  */
 export const IDLE_TIMEOUT_MS = 120_000;
 
+/** How long a connection to a listener with TLS is given to make its handshake. */
+export const HANDSHAKE_TIMEOUT_MS = 10_000;
+
 export interface DicomListenerOptions {
   /** The store, the index and the way in. */
   readonly pacs: Pacs;
@@ -156,7 +161,15 @@ export interface DicomListenerOptions {
    * one the server does not know, or knows no address of. Without it no
    * move has a destination.
    */
-  readonly destinationOf?: (aeTitle: string) => { host: string; port: number } | null;
+  readonly destinationOf?: (
+    aeTitle: string,
+  ) => { host: string; port: number; tls?: ClientTls } | null;
+  /**
+   * Listen with TLS (#57), with this certificate: every system that calls
+   * then calls with TLS. With authorities, a caller must show a certificate
+   * of theirs. Without this, associations are not encrypted.
+   */
+  readonly tls?: DicomTls;
   /** How long an association to a move's destination may take over each step. */
   readonly moveTimeoutMs?: number;
   /** In place of the bounds of a retrieve and of a query's answer, for a test. */
@@ -185,6 +198,8 @@ export interface DicomListenerOptions {
 export interface DicomListener {
   readonly host: string;
   readonly port: number;
+  /** Whether it listens with TLS. */
+  readonly tls: boolean;
   /**
    * Stop: no new associations, and the open ones are given `timeoutMs` to
    * end before they are cut off. True when none had to be.
@@ -868,7 +883,17 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
     request: LibraryFindRequest | LibraryMoveRequest | LibraryGetRequest,
   ): Identifier => (request.getDataset()?.getElements() ?? {}) as Identifier;
 
-  const server: NetServer = createServer((socket) => {
+  const accept = (socket: Socket): void => {
+    if (options.tls?.ca != null && !(socket as TLSSocket).authorized) {
+      // No certificate, or one of no authority the server trusts. Who it was
+      // is not known: no AE title was said. Why, by the check's own word.
+      const why = (socket as TLSSocket).authorizationError as unknown;
+      logger.warn('tls-caller-not-trusted', {
+        reason: String((why as { code?: unknown } | null)?.code ?? why ?? 'unknown'),
+      });
+      socket.destroy();
+      return;
+    }
     if (sockets.size >= ASSOCIATIONS_AT_MOST) {
       logger.warn('association-refused', { why: 'too-many', open: sockets.size });
       socket.destroy();
@@ -896,7 +921,38 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
       logger.debug('association-broken', errorFields(error));
     });
     socket.once('close', () => association.ended());
+  };
+  const { tls } = options;
+  const server: NetServer = tls
+    ? createTlsServer(
+        {
+          cert: tls.cert,
+          key: tls.key,
+          minVersion: TLS_MIN_VERSION,
+          // With authorities, a caller shows a certificate of theirs or is
+          // not heard: looked at as the connection is taken, to say why not.
+          ...(tls.ca === null ? {} : { ca: tls.ca, requestCert: true, rejectUnauthorized: false }),
+          handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
+        },
+        accept,
+      )
+    : createServer(accept);
+  /** Every connection, also one that has not yet made its handshake: cut off with the rest. */
+  const connections = new Set<Socket>();
+  server.on('connection', (raw: Socket) => {
+    connections.add(raw);
+    raw.once('close', () => connections.delete(raw));
   });
+  if (tls) {
+    // Connections that never become associations do not take the place of those that do.
+    server.maxConnections = ASSOCIATIONS_AT_MOST * 2;
+    // Who it was is not known: no AE title was said. Why, by the error's code alone.
+    server.on('tlsClientError', (error: unknown) => {
+      logger.info('tls-handshake-failed', {
+        reason: String((error as { code?: unknown } | null)?.code ?? 'unknown'),
+      });
+    });
+  }
 
   const port = await new Promise<number>((resolve, reject) => {
     server.once('error', reject);
@@ -913,12 +969,15 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
     aeTitle: aeTitle(),
     callers: callers().length,
     retrievers: retrievers().length,
+    tls: tls !== undefined,
+    ...(tls ? { callersShowCertificates: tls.ca !== null } : {}),
   });
 
   let closed: Promise<boolean> | null = null;
   return {
     host: options.host,
     port,
+    tls: tls !== undefined,
     close({ timeoutMs = 0 } = {}) {
       closing = true;
       closed ??= new Promise<boolean>((resolve) => {
@@ -926,6 +985,7 @@ export async function startDicomListener(options: DicomListenerOptions): Promise
         const timer = setTimeout(() => {
           const left = sockets.size;
           for (const socket of sockets) socket.destroy();
+          for (const raw of connections) raw.destroy();
           if (left > 0) {
             logger.warn('associations-cut-off', { count: left });
             resolve(false);

@@ -180,8 +180,13 @@ Viewer (`src/app/viewer`):
   button that has the server ask it for a C-ECHO and says what
   came of it. Every change is the server's at once; the page keeps nothing.
   It says that DICOM asks for no login, and says so in the warning colour
-  when the listener is reached from other machines. `e2e/dicom-settings.spec.ts`
-  turns the real server's listener on and has the server echo itself.
+  when the listener is reached from other machines. TLS (#57) is two
+  switches: "Listen with TLS", offered where the server has a certificate
+  for DICOM, and "Call it with TLS" for each system; when no secure
+  connection can be made, what is wrong with the certificate is said in
+  words (`dicomTlsFailureSaid`, which the send and retrieve panels use too).
+  `e2e/dicom-settings.spec.ts` turns the real server's listener on and has
+  the server echo itself, without TLS and with it.
 - `send-panel/`: send to another system (the server card's "Send…", for
   everyone who is logged in). It lists what the patient in the timeline has
   on the server (every series, and the structure sets, plans and

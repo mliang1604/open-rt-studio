@@ -3,9 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import type { SyntheticFile } from '@open-rt-studio/testdata';
 
@@ -26,6 +27,12 @@ export interface TestServerOptions {
    * as it does by default; without, it runs with no login at all.
    */
   readonly account?: { readonly name: string; readonly password: string };
+  /**
+   * Give the server a certificate for DICOM, made on the spot (#57), which
+   * is also the one authority it trusts other systems by: it can listen
+   * with TLS, and call itself with it.
+   */
+  readonly dicomCertificate?: boolean;
 }
 
 let built = false;
@@ -53,6 +60,28 @@ export async function startTestServer(
   const { account } = options;
   // A server with accounts keeps them in a data directory, which goes when it stops.
   const directory = account ? await mkdtemp(join(tmpdir(), 'open-rt-studio-e2e-')) : null;
+  // A certificate and its key, made by the server's own helper for its tests
+  // and kept in a directory of their own, which goes when the server stops.
+  const certificates = options.dicomCertificate
+    ? await mkdtemp(join(tmpdir(), 'open-rt-studio-e2e-tls-'))
+    : null;
+  if (certificates) {
+    const made = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import { testCertificate } from ${JSON.stringify(
+            pathToFileURL(resolve(ROOT, 'services/server/dist/tls-testing.js')).href,
+          )}; process.stdout.write(JSON.stringify(testCertificate()));`,
+        ],
+        { encoding: 'utf8' },
+      ),
+    ) as { cert: string; key: string };
+    await writeFile(join(certificates, 'cert.pem'), made.cert);
+    await writeFile(join(certificates, 'key.pem'), made.key, { mode: 0o600 });
+  }
   const environment: Record<string, string | undefined> = {
     PATH: process.env['PATH'],
     OPEN_RT_STUDIO_PORT: '0',
@@ -60,6 +89,13 @@ export async function startTestServer(
     // Without an account to log in with: no login, which the server allows
     // because it is on this machine only.
     ...(directory ? { OPEN_RT_STUDIO_DATA_DIR: directory } : { OPEN_RT_STUDIO_AUTH: 'none' }),
+    ...(certificates
+      ? {
+          OPEN_RT_STUDIO_DICOM_TLS_CERT: join(certificates, 'cert.pem'),
+          OPEN_RT_STUDIO_DICOM_TLS_KEY: join(certificates, 'key.pem'),
+          OPEN_RT_STUDIO_DICOM_TLS_CA: join(certificates, 'cert.pem'),
+        }
+      : {}),
   };
   if (account) {
     // As an administrator of a server makes the first account: with the
@@ -132,6 +168,7 @@ export async function startTestServer(
         child.kill('SIGTERM');
       });
       if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+      if (certificates) await rm(certificates, { recursive: true, force: true, maxRetries: 5 });
     },
   };
 }

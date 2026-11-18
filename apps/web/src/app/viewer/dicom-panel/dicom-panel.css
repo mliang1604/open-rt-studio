@@ -157,6 +157,16 @@ tbody tr {
   font-variant-numeric: tabular-nums;
 }
 
+/* Said in the letters; the outline only sets it apart from the address. */
+.dicom-tls {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 /* What an echo came to is said in the word; the weight sets apart the one that went well. */
 .dicom-echo {
   min-width: 64px;

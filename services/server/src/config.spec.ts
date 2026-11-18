@@ -70,6 +70,9 @@ describe('resolveConfig', () => {
       OPEN_RT_STUDIO_DICOM_PORT: '11112',
       OPEN_RT_STUDIO_DICOM_AE_TITLE: ' ORS ',
       OPEN_RT_STUDIO_DICOM_CALLERS: 'PLANNING, Linac 2,PLANNING',
+      OPEN_RT_STUDIO_DICOM_TLS_CERT: ' /etc/open-rt-studio/dicom-cert.pem ',
+      OPEN_RT_STUDIO_DICOM_TLS_KEY: '/etc/open-rt-studio/dicom-key.pem',
+      OPEN_RT_STUDIO_DICOM_TLS_CA: '/etc/open-rt-studio/dicom-ca.pem',
     });
     // Port 0 asks the operating system for a free port; it is a valid setting.
     expect(config).toEqual({
@@ -88,6 +91,9 @@ describe('resolveConfig', () => {
       dicomPort: 11112,
       dicomAeTitle: 'ORS',
       dicomCallers: ['PLANNING', 'Linac 2'],
+      dicomTlsCert: '/etc/open-rt-studio/dicom-cert.pem',
+      dicomTlsKey: '/etc/open-rt-studio/dicom-key.pem',
+      dicomTlsCa: '/etc/open-rt-studio/dicom-ca.pem',
     });
   });
 
@@ -251,7 +257,7 @@ describe('resolveConfig', () => {
   it('notices a misspelt setting in the file', () => {
     expect(() => resolveConfig({ prot: 8080 })).toThrow(
       new ConfigError(
-        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey, auditRetentionDays, dicomPort, dicomAeTitle, dicomCallers.',
+        'The config file has an unknown setting "prot". Known: host, auth, port, logLevel, shutdownTimeoutMs, dataDir, maxUploadBytes, jobConcurrency, allowedOrigins, tlsCert, tlsKey, auditRetentionDays, dicomPort, dicomAeTitle, dicomCallers, dicomTlsCert, dicomTlsKey, dicomTlsCa.',
       ),
     );
   });

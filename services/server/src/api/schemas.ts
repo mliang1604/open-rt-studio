@@ -8,6 +8,15 @@
 
 type Schema = Readonly<Record<string, unknown>>;
 
+/** Why a call over TLS could not be made, as `src/dimse/tls.ts` names it. */
+const TLS_FAILURES = [
+  'tls-untrusted',
+  'tls-expired',
+  'tls-name',
+  'tls-refused',
+  'tls-failed',
+] as const;
+
 const text = { type: 'string' } as const;
 const nullableText = { type: ['string', 'null'] } as const;
 const count = { type: 'integer', minimum: 0 } as const;
@@ -290,6 +299,11 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     enabled: { type: 'boolean', description: 'Whether the server listens for DICOM.' },
     port: { type: 'integer', minimum: 0, maximum: 65535 },
     aeTitle: { type: 'string', maxLength: 16 },
+    tls: {
+      type: 'boolean',
+      description:
+        'Whether the server listens with TLS: every system that calls then calls with TLS.',
+    },
   }),
   DicomRemote: object({
     id: { type: 'string', description: 'The server’s own, and of no meaning.' },
@@ -302,6 +316,10 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
       type: 'boolean',
       description: 'Whether it may query this server and retrieve from it (C-FIND, C-MOVE, C-GET).',
     },
+    tls: {
+      type: 'boolean',
+      description: 'Whether the server calls it with TLS, and checks its certificate.',
+    },
   }),
   DicomState: object({
     local: ref('DicomLocal'),
@@ -309,9 +327,14 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     listening: {
       type: ['object', 'null'],
       description: 'Where the listener is now.',
-      properties: { host: text, port: { type: 'integer' } },
-      required: ['host', 'port'],
+      properties: { host: text, port: { type: 'integer' }, tls: { type: 'boolean' } },
+      required: ['host', 'port', 'tls'],
       additionalProperties: false,
+    },
+    tlsAvailable: {
+      type: 'boolean',
+      description:
+        'Whether the server was given a certificate for DICOM (`dicomTlsCert`), without which it cannot listen with TLS.',
     },
   }),
   DicomDestination: object({
@@ -336,7 +359,8 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
       type: ['string', 'null'],
       enum: [
         ...['refused', 'kind-not-taken', 'transfer-syntax-not-taken', 'rejected'],
-        ...['unreachable', 'broken', 'missing', 'stopped', null],
+        ...['unreachable', 'broken', 'missing', 'stopped'],
+        ...[...TLS_FAILURES, null],
       ],
     },
   }),
@@ -400,9 +424,9 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
       level: { type: 'string', enum: ['patient', 'study', 'series'] },
       outcome: {
         type: 'string',
-        enum: ['answered', 'rejected', 'unreachable', 'broken', 'not-taken'],
+        enum: ['answered', 'rejected', 'unreachable', 'broken', 'not-taken', ...TLS_FAILURES],
         description:
-          '`answered`, or why not: the association was `rejected`, nothing answered (`unreachable`), the connection ended (`broken`), or the system answers no such question (`not-taken`).',
+          '`answered`, or why not: the association was `rejected`, nothing answered (`unreachable`), the connection ended (`broken`), the system answers no such question (`not-taken`), or no secure connection could be made (`tls-…`, as for an echo).',
       },
       status: {
         type: ['integer', 'null'],
@@ -439,7 +463,8 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
       type: ['string', 'null'],
       enum: [
         ...['rejected', 'unreachable', 'broken', 'not-taken'],
-        ...['destination-unknown', 'refused', 'stopped', null],
+        ...['destination-unknown', 'refused', 'stopped'],
+        ...[...TLS_FAILURES, null],
       ],
     },
     status: {
@@ -454,7 +479,10 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
   }),
   DicomRetrieves: object({ items: { type: 'array', items: ref('DicomRetrieve') } }),
   DicomEcho: object({
-    outcome: { type: 'string', enum: ['ok', 'rejected', 'unreachable', 'failed'] },
+    outcome: {
+      type: 'string',
+      enum: ['ok', 'rejected', 'unreachable', 'broken', 'failed', ...TLS_FAILURES],
+    },
     status: { type: ['integer', 'null'], description: 'The status of an echo that failed.' },
   }),
   StudyPage: page('Study'),

@@ -10,6 +10,7 @@ import {
 
 import { createCore, type ServerCore } from '../core/core.js';
 import { createLogger } from '../logger.js';
+import { testCertificate } from '../tls-testing.js';
 import { openSqliteIndex } from '../pacs-index/sqlite-index.js';
 import { createMemoryStore } from '../store/memory-store.js';
 import { createDicomService, type DicomService } from './dicom-service.js';
@@ -20,6 +21,7 @@ import {
   type DicomSettingsStore,
 } from './dicom-settings.js';
 import { dicomEcho } from './echo.js';
+import type { ClientTls, DicomTls } from './tls.js';
 import { FIND_STATUS } from './listener.js';
 import { RETRIEVE_STATUS } from './retrieve.js';
 import {
@@ -33,7 +35,7 @@ import {
 } from './testing/peer.js';
 
 const OFF: DicomSettings = {
-  local: { enabled: false, port: 0, aeTitle: LISTENER_AE },
+  local: { enabled: false, port: 0, aeTitle: LISTENER_AE, tls: false },
   remotes: [],
 };
 const CALLER = {
@@ -43,6 +45,7 @@ const CALLER = {
   port: null,
   mayStore: true,
   mayRetrieve: false,
+  tls: false,
 };
 
 const cores: ServerCore[] = [];
@@ -57,6 +60,7 @@ afterEach(async () => {
 async function make(
   defaults: DicomSettings = OFF,
   store: DicomSettingsStore = createMemorySettingsStore(),
+  tls: DicomTls | null = null,
 ): Promise<{ service: DicomService; core: ServerCore; log: () => Record<string, unknown>[] }> {
   const core = createCore({
     pacs: { store: createMemoryStore(), index: await openSqliteIndex(':memory:') },
@@ -72,6 +76,7 @@ async function make(
     closeTimeoutMs: 2_000,
     sendTimeoutMs: 2_000,
     echoTimeoutMs: 2_000,
+    tls,
     logger: createLogger({ level: 'debug', write: (line) => lines.push(line) }),
   });
   services.push(service);
@@ -83,13 +88,14 @@ async function make(
   };
 }
 
-const echo = (port: number, calling = PEER_AE, called = LISTENER_AE) =>
+const echo = (port: number, calling = PEER_AE, called = LISTENER_AE, tls?: ClientTls) =>
   dicomEcho({
     host: '127.0.0.1',
     port,
     callingAeTitle: calling,
     calledAeTitle: called,
     timeoutMs: 2_000,
+    ...(tls ? { tls } : {}),
   });
 
 const refusal = async (work: Promise<unknown>): Promise<string> => {
@@ -104,7 +110,7 @@ const refusal = async (work: Promise<unknown>): Promise<string> => {
 describe('the DICOM service', () => {
   it('does not listen until it is told to, and then does at once', async () => {
     const { service } = await make();
-    expect(service.state()).toEqual({ ...OFF, listening: null });
+    expect(service.state()).toEqual({ ...OFF, listening: null, tlsAvailable: false });
 
     const on = await service.setLocal({ ...OFF.local, enabled: true });
     expect(on.listening).toMatchObject({ host: '127.0.0.1' });
@@ -163,7 +169,7 @@ describe('the DICOM service', () => {
     const old = service.state().listening!.port;
     const next = await freePort();
     const moved = await service.setLocal({ ...OFF.local, enabled: true, port: next });
-    expect(moved.listening).toEqual({ host: '127.0.0.1', port: next });
+    expect(moved.listening).toEqual({ host: '127.0.0.1', port: next, tls: false });
     expect(moved.local.port).toBe(next);
     expect(await echo(next)).toEqual({ outcome: 'ok' });
     expect(await echo(old)).toEqual({ outcome: 'unreachable' });
@@ -712,5 +718,217 @@ describe('asking another system', () => {
     expect(await service.close()).toBe(true);
     expect(service.retrieveOf(record.id)).toMatchObject({ state: 'done', result: 'retrieved' });
     expect(await core.pacs!.index.counts()).toMatchObject({ instances: 3 });
+  });
+});
+
+// #57.
+describe('TLS', () => {
+  const LISTENING = { ...OFF, local: { ...OFF.local, enabled: true } };
+  /** One authority, which signed this server's certificate and the other system's. */
+  const authority = testCertificate({ authority: true });
+  const signed = (): DicomTls => ({
+    ...testCertificate({ signedBy: authority }),
+    ca: authority.cert,
+  });
+
+  it('cannot listen with TLS without a certificate, and changes nothing when asked to', async () => {
+    const { service } = await make(LISTENING);
+    const before = service.state();
+    expect(before.tlsAvailable).toBe(false);
+    expect(before.listening).toMatchObject({ tls: false });
+    expect(await refusal(service.setLocal({ ...before.local, tls: true }))).toBe('no-certificate');
+    expect(service.state()).toEqual(before);
+    expect(await echo(before.listening!.port)).toEqual({ outcome: 'rejected' });
+    // Not listening, it may be said: there is nothing to listen with it.
+    await service.setLocal({ ...before.local, enabled: false, tls: true });
+    expect(service.state().listening).toBeNull();
+  });
+
+  it('does not start without TLS where its kept settings say TLS and it has no certificate', async () => {
+    const core = createCore({
+      pacs: { store: createMemoryStore(), index: await openSqliteIndex(':memory:') },
+    });
+    cores.push(core);
+    const service = createDicomService({
+      pacs: core.pacs!,
+      host: '127.0.0.1',
+      maxObjectBytes: 1024 * 1024,
+      store: createMemorySettingsStore(),
+      defaults: { ...OFF, local: { ...OFF.local, enabled: true, tls: true } },
+    });
+    services.push(service);
+    expect(await refusal(service.start())).toBe('no-certificate');
+    expect(service.state().listening).toBeNull();
+  });
+
+  it('listens with TLS from the moment it is told to, on the port it has, and without again', async () => {
+    const own = testCertificate();
+    const { service, log } = await make(
+      { ...LISTENING, remotes: [{ id: '0123456789abcdef', ...CALLER }] },
+      createMemorySettingsStore(),
+      { ...own, ca: null },
+    );
+    const { port } = service.state().listening!;
+    expect(service.state()).toMatchObject({ tlsAvailable: true, listening: { tls: false } });
+    expect(await echo(port)).toEqual({ outcome: 'ok' });
+
+    const on = await service.setLocal({ ...service.state().local, tls: true });
+    expect(on.local.tls).toBe(true);
+    expect(on.listening).toEqual({ host: '127.0.0.1', port, tls: true });
+    expect(await echo(port, PEER_AE, LISTENER_AE, { ca: own.cert })).toEqual({ outcome: 'ok' });
+    expect(await echo(port)).toEqual({ outcome: 'broken' });
+
+    // Another change leaves it as it is: the listener is not opened again for an AE title.
+    await service.setLocal({ ...service.state().local, aeTitle: 'RENAMED' });
+    expect(await echo(port, PEER_AE, 'RENAMED', { ca: own.cert })).toEqual({ outcome: 'ok' });
+
+    const off = await service.setLocal({ ...service.state().local, tls: false });
+    expect(off.listening).toEqual({ host: '127.0.0.1', port, tls: false });
+    expect(await echo(port, PEER_AE, 'RENAMED')).toEqual({ outcome: 'ok' });
+    expect(await echo(port, PEER_AE, 'RENAMED', { ca: own.cert })).toEqual({
+      outcome: 'tls-failed',
+    });
+    expect(log().filter((line) => line['event'] === 'dicom-local-changed')).toMatchObject([
+      { enabled: true, tls: true },
+      { enabled: true, tls: true },
+      { enabled: true, tls: false },
+    ]);
+    // The last echo waits twice: a listener without TLS takes a handshake for
+    // the start of an association and says nothing, to the call and then to
+    // the question of what was wrong.
+  }, 15_000);
+
+  it('moves to a new port with TLS in one change', async () => {
+    const own = testCertificate();
+    const { service } = await make(
+      { ...LISTENING, remotes: [{ id: '0123456789abcdef', ...CALLER }] },
+      createMemorySettingsStore(),
+      { ...own, ca: null },
+    );
+    const old = service.state().listening!.port;
+    const next = await freePort();
+    const moved = await service.setLocal({ ...service.state().local, port: next, tls: true });
+    expect(moved.listening).toEqual({ host: '127.0.0.1', port: next, tls: true });
+    expect(await echo(next, PEER_AE, LISTENER_AE, { ca: own.cert })).toEqual({ outcome: 'ok' });
+    expect(await echo(old)).toEqual({ outcome: 'unreachable' });
+  });
+
+  // Both sides ask who the other is: this server shows its certificate when it calls.
+  it('calls a system with TLS when it is told to: an echo, a send, a question and a retrieve', async () => {
+    const { service, core } = await make(
+      { ...OFF, local: { ...OFF.local, enabled: true, tls: true } },
+      createMemorySettingsStore(),
+      signed(),
+    );
+    const ours = service.state().listening!;
+    expect(ours.tls).toBe(true);
+    const their = signed();
+    const peer = await startTestListener({
+      aeTitle: 'THEIR-PACS',
+      callers: [LISTENER_AE],
+      retrievers: [LISTENER_AE],
+      tls: their,
+      destinationOf: (aeTitle) =>
+        aeTitle === LISTENER_AE
+          ? { host: '127.0.0.1', port: ours.port, tls: { ...their, ca: authority.cert } }
+          : null,
+      moveTimeoutMs: 2_000,
+    });
+    closing.push(() => peer.close());
+    const there = {
+      name: 'Their PACS',
+      aeTitle: 'THEIR-PACS',
+      host: '127.0.0.1',
+      port: peer.port,
+      mayStore: true,
+      mayRetrieve: false,
+    };
+    // Without TLS it is not reached; with, it is.
+    const remote = await service.addRemote(there);
+    expect(remote.tls).toBe(false);
+    expect(await service.echo(remote.id)).toEqual({ outcome: 'broken' });
+    expect(await service.changeRemote(remote.id, { ...there, tls: true })).toMatchObject({
+      tls: true,
+    });
+    expect(await service.echo(remote.id)).toEqual({ outcome: 'ok' });
+
+    // A send.
+    for (const file of syntheticCtSeries(2, 8)) await core.pacs!.ingest.ingest(file.bytes);
+    const [held] = await core.pacs!.index.findInstances();
+    const send = await service.send({
+      destination: remote.id,
+      seriesInstanceUid: held.seriesInstanceUid,
+    });
+    await vi.waitFor(() => expect(service.sendOf(send.id)?.state).toBe('done'), 5_000);
+    expect(service.sendOf(send.id)!.instances.map((one) => one.state)).toEqual(['sent', 'sent']);
+    expect(await peer.core.pacs!.index.counts()).toMatchObject({ instances: 2 });
+
+    // A question, and a retrieve: the other system calls back, with TLS.
+    for (const file of syntheticRtCourse()) await peer.core.pacs!.ingest.ingest(file.bytes);
+    const answer = await service.query({
+      source: remote.id,
+      level: 'study',
+      keys: { patientName: 'SYNTH*' },
+    });
+    expect(answer.outcome === 'answered' && answer.matches).toHaveLength(2);
+    const record = await service.retrieve({
+      source: remote.id,
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+    });
+    await vi.waitFor(() => expect(service.retrieveOf(record.id)?.state).toBe('done'), 5_000);
+    expect(service.retrieveOf(record.id)).toMatchObject({ result: 'retrieved', held: 8 });
+  });
+
+  it('says what is wrong with a system’s certificate, of all it asks of it', async () => {
+    // The other system's certificate is its own, and of no authority this server trusts.
+    const { service, core } = await make(LISTENING, createMemorySettingsStore(), signed());
+    const peer = await startTestListener({
+      aeTitle: 'THEIR-PACS',
+      callers: [LISTENER_AE],
+      retrievers: [LISTENER_AE],
+      tls: { ...testCertificate(), ca: null },
+    });
+    closing.push(() => peer.close());
+    const remote = await service.addRemote({
+      name: 'Their PACS',
+      aeTitle: 'THEIR-PACS',
+      host: '127.0.0.1',
+      port: peer.port,
+      mayStore: true,
+      mayRetrieve: false,
+      tls: true,
+    });
+    expect(await service.echo(remote.id)).toEqual({ outcome: 'tls-untrusted' });
+
+    for (const file of syntheticCtSeries(2, 8)) await core.pacs!.ingest.ingest(file.bytes);
+    const [held] = await core.pacs!.index.findInstances();
+    const send = await service.send({
+      destination: remote.id,
+      seriesInstanceUid: held.seriesInstanceUid,
+    });
+    await vi.waitFor(() => expect(service.sendOf(send.id)?.state).toBe('done'), 5_000);
+    expect(service.sendOf(send.id)!.instances.map((one) => one.failure)).toEqual([
+      'tls-untrusted',
+      'tls-untrusted',
+    ]);
+
+    expect((await service.query({ source: remote.id, level: 'study', keys: {} })).outcome).toBe(
+      'tls-untrusted',
+    );
+    const record = await service.retrieve({
+      source: remote.id,
+      studyInstanceUid: SYNTHETIC_RT_COURSE.planningStudy,
+    });
+    await vi.waitFor(() => expect(service.retrieveOf(record.id)?.state).toBe('done'), 5_000);
+    expect(service.retrieveOf(record.id)).toMatchObject({
+      result: 'failed',
+      failure: 'tls-untrusted',
+    });
+    expect(await peer.core.pacs!.index.counts()).toMatchObject({ instances: 0 });
+  });
+
+  it('takes TLS only for a system it can call', async () => {
+    const { service } = await make();
+    expect(await refusal(service.addRemote({ ...CALLER, tls: true }))).toBe('invalid');
   });
 });

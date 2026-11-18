@@ -29,6 +29,7 @@ import { ASK_LEVELS, AskError, checkedKeys, type AskKeys, type AskLevel } from '
 import type { FindAnswer } from './ask.js';
 import { NO_DICOM_AUDIT, type DicomAudit } from './dicom-audit.js';
 import type { EchoResult } from './echo.js';
+import { clientTls, type ClientTls, type DicomTls } from './tls.js';
 import type { DicomListener } from './listener.js';
 import {
   createRetrieveManager,
@@ -59,6 +60,11 @@ export interface DicomServiceOptions {
   readonly echoTimeoutMs?: number;
   /** How long a send waits for the connection, the association and each answer. */
   /**
+   * The server's certificate for DICOM and the authorities it trusts (#57),
+   * as its configuration names them. Without, it cannot listen with TLS.
+   */
+  readonly tls?: DicomTls | null;
+  /**
    * Where the audit records of DICOM networking go (#212). Without, none
    * are written: a server that keeps no audit log.
    */
@@ -79,7 +85,16 @@ export interface DicomServiceOptions {
 /** The settings, and what the listener is doing. */
 export interface DicomState extends DicomSettings {
   /** Where the listener is, or null when the server is not listening for DICOM. */
-  readonly listening: { readonly host: string; readonly port: number } | null;
+  readonly listening: {
+    readonly host: string;
+    readonly port: number;
+    readonly tls: boolean;
+  } | null;
+  /**
+   * Whether the server was given a certificate for DICOM, without which it
+   * cannot listen with TLS.
+   */
+  readonly tlsAvailable: boolean;
 }
 
 export interface DicomService {
@@ -207,7 +222,22 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
   let listener: DicomListener | null = null;
   const closeTimeoutMs = options.closeTimeoutMs ?? 10_000;
 
-  const open = async (port: number): Promise<DicomListener> => {
+  const ownTls = options.tls ?? null;
+  /** What a call to a system brings, when the system is called with TLS. */
+  const callWith = (remote: RemoteSystem): { readonly tls?: ClientTls } =>
+    remote.tls ? { tls: clientTls(ownTls) } : {};
+  /** Refuse to listen with TLS on a server that has no certificate for it. */
+  const certificateFor = (local: LocalDicom): void => {
+    if (local.enabled && local.tls && ownTls === null) {
+      throw new DicomSettingsError(
+        'no-certificate',
+        'The server has no certificate for DICOM, and cannot listen with TLS. ' +
+          'Its configuration names one (dicomTlsCert and dicomTlsKey), read when it starts.',
+      );
+    }
+  };
+
+  const open = async (port: number, tls: boolean): Promise<DicomListener> => {
     const { startDicomListener } = await import('./listener.js');
     // DICOM has no login, and an AE title is not a proof of who calls.
     if (options.exposed) logger.warn('dicom-without-login', { host: options.host });
@@ -217,6 +247,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       port,
       // Asked for at each association: a change needs no new listener.
       aeTitle: () => settings.local.aeTitle,
+      ...(tls && ownTls ? { tls: ownTls } : {}),
       audit,
       callers: () => settings.remotes.filter((r) => r.mayStore).map((r) => r.aeTitle),
       retrievers: () => settings.remotes.filter((r) => r.mayRetrieve).map((r) => r.aeTitle),
@@ -224,7 +255,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       destinationOf: (aeTitle) => {
         const there = settings.remotes.find((r) => r.aeTitle === aeTitle);
         return there?.host != null && there.port != null
-          ? { host: there.host, port: there.port }
+          ? { host: there.host, port: there.port, ...callWith(there) }
           : null;
       },
       ...(options.sendTimeoutMs === undefined ? {} : { moveTimeoutMs: options.sendTimeoutMs }),
@@ -318,6 +349,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
         calledAeTitle: remote.aeTitle,
         callingAeTitle: settings.local.aeTitle,
         ...(options.sendTimeoutMs === undefined ? {} : { timeoutMs: options.sendTimeoutMs }),
+        ...callWith(remote),
       },
     };
   };
@@ -338,7 +370,8 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
   const state = (): DicomState => ({
     local: settings.local,
     remotes: settings.remotes,
-    listening: listener ? { host: listener.host, port: listener.port } : null,
+    listening: listener ? { host: listener.host, port: listener.port, tls: listener.tls } : null,
+    tlsAvailable: ownTls !== null,
   });
 
   /** Refuse a remote whose AE title another system has. */
@@ -351,7 +384,11 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
   return {
     start: () =>
       inTurn(async () => {
-        if (settings.local.enabled && !listener) listener = await open(settings.local.port);
+        // Kept settings that say TLS, on a server that no longer has a certificate: said, not passed over.
+        certificateFor(settings.local);
+        if (settings.local.enabled && !listener) {
+          listener = await open(settings.local.port, settings.local.tls);
+        }
       }),
 
     state,
@@ -359,24 +396,41 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
     setLocal: (given) =>
       inTurn(async () => {
         const local: LocalDicom = checkedLocal(given);
+        certificateFor(local);
         // The port it has may be one it was given as 0, and is asked for by number.
-        const samePlace =
+        const samePort =
           listener !== null &&
           local.enabled &&
           (local.port === settings.local.port || local.port === listener.port);
-        if (!samePlace) {
+        const unavailable = (error: unknown): DicomSettingsError => {
+          logger.warn('dicom-port-unavailable', errorFields(error));
+          return new DicomSettingsError(
+            'port-unavailable',
+            'The server cannot listen on that port. Nothing was changed.',
+          );
+        };
+        if (samePort && listener !== null && local.tls !== listener.tls) {
+          // With TLS or without, on the port it has: one port is one or the
+          // other, so the old listener ends before the new one begins.
+          const old = listener;
+          listener = null;
+          await old.close({ timeoutMs: closeTimeoutMs });
+          try {
+            listener = await open(old.port, local.tls);
+          } catch (error) {
+            // As it was, if the port can still be had.
+            listener = await open(old.port, old.tls).catch(() => null);
+            throw unavailable(error);
+          }
+        } else if (!samePort) {
           let next: DicomListener | null = null;
           if (local.enabled) {
             try {
               // The settings are not yet the new ones: the listener asks for
               // them at each association, and none comes before they are.
-              next = await open(local.port);
+              next = await open(local.port, local.tls);
             } catch (error) {
-              logger.warn('dicom-port-unavailable', errorFields(error));
-              throw new DicomSettingsError(
-                'port-unavailable',
-                'The server cannot listen on that port. Nothing was changed.',
-              );
+              throw unavailable(error);
             }
           }
           const old = listener;
@@ -384,7 +438,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
           if (old) void old.close({ timeoutMs: closeTimeoutMs });
         }
         keep({ ...settings, local });
-        logger.info('dicom-local-changed', { enabled: local.enabled });
+        logger.info('dicom-local-changed', { enabled: local.enabled, tls: local.tls });
         return state();
       }),
 
@@ -441,6 +495,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
         calledAeTitle: remote.aeTitle,
         callingAeTitle: settings.local.aeTitle,
         ...(options.echoTimeoutMs === undefined ? {} : { timeoutMs: options.echoTimeoutMs }),
+        ...callWith(remote),
       });
       logger.info('dicom-echo', { outcome: result.outcome });
       return result;
@@ -578,11 +633,12 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
           'That system may not send objects here: what it sent would be refused.',
         );
       }
-      const { host, port, calledAeTitle, callingAeTitle } = from.target;
+      const { host, port, calledAeTitle, callingAeTitle, tls } = from.target;
       return retrieveManager().start({
         source: from.destination,
         target: {
           ...{ host, port, calledAeTitle, callingAeTitle },
+          ...(tls === undefined ? {} : { tls }),
           // How long it may hear nothing, which is longer than an answer may take.
           ...(options.retrieveTimeoutMs === undefined
             ? {}

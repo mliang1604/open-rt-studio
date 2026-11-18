@@ -291,6 +291,36 @@ calls a handler's callback once, so the record of a query is written
 before the matches are handed over, and one that cannot be written
 replaces them with a failure.
 
+### What #57 did with this
+
+TLS is Node's on both sides, and the library is told of it and no more.
+
+- **The listener** is `node:tls`'s server in place of `node:net`'s when the
+  listener's setting says TLS, and hands each socket to the library's
+  protocol class as before: the class does not know. One port is one or the
+  other, so a change of the setting closes the listener and opens another.
+- **The clients** (echo, send, find, move) pass the library its
+  `securityOptions`: the authorities, the server's certificate and key,
+  TLS 1.2 at least, and `rejectUnauthorized`, which is never off.
+- **The library says only that a connection failed.** A certificate that is
+  not trusted reaches us as "Connection error" with OpenSSL's sentence
+  inside it and no code. So when a call over TLS came to nothing, the
+  address is asked for a handshake once more by a socket of our own
+  (`tlsProblem` in `src/dimse/tls.ts`), and its error code is what the
+  outcome is made from. A handshake that is made and then ended at once is
+  taken as a refusal: that is how a server tells a TLS 1.3 client that it
+  wants a certificate, or will not have the one it was shown.
+- **A caller's certificate is looked at by our code**, not refused by
+  Node: with `rejectUnauthorized` the socket would be dropped before
+  anything could be logged, and the administrator would see connections
+  reset. The listener takes the socket, reads why it is not authorised, logs
+  the reason and ends it.
+- Tried between the server's own listener and clients with certificates
+  made on the spot (an authority, certificates it signed, expired ones,
+  ones for another name), and against DCMTK's `echoscu`, `storescu` and
+  `storescp` with TLS in CI, with RSA certificates: the ciphersuites of
+  DCMTK's default profile for TLS 1.2 are for those.
+
 ### What #51 did with this
 
 The server asks other systems with the library's client: a C-FIND, and a

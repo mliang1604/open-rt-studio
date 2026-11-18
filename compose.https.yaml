@@ -1,0 +1,23 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# The server of compose.yaml, speaking HTTPS with a certificate of yours.
+# Not for clinical use.
+#
+#   export OPEN_RT_STUDIO_CERT_DIR=/etc/open-rt-studio/certs
+#   docker compose -f compose.yaml -f compose.https.yaml up --build --detach
+#
+# The directory holds cert.pem (the certificate, with any between it and its
+# authority after it) and key.pem (its private key, with no passphrase). The
+# server in the container runs as user 1000 and has to be able to read both;
+# let no one else read the key. The server reads them when it starts: after
+# renewing a certificate, restart it. See services/server/README.md ("HTTPS").
+
+services:
+  server:
+    environment:
+      OPEN_RT_STUDIO_TLS_CERT: /certs/cert.pem
+      OPEN_RT_STUDIO_TLS_KEY: /certs/key.pem
+    volumes:
+      - ${OPEN_RT_STUDIO_CERT_DIR:?Set OPEN_RT_STUDIO_CERT_DIR to the directory that holds cert.pem and key.pem}:/certs:ro

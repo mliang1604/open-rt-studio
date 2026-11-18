@@ -33,6 +33,7 @@ const STATUS: Record<DicomSettingsError['code'], number> = {
   'not-done': 409,
   'not-listening': 409,
   'may-not-store': 409,
+  'no-certificate': 409,
 };
 
 /** A refusal of the settings, as the answer it is. */
@@ -74,7 +75,7 @@ const ERRORS = {
 } as const;
 
 const REMOTE_BODY =
-  'Send `{ "name", "aeTitle", "host", "port", "mayStore" }` as JSON. `host` and `port` are where the system listens, or both `null` for one that only calls this server. `mayStore` lets it send objects here when it calls, and `mayRetrieve` (false when left out) lets it ask what the server holds and have it sent, to itself or to any system on this list that has an address: all that the server holds. DICOM asks a caller for no login.';
+  'Send `{ "name", "aeTitle", "host", "port", "mayStore" }` as JSON. `host` and `port` are where the system listens, or both `null` for one that only calls this server. `mayStore` lets it send objects here when it calls, and `mayRetrieve` (false when left out) lets it ask what the server holds and have it sent, to itself or to any system on this list that has an address: all that the server holds. DICOM asks a caller for no login. `tls` (false when left out) has the server call it with TLS and check its certificate, for the name in `host`; it is for a system that has an address.';
 
 /** What the AE title of a system in a request's body is, for the audit record; null when there is none to read. */
 const aeTitleIn = (body: unknown): string | null => {
@@ -223,7 +224,7 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
           const state = await dicom.setLocal(body);
           request.audit({
             object: state.local.aeTitle,
-            detail: `enabled=${state.local.enabled} port=${state.local.port}`,
+            detail: `enabled=${state.local.enabled} port=${state.local.port} tls=${state.local.tls}`,
           });
           return { status: 200, body: state };
         } catch (error) {
@@ -234,14 +235,18 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
         tag: 'DICOM',
         summary: 'Change how the server is reached by DICOM',
         description:
-          'Send `{ "enabled", "port", "aeTitle" }` as JSON. The change takes effect at once and is kept. A new port is opened before the old one is closed: when it cannot be had, nothing changes. Port 0 takes a free one, which `listening` then names. The listener is at the address the server itself is on.',
+          'Send `{ "enabled", "port", "aeTitle" }` as JSON, with `"tls"` (false when left out) to listen with TLS. The change takes effect at once and is kept. A new port is opened before the old one is closed: when it cannot be had, nothing changes. Port 0 takes a free one, which `listening` then names. The listener is at the address the server itself is on. With TLS, every system that calls must call with TLS: a port speaks one or the other, so turning it on or off closes the listener and opens it again. It takes a certificate, which the server’s configuration names (`dicomTlsCert`, `dicomTlsKey`) and which is read when the server starts; `tlsAvailable` says whether there is one.',
         requestBody: 'application/json',
         responses: {
           200: { description: 'Changed: the settings as they are now.', schema: 'DicomState' },
           400: ERRORS[400],
           401: ERRORS[401],
           403: ERRORS[403],
-          409: { description: 'The server cannot listen on that port.', schema: 'Error' },
+          409: {
+            description:
+              'The server cannot listen on that port (`port-unavailable`), or was asked to listen with TLS and has no certificate for DICOM (`no-certificate`).',
+            schema: 'Error',
+          },
           415: ERRORS[415],
         },
       },
@@ -258,7 +263,7 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
           const made = await dicom.addRemote(body);
           request.audit({
             object: made.aeTitle,
-            detail: `mayStore=${made.mayStore} mayRetrieve=${made.mayRetrieve}`,
+            detail: `mayStore=${made.mayStore} mayRetrieve=${made.mayRetrieve} tls=${made.tls}`,
           });
           return { status: 201, body: made };
         } catch (error) {
@@ -296,7 +301,7 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
           const changed = await dicom.changeRemote(id, body);
           request.audit({
             object: changed.aeTitle,
-            detail: `mayStore=${changed.mayStore} mayRetrieve=${changed.mayRetrieve}`,
+            detail: `mayStore=${changed.mayStore} mayRetrieve=${changed.mayRetrieve} tls=${changed.tls}`,
           });
           return { status: 200, body: changed };
         } catch (error) {
@@ -374,7 +379,7 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
         tag: 'DICOM',
         summary: 'Ask a system whether it is there (C-ECHO)',
         description:
-          'The server calls the system under its own AE title. `ok`: it answered. `rejected`: it is there and refused the association; it may not know this server’s AE title, or may go by another itself. `unreachable`: nothing answered at its address. `failed`: it answered the echo with a status that is not success, which `status` holds.',
+          'The server calls the system under its own AE title. `ok`: it answered. `rejected`: it is there and refused the association; it may not know this server’s AE title, or may go by another itself. `unreachable`: nothing listens at its address. `broken`: the connection was made and no answer came; a system that expects TLS does this to a call without. `failed`: it answered the echo with a status that is not success, which `status` holds. For a system that is called with TLS, when no secure connection could be made: `tls-untrusted` (its certificate is of no authority the server trusts), `tls-expired`, `tls-name` (its certificate is for another name than its host), `tls-refused` (it ended the handshake: it wants a certificate of this server’s, or does not accept the one it has), `tls-failed` (it may not speak TLS at that port).',
         parameters: [ID_PARAMETER],
         responses: {
           200: { description: 'What came of it.', schema: 'DicomEcho' },

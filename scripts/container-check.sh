@@ -5,8 +5,10 @@
 
 # Checks the server's container as compose.yaml runs it: built, healthy,
 # closed to whoever has not logged in, open to an account made by its
-# command, not root, and with its data kept across a restart. Run by CI (the
-# "Container" job) and by anyone with Docker, from the repository root:
+# command, not root, and with its data kept across a restart; and then as
+# compose.https.yaml runs it, over HTTPS with a certificate made here. Run by
+# CI (the "Container" job) and by anyone with Docker and OpenSSL, from the
+# repository root:
 #
 #   scripts/container-check.sh
 #
@@ -18,6 +20,8 @@ address="http://127.0.0.1:${OPEN_RT_STUDIO_PUBLISHED_PORT:-4300}"
 name="check-admin"
 # Made here, used here, gone with the volume.
 password="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
+# Where the certificate for the second half is made, and removed from.
+certs=""
 
 finish() {
   status=$?
@@ -26,6 +30,7 @@ finish() {
     docker compose logs --no-color server || true
   fi
   docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  [ -z "$certs" ] || rm -rf "$certs"
   exit "$status"
 }
 trap finish EXIT
@@ -94,5 +99,56 @@ docker compose stop --timeout 20 server
 [ "$(docker compose ps --all --format '{{.ExitCode}}' server)" = 0 ] ||
   fail "the server did not stop cleanly when asked"
 say "the server stops cleanly when the container is stopped"
+
+# Over HTTPS (#57): the same server and the same data, with compose.https.yaml
+# and a certificate made here for this address. Its key is used here and
+# removed with the directory; the container's user is not this one, so both
+# files are left readable, which a key that guards anything must not be.
+secure="https://127.0.0.1:${OPEN_RT_STUDIO_PUBLISHED_PORT:-4300}"
+certs="$(mktemp -d)"
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj '/CN=localhost' \
+  -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+  -keyout "$certs/key.pem" -out "$certs/cert.pem" >/dev/null 2>&1 ||
+  fail "no certificate could be made for the check over HTTPS"
+chmod 755 "$certs"
+chmod 644 "$certs/cert.pem" "$certs/key.pem"
+export OPEN_RT_STUDIO_CERT_DIR="$certs"
+docker compose --file compose.yaml --file compose.https.yaml up --detach --wait
+say "with a certificate, the server starts and reports itself healthy"
+
+trusting=(--cacert "$certs/cert.pem")
+[ "$(curl --silent --fail "${trusting[@]}" "$secure/health" |
+  sed -n 's/.*"status":"\([a-z]*\)".*/\1/p')" = ok ] ||
+  fail "the health endpoint does not answer over HTTPS"
+say "the health endpoint answers over HTTPS, to a client that trusts the certificate"
+
+# curl ends with 60 for a certificate it cannot verify.
+unverified=0
+curl --silent --output /dev/null "$secure/health" || unverified=$?
+[ "$unverified" = 60 ] || fail "a client that was not given the certificate was answered ($unverified)"
+say "a client that was not given the certificate does not trust the server"
+
+plain=0
+curl --silent --output /dev/null --max-time 10 "$address/health" || plain=$?
+[ "$plain" != 0 ] || fail "the server answered plain HTTP on the port it speaks HTTPS on"
+say "plain HTTP is not answered on that port"
+
+[ "$(status_of "${trusting[@]}" "$secure/api/v1/patients")" = 401 ] ||
+  fail "the server answered someone who had not logged in, over HTTPS"
+token="$(curl --silent --fail "${trusting[@]}" --request POST \
+  --header 'Content-Type: application/json' \
+  --data "{\"name\":\"$name\",\"password\":\"$password\"}" "$secure/api/v1/session" |
+  sed -n 's/.*"token":"\([^"]*\)".*/\1/p' || true)"
+[ -n "$token" ] || fail "the account could not log in over HTTPS"
+[ "$(status_of "${trusting[@]}" --header "Authorization: Bearer $token" \
+  "$secure/api/v1/patients")" = 200 ] ||
+  fail "a logged-in administrator was not answered over HTTPS"
+say "the API is reached over HTTPS: closed without a login, and open with one"
+
+docker compose --file compose.yaml --file compose.https.yaml stop --timeout 20 server
+[ "$(docker compose --file compose.yaml --file compose.https.yaml ps --all \
+  --format '{{.ExitCode}}' server)" = 0 ] ||
+  fail "the server with a certificate did not stop cleanly when asked"
+say "the server with a certificate stops cleanly"
 
 echo "The container is as it should be."

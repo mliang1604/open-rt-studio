@@ -7,7 +7,7 @@
 // expires there. Node makes keys but not certificates, so the certificate is
 // written out here: X.509 in DER, as little of it as a TLS client asks for.
 
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createPrivateKey, generateKeyPairSync, sign } from 'node:crypto';
 
 const der = (tag: number, ...content: Uint8Array[]): Buffer => {
   const body = Buffer.concat(content);
@@ -64,6 +64,8 @@ const pem = (label: string, bytes: Uint8Array): string =>
     .trimEnd()}\n-----END ${label}-----\n`;
 
 const ECDSA_WITH_SHA256 = sequence(oid('1.2.840.10045.4.3.2'));
+/** With its parameters, which are null. */
+const RSA_WITH_SHA256 = sequence(oid('1.2.840.113549.1.1.11'), der(0x05));
 const DAY = 86_400_000;
 
 export interface TestCertificate {
@@ -73,39 +75,74 @@ export interface TestCertificate {
   readonly key: string;
 }
 
+const named = (commonName: string): Buffer =>
+  sequence(der(0x31, sequence(oid('2.5.4.3'), der(0x0c, Buffer.from(commonName, 'utf8')))));
+const SUBJECT = named('Open RT Studio test');
+const AUTHORITY = named('Open RT Studio test authority');
+
 /**
- * A self-signed certificate for `localhost` and `127.0.0.1`, with a new key.
- * Valid from a day ago for thirty days unless told otherwise.
+ * A certificate for `localhost` and `127.0.0.1`, with a new key: signed by
+ * itself, or by an authority made here with `authority`. Valid from a day
+ * ago for thirty days unless told otherwise.
  */
 export function testCertificate(
-  options: { readonly notBefore?: Date; readonly notAfter?: Date } = {},
+  options: {
+    readonly notBefore?: Date;
+    readonly notAfter?: Date;
+    /** The DNS names it is for, in place of `localhost` and `127.0.0.1`. */
+    readonly names?: readonly string[];
+    /** Make an authority, which signs other certificates and is for no name. */
+    readonly authority?: boolean;
+    /** The authority (made with `authority`) that signs it, in place of itself. */
+    readonly signedBy?: TestCertificate;
+    /** An RSA key of 2048 bits in place of one on P-256, for a peer that wants one. */
+    readonly rsa?: boolean;
+  } = {},
 ): TestCertificate {
-  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
-  const name = sequence(
-    der(0x31, sequence(oid('2.5.4.3'), der(0x0c, Buffer.from('Open RT Studio test', 'utf8')))),
-  );
-  const alternativeNames = sequence(
-    der(0x82, Buffer.from('localhost', 'ascii')),
-    der(0x87, Buffer.from([127, 0, 0, 1])),
-  );
+  const { publicKey, privateKey } = options.rsa
+    ? generateKeyPairSync('rsa', { modulusLength: 2048 })
+    : generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const signer = options.signedBy ? createPrivateKey(options.signedBy.key) : privateKey;
+  // How it is signed is the signer's kind of key, not its own.
+  const signedWith = signer.asymmetricKeyType === 'rsa' ? RSA_WITH_SHA256 : ECDSA_WITH_SHA256;
+  const name = options.authority ? AUTHORITY : SUBJECT;
+  const issuer = options.signedBy ? AUTHORITY : name;
+  const alternativeNames = options.names
+    ? sequence(...options.names.map((one) => der(0x82, Buffer.from(one, 'ascii'))))
+    : sequence(
+        der(0x82, Buffer.from('localhost', 'ascii')),
+        der(0x87, Buffer.from([127, 0, 0, 1])),
+      );
   const toBeSigned = sequence(
     // Version 3, which is what has extensions.
     der(0xa0, integer(2)),
     integer(Math.floor(Math.random() * 0x7fff_ffff) + 1),
-    ECDSA_WITH_SHA256,
-    name,
+    signedWith,
+    issuer,
     sequence(
       time(options.notBefore ?? new Date(Date.now() - DAY)),
       time(options.notAfter ?? new Date(Date.now() + 30 * DAY)),
     ),
     name,
     publicKey.export({ type: 'spki', format: 'der' }),
-    der(0xa3, sequence(sequence(oid('2.5.29.17'), der(0x04, alternativeNames)))),
+    der(
+      0xa3,
+      sequence(
+        options.authority
+          ? // Basic constraints, critical: it is an authority.
+            sequence(
+              oid('2.5.29.19'),
+              der(0x01, Buffer.from([0xff])),
+              der(0x04, sequence(der(0x01, Buffer.from([0xff])))),
+            )
+          : sequence(oid('2.5.29.17'), der(0x04, alternativeNames)),
+      ),
+    ),
   );
-  const signature = sign('sha256', toBeSigned, privateKey);
+  const signature = sign('sha256', toBeSigned, signer);
   const certificate = sequence(
     toBeSigned,
-    ECDSA_WITH_SHA256,
+    signedWith,
     // A bit string: no unused bits, then the signature.
     der(0x03, Buffer.from([0]), signature),
   );
