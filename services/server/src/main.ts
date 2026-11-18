@@ -6,7 +6,8 @@
 // standard output, and a clean stop on SIGTERM or SIGINT. With `account` as
 // its first argument it is the command that makes and changes accounts; with
 // `health`, the one that asks the running server whether it is well; with
-// `dicom-echo`, the one that asks another DICOM system whether it is there.
+// `dicom-echo`, the one that asks another DICOM system whether it is there;
+// with `reindex`, the one that makes the index again from the store.
 
 import { mkdirSync } from 'node:fs';
 import { userInfo } from 'node:os';
@@ -21,6 +22,7 @@ import { isAeTitle } from './dimse/sop-classes.js';
 import { clientTls, type ClientTls } from './dimse/tls.js';
 import { askHealth } from './health-check.js';
 import { createLogger, errorFields } from './logger.js';
+import { runReindexCommand } from './reindex-cli.js';
 import {
   ACCOUNTS_FILE,
   DICOM_SETTINGS_FILE,
@@ -80,6 +82,39 @@ if (process.argv[2] === 'account') {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   } finally {
     accounts.close();
+    audit?.close();
+  }
+  process.exit(code);
+}
+
+if (process.argv[2] === 'reindex') {
+  // Its own words go to standard output; what the store and the index warn of, to the other.
+  const quiet = createLogger({
+    level: 'warn',
+    write: (line) => void process.stderr.write(`${line}\n`),
+  });
+  const audit = config.dataDir === null ? null : openAudit(config.dataDir);
+  let osUser: string | null = null;
+  try {
+    osUser = userInfo().username;
+  } catch {
+    // A machine that cannot say who its user is: the record says so by saying nothing.
+  }
+  let code = 1;
+  try {
+    code = await runReindexCommand(
+      process.argv.slice(3),
+      config,
+      {
+        out: (line) => process.stdout.write(`${line}\n`),
+        err: (line) => process.stderr.write(`${line}\n`),
+      },
+      { serverRuns: () => askHealth(config), logger: quiet, audit, osUser },
+    );
+  } catch (error) {
+    // Its name and no more: a message may say where a file is.
+    quiet.error('reindex-failed', errorFields(error));
+  } finally {
     audit?.close();
   }
   process.exit(code);

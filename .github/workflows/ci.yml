@@ -219,7 +219,7 @@ jobs:
         env:
           REQUIRE_POSTGRES: '1'
           OPEN_RT_STUDIO_TEST_POSTGRES: postgresql://postgres:for-this-job-only@127.0.0.1:5432/postgres
-        run: npx vitest run src/pacs-index src/postgres-server.spec.ts src/log-identifiers.spec.ts
+        run: npx vitest run src/pacs-index src/postgres-server.spec.ts src/log-identifiers.spec.ts src/ingest/reindex.spec.ts src/reindex-cli.spec.ts
 
   # The server's container image: built, started as compose.yaml starts it,
   # and checked from outside (healthy, closed without a login, open to an

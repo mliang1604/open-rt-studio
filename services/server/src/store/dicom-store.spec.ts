@@ -128,6 +128,30 @@ describe.each(BACKENDS)('a DICOM store (%s)', (_name, open) => {
     expect(await store.delete(FIRST.uid)).toBe(false);
   });
 
+  it('lists what it holds: each instance once, as it is now', async () => {
+    const listed = async (): Promise<Record<string, string>> => {
+      const all: Record<string, string> = {};
+      for await (const one of store.list()) {
+        expect(all, one.sopInstanceUid).not.toHaveProperty([one.sopInstanceUid]);
+        expect(one).toEqual(await store.stat(one.sopInstanceUid));
+        all[one.sopInstanceUid] = one.sha256;
+      }
+      return all;
+    };
+    expect(await listed()).toEqual({});
+    for (const instance of INSTANCES) await store.put(instance.uid, instance.bytes);
+    expect(await listed()).toEqual(
+      Object.fromEntries(INSTANCES.map((instance) => [instance.uid, sha256(instance.bytes)])),
+    );
+    // One replaced and one removed.
+    await store.put(FIRST.uid, SECOND.bytes);
+    await store.delete(SECOND.uid);
+    const now = await listed();
+    expect(Object.keys(now)).toHaveLength(INSTANCES.length - 1);
+    expect(now[FIRST.uid]).toBe(sha256(SECOND.bytes));
+    expect(now).not.toHaveProperty([SECOND.uid]);
+  });
+
   it('deletes an instance, and only that one', async () => {
     await store.put(FIRST.uid, FIRST.bytes);
     await store.put(SECOND.uid, SECOND.bytes);

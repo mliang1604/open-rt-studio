@@ -800,10 +800,24 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
   - Only the index moves: accounts, the audit log, jobs and DICOM settings
     stay in files of the data directory, with the instances.
 
-  Not there: filling an index from the store, or copying one index into
-  the other, so a server cannot yet be moved from SQLite to PostgreSQL with
-  what it holds. Status: **decided, and Michael's to overturn**: the lock,
-  and that an existing index is not moved.
+  Status: **decided, and Michael's to overturn**: the lock.
+
+- **An index is made again from the store** (#328) by a command, `reindex`:
+  the store lists what it holds, and each instance is read and filed as
+  ingest files it. It is how a lost index comes back and how a server is
+  moved to PostgreSQL with what it holds.
+  - It adds and brings up to date; it takes nothing out of an index, and
+    changes nothing in the store, which it opens to read.
+  - Timepoints are in no file. They are brought in one case, from the
+    data directory's SQLite index into PostgreSQL, to patients that have
+    none there, so that running it again replaces nothing a user made since.
+    Back to SQLite they are not brought, and the command says so.
+  - It does not run beside a server that answers its health check on the
+    same machine, unless told to. It cannot see a server in another
+    container; a lock in the data directory would, and is not there.
+
+  Status: **decided, and Michael's to overturn**: that the command only
+  adds, and what it does about timepoints.
 
 - RT relationships are rows of one `reference` table: from an instance, by a
   named relation, to the UID of an instance, a series or a frame of

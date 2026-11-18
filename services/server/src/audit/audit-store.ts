@@ -30,6 +30,8 @@ export const AUDIT_ACTIONS = [
   'audit-read',
   'audit-export',
   'audit-clear',
+  // The index made again from the store, by a command (#328).
+  'index-fill',
   'dicom-settings-read',
   'dicom-settings-change',
   'dicom-remote-add',

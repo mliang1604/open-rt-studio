@@ -61,6 +61,11 @@ export function createMemoryStore(): DicomStore {
       return kept.delete(sopInstanceUid);
     },
 
+    async *list() {
+      // What is held now: an instance that comes during the reading is not waited for.
+      for (const { instance } of [...kept.values()]) yield instance;
+    },
+
     async verify(sopInstanceUid) {
       const entry = found(sopInstanceUid);
       if (!entry) throw new InstanceNotFoundError();
