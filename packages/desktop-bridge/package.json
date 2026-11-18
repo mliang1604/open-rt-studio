@@ -1,0 +1,24 @@
+{
+  "name": "@open-rt-studio/desktop-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The one declaration of what the desktop application's page may ask of its main process.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "pretest": "tsc -p tsconfig.spec.json",
+    "test": "vitest run",
+    "lint": "eslint ."
+  }
+}

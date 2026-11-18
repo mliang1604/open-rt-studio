@@ -18,6 +18,7 @@ FROM node:${NODE_VERSION}-bookworm-slim AS build
 WORKDIR /src
 # The manifests first, so that the install is cached until one of them changes.
 COPY package.json package-lock.json ./
+COPY packages/desktop-bridge/package.json packages/desktop-bridge/
 COPY packages/dicom/package.json packages/dicom/
 COPY packages/render/package.json packages/render/
 COPY packages/testdata/package.json packages/testdata/
@@ -39,6 +40,7 @@ RUN npm run build -w @open-rt-studio/server
 FROM node:${NODE_VERSION}-bookworm-slim AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY packages/desktop-bridge/package.json packages/desktop-bridge/
 COPY packages/dicom/package.json packages/dicom/
 COPY packages/render/package.json packages/render/
 COPY packages/testdata/package.json packages/testdata/

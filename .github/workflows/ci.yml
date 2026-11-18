@@ -153,6 +153,69 @@ jobs:
   # and store both ways, with and without TLS. DCMTK is a test peer only, from
   # the runner's package archive; it is never bundled. Not a required check.
   # REQUIRE_DCMTK makes a missing DCMTK a failure here and not a skip.
+  # The desktop application, started on each system it is for (#61): Electron
+  # on the web client's build, with the page asked what it can reach. The
+  # runners have no display on Linux and no GPU on Linux or Windows; what
+  # needs a GPU is checked where there is one.
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-latest }
+          - { name: macOS, os: macos-latest }
+          - { name: Windows, os: windows-latest }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # The package holds no program: Electron's is fetched for this system
+      # and checked against the checksums the package carries.
+      - name: Fetch Electron
+        run: node node_modules/electron/install.js
+
+      - name: Build the web client
+        run: npm run build -w @open-rt-studio/web
+
+      - name: Unit tests
+        run: npm test -w @open-rt-studio/desktop-bridge -w @open-rt-studio/desktop
+
+      # Ubuntu does not let a program make the user namespace Chromium's
+      # sandbox is built on unless it is told to. The test runs with the
+      # sandbox, never with --no-sandbox: it is what is being tested.
+      - name: Let the sandbox work on the runner
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: End-to-end (on a virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run e2e -w @open-rt-studio/desktop
+
+      - name: End-to-end
+        if: runner.os != 'Linux'
+        run: npm run e2e -w @open-rt-studio/desktop
+
+      - name: Upload what a failed test left
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-test-results-${{ matrix.name }}
+          path: apps/desktop/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
   dimse-interop:
     name: DIMSE interop
     runs-on: ubuntu-latest

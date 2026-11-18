@@ -2,6 +2,24 @@
   "name": "@open-rt-studio/desktop",
   "version": "0.0.0",
   "private": true,
-  "description": "Electron desktop shell. Starts in milestone M2 (issue #61).",
-  "license": "MPL-2.0"
+  "description": "The desktop application: an Electron shell around the web client. Not for clinical use.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -b tsconfig.json tsconfig.preload.json",
+    "pretest": "tsc -p tsconfig.spec.json && tsc -p tsconfig.e2e.json",
+    "test": "vitest run",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && node scripts/dev.mjs",
+    "e2e": "npm run build && playwright test",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@open-rt-studio/desktop-bridge": "0.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "electron": "45.3.4"
+  }
 }
