@@ -25,6 +25,12 @@ export interface GpuEnvironment {
   readonly browser: HostBrowser;
   /** `window.isSecureContext`: WebGPU exists only on https and on localhost. */
   readonly secureContext: boolean;
+  /**
+   * True in the desktop application. It is a Chromium of its own: there is
+   * no browser to update, no settings page and no flags, so what to do is
+   * about the computer and not about a browser.
+   */
+  readonly desktop?: boolean;
 }
 
 /** What the viewer shows in place of the images. */
@@ -38,6 +44,8 @@ export interface GpuGuidance {
   readonly retryLabel: string;
   /** Whether the loaded series survive a successful retry. */
   readonly keepsData: boolean;
+  /** What the button that loads everything again is called. "Reload the page" without. */
+  readonly reloadLabel?: string;
 }
 
 const CHROMIUM: readonly HostBrowser[] = ['chrome', 'edge'];
@@ -54,13 +62,52 @@ function flagsPage(browser: HostBrowser): string {
 }
 
 /** The browser's own words, as a closing sentence; empty when it gave none. */
-function reported(detail: string | null): string {
+function reported(detail: string | null, desktop = false): string {
   const text = detail?.trim().replace(/\.$/, '');
-  return text ? ` The browser reported: ${text}.` : '';
+  if (!text) return '';
+  return desktop ? ` What was reported: ${text}.` : ` The browser reported: ${text}.`;
+}
+
+/** How to see which graphics cards Vulkan can use, on Linux. */
+const VULKAN_CHECK =
+  'To see what Vulkan can use, run "vulkaninfo --summary" in a terminal (it is in the package vulkan-tools). If it lists no graphics card, or only a software one such as llvmpipe, the application has none to draw with.';
+
+/**
+ * The desktop application found no way to draw (#69): it has WebGPU built
+ * in, so what is missing is a graphics card it can use, or the driver for it.
+ */
+function desktopWithoutGpu(env: GpuEnvironment, hasApi: boolean): GpuGuidance {
+  const steps: string[] = [];
+  if (env.os === 'linux') {
+    steps.push(
+      'On Linux, WebGPU runs on Vulkan. Install a current Vulkan driver for the graphics card: Mesa for Intel and AMD, or NVIDIA’s own driver.',
+      VULKAN_CHECK,
+    );
+  } else if (env.os === 'windows') {
+    steps.push('Update the graphics driver from the maker of the GPU (Intel, AMD or NVIDIA).');
+  } else if (env.os === 'mac') {
+    steps.push('Update macOS. WebGPU runs on Metal, which needs a supported Mac.');
+  }
+  steps.push(
+    'A virtual machine, a container or a remote desktop session often has no graphics card the application can use. Try on the machine itself.',
+    'Quit the application and start it again after changing a driver.',
+  );
+  return {
+    title: hasApi
+      ? 'No graphics adapter is available for WebGPU'
+      : 'WebGPU is not available on this computer',
+    cause:
+      'Open RT Studio draws images with WebGPU, and found no graphics adapter it can use. Usually the graphics driver is missing, out of date, or one that is known to draw wrongly and is not used.',
+    steps,
+    retryLabel: 'Try again',
+    keepsData: true,
+    reloadLabel: 'Start the viewer again',
+  };
 }
 
 /** The browser does not expose `navigator.gpu`. */
 function noApi(env: GpuEnvironment): GpuGuidance {
+  if (env.desktop) return desktopWithoutGpu(env, false);
   const steps: string[] = [];
   if (!env.secureContext) {
     steps.push(
@@ -102,6 +149,7 @@ function noApi(env: GpuEnvironment): GpuGuidance {
 
 /** The API exists but the browser found no adapter to hand out. */
 function noAdapter(env: GpuEnvironment): GpuGuidance {
+  if (env.desktop) return desktopWithoutGpu(env, true);
   const steps: string[] = [];
   if (CHROMIUM.includes(env.browser)) {
     steps.push(
@@ -146,33 +194,43 @@ function noAdapter(env: GpuEnvironment): GpuGuidance {
 }
 
 /** An adapter exists but no device or canvas context could be created. */
-function couldNotStart(detail: string | null): GpuGuidance {
+function couldNotStart(detail: string | null, desktop: boolean): GpuGuidance {
   return {
     title: 'WebGPU could not be started',
     cause:
-      'A graphics adapter was found, but it could not be set up for drawing.' + reported(detail),
-    steps: [
-      'Close other tabs and applications that use the GPU heavily, then try again.',
-      'Restart the browser.',
-    ],
+      'A graphics adapter was found, but it could not be set up for drawing.' +
+      reported(detail, desktop),
+    steps: desktop
+      ? [
+          'Close other applications that use the GPU heavily, then try again.',
+          'Quit the application and start it again.',
+        ]
+      : [
+          'Close other tabs and applications that use the GPU heavily, then try again.',
+          'Restart the browser.',
+        ],
     retryLabel: 'Try again',
     keepsData: true,
+    ...(desktop ? { reloadLabel: 'Start the viewer again' } : {}),
   };
 }
 
 /** The device worked and then went away. */
-function deviceLost(detail: string | null): GpuGuidance {
+function deviceLost(detail: string | null, desktop: boolean): GpuGuidance {
   return {
     title: 'The graphics device was lost',
     cause:
-      'The browser lost its connection to the GPU. This happens when the computer wakes from sleep, the graphics driver restarts or updates, a laptop switches between GPUs, or the GPU runs out of memory.' +
-      reported(detail),
+      `The ${desktop ? 'application' : 'browser'} lost its connection to the GPU. This happens when the computer wakes from sleep, the graphics driver restarts or updates, a laptop switches between GPUs, or the GPU runs out of memory.` +
+      reported(detail, desktop),
     steps: [
       'Choose Reinitialize. The series you loaded are still in memory and are drawn again; nothing has to be opened again.',
-      'If that does not help, reload the page and open the files again.',
+      desktop
+        ? 'If that does not help, choose "Start the viewer again" and open the series again.'
+        : 'If that does not help, reload the page and open the files again.',
     ],
     retryLabel: 'Reinitialize',
     keepsData: true,
+    ...(desktop ? { reloadLabel: 'Start the viewer again' } : {}),
   };
 }
 
@@ -189,9 +247,9 @@ export function gpuGuidance(state: GpuProblemState, env: GpuEnvironment): GpuGui
       return noAdapter(env);
     case 'no-device':
     case 'no-context':
-      return couldNotStart(state.detail);
+      return couldNotStart(state.detail, env.desktop === true);
     case 'device-lost':
-      return deviceLost(state.detail);
+      return deviceLost(state.detail, env.desktop === true);
     default: {
       const exhaustive: never = state.problem;
       return exhaustive;

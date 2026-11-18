@@ -35,6 +35,7 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { gpuArgs } from './gpu.js';
 import { startTestServer, type TestServer } from './test-server.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -57,7 +58,7 @@ async function start(): Promise<void> {
   // plain store, which the application takes for no protection at all.
   if (process.platform === 'darwin') args.push('--use-mock-keychain');
   if (process.platform === 'linux') args.push('--password-store=basic');
-  if (process.env['E2E_NO_WEBGPU']) args.push('--disable-gpu');
+  args.push(...gpuArgs());
   application = await electron.launch({
     args,
     cwd: DESKTOP,

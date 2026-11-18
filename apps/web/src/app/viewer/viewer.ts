@@ -14,6 +14,7 @@ import {
   effect,
   untracked,
 } from '@angular/core';
+import { desktopBridge } from '@open-rt-studio/desktop-bridge';
 import {
   LayoutMode,
   scaleRect,
@@ -302,6 +303,7 @@ export class Viewer {
       os: hostOs(),
       browser: hostBrowser(),
       secureContext: typeof isSecureContext === 'undefined' ? true : isSecureContext,
+      desktop: desktopBridge() !== null,
     });
   });
   /** Canvas size in CSS pixels plus the device-pixel ratio; drives layout + render. */

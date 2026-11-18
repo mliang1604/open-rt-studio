@@ -9,6 +9,7 @@ import {
   mayHave,
   mayNavigate,
   siteOf,
+  gpuSwitches,
 } from './policy.js';
 
 const DEV = 'http://localhost:4200/';
@@ -170,5 +171,36 @@ describe('what the page is permitted', () => {
     ]) {
       expect(mayHave(permission, APP_HOME, APP_HOME), permission).toBe(false);
     }
+  });
+});
+
+describe('what Chromium is told at start for WebGPU', () => {
+  it('is nothing on macOS and Windows, where WebGPU is on by itself', () => {
+    expect(gpuSwitches('darwin')).toEqual([]);
+    expect(gpuSwitches('win32')).toEqual([]);
+    expect(gpuSwitches('darwin', 'Vulkan')).toEqual([]);
+  });
+
+  it('is WebGPU and Vulkan on Linux', () => {
+    expect(gpuSwitches('linux')).toEqual([
+      { name: 'enable-unsafe-webgpu' },
+      { name: 'enable-features', value: 'Vulkan' },
+    ]);
+  });
+
+  it('keeps the features the command line asked for, and names Vulkan once', () => {
+    expect(gpuSwitches('linux', 'UseOzonePlatform, WaylandWindowDecorations')[1]).toEqual({
+      name: 'enable-features',
+      value: 'UseOzonePlatform,WaylandWindowDecorations,Vulkan',
+    });
+    expect(gpuSwitches('linux', 'Vulkan,WebGPU')[1].value).toBe('Vulkan,WebGPU');
+    expect(gpuSwitches('linux', ' , ')[1].value).toBe('Vulkan');
+  });
+
+  it('does not ask for a blocked graphics card to be used anyway', () => {
+    const told = gpuSwitches('linux').map((one) => one.name);
+    expect(told).not.toContain('ignore-gpu-blocklist');
+    expect(told).not.toContain('no-sandbox');
+    expect(told).not.toContain('disable-gpu-sandbox');
   });
 });

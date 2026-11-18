@@ -27,6 +27,8 @@ import {
 
 import { APP_HOME, contentSecurityPolicy } from '../src/policy.js';
 
+import { gpuArgs } from './gpu.js';
+
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** An address that is nobody's (RFC 2606): nothing is ever sent to it, here or anywhere. */
 const ELSEWHERE = 'https://elsewhere.invalid/';
@@ -46,9 +48,8 @@ test.beforeAll(async () => {
     if (value !== undefined) env[name] = value;
   }
   application = await electron.launch({
-    // E2E_NO_WEBGPU=1 takes the GPU away, to see on a machine that has one
-    // what a runner without one sees.
-    args: process.env['E2E_NO_WEBGPU'] ? [DESKTOP, '--disable-gpu'] : [DESKTOP],
+    // The GPU as the run asks for it: the machine's, none, or a software one.
+    args: [DESKTOP, ...gpuArgs()],
     cwd: DESKTOP,
     // A profile of its own: the test finds no acknowledgement and leaves none.
     env: { ...env, OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
@@ -232,12 +233,28 @@ test('WebGPU is there for the viewer', async () => {
     description: `${process.platform}: API ${gpu.api ? 'present' : 'missing'}, adapter ${gpu.adapter ? 'available' : 'not available'}`,
   });
   console.log(`WebGPU on ${process.platform}: ${JSON.stringify(gpu)}`);
-  // Linux is #69: Chromium does not turn it on there by itself.
-  if (process.platform !== 'linux') expect(gpu.api).toBe(true);
+  expect(gpu.api).toBe(true);
+  // On Linux a run that asks for a software adapter must get one: that is the
+  // switches the application sets (#69) doing their work, on a machine with
+  // no graphics card at all.
+  if (process.env['E2E_SOFTWARE_GPU'] && process.platform === 'linux') {
+    expect(gpu.adapter).toBe(true);
+  }
 
-  // Without an adapter (a runner with no GPU) the viewer says what is missing.
+  // Without an adapter (a runner with no GPU) the viewer says what is missing,
+  // in words for this application on this system: nothing of a browser.
   if (!gpu.adapter) {
-    await expect(page.locator('.gpu-notice')).toBeVisible();
+    const notice = page.locator('.gpu-notice');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('No graphics adapter is available for WebGPU');
+    await expect(notice).not.toContainText(/browser|chrome:\/\/|flags/i);
+    await expect(notice.getByRole('button', { name: 'Start the viewer again' })).toBeVisible();
+    if (process.platform === 'linux') {
+      await expect(notice).toContainText('On Linux, WebGPU runs on Vulkan');
+      await expect(notice).toContainText('vulkaninfo --summary');
+    } else {
+      await expect(notice).not.toContainText('Vulkan');
+    }
     return;
   }
   // With one it draws.

@@ -136,7 +136,8 @@ chromium` in `apps/web` once). See `apps/web/README.md`.
 - The desktop application: `npm run build`, then `npm run desktop`; on the
   development server with live reload, `npm run desktop:dev`; its own
   end-to-end test, `npm run e2e:desktop` (`E2E_NO_WEBGPU=1` to see what a
-  runner without a GPU sees). Electron's program is not in the npm package:
+  runner without a GPU sees; `E2E_SOFTWARE_GPU=1` is how the Linux job draws,
+  and gives no adapter on macOS). Electron's program is not in the npm package:
   `node node_modules/electron/install.js` fetches it once. See
   `apps/desktop/README.md`.
 

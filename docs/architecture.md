@@ -650,7 +650,20 @@ Decided for the shell (#61):
   version: a new Chromium is a change to look at, not one to drift into.
   Its Node has `node:sqlite`, which the library uses.
 - **WebGPU** is on in that Chromium on macOS and Windows with nothing set.
-  Linux is #69.
+  On Linux (#69) Chromium offers it by itself for some graphics cards only,
+  so the shell tells it at start that WebGPU and Vulkan, which WebGPU runs
+  on there, may be used (`enable-unsafe-webgpu`, `enable-features=Vulkan`;
+  `gpuSwitches` in `policy.ts`). The page this applies to is the
+  application's own and no other. A graphics card Chromium has blocked
+  stays blocked (no `ignore-gpu-blocklist`), and nothing is drawn in
+  software by itself: without a usable Vulkan driver the viewer says so,
+  with what to install and how to check (`vulkaninfo --summary`).
+  - The notice for a missing GPU is written for the application when it is
+    one (`GpuEnvironment.desktop`): there is no browser to update and no
+    flags page, so it speaks of the driver and the computer.
+  - **Checked in CI with a software adapter**, which the Linux runner gets
+    when the tests ask Chromium for one (`E2E_SOFTWARE_GPU=1`): the viewer
+    draws there. No Linux machine with a graphics card has run it.
 
 Status: **decided, and Michael's to overturn**: the scheme, that the web
 build gives up inlined critical styles for the policy, that a server is

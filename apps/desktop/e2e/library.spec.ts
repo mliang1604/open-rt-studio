@@ -35,6 +35,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { gpuArgs } from './gpu.js';
+
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CT = syntheticCtSeries(6, 24);
 const THORAX = syntheticThoraxPatient({ size: 48, slices: 16 });
@@ -53,8 +55,7 @@ async function start(): Promise<void> {
   for (const [name, value] of Object.entries(process.env)) {
     if (value !== undefined) env[name] = value;
   }
-  const args = [DESKTOP];
-  if (process.env['E2E_NO_WEBGPU']) args.push('--disable-gpu');
+  const args = [DESKTOP, ...gpuArgs()];
   application = await electron.launch({
     args,
     cwd: DESKTOP,

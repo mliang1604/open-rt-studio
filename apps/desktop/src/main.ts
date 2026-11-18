@@ -46,6 +46,7 @@ import {
   APP_SCHEME,
   contentSecurityPolicy,
   devServerSite,
+  gpuSwitches,
   mayHave,
   mayNavigate,
 } from './policy.js';
@@ -326,6 +327,15 @@ async function start(): Promise<void> {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();
   });
+}
+
+// Before Chromium starts: what it needs to be told for WebGPU on this system.
+for (const told of gpuSwitches(
+  process.platform,
+  app.commandLine.getSwitchValue('enable-features'),
+)) {
+  if (told.value === undefined) app.commandLine.appendSwitch(told.name);
+  else app.commandLine.appendSwitch(told.name, told.value);
 }
 
 if (!(DESKTOP_PLATFORMS as readonly string[]).includes(process.platform)) {

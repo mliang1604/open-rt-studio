@@ -155,8 +155,9 @@ jobs:
   # REQUIRE_DCMTK makes a missing DCMTK a failure here and not a skip.
   # The desktop application, started on each system it is for (#61): Electron
   # on the web client's build, with the page asked what it can reach. The
-  # runners have no display on Linux and no GPU on Linux or Windows; what
-  # needs a GPU is checked where there is one.
+  # runners have no display on Linux and no GPU on Linux or Windows. On macOS
+  # the viewer draws with the runner's GPU, on Linux with a software adapter
+  # (#69), and on Windows what needs a GPU is skipped.
   desktop:
     name: Desktop (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -199,9 +200,23 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      - name: End-to-end (on a virtual display)
+      # Linux (#69): WebGPU there runs on Vulkan, which the application asks
+      # Chromium for at start. The runner has no graphics card, so the tests
+      # ask for Chromium's software adapter: everything is drawn, slowly.
+      - name: End-to-end (on a virtual display, drawing with a software adapter)
         if: runner.os == 'Linux'
+        env:
+          E2E_SOFTWARE_GPU: '1'
         run: xvfb-run --auto-servernum npm run e2e -w @open-rt-studio/desktop
+
+      # And as a Linux machine with no usable graphics driver is: first the
+      # runner as it comes, then with the GPU taken away outright. The viewer
+      # must say what is missing, in words for Linux.
+      - name: End-to-end without a graphics adapter (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run --auto-servernum npm run e2e -w @open-rt-studio/desktop -- e2e/shell.spec.ts
+          E2E_NO_WEBGPU=1 xvfb-run --auto-servernum npm run e2e -w @open-rt-studio/desktop -- e2e/shell.spec.ts
 
       - name: End-to-end
         if: runner.os != 'Linux'
