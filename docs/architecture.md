@@ -2184,7 +2184,7 @@ Decided in #79, the toolchain:
   believes the stamp and not the cache key.
 - **Static, and self-contained.** Each tool is one file: ITK and elastix
   are static libraries, the C++ runtime is linked in on Linux and the whole
-  runtime on Windows. The C library on Linux is the system's (glibc 2.35 or
+  runtime on Windows. The C library on Linux is the system's (glibc 2.34 or
   newer, from building on Ubuntu 22.04).
 - **macOS universal by joining.** ITK works out what the processor can do
   when it is configured, so one build for two processors is refused. Each

@@ -62,12 +62,14 @@ ctest --test-dir native/build/tools -C Release --output-on-failure
 licences of what is inside them. Each tool is one file with nothing to
 install beside it:
 
-- **Linux**: the C++ runtime is linked in; the C library is the system's
-  (built on Ubuntu 22.04 in CI, so glibc 2.35 or newer).
+- **Linux**: the C++ runtime is linked in; the C library is the system's.
+  Built on Ubuntu 22.04 in CI, the tools ask for glibc 2.34 or newer (the
+  workflow prints the newest symbol they use).
 - **macOS**: for macOS 12 or newer. CI builds for Apple silicon and for
   Intel separately and joins the two into universal programs.
 - **Windows**: the C and C++ runtime is linked in, so no redistributable is
-  needed. File names are taken as UTF-8.
+  needed: the only library a tool asks the system for is `KERNEL32.dll`.
+  File names are taken as UTF-8.
 
 ## In CI
 
