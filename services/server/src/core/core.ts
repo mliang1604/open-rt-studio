@@ -118,6 +118,7 @@ export function createCore(options: CoreOptions = {}): ServerCore {
         ingest: (bytes, ingestOptions) => run(() => ingest.ingest(bytes, ingestOptions)),
         importFolder: (directory, importOptions) =>
           run(() => ingest.importFolder(directory, importOptions)),
+        remove: (sopInstanceUid) => run(() => ingest.remove(sopInstanceUid)),
       },
     };
   }

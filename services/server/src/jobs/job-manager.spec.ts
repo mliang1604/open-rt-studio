@@ -10,11 +10,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { createLogger } from '../logger.js';
 import { IndexVersionError } from '../pacs-index/migrations.js';
 import { createJobManager, type JobManager, type JobManagerOptions } from './job-manager.js';
-import { openSqliteJobStore } from './job-store.js';
+import { JOB_MIGRATIONS, JOB_STORE_APPLICATION_ID, openSqliteJobStore } from './job-store.js';
 import {
   InvalidJobInputError,
   JobStepError,
   JobsStoppedError,
+  NothingToDiscardError,
   readWorkerLine,
   UnknownJobKindError,
   type Job,
@@ -367,6 +368,7 @@ describe('across a restart', () => {
       createdAt: '2026-11-13T10:00:00.000Z',
       startedAt: '2026-11-13T10:00:01.000Z',
       endedAt: null,
+      discardedAt: null,
     };
     store.save(died);
     store.appendLog(died.id, [{ stream: 'out', text: 'finished step 4' }], 100);
@@ -642,7 +644,142 @@ describe('a kind with steps of its own (#80)', () => {
   });
 });
 
+describe('discarding what a job made (#82)', () => {
+  const withSteps = (steps: Partial<JobKind>): JobKind => ({ ...dummyKind(), ...steps });
+
+  it('has the kind take it back, and writes down when', async () => {
+    const taken: [JsonObject, JsonObject][] = [];
+    const { jobs, log } = await manager({
+      kinds: [
+        withSteps({
+          finish: () => Promise.resolve({ stored: 'object-7' }),
+          discard: (inputs, result) => {
+            taken.push([inputs, result]);
+            return Promise.resolve();
+          },
+        }),
+      ],
+      now: () => new Date('2026-11-18T10:00:00.000Z'),
+    });
+    const job = await jobs.submit('dummy', { steps: 1 });
+    expect(job.discardedAt).toBeNull();
+    const done = await jobs.whenEnded(job.id);
+    expect(done).toMatchObject({ status: 'succeeded', discardedAt: null });
+
+    const discarded = await jobs.discard(job.id);
+    expect(discarded).toEqual({ ...done, discardedAt: '2026-11-18T10:00:00.000Z' });
+    // The kind is given the job's own result: what its finish returned.
+    expect(taken).toEqual([[{ steps: 1 }, { stored: 'object-7' }]]);
+    expect(jobs.get(job.id)).toEqual(discarded);
+    expect(jobs.list()).toEqual([discarded]);
+    expect(log().map((line) => line['event'])).toContain('job-discarded');
+
+    // Again changes nothing and asks the kind nothing.
+    expect(await jobs.discard(job.id)).toEqual(discarded);
+    expect(taken).toHaveLength(1);
+  });
+
+  it('is done once when it is asked for twice at once', async () => {
+    let calls = 0;
+    const { jobs } = await manager({
+      kinds: [
+        withSteps({
+          discard: async () => {
+            calls++;
+            await new Promise((resolve) => setTimeout(resolve, 30));
+          },
+        }),
+      ],
+    });
+    const job = await jobs.submit('dummy', { steps: 1, result: { made: 1 } });
+    await jobs.whenEnded(job.id);
+    const [first, second] = await Promise.all([jobs.discard(job.id), jobs.discard(job.id)]);
+    expect(calls).toBe(1);
+    expect(first!.discardedAt).not.toBeNull();
+    expect(second).toEqual(first);
+  });
+
+  it('is refused for a job that made nothing to take back', async () => {
+    const { jobs } = await manager({
+      kinds: [dummyKind(), withSteps({ name: 'keeps', discard: () => Promise.resolve() })],
+    });
+    // A kind that keeps nothing.
+    const plain = await jobs.submit('dummy', { steps: 1, result: { made: 1 } });
+    await jobs.whenEnded(plain.id);
+    await expect(jobs.discard(plain.id)).rejects.toBeInstanceOf(NothingToDiscardError);
+    // A job that failed, one that reported no result, one that still runs.
+    const failed = await jobs.submit('keeps', { steps: 1, exitCode: 3, result: { made: 1 } });
+    await jobs.whenEnded(failed.id);
+    await expect(jobs.discard(failed.id)).rejects.toBeInstanceOf(NothingToDiscardError);
+    const empty = await jobs.submit('keeps', { steps: 1 });
+    await jobs.whenEnded(empty.id);
+    await expect(jobs.discard(empty.id)).rejects.toBeInstanceOf(NothingToDiscardError);
+    const slow = await jobs.submit('keeps', { steps: 50, delayMs: 100 });
+    await until(jobs, slow.id, (one) => one.status === 'running');
+    await expect(jobs.discard(slow.id)).rejects.toBeInstanceOf(NothingToDiscardError);
+    for (const one of [plain, failed, empty, slow]) {
+      expect(jobs.get(one.id)!.discardedAt).toBeNull();
+    }
+    jobs.cancel(slow.id);
+    // And there is no such job.
+    expect(await jobs.discard('00000000-0000-4000-8000-000000000000')).toBeNull();
+  });
+
+  it('stays as it was when the kind cannot take it back, with its word for why and no other', async () => {
+    let fail: Error | null = new TypeError('instance 1.2.3.4');
+    const { jobs, log } = await manager({
+      kinds: [
+        withSteps({
+          discard: () => (fail ? Promise.reject(fail) : Promise.resolve()),
+        }),
+      ],
+    });
+    const job = await jobs.submit('dummy', { steps: 1, result: { made: 1 } });
+    await jobs.whenEnded(job.id);
+    await expect(jobs.discard(job.id)).rejects.toEqual(new JobStepError('failed'));
+    fail = new JobStepError('not-a-registration');
+    await expect(jobs.discard(job.id)).rejects.toEqual(new JobStepError('not-a-registration'));
+    expect(jobs.get(job.id)!.discardedAt).toBeNull();
+    const written = JSON.stringify(log());
+    expect(written).toContain('"event":"job-not-discarded"');
+    expect(written).toContain('"reason":"not-a-registration"');
+    expect(written).not.toContain('1.2.3.4');
+    // It can be tried again.
+    fail = null;
+    expect((await jobs.discard(job.id))!.discardedAt).not.toBeNull();
+  });
+
+  it('is still known after a restart', async () => {
+    const path = join(scratch, 'jobs.sqlite');
+    const kinds = [withSteps({ discard: () => Promise.resolve() })];
+    const first = await manager({ kinds, store: openSqliteJobStore(path) });
+    const job = await first.jobs.submit('dummy', { steps: 1, result: { made: 1 } });
+    await first.jobs.whenEnded(job.id);
+    const discarded = await first.jobs.discard(job.id);
+    await first.jobs.shutdown();
+    const second = await manager({ kinds, store: openSqliteJobStore(path) });
+    expect(second.jobs.get(job.id)).toEqual(discarded);
+  });
+});
+
 describe('the job store', () => {
+  it('takes a store made before a job could be discarded, and keeps its jobs', () => {
+    const path = join(scratch, 'old.sqlite');
+    const db = new DatabaseSync(path);
+    db.exec(JOB_MIGRATIONS[0].sql);
+    db.exec(`PRAGMA application_id = ${JOB_STORE_APPLICATION_ID}; PRAGMA user_version = 1;`);
+    db.prepare(
+      `INSERT INTO job (id, kind, status, inputs, created_at, made)
+       VALUES ('a', 'dummy', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', 1)`,
+    ).run();
+    db.close();
+    const store = openSqliteJobStore(path);
+    expect(store.get('a')).toMatchObject({ status: 'succeeded', discardedAt: null });
+    store.save({ ...store.get('a')!, discardedAt: '2026-11-18T10:00:00.000Z' });
+    expect(store.get('a')!.discardedAt).toBe('2026-11-18T10:00:00.000Z');
+    store.close();
+  });
+
   it('refuses a database that is something else', () => {
     const path = join(scratch, 'other.sqlite');
     const db = new DatabaseSync(path);

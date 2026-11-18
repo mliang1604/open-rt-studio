@@ -45,6 +45,7 @@ import {
 } from '../jobs/job.js';
 import {
   checkPair,
+  discardStored,
   filedWith,
   PAIR_INPUT_NAMES,
   pairArguments,
@@ -202,6 +203,7 @@ export function deformableRegistrationKind(parts: DeformableRegistrationParts): 
       'Finds the deformable registration between two image series (fixedSeriesUid, movingSeriesUid, preset; optionally initial, roi, seed, parameters) and stores it as a Deformable Spatial Registration object.',
     timeoutMs: parts.timeoutMs ?? 60 * 60_000,
     removeWorkDir: true,
+    discard: (_inputs, result) => discardStored(parts.pacs(), result),
 
     command(given, { workDir }) {
       const inputs = readInputs(given);

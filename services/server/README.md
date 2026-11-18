@@ -119,7 +119,7 @@ changed).
 | `instance-upload`                                       | A file is sent; `detail` says what became of it                                          |
 | `timepoints-read`, `timepoints-write`                   | A patient's timepoints are read or replaced; `detail` counts them                        |
 | `accounts-list`, `account-create`, `-change`, `-remove` | An administrator, or the `account` command, does so                                      |
-| `job-start`, `job-cancel`, `job-read`                   | A job is submitted, cancelled, followed                                                  |
+| `job-start`, `job-cancel`, `job-read`, `job-discard`    | A job is submitted, cancelled, followed; what it made is taken back                      |
 | `audit-read`, `audit-export`                            | The audit log itself is read                                                             |
 | `audit-clear`                                           | The server clears records that have outlived the retention period                        |
 | `index-fill`                                            | The `reindex` command made the index again from the store; `detail` counts what it filed |
@@ -834,6 +834,7 @@ routes, so what is served is what is described.
 | `GET /api/v1/jobs/{id}`                 | One job: status, progress, result                                          |
 | `GET /api/v1/jobs/{id}/log`             | The last lines its worker wrote                                            |
 | `POST /api/v1/jobs/{id}/cancel`         | Stop it                                                                    |
+| `POST /api/v1/jobs/{id}/discard`        | Take back what it made: remove what the job stored                         |
 | `GET /api/v1/registration-presets`      | The presets a deformable registration can be run with                      |
 
 ```sh
@@ -1068,6 +1069,16 @@ kinds of the native tools it is told of ([rigid](#rigid-registration) and
   data in the job's directory asks for the directory to be removed when
   the job has ended (`removeWorkDir`), and says whose data a job is about
   (`subject`), which goes into the audit record of whoever submitted it.
+- **Taking a result back.** A kind may say how what it made is removed
+  again (`discard`), for a result that was looked at and is not wanted.
+  `POST /api/v1/jobs/{id}/discard` then removes what the job stored and
+  the job says when (`discardedAt`); its `result` still says what was
+  made. It is the only way the API removes anything from the PACS, and it
+  removes only what a job of the server stored itself: nothing that was
+  sent to the server can be removed through it. It answers 409
+  (`nothing-to-discard`) for a job that has not succeeded or whose kind
+  keeps nothing, and is in the audit log as `job-discard` with whose data
+  it was.
 - **Stopping a worker** (cancel, timeout, server stop) is `SIGTERM`, and
   `SIGKILL` five seconds later if it is still there.
 - **Across a restart.** Jobs are written down in `<dataDir>/jobs.sqlite` as
@@ -1135,6 +1146,10 @@ curl -X POST http://127.0.0.1:4300/api/jobs -H 'Content-Type: application/json' 
 - **What it does not do**: say whether the registration is any good. A job
   that succeeded has stored what the tool found; someone has to look at the
   two images together before it is used for anything.
+- **Discarding**: `POST /api/v1/jobs/{id}/discard` takes the object the
+  job stored out of the server again, for a registration that was looked
+  at and is not wanted. The two series are untouched. The same for a
+  deformable registration.
 - **Limits**: both volumes are held in memory while they are written; the
   tool is run with four threads; registering the same two series again
   stores another object and replaces none.

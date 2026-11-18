@@ -520,6 +520,10 @@ export const SCHEMAS: Readonly<Record<string, Schema>> = {
     createdAt: text,
     startedAt: nullableText,
     endedAt: nullableText,
+    discardedAt: {
+      type: ['string', 'null'],
+      description: 'When what the job made was taken back; null while its result stands.',
+    },
   }),
   JobPage: page('Job'),
   JobLogLine: object({

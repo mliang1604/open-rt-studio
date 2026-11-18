@@ -621,6 +621,9 @@ it.each(INDEXES)(
     for (const name of ['sopInstanceUid', 'seriesInstanceUid']) {
       seen.add(String(deformed.result![name]));
     }
+    // And what it made taken back again (#82).
+    const discarded = await call('POST', api(`/jobs/${deformed.id}/discard`), { token: admin });
+    expect(discarded.status).toBe(200);
     await call('POST', api('/jobs'), {
       token: admin,
       body: {

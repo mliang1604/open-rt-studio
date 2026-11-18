@@ -8,6 +8,8 @@ import {
   InvalidJobInputError,
   JOB_STATUSES,
   JobsStoppedError,
+  JobStepError,
+  NothingToDiscardError,
   UnknownJobKindError,
   type JobStatus,
   type JsonObject,
@@ -245,6 +247,51 @@ export function jobRoutes(jobs: JobManager): Route[] {
           200: { description: 'The job as it is after the call.', schema: 'Job' },
           400: BAD_REQUEST,
           404: NOT_FOUND,
+        },
+      },
+    },
+    {
+      method: 'POST',
+      path: `${API_PREFIX}/jobs/:jobId/discard`,
+      audit: 'job-discard',
+      handle: async (request) => {
+        const id = idOf(request);
+        const job = found(jobs.get(id));
+        // Whose data is changed, said before anything is.
+        request.audit({ detail: job.kind });
+        const subject = await jobs.subject(job.kind, job.inputs);
+        if (subject) request.audit(subject);
+        try {
+          return { status: 200, body: found(await jobs.discard(id)) };
+        } catch (error) {
+          if (error instanceof NothingToDiscardError) {
+            throw new HttpError(409, 'nothing-to-discard', error.message);
+          }
+          if (error instanceof JobStepError) {
+            throw new HttpError(500, 'not-discarded', 'What the job made could not be removed.');
+          }
+          throw error;
+        }
+      },
+      doc: {
+        tag: 'Jobs',
+        summary: 'Take back what a job made',
+        description:
+          'For a result that was looked at and is not wanted, such as a registration: what the job stored is removed from the server, and the job says when (`discardedAt`). Only what the job itself stored can be removed this way; nothing that was sent to the server can. A job that was discarded before stays as it is.',
+        parameters: [JOB_ID],
+        responses: {
+          200: { description: 'The job as it is after the call.', schema: 'Job' },
+          400: BAD_REQUEST,
+          404: NOT_FOUND,
+          409: {
+            description:
+              'The job has not succeeded, or its kind stores nothing (`nothing-to-discard`).',
+            schema: 'Error',
+          },
+          500: {
+            description: 'What it made could not be removed (`not-discarded`).',
+            schema: 'Error',
+          },
         },
       },
     },

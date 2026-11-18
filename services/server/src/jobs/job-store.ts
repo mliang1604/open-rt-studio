@@ -43,6 +43,11 @@ export const JOB_MIGRATIONS: readonly Migration[] = [
       ) STRICT, WITHOUT ROWID;
     `,
   },
+  {
+    version: 2,
+    name: 'when what a job made was discarded',
+    sql: 'ALTER TABLE job ADD COLUMN discarded_at TEXT;',
+  },
 ];
 
 export interface JobQuery {
@@ -85,6 +90,7 @@ const toJob = (row: Row): Job => ({
   createdAt: String(row['created_at']),
   startedAt: text(row['started_at']),
   endedAt: text(row['ended_at']),
+  discardedAt: text(row['discarded_at']),
 });
 
 /**
@@ -113,12 +119,12 @@ export function openSqliteJobStore(location: string): JobStore {
     save(job) {
       db.prepare(
         `INSERT INTO job (id, kind, status, inputs, progress, message, result, failure, exit_code,
-           created_at, started_at, ended_at, made)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           created_at, started_at, ended_at, discarded_at, made)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET status = excluded.status, progress = excluded.progress,
            message = excluded.message, result = excluded.result, failure = excluded.failure,
            exit_code = excluded.exit_code, started_at = excluded.started_at,
-           ended_at = excluded.ended_at`,
+           ended_at = excluded.ended_at, discarded_at = excluded.discarded_at`,
       ).run(
         job.id,
         job.kind,
@@ -132,6 +138,7 @@ export function openSqliteJobStore(location: string): JobStore {
         job.createdAt,
         job.startedAt,
         job.endedAt,
+        job.discardedAt,
         ++made,
       );
     },

@@ -333,3 +333,26 @@ export function filedWith(study: StudyRecord): {
     studyDescription: study.description,
   };
 }
+
+/** The two kinds of registration object a job here stores. */
+const REGISTRATION_SOP_CLASSES = new Set([
+  '1.2.840.10008.5.1.4.1.1.66.1',
+  '1.2.840.10008.5.1.4.1.1.66.3',
+]);
+
+/**
+ * Take the registration object a job stored out of the PACS again, for a
+ * registration that was looked at and is not wanted (`JobKind.discard`).
+ * `result` is the job's own result, which names the object. One that is no
+ * longer there is no failure; anything but a registration object is left
+ * alone.
+ */
+export async function discardStored(pacs: Pacs, result: JsonObject): Promise<void> {
+  const uid = result['sopInstanceUid'];
+  if (typeof uid !== 'string') throw new JobStepError('no-result');
+  const held = await pacs.index.getInstance(uid);
+  if (held && !REGISTRATION_SOP_CLASSES.has(held.sopClassUid)) {
+    throw new JobStepError('not-a-registration');
+  }
+  await pacs.ingest.remove(uid);
+}

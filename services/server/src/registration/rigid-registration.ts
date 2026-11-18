@@ -23,6 +23,7 @@ import type { Pacs } from '../core/core.js';
 import { InvalidJobInputError, JobStepError, type JobKind, type JsonObject } from '../jobs/job.js';
 import {
   checkPair,
+  discardStored,
   filedWith,
   PAIR_INPUT_NAMES,
   pairArguments,
@@ -111,6 +112,7 @@ export function rigidRegistrationKind(parts: RigidRegistrationParts): JobKind {
       'Finds the rigid registration between two image series (fixedSeriesUid, movingSeriesUid; optionally initial, roi, seed) and stores it as a Spatial Registration object.',
     timeoutMs: parts.timeoutMs ?? 30 * 60_000,
     removeWorkDir: true,
+    discard: (_inputs, result) => discardStored(parts.pacs(), result),
 
     command: (given, { workDir }) => ({
       file: program,

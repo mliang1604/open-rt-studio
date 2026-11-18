@@ -465,6 +465,20 @@ describe('a deformable registration job', () => {
     expect(await readdir(join(scratch, 'work'))).toEqual([]);
   });
 
+  it('takes its object out of the PACS again when it is discarded (#82)', async () => {
+    const before = await registrations();
+    const manager = await jobs();
+    const job = await manager.whenEnded(
+      (await manager.submit(DEFORMABLE_REGISTRATION_KIND, INPUTS)).id,
+    );
+    const uid = job.result!['sopInstanceUid'] as string;
+    expect(await registrations()).toEqual([...before, uid].sort());
+    expect((await manager.discard(job.id))!.discardedAt).not.toBeNull();
+    expect(await registrations()).toEqual(before);
+    expect(await pacs.store.exists(uid)).toBe(false);
+    expect(await pacs.index.getSeries(job.result!['seriesInstanceUid'] as string)).toBeNull();
+  });
+
   it('fails the tool that is given a preset that is none', async () => {
     await mkdir(join(scratch, 'presets'));
     await writeFile(join(scratch, 'presets', 'empty.txt'), '// title: Empty\n');

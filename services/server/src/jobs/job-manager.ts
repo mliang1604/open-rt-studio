@@ -13,6 +13,7 @@ import {
   ENDED,
   JobStepError,
   JobsStoppedError,
+  NothingToDiscardError,
   readWorkerLine,
   UnknownJobKindError,
   type Job,
@@ -84,6 +85,15 @@ export interface JobManager {
   /** The job once it has ended, however it ended. */
   whenEnded(id: string): Promise<Job>;
   /**
+   * Take back what a job made, for a result that is not wanted
+   * ({@link JobKind.discard}). The job as it is after the call, with when it
+   * was discarded; one that was discarded before stays as it is. Null when
+   * there is no such job. Rejects with `NothingToDiscardError` for a job that
+   * has not succeeded or whose kind keeps nothing, and with a `JobStepError`
+   * when what it made could not be removed.
+   */
+  discard(id: string): Promise<Job | null>;
+  /**
    * Stop for good: take no more jobs, stop the workers that run (their jobs
    * fail as `interrupted`), leave the waiting jobs waiting for the next start,
    * and close the store.
@@ -121,6 +131,8 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
   const queue: string[] = [];
   const running = new Map<string, Running>();
   const waiters = new Map<string, ((job: Job) => void)[]>();
+  /** The discards under way, so that a second one of the same job waits for the first. */
+  const discarding = new Map<string, Promise<Job | null>>();
   let stopped = false;
 
   await mkdir(workRoot, { recursive: true });
@@ -389,6 +401,7 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
         createdAt: now().toISOString(),
         startedAt: null,
         endedAt: null,
+        discardedAt: null,
       });
       queue.push(job.id);
       logger.info('job-submitted', { kind: kindName });
@@ -440,6 +453,35 @@ export async function createJobManager(options: JobManagerOptions): Promise<JobM
       return new Promise((resolve) => {
         waiters.set(id, [...(waiters.get(id) ?? []), resolve]);
       });
+    },
+
+    discard(id) {
+      const underWay = discarding.get(id);
+      if (underWay) return underWay;
+      const work = (async (): Promise<Job | null> => {
+        const job = store.get(id);
+        if (!job || job.discardedAt !== null) return job;
+        const kind = kinds.get(job.kind);
+        if (job.status !== 'succeeded' || job.result === null || !kind?.discard) {
+          throw new NothingToDiscardError();
+        }
+        try {
+          await kind.discard(job.inputs, job.result);
+        } catch (error) {
+          // As for the kind's other steps: what it threw is not logged.
+          const reason = reasonOf(error) ?? 'failed';
+          logger.error('job-not-discarded', { kind: job.kind, error: nameOf(error), reason });
+          throw new JobStepError(reason);
+        }
+        logger.info('job-discarded', { kind: job.kind });
+        return save({ ...job, discardedAt: now().toISOString() });
+      })();
+      discarding.set(id, work);
+      void work.then(
+        () => discarding.delete(id),
+        () => discarding.delete(id),
+      );
+      return work;
     },
 
     async shutdown() {
