@@ -17,7 +17,7 @@ import type { SendRecord } from '../dimse/send-manager.js';
 import { HttpError, type ParameterDoc, type Route, type RouteRequest } from '../host/routes.js';
 import type { PacsIndex } from '../pacs-index/pacs-index.js';
 import { isUid } from '../uid.js';
-import { API_PREFIX, queryOf } from './api-routes.js';
+import { API_PREFIX, exactly, queryOf } from './api-routes.js';
 
 const MAX_BODY_BYTES = 4096;
 
@@ -136,6 +136,9 @@ const NO_SUCH_RETRIEVE = {
   description: 'The server has no such retrieve.',
   schema: 'Error',
 } as const;
+
+/** The account a request is made by, for the record of what the server then does by DICOM. */
+const asker = (request: RouteRequest): string | null => request.session?.account.name ?? null;
 
 /** An object of a request's body, with the names it may have and no others. */
 function bodyOf(body: unknown, names: readonly string[]): Record<string, unknown> {
@@ -412,11 +415,14 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
           object: remote(what.destination)?.aeTitle ?? null,
         });
         try {
-          const record = await dicom.send({
-            destination: what.destination,
-            ...(what.seriesUid === undefined ? {} : { seriesInstanceUid: what.seriesUid }),
-            ...(what.sopInstanceUid === undefined ? {} : { sopInstanceUid: what.sopInstanceUid }),
-          });
+          const record = await dicom.send(
+            {
+              destination: what.destination,
+              ...(what.seriesUid === undefined ? {} : { seriesInstanceUid: what.seriesUid }),
+              ...(what.sopInstanceUid === undefined ? {} : { sopInstanceUid: what.sopInstanceUid }),
+            },
+            asker(request),
+          );
           await auditSend(request, record);
           request.audit({ detail: `${record.instances.length} instances` });
           return { status: 202, body: record };
@@ -499,7 +505,7 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
         const before = dicom.sendOf(request.params['id']);
         if (before) await auditSend(request, before);
         try {
-          const record = await dicom.retrySend(request.params['id']);
+          const record = await dicom.retrySend(request.params['id'], asker(request));
           if (!record) throw new HttpError(404, 'not-found', 'The server has no such send.');
           request.audit({ detail: `${record.instances.length} instances, again` });
           return { status: 202, body: record };
@@ -558,11 +564,17 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
         try {
           const answer = await dicom.query({ source, level: body['level'], keys: body['keys'] });
           const matches = answer.outcome === 'answered' ? answer.matches : [];
+          // Whom a user looked for elsewhere is said as it is for a search here.
+          const keys = Object.entries(answer.asked).filter(([, value]) => value !== '');
           request.audit({
-            detail:
+            patientId: exactly(answer.asked.patientId),
+            studyUid: answer.asked.studyInstanceUid ?? null,
+            detail: [
               answer.outcome === 'answered'
                 ? `${answer.level}: ${matches.length} matches${answer.complete ? '' : ', not all'}`
                 : `${answer.level}: ${answer.outcome}`,
+              ...(keys.length > 0 ? [JSON.stringify(Object.fromEntries(keys))] : []),
+            ].join(', '),
           });
           return {
             status: 200,
@@ -619,11 +631,14 @@ export function dicomRoutes(dicom: DicomService, index: PacsIndex): Route[] {
           object: remote(source)?.aeTitle ?? null,
         });
         try {
-          const record = await dicom.retrieve({
-            source,
-            studyInstanceUid: studyUid,
-            ...(seriesUid === undefined ? {} : { seriesInstanceUid: seriesUid }),
-          });
+          const record = await dicom.retrieve(
+            {
+              source,
+              studyInstanceUid: studyUid,
+              ...(seriesUid === undefined ? {} : { seriesInstanceUid: seriesUid }),
+            },
+            asker(request),
+          );
           return { status: 202, body: record };
         } catch (error) {
           return refused(error);

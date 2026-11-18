@@ -708,6 +708,20 @@ describe('the DICOM settings of the API', () => {
       const read = records().filter((record) => record.action === 'dicom-send-read');
       expect(read.at(-1)).toMatchObject({ actor: 'ada', seriesUid, object: 'PLANNING' });
       expect(read.at(-1)!.detail).toBe('done: 3 of 3 sent, 0 failed');
+      // How the send ended is recorded by itself, with who asked for it (#212).
+      const ended = records().filter((record) => record.action === 'dicom-sent');
+      expect(ended).toMatchObject([
+        {
+          actor: 'ada',
+          origin: 'dicom',
+          outcome: 'ok',
+          object: 'PLANNING',
+          seriesUid,
+          detail: 'send: 3 of 3 sent',
+        },
+      ]);
+      expect(ended[0].patientId).toBe(sends[0].patientId);
+      expect(ended[0].studyUid).toBe(sends[0].studyUid);
       expect(records().some((record) => record.action === 'dicom-destinations-read')).toBe(true);
     });
   });
@@ -993,12 +1007,17 @@ describe('the DICOM settings of the API', () => {
 
       const of = (action: string) => records().filter((record) => record.action === action);
       expect(of('dicom-sources-read')).toHaveLength(1);
+      // Whom was looked for is in the record, as it is for a search of the server's own studies.
       expect(of('dicom-query')).toMatchObject([
-        { actor: 'ada', outcome: 'ok', object: 'ARCHIVE', detail: 'study: 2 matches' },
+        {
+          actor: 'ada',
+          outcome: 'ok',
+          object: 'ARCHIVE',
+          patientId: null,
+          detail: 'study: 2 matches, {"patientName":"SYNTH*"}',
+        },
         { actor: 'ada', outcome: 'not-found', object: null },
       ]);
-      // What was asked for is not in the record: a name that was typed is no one's yet.
-      expect(JSON.stringify(of('dicom-query'))).not.toContain('SYNTH');
       expect(of('dicom-retrieve')).toMatchObject([
         { actor: 'ada', outcome: 'ok', object: 'ARCHIVE', studyUid: COURSE.planningStudy },
       ]);
@@ -1011,6 +1030,76 @@ describe('the DICOM settings of the API', () => {
         detail: 'done: retrieved, 8 sent, 0 failed, 8 held',
       });
       expect(read.patientId).toBeTruthy();
+
+      // What the archive sent arrived over DICOM, and is recorded as that (#212):
+      // each series it stored here, by its AE title and with no account,
+      const stored = of('dicom-store');
+      expect(stored.length).toBeGreaterThan(0);
+      expect(stored.reduce((sum, record) => sum + record.count, 0)).toBe(8);
+      for (const record of stored) {
+        expect(record).toMatchObject({
+          actor: null,
+          origin: 'dicom',
+          outcome: 'ok',
+          object: 'ARCHIVE',
+          studyUid: COURSE.planningStudy,
+        });
+        expect(record.patientId).toBeTruthy();
+      }
+      // and how the retrieve ended, with who asked for it, though no one had asked after it.
+      await vi.waitFor(() => expect(of('dicom-retrieved')).toHaveLength(1));
+      expect(of('dicom-retrieved')).toMatchObject([
+        {
+          actor: 'ada',
+          origin: 'dicom',
+          outcome: 'ok',
+          object: 'ARCHIVE',
+          studyUid: COURSE.planningStudy,
+          seriesUid: null,
+          detail: 'retrieved, 8 sent, 0 failed, 8 held',
+        },
+      ]);
+      expect(of('dicom-retrieved')[0].patientId).toBe(stored[0].patientId);
+    });
+
+    it('records a query that names a patient or a study as being of them', async () => {
+      const { call, user, source, records } = await asker();
+      await call('POST', '/dicom/queries', {
+        token: user,
+        body: {
+          source,
+          level: 'series',
+          keys: { studyInstanceUid: COURSE.planningStudy, modality: 'CT' },
+        },
+      });
+      await call('POST', '/dicom/queries', {
+        token: user,
+        body: { source, level: 'patient', keys: { patientId: 'SYN-0001' } },
+      });
+      await call('POST', '/dicom/queries', {
+        token: user,
+        body: { source, level: 'study', keys: { studyDate: 'yesterday', patientId: 'SYN-0001' } },
+      });
+      const queries = records().filter((record) => record.action === 'dicom-query');
+      expect(queries).toMatchObject([
+        {
+          outcome: 'ok',
+          patientId: null,
+          studyUid: COURSE.planningStudy,
+          detail: `series: 1 matches, ${JSON.stringify({
+            studyInstanceUid: COURSE.planningStudy,
+            modality: 'CT',
+          })}`,
+        },
+        {
+          outcome: 'ok',
+          patientId: 'SYN-0001',
+          studyUid: null,
+          detail: 'patient: 1 matches, {"patientId":"SYN-0001"}',
+        },
+        // What could not be asked is not repeated.
+        { outcome: 'rejected', patientId: null, detail: null },
+      ]);
     });
   });
 });

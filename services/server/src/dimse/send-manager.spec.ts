@@ -275,6 +275,41 @@ describe('the sends of a server', () => {
     expect(log().some((line) => line.event === 'dicom-send-failed')).toBe(true);
   });
 
+  it('tells of each send once it is done, however it ended, with who asked for it (#212)', async () => {
+    const told: [SendRecord, string | null][] = [];
+    let calls = 0;
+    const { manager, request, uids } = await make(2, {
+      send: async (_target, objects) => {
+        calls += 1;
+        if (calls === 2) throw new Error('something in the sender');
+        return objects.map(() => STORED);
+      },
+      ended: (record, by) => {
+        told.push([record, by]);
+        // What is told of a send does not undo it, nor stop the next.
+        throw new Error('the one that is told fails');
+      },
+    });
+    const first = manager.start(request({ by: 'ada' }));
+    const second = manager.start(request());
+    expect(told).toEqual([]);
+    await manager.idle();
+    await manager.close();
+    const late = manager.start(request({ by: 'grace' }));
+    await manager.idle();
+    expect(told.map(([record, by]) => [record.id, record.state, by])).toEqual([
+      [first.id, 'done', 'ada'],
+      [second.id, 'done', null],
+      [late.id, 'done', 'grace'],
+    ]);
+    // Each as it ended: sent, broken, and not begun.
+    expect(told[0][0].instances.map((one) => one.state)).toEqual(['sent', 'sent']);
+    expect(told[1][0].instances.map((one) => one.failure)).toEqual(['broken', 'broken']);
+    expect(told[2][0].instances.map((one) => one.failure)).toEqual(['stopped', 'stopped']);
+    expect(told[0][0].instances.map((one) => one.sopInstanceUid)).toEqual(uids);
+    expect(manager.get(first.id)).toEqual(told[0][0]);
+  });
+
   it('keeps the latest records, and never drops one that is not done', async () => {
     const { manager, request } = await make(1, { kept: 3 });
     const ids: string[] = [];

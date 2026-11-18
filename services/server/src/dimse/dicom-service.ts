@@ -27,6 +27,7 @@ import {
 } from './dicom-settings.js';
 import { ASK_LEVELS, AskError, checkedKeys, type AskKeys, type AskLevel } from './ask-keys.js';
 import type { FindAnswer } from './ask.js';
+import { NO_DICOM_AUDIT, type DicomAudit } from './dicom-audit.js';
 import type { EchoResult } from './echo.js';
 import type { DicomListener } from './listener.js';
 import {
@@ -57,6 +58,11 @@ export interface DicomServiceOptions {
   /** How long an echo waits. */
   readonly echoTimeoutMs?: number;
   /** How long a send waits for the connection, the association and each answer. */
+  /**
+   * Where the audit records of DICOM networking go (#212). Without, none
+   * are written: a server that keeps no audit log.
+   */
+  readonly audit?: DicomAudit;
   readonly sendTimeoutMs?: number;
   /**
    * How long a retrieve may hear nothing from the system that is sending
@@ -101,7 +107,7 @@ export interface DicomService {
    * Rejects with `not-found`, `no-address`, `no-such-series` or
    * `nothing-to-send`.
    */
-  send(what: SendOf): Promise<SendRecord>;
+  send(what: SendOf, by?: string | null): Promise<SendRecord>;
   /** A send's record as it is now; null for one there is none of. */
   sendOf(id: string): SendRecord | null;
   /** The sends kept, the latest first. */
@@ -111,7 +117,7 @@ export interface DicomService {
    * there is none of; rejects with `not-done`, `nothing-to-send`,
    * `not-found` or `no-address`.
    */
-  retrySend(id: string): Promise<SendRecord | null>;
+  retrySend(id: string, by?: string | null): Promise<SendRecord | null>;
   /** The systems that can be asked what they hold: those with an address. */
   sources(): Source[];
   /**
@@ -127,7 +133,7 @@ export interface DicomService {
    * `no-address`, `invalid`, `not-listening` (the objects would have nowhere
    * to arrive) or `may-not-store` (they would be refused).
    */
-  retrieve(what: RetrieveOf): Promise<RetrieveRecord>;
+  retrieve(what: RetrieveOf, by?: string | null): Promise<RetrieveRecord>;
   /** A retrieve's record as it is now; null for one there is none of. */
   retrieveOf(id: string): RetrieveRecord | null;
   /** The retrieves kept, the latest first. */
@@ -162,7 +168,11 @@ export interface QueryOf {
 }
 
 /** What another system answered, or why it did not. */
-export type QueryAnswer = { readonly level: AskLevel } & FindAnswer<AskLevel>;
+export type QueryAnswer = {
+  readonly level: AskLevel;
+  /** The keys that were asked, as they were checked. */
+  readonly asked: AskKeys;
+} & FindAnswer<AskLevel>;
 
 /** What to retrieve, and from where. */
 export interface RetrieveOf {
@@ -207,6 +217,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
       port,
       // Asked for at each association: a change needs no new listener.
       aeTitle: () => settings.local.aeTitle,
+      audit,
       callers: () => settings.remotes.filter((r) => r.mayStore).map((r) => r.aeTitle),
       retrievers: () => settings.remotes.filter((r) => r.mayRetrieve).map((r) => r.aeTitle),
       // A move goes to a system on the list that has an address, and to no other.
@@ -222,12 +233,39 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
     });
   };
 
+  const audit = options.audit ?? NO_DICOM_AUDIT;
+  /** Whose a study is, for a record: the patient the server has it under, if it holds it. */
+  const whose = (studyInstanceUid: string): Promise<string | null> =>
+    options.pacs.index.getStudy(studyInstanceUid).then(
+      (study) => study?.patientId || null,
+      () => null,
+    );
+
   // Made by the first retrieve.
   let retrieving: RetrieveManager | null = null;
   const retrieveManager = (): RetrieveManager =>
     (retrieving ??= createRetrieveManager({
       index: options.pacs.index,
       ...(options.logger ? { logger: options.logger } : {}),
+      // How it ended is in the audit log, whether or not anyone asks after it.
+      ended: (record, by) =>
+        void whose(record.studyInstanceUid).then((patientId) =>
+          audit({
+            action: 'dicom-retrieved',
+            outcome: record.result === 'retrieved' ? 'ok' : 'failed',
+            actor: by,
+            aeTitle: record.source.aeTitle,
+            patientId,
+            studyUid: record.studyInstanceUid,
+            seriesUid: record.seriesInstanceUid,
+            detail: [
+              record.result === 'partly' ? 'partly' : (record.failure ?? record.result ?? 'failed'),
+              `${(record.counts?.completed ?? 0) + (record.counts?.warning ?? 0)} sent`,
+              `${record.counts?.failed ?? 0} failed`,
+              `${record.held ?? 0} held`,
+            ].join(', '),
+          }),
+        ),
     }));
 
   // Made by the first send.
@@ -240,6 +278,26 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
         ? {}
         : { instancesAtOnce: options.sendInstancesAtOnce }),
       ...(options.sender ? { send: options.sender } : {}),
+      ended: (record, by) =>
+        void whose(record.studyInstanceUid).then((patientId) => {
+          const sent = record.instances.filter((one) => one.state === 'sent').length;
+          const reasons = [
+            ...new Set(record.instances.flatMap((one) => (one.failure ? [one.failure] : []))),
+          ];
+          audit({
+            action: 'dicom-sent',
+            outcome: sent === record.instances.length ? 'ok' : 'failed',
+            actor: by,
+            aeTitle: record.destination.aeTitle,
+            patientId,
+            studyUid: record.studyInstanceUid,
+            seriesUid: record.seriesInstanceUid,
+            detail: [
+              `send: ${sent} of ${record.instances.length} sent`,
+              ...(reasons.length > 0 ? [reasons.join(' ')] : []),
+            ].join(', '),
+          });
+        }),
     }));
 
   /** The system to send to, as it is now, with where it is. */
@@ -393,7 +451,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
         .filter((r) => r.host !== null)
         .map((r) => ({ id: r.id, name: r.name, aeTitle: r.aeTitle })),
 
-    async send(what) {
+    async send(what, by = null) {
       const to = destinationOf(what.destination);
       const { index } = options.pacs;
       // One object says which series it is of, when the request does not.
@@ -433,13 +491,14 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
         studyInstanceUid: series.studyInstanceUid,
         seriesInstanceUid: series.seriesInstanceUid,
         sopInstanceUids,
+        by,
       });
     },
 
     sendOf: (id) => manager?.get(id) ?? null,
     sends: () => manager?.list() ?? [],
 
-    async retrySend(id) {
+    async retrySend(id, by = null) {
       const before = manager?.get(id);
       const failed = manager?.failed(id);
       if (!before || !failed) return null;
@@ -459,6 +518,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
         seriesInstanceUid: before.seriesInstanceUid,
         sopInstanceUids: failed,
         retryOf: before.id,
+        by,
       });
     },
 
@@ -494,10 +554,10 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
         matches: answer.outcome === 'answered' ? answer.matches.length : 0,
         ms: Date.now() - started,
       });
-      return { level, ...answer };
+      return { level, asked: keys, ...answer };
     },
 
-    async retrieve(what) {
+    async retrieve(what, by = null) {
       const from = destinationOf(what.source);
       if (
         !isUid(what.studyInstanceUid) ||
@@ -535,6 +595,7 @@ export function createDicomService(options: DicomServiceOptions): DicomService {
             ? {}
             : { seriesInstanceUid: what.seriesInstanceUid }),
         },
+        by,
       });
     },
 

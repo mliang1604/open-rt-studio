@@ -43,6 +43,14 @@ export const AUDIT_ACTIONS = [
   'dicom-query',
   'dicom-retrieve',
   'dicom-retrieve-read',
+  // What is done over a DICOM association (#212), by another system or to one.
+  'dicom-association',
+  'dicom-store',
+  'dicom-find',
+  'dicom-move',
+  'dicom-get',
+  'dicom-sent',
+  'dicom-retrieved',
   'request',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -56,10 +64,11 @@ export const AUDIT_OUTCOMES = ['ok', 'refused', 'not-found', 'rejected', 'failed
 export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
 
 /**
- * Through what it was done: the API, a command on the server's machine, or
- * the server itself, by a rule it was set to keep (its retention period).
+ * Through what it was done: the API, a command on the server's machine, the
+ * server itself, by a rule it was set to keep (its retention period), or a
+ * DICOM association, where who it was is an AE title (the `object`).
  */
-export const AUDIT_ORIGINS = ['api', 'command', 'server'] as const;
+export const AUDIT_ORIGINS = ['api', 'command', 'server', 'dicom'] as const;
 export type AuditOrigin = (typeof AUDIT_ORIGINS)[number];
 
 /** Who did what, to what, and how it ended. */

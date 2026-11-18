@@ -658,7 +658,18 @@ Installers are built in CI and published on GitHub Releases, with auto-update.
     stray `DELETE` still takes nothing the period means to keep. There is no
     clearing on request: a period is a rule, and a request would be a way to
     remove chosen records.
-  - Not there: DIMSE events (#212), a second copy off the machine.
+  - What is done over DICOM (#212) is in the same log, as origin `dicom`:
+    each object another system stores (the instances of a series as one
+    record), each query, C-MOVE and C-GET it makes, each association that
+    is refused, and how each send and retrieve ended. DICOM has no
+    accounts, so who it was is an AE title, kept as the record's `object`;
+    the account is there too when a user asked for the send or retrieve.
+    The rule that nothing leaves without a record holds here as for the
+    API: a query or a retrieve whose record cannot be written is answered
+    "unable to process". The listener is handed a function that writes a
+    record (`src/dimse/dicom-audit.ts`) and knows nothing of the log.
+    With this the AE titles of other systems left the application log.
+  - Not there: a second copy off the machine.
 
   Status: **decided, and Michael's to overturn**, most of all the choice to
   stop answering when the log cannot be written.
