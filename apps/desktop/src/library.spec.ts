@@ -61,6 +61,14 @@ const said = (answer: ServerAnswer): unknown => {
   return JSON.parse(Buffer.from(answer.body).toString('utf8'));
 };
 
+/** Wait for something that happens when the library is ready, however long that takes here. */
+async function until(happened: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 2000 && !happened(); turn++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  expect(happened()).toBe(true);
+}
+
 describe('the library on this computer', () => {
   it("answers the server's API from its own folder, with no login", async () => {
     const lib = library();
@@ -162,9 +170,14 @@ describe('the library on this computer', () => {
         asked += 1;
         return new Promise((resolve) => (choose = resolve));
       },
+      // A library that takes its time to open, as on a slow disk: the dialog comes after.
+      open: async (directory, logger) => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return openEmbeddedServer({ dataDir: directory }, logger);
+      },
     });
     const first = lib.importFolder();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await until(() => asked === 1);
     // The dialog is open: a second import is refused, and shows no second dialog.
     expect(await lib.importFolder()).toEqual({ not: 'busy' });
     expect(asked).toBe(1);
@@ -173,7 +186,7 @@ describe('the library on this computer', () => {
     expect(said(await lib.request(request()))).toMatchObject({ instances: 0 });
 
     const second = lib.importFolder();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await until(() => asked === 2);
     choose(folder);
     expect(await second).toMatchObject({ imported: { stored: FILES.length } });
     expect(asked).toBe(2);
