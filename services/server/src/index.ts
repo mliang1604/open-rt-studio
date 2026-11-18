@@ -175,6 +175,7 @@ export {
 } from './pacs-index/migrations.js';
 export {
   IndexConflictError,
+  IndexDatabaseError,
   InvalidQueryError,
   RELATIONS,
   type IndexConflict,

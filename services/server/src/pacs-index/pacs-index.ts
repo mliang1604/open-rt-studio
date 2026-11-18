@@ -343,6 +343,19 @@ export class IndexConflictError extends Error {
   }
 }
 
+/**
+ * The index's database did not do what it was asked, or could not be
+ * reached. Only a code is kept of what the database said (an SQLSTATE, or
+ * the network's): its own message may quote what it was given, and messages
+ * end up in logs.
+ */
+export class IndexDatabaseError extends Error {
+  override readonly name = 'IndexDatabaseError';
+  constructor(readonly code: string) {
+    super(`The index's database did not do what it was asked (${code}).`);
+  }
+}
+
 /** A query key is not of the form its kind allows. */
 export class InvalidQueryError extends Error {
   override readonly name = 'InvalidQueryError';

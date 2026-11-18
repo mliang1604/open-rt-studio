@@ -4,10 +4,25 @@
 
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 
-import { DOSE_OF_BEAMS_AT_MOST, type DoseOf, type PlanFacts } from '@open-rt-studio/dicom';
-
 import { SILENT_LOGGER, type Logger } from '../logger.js';
 import { isUid } from '../uid.js';
+import {
+  checkEntry,
+  checkPage,
+  likePattern,
+  derivedToKeep,
+  doseToKeep,
+  planToKeep,
+  readDose,
+  readPlan,
+  readTimepoints,
+  timepointsToKeep,
+  toInstance,
+  toPatient,
+  toSeries,
+  toStudy,
+  type Row,
+} from './entries.js';
 import { migrate } from './migrations.js';
 import {
   hasWildcard,
@@ -19,37 +34,20 @@ import {
   type InstanceRecord,
   type PacsIndex,
   type Page,
-  type PatientRecord,
   type Reference,
   type Relation,
-  type SeriesRecord,
   type StudyOrder,
-  type StudyRecord,
-  type TimepointRecord,
 } from './pacs-index.js';
+
+export { InvalidEntryError, likePattern, PLAN_CHARACTERS_AT_MOST } from './entries.js';
 
 export interface SqliteIndexOptions {
   readonly logger?: Logger;
 }
 
-/** The entry cannot be indexed as it is. */
-export class InvalidEntryError extends Error {
-  override readonly name = 'InvalidEntryError';
-}
-
-type Row = Record<string, string | number | null>;
-
 /** A key as a GLOB pattern: `*` and `?` mean what they mean in DICOM; `[` is made literal. */
 export function globPattern(key: string): string {
   return key.replaceAll('[', '[[]');
-}
-
-/** A key as a LIKE pattern with `\` as the escape: `*` and `?` become `%` and `_`. */
-export function likePattern(key: string): string {
-  return key
-    .replace(/[\\%_]/g, (character) => `\\${character}`)
-    .replaceAll('*', '%')
-    .replaceAll('?', '_');
 }
 
 /** The conditions of one query, and the values they are asked with. */
@@ -106,14 +104,7 @@ class Conditions {
 
   /** The end of the statement: which part of the answer is wanted. */
   page({ limit, offset }: Page): string {
-    for (const [name, value] of [
-      ['limit', limit],
-      ['offset', offset],
-    ] as const) {
-      if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-        throw new InvalidQueryError(`The ${name} must be a whole number, 0 or more.`);
-      }
-    }
+    checkPage({ limit, offset });
     this.values.push(limit ?? -1, offset ?? 0);
     return 'LIMIT ? OFFSET ?';
   }
@@ -171,127 +162,6 @@ const SERIES_ORDER = 'ORDER BY s.series_number NULLS LAST, s.series_uid';
 const INSTANCE_ORDER = 'ORDER BY i.instance_number NULLS LAST, i.sop_instance_uid';
 const PATIENT_ORDER = 'ORDER BY p.name COLLATE NOCASE NULLS LAST, p.patient_id, p.patient_key';
 
-const text = (value: string | number | null): string | null =>
-  value === null ? null : String(value);
-const number = (value: string | number | null): number | null =>
-  value === null ? null : Number(value);
-
-const toStudy = (row: Row): StudyRecord => ({
-  studyInstanceUid: String(row['study_uid']),
-  patientKey: Number(row['patient_key']),
-  patientId: String(row['patient_id']),
-  patientName: text(row['patient_name']),
-  patientBirthDate: text(row['birth_date']),
-  patientSex: text(row['sex']),
-  date: text(row['study_date']),
-  time: text(row['study_time']),
-  description: text(row['description']),
-  accessionNumber: text(row['accession_number']),
-  modalities: row['modalities'] === null ? [] : String(row['modalities']).split(',').sort(),
-  series: Number(row['series_count']),
-  instances: Number(row['instance_count']),
-});
-
-const toSeries = (row: Row): SeriesRecord => ({
-  seriesInstanceUid: String(row['series_uid']),
-  studyInstanceUid: String(row['study_uid']),
-  modality: String(row['modality']),
-  number: number(row['series_number']),
-  description: text(row['description']),
-  frameOfReferenceUid: text(row['frame_of_reference_uid']),
-  instances: Number(row['instance_count']),
-  images: Number(row['image_count']),
-  structureSets: Number(row['structure_set_count']),
-  derived: flag(row['derived']),
-});
-
-const toInstance = (row: Row): InstanceRecord => ({
-  sopInstanceUid: String(row['sop_instance_uid']),
-  sopClassUid: String(row['sop_class_uid']),
-  seriesInstanceUid: String(row['series_uid']),
-  studyInstanceUid: String(row['study_uid']),
-  modality: String(row['modality']),
-  number: number(row['instance_number']),
-  frames: number(row['frame_count']),
-  derived: flag(row['derived']),
-  size: Number(row['size']),
-  sha256: String(row['sha256']),
-});
-
-const toPatient = (row: Row): PatientRecord => ({
-  patientKey: Number(row['patient_key']),
-  patientId: String(row['patient_id']),
-  issuer: String(row['issuer']),
-  name: text(row['name']),
-  birthDate: text(row['birth_date']),
-  sex: text(row['sex']),
-  studies: Number(row['study_count']),
-});
-
-/**
- * How long what is kept of a plan may be, as JSON. What the header reader
- * gives of a plan is well within it; anything longer did not come from it.
- */
-export const PLAN_CHARACTERS_AT_MOST = 65_536;
-
-/** A yes or no kept as 1 or 0; null where nothing is kept. */
-const flag = (value: unknown): boolean | null =>
-  value === null || value === undefined ? null : Number(value) === 1;
-
-/** A Dose Summation Type is a code string: short, and of capitals, digits, spaces and underscores. */
-const CODE_STRING = /^[A-Z0-9_ ]{1,16}$/;
-const isNumber = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isInteger(value);
-
-/** Whether a value is what the header reader gives of a dose, and no more. */
-function isDoseOf(value: unknown): value is DoseOf {
-  if (typeof value !== 'object' || value === null) return false;
-  const { summationType, beams, fractionGroup } = value as Record<string, unknown>;
-  return (
-    (summationType === null ||
-      (typeof summationType === 'string' && CODE_STRING.test(summationType))) &&
-    Array.isArray(beams) &&
-    beams.length <= DOSE_OF_BEAMS_AT_MOST &&
-    beams.every(isNumber) &&
-    (fractionGroup === null || isNumber(fractionGroup))
-  );
-}
-
-/** Say what is wrong with an entry before any of it reaches the database. */
-function check(entry: InstanceEntry): void {
-  const wrong = (what: string): never => {
-    throw new InvalidEntryError(`The entry's ${what}.`);
-  };
-  if (!isUid(entry.study.uid)) wrong('study UID is not a UID');
-  if (!isUid(entry.series.uid)) wrong('series UID is not a UID');
-  if (!isUid(entry.instance.uid)) wrong('SOP Instance UID is not a UID');
-  if (!isUid(entry.instance.sopClassUid)) wrong('SOP Class UID is not a UID');
-  const frames = entry.instance.frames;
-  if (frames !== null && !(Number.isInteger(frames) && frames >= 1)) {
-    wrong('number of frames is not a count');
-  }
-  if (entry.plan && JSON.stringify(entry.plan).length > PLAN_CHARACTERS_AT_MOST) {
-    wrong('plan says more than is kept of one');
-  }
-  if (entry.dose && !isDoseOf(entry.dose)) wrong('dose does not say what it is the dose of');
-  if (entry.derived != null && typeof entry.derived !== 'boolean') {
-    wrong('derived is neither yes nor no');
-  }
-  if (entry.series.modality.trim() === '') wrong('modality is empty');
-  if (!Number.isInteger(entry.instance.size) || entry.instance.size <= 0) {
-    wrong('size is not a whole number above 0');
-  }
-  if (!/^[0-9a-f]{64}$/.test(entry.instance.sha256)) wrong('checksum is not a SHA-256 in hex');
-  const frame = entry.series.frameOfReferenceUid;
-  if (frame !== null && !isUid(frame)) wrong('frame of reference UID is not a UID');
-  for (const reference of entry.references) {
-    if (!(RELATIONS as readonly string[]).includes(reference.relation)) {
-      wrong('reference has an unknown relation');
-    }
-    if (!isUid(reference.targetUid)) wrong('reference does not point to a UID');
-  }
-}
-
 /**
  * Open the index in a SQLite database: a file, or `:memory:` for one that
  * lasts as long as the process. A new database gets the schema; an older one
@@ -313,7 +183,7 @@ export async function openSqliteIndex(
     // Readers are not held up by a writer. A database in memory has no journal file.
     if (location !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
     const moved = migrate(db);
-    logger.info('index-opened', { schemaFrom: moved.from, schema: moved.to });
+    logger.info('index-opened', { backend: 'sqlite', schemaFrom: moved.from, schema: moved.to });
   } catch (error) {
     db.close();
     throw error;
@@ -412,7 +282,7 @@ export async function openSqliteIndex(
 
   return {
     async putInstance(entry) {
-      check(entry);
+      checkEntry(entry);
       return transaction(() => {
         const { study, series, instance } = entry;
         const knownInstance = one(
@@ -473,15 +343,9 @@ export async function openSqliteIndex(
           instance.frames,
           instance.size,
           instance.sha256,
-          entry.plan ? JSON.stringify(entry.plan) : null,
-          entry.dose
-            ? JSON.stringify({
-                summationType: entry.dose.summationType,
-                beams: entry.dose.beams,
-                fractionGroup: entry.dose.fractionGroup,
-              })
-            : null,
-          entry.derived == null ? null : entry.derived ? 1 : 0,
+          planToKeep(entry),
+          doseToKeep(entry),
+          derivedToKeep(entry),
         );
         run('DELETE FROM reference WHERE sop_instance_uid = ?', instance.uid);
         for (const reference of entry.references) {
@@ -618,27 +482,12 @@ export async function openSqliteIndex(
 
     async planOf(sopInstanceUid) {
       const row = one('SELECT plan FROM instance WHERE sop_instance_uid = ?', sopInstanceUid);
-      const kept = row ? text(row['plan']) : null;
-      if (!kept) return null;
-      try {
-        return JSON.parse(kept) as PlanFacts;
-      } catch {
-        // Not what was written: nothing is said of the plan.
-        return null;
-      }
+      return readPlan(row ? row['plan'] : null);
     },
 
     async doseOf(sopInstanceUid) {
       const row = one('SELECT dose FROM instance WHERE sop_instance_uid = ?', sopInstanceUid);
-      const kept = row ? text(row['dose']) : null;
-      if (!kept) return null;
-      try {
-        const parsed: unknown = JSON.parse(kept);
-        // Not what was written: nothing is said of the dose.
-        return isDoseOf(parsed) ? parsed : null;
-      } catch {
-        return null;
-      }
+      return readDose(row ? row['dose'] : null);
     },
 
     async referencesTo(targetUid, relation) {
@@ -702,7 +551,7 @@ export async function openSqliteIndex(
         'SELECT timepoints FROM patient_timepoints WHERE patient_key = ?',
         patientKey,
       );
-      return row ? (JSON.parse(String(row['timepoints'])) as TimepointRecord[]) : [];
+      return row ? readTimepoints(row['timepoints']) : [];
     },
 
     async putTimepoints(patientKey, timepoints) {
@@ -715,13 +564,7 @@ export async function openSqliteIndex(
             `INSERT INTO patient_timepoints (patient_key, timepoints) VALUES (?, ?)
              ON CONFLICT (patient_key) DO UPDATE SET timepoints = excluded.timepoints`,
             patientKey,
-            JSON.stringify(
-              timepoints.map(({ id, name, studyUids }) => ({
-                id,
-                name,
-                studyUids: [...studyUids],
-              })),
-            ),
+            timepointsToKeep(timepoints),
           );
         }
         return true;
