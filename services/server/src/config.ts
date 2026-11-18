@@ -99,6 +99,14 @@ export interface ServerConfig {
    * the authorities the machine knows, and one that calls is asked for none.
    */
   readonly dicomTlsCa: string | null;
+  /**
+   * The directory that holds the native tools (`native/`, built apart from
+   * the server). With it the server has the jobs that run them, automatic
+   * rigid registration first. Null, the default: it has none of those jobs.
+   * The programs that are run are the ones in this directory, by their own
+   * names; a request never names one.
+   */
+  readonly nativeTools: string | null;
 }
 
 export const AUTH_MODES = ['accounts', 'none'] as const;
@@ -124,6 +132,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   dicomTlsCert: null,
   dicomTlsKey: null,
   dicomTlsCa: null,
+  nativeTools: null,
 };
 
 /** The environment variable naming a JSON config file. */
@@ -150,6 +159,7 @@ export const ENVIRONMENT_VARIABLES: Readonly<Record<keyof ServerConfig, string>>
   dicomTlsCert: 'OPEN_RT_STUDIO_DICOM_TLS_CERT',
   dicomTlsKey: 'OPEN_RT_STUDIO_DICOM_TLS_KEY',
   dicomTlsCa: 'OPEN_RT_STUDIO_DICOM_TLS_CA',
+  nativeTools: 'OPEN_RT_STUDIO_NATIVE_TOOLS',
 };
 
 /** The configuration is wrong; the message says which setting, where it came from and why. */
@@ -264,6 +274,10 @@ const CHECKS: { readonly [K in keyof ServerConfig]: (value: unknown) => Checked<
     dicomTlsCert: fileOrNone,
     dicomTlsKey: fileOrNone,
     dicomTlsCa: fileOrNone,
+    nativeTools: (value) =>
+      value === null || (typeof value === 'string' && value.trim() !== '')
+        ? { value: value === null ? null : value.trim() }
+        : { wrong: 'must be the path of a directory, or null' },
   };
 
 /** Whether a text is a web origin as a browser writes one in an `Origin` header. */

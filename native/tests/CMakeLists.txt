@@ -38,3 +38,26 @@ ors_self_contained(ors-toolchain-check)
 
 add_test(NAME toolchain-elastix COMMAND ors-toolchain-check)
 set_tests_properties(toolchain-elastix PROPERTIES TIMEOUT 600)
+
+# --- ors-register-rigid (#80) -------------------------------------------------
+
+# Writes the synthetic pair and says how near a result is to the transform
+# the pair was made with. Nothing of ITK or elastix is in it.
+add_executable(ors-make-registration-pair make_registration_pair.cxx)
+ors_self_contained(ors-make-registration-pair)
+ors_warnings(ors-make-registration-pair)
+
+add_test(NAME register-rigid-version COMMAND ors-register-rigid --version)
+set_tests_properties(register-rigid-version PROPERTIES PASS_REGULAR_EXPRESSION
+  "^{\"tool\":\"ors-register-rigid\",\"version\":\"${PROJECT_VERSION}\",\"itk\":\"${ORS_ITK_VERSION}\",\"elastix\":\"${ORS_ELASTIX_VERSION}\"}")
+
+# The tool finds the known transform of the synthetic pair, gives the same
+# answer twice for one seed, takes a region of interest and a place to start
+# from, reports as a job's worker does, and refuses what it cannot use.
+add_test(NAME register-rigid
+  COMMAND ${CMAKE_COMMAND}
+    -DTOOL=$<TARGET_FILE:ors-register-rigid>
+    -DPAIR=$<TARGET_FILE:ors-make-registration-pair>
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/register-rigid
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/register_rigid_test.cmake)
+set_tests_properties(register-rigid PROPERTIES TIMEOUT 1200)

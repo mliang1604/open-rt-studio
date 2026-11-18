@@ -30,118 +30,34 @@
 #include <string>
 #include <vector>
 
-#include "itkImage.h"
-#include "itkImageFileReader.h"
-#include "itkImageIOBase.h"
-#include "itkImageIOFactory.h"
-#include "itkMetaImageIOFactory.h"
-#include "itkNiftiImageIOFactory.h"
-#include "itkNrrdImageIOFactory.h"
 #include "itkVersion.h"
 
+#include "ors_common.h"
 #include "ors_version.h"
 
 namespace
 {
 
-constexpr int STATUS_USAGE = 2;
-constexpr int STATUS_UNREADABLE = 3;
-
-/** A number as JSON has it: short, and the same on every system. */
-std::string
-number(double value)
-{
-  char text[32];
-  std::snprintf(text, sizeof(text), "%.9g", value);
-  const std::string written(text);
-  // Minus zero is zero to whoever reads it.
-  return written == "-0" ? "0" : written;
-}
-
-std::string
-list(const std::vector<double> & values)
-{
-  std::string text = "[";
-  for (std::size_t i = 0; i < values.size(); ++i)
-  {
-    text += (i == 0 ? "" : ",") + number(values[i]);
-  }
-  return text + "]";
-}
-
-/** Text between quotes, with what JSON does not take as it is escaped. */
-std::string
-quoted(const std::string & text)
-{
-  std::string out = "\"";
-  for (const char c : text)
-  {
-    if (c == '"' || c == '\\')
-    {
-      out += '\\';
-      out += c;
-    }
-    else if (static_cast<unsigned char>(c) < 0x20)
-    {
-      char escaped[8];
-      std::snprintf(escaped, sizeof(escaped), "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
-      out += escaped;
-    }
-    else
-    {
-      out += c;
-    }
-  }
-  return out + "\"";
-}
-
-int
-fail(int status, const char * code, const std::string & detail = "")
-{
-  std::string line = std::string("{\"error\":") + quoted(code);
-  if (!detail.empty())
-  {
-    line += ",\"detail\":" + quoted(detail);
-  }
-  std::fprintf(stderr, "%s}\n", line.c_str());
-  return status;
-}
-
 int
 version()
 {
   std::printf("{\"tool\":\"ors-volume-info\",\"version\":%s,\"itk\":%s,\"elastix\":%s}\n",
-              quoted(ORS_NATIVE_VERSION).c_str(),
-              quoted(itk::Version::GetITKVersion()).c_str(),
-              quoted(ORS_ELASTIX_VERSION).c_str());
+              ors::quoted(ORS_NATIVE_VERSION).c_str(),
+              ors::quoted(itk::Version::GetITKVersion()).c_str(),
+              ors::quoted(ORS_ELASTIX_VERSION).c_str());
   return 0;
 }
 
 int
 describe(const std::string & path, bool verbose)
 {
-  // The formats the tools take, and no other that ITK happens to know.
-  itk::MetaImageIOFactory::RegisterOneFactory();
-  itk::NrrdImageIOFactory::RegisterOneFactory();
-  itk::NiftiImageIOFactory::RegisterOneFactory();
-
   try
   {
-    const itk::ImageIOBase::Pointer io =
-      itk::ImageIOFactory::CreateImageIO(path.c_str(), itk::ImageIOFactory::IOFileModeEnum::ReadMode);
+    const char *                    problem = nullptr;
+    const itk::ImageIOBase::Pointer io = ors::openVolume(path, problem);
     if (io.IsNull())
     {
-      return fail(STATUS_UNREADABLE, "unreadable");
-    }
-    io->SetFileName(path);
-    io->ReadImageInformation();
-    if (io->GetNumberOfDimensions() != 3)
-    {
-      return fail(STATUS_UNREADABLE, "not-three-dimensional");
-    }
-    if (io->GetNumberOfComponents() != 1)
-    {
-      return fail(STATUS_UNREADABLE, "not-scalar");
+      return ors::fail(ors::STATUS_UNREADABLE, problem);
     }
 
     std::vector<double> size, spacing, origin;
@@ -151,23 +67,18 @@ describe(const std::string & path, bool verbose)
       size.push_back(static_cast<double>(io->GetDimensions(axis)));
       spacing.push_back(io->GetSpacing(axis));
       origin.push_back(io->GetOrigin(axis));
-      direction += (axis == 0 ? "" : ",") + list(io->GetDirection(axis));
+      direction += (axis == 0 ? "" : ",") + ors::list(io->GetDirection(axis));
     }
     direction += "]";
     const std::string stored = itk::ImageIOBase::GetComponentTypeAsString(io->GetComponentType());
 
     // The voxels themselves, to know that they can be read and what they hold.
-    using VolumeType = itk::Image<float, 3>;
-    const auto reader = itk::ImageFileReader<VolumeType>::New();
-    reader->SetImageIO(io);
-    reader->SetFileName(path);
-    reader->Update();
-    const VolumeType::Pointer volume = reader->GetOutput();
-    const std::size_t         count = volume->GetBufferedRegion().GetNumberOfPixels();
-    const float *             values = volume->GetBufferPointer();
+    const ors::VolumeType::Pointer volume = ors::readVolume(path, io);
+    const std::size_t              count = volume->GetBufferedRegion().GetNumberOfPixels();
+    const float *                  values = volume->GetBufferPointer();
     if (count == 0 || values == nullptr)
     {
-      return fail(STATUS_UNREADABLE, "empty");
+      return ors::fail(ors::STATUS_UNREADABLE, "empty");
     }
     float lowest = values[0];
     float highest = values[0];
@@ -178,17 +89,17 @@ describe(const std::string & path, bool verbose)
     }
 
     std::printf("{\"size\":%s,\"spacing\":%s,\"origin\":%s,\"direction\":%s,\"stored\":%s,\"range\":%s}\n",
-                list(size).c_str(),
-                list(spacing).c_str(),
-                list(origin).c_str(),
+                ors::list(size).c_str(),
+                ors::list(spacing).c_str(),
+                ors::list(origin).c_str(),
                 direction.c_str(),
-                quoted(stored).c_str(),
-                list({ static_cast<double>(lowest), static_cast<double>(highest) }).c_str());
+                ors::quoted(stored).c_str(),
+                ors::list({ static_cast<double>(lowest), static_cast<double>(highest) }).c_str());
     return 0;
   }
   catch (const std::exception & problem)
   {
-    return fail(STATUS_UNREADABLE, "unreadable", verbose ? problem.what() : "");
+    return ors::fail(ors::STATUS_UNREADABLE, "unreadable", verbose ? problem.what() : "");
   }
 }
 
@@ -212,7 +123,7 @@ main(int argc, char * argv[])
     }
     else if (argument.rfind("--", 0) == 0)
     {
-      return fail(STATUS_USAGE, "usage");
+      return ors::fail(ors::STATUS_USAGE, "usage");
     }
     else
     {
@@ -221,7 +132,7 @@ main(int argc, char * argv[])
   }
   if (files.size() != 1)
   {
-    return fail(STATUS_USAGE, "usage");
+    return ors::fail(ors::STATUS_USAGE, "usage");
   }
   return describe(files[0], verbose);
 }

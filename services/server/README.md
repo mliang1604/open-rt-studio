@@ -795,6 +795,7 @@ code 2).
 | `dicomTlsCert`       | `OPEN_RT_STUDIO_DICOM_TLS_CERT`       | none           | File with the certificate the server shows over DICOM (PEM). With `dicomTlsKey`, the listener can speak TLS; see [TLS for DICOM](#tls-for-dicom)                                     |
 | `dicomTlsKey`        | `OPEN_RT_STUDIO_DICOM_TLS_KEY`        | none           | File with that certificate's private key (PEM, no passphrase)                                                                                                                        |
 | `dicomTlsCa`         | `OPEN_RT_STUDIO_DICOM_TLS_CA`         | none           | File with the certificates of the authorities other DICOM systems are trusted by (PEM). With it, a system that calls with TLS must show a certificate of theirs                      |
+| `nativeTools`        | `OPEN_RT_STUDIO_NATIVE_TOOLS`         | none           | Directory that holds the native tools. With it the server has the jobs that run them; see [Rigid registration](#rigid-registration)                                                  |
 
 ```json
 { "port": 8080, "logLevel": "warn" }
@@ -1051,7 +1052,20 @@ answers an empty list until the native tools register theirs.
 
 - **Statuses**: `queued`, `running`, then `succeeded`, `failed` or
   `cancelled`. A failed job says why: `exit-code`, `timed-out` (a kind may
-  set a limit), `interrupted` or `could-not-start`.
+  set a limit), `interrupted`, `could-not-start`, `could-not-prepare` or
+  `could-not-finish`.
+- **A kind may have steps of its own** around its worker: `check` at
+  submission (what of the inputs can only be checked by asking, such as
+  whether a series is there: a job that is refused is not queued),
+  `prepare` before the worker starts (put its inputs in its directory) and
+  `finish` after it ended with 0 (take what it made, such as storing it in
+  the PACS; what `finish` returns is the job's result). A step that fails
+  fails the job (`could-not-prepare`, `could-not-finish`), with the kind's
+  word for why as the job's `message` when it has one. What a step throws
+  is otherwise not logged beyond its name. A kind that puts a patient's
+  data in the job's directory asks for the directory to be removed when
+  the job has ended (`removeWorkDir`), and says whose data a job is about
+  (`subject`), which goes into the audit record of whoever submitted it.
 - **Stopping a worker** (cancel, timeout, server stop) is `SIGTERM`, and
   `SIGKILL` five seconds later if it is still there.
 - **Across a restart.** Jobs are written down in `<dataDir>/jobs.sqlite` as
@@ -1063,14 +1077,64 @@ answers an empty list until the native tools register theirs.
   are kept in memory and work in a temporary directory that goes with the
   server.
 - **What is not there yet**: an endpoint to fetch the files a worker wrote
-  (a kind is expected to ingest its outputs into the PACS, and to report
-  their UIDs as its result); clearing up old jobs and their directories;
+  (a kind ingests its outputs into the PACS, and reports their UIDs as its
+  result); clearing up old jobs and their directories;
   stopping the children of a worker that starts processes of its own. On
   Windows a worker cannot be asked to stop, only killed.
 
 A job's inputs and log are kept in the job store and given by the API as they
 are, and a worker may well write a patient's name. The server's own log has
 only the kind of a job and how it ended.
+
+### Rigid registration
+
+A server that is told where the native tools are (`nativeTools`, see
+[native/README.md](../../native/README.md) for building them) has the job
+kind `rigid-registration`. The container image does not hold the tools
+yet, and neither does the desktop application.
+
+```sh
+curl -X POST http://127.0.0.1:4300/api/jobs -H 'Content-Type: application/json' -d '{
+  "kind": "rigid-registration",
+  "inputs": { "fixedSeriesUid": "1.2.3...", "movingSeriesUid": "1.2.4..." }
+}'
+```
+
+- **Inputs**: `fixedSeriesUid` and `movingSeriesUid`, two CT, MR or PET
+  series of one patient in two frames of reference. Optionally `initial`
+  (a matrix of 16 numbers, row by row, that only turns and moves: where a
+  point of the fixed image is in the moving one), `roi` (a box in the fixed
+  image's coordinates, `[x0, y0, z0, x1, y1, z1]` in millimetres; only what
+  is inside is compared) and `seed` (a whole number; the same seed gives
+  the same answer on one server).
+- **Refused at submission** (400, `invalid-inputs`, and not queued): a
+  series that is not there or is not an image, two series of different
+  patients, a series that names no frame of reference, and two series in
+  the same frame, which says that they are registered already (a
+  registration object is between two frames and cannot say otherwise).
+- **What it does**: writes the two series as volume files in the job's
+  directory, runs `ors-register-rigid` on them, and stores what it found as
+  a DICOM Spatial Registration object in the study of the fixed series.
+  The directory is removed when the job has ended.
+- **Which way.** The object is in the fixed image's frame of reference and
+  holds the matrix that maps the moving image's frame into it, as such
+  objects are usually written. The job's result names the object
+  (`sopInstanceUid`, `seriesInstanceUid`, `studyInstanceUid`) and gives the
+  matrix both ways, each under its name: `movingToFixed` (what the object
+  holds) and `fixedToMoving` (what the tool found).
+- **When it fails**: `exit-code` with the tool's code in the job's log
+  (`registration-failed`, `roi-empty`, ...); `could-not-prepare` with a
+  word such as `no-moving-series` (it went since the job was taken in),
+  `fixed-not-a-volume` or `moving-sheared` (a tilted gantry: a volume whose
+  axes are not at right angles cannot be given to the tool yet);
+  `could-not-finish` with `no-result` or `not-stored`; `timed-out` after
+  half an hour.
+- **What it does not do**: say whether the registration is any good. A job
+  that succeeded has stored what the tool found; someone has to look at the
+  two images together before it is used for anything.
+- **Limits**: both volumes are held in memory while they are written; the
+  tool is run with four threads; registering the same two series again
+  stores another object and replaces none.
 
 ## The index
 

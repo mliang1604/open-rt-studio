@@ -3,8 +3,9 @@ name: Native tools
 # Builds the C++ tools in native/ on the three systems they are for (#79):
 # ITK and elastix from their pinned sources, then the tools against them,
 # then the tools' tests. Not a required check. It runs when native/ or its
-# build script changes; `workflow_call` is for the installers, which will
-# want the tools it makes.
+# build script changes, or the server's job that runs a tool (#80), which
+# is tested here with the tool itself; `workflow_call` is for the
+# installers, which will want the tools it makes.
 #
 # ITK and elastix take a quarter of an hour to half an hour to build on a
 # runner. They are kept in the Actions
@@ -18,12 +19,14 @@ on:
       - 'native/**'
       - 'scripts/native.mjs'
       - '.github/workflows/native.yml'
+      - 'services/server/src/registration/**'
   push:
     branches: [main]
     paths:
       - 'native/**'
       - 'scripts/native.mjs'
       - '.github/workflows/native.yml'
+      - 'services/server/src/registration/**'
   workflow_dispatch:
   workflow_call:
 
@@ -108,6 +111,23 @@ jobs:
       - name: Test
         run: node scripts/native.mjs test
 
+      # The server's registration job with the tool itself (#80): two series
+      # with a known offset go in as DICOM, and the registration object that
+      # comes out is held against the offset. Everywhere else that test runs
+      # against a stand-in for the tool. On one system: what differs between
+      # systems is the tool, and its own tests ran on each just now.
+      - name: Install the server's packages
+        if: matrix.id == 'linux-x64'
+        run: npm ci
+
+      - name: The registration job, with the tool itself
+        if: matrix.id == 'linux-x64'
+        working-directory: services/server
+        env:
+          OPEN_RT_STUDIO_TEST_NATIVE_TOOLS: ${{ github.workspace }}/${{ matrix.build }}/dist/bin
+          REQUIRE_NATIVE_TOOLS: '1'
+        run: npx vitest run src/registration
+
       # A tool is one file with nothing to install beside it: say what it
       # still asks of the system.
       - name: What the tools need
@@ -116,6 +136,7 @@ jobs:
           cd "$ORS_NATIVE_BUILD_DIR/dist"
           ls -l bin licenses licenses/*
           ./bin/ors-volume-info --version
+          ./bin/ors-register-rigid --version
           case "$RUNNER_OS" in
             Linux)
               ldd bin/ors-volume-info

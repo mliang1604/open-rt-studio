@@ -23,8 +23,28 @@ export type JsonObject = { [key: string]: JsonValue };
  * - `timed-out`: it ran longer than its kind allows, and was stopped
  * - `interrupted`: the server stopped, or died, while it ran
  * - `could-not-start`: the worker's program could not be started
+ * - `could-not-prepare`: what the worker needs could not be put in place
+ *   (see {@link JobKind.prepare}); the worker was not started
+ * - `could-not-finish`: the worker ended well, and what it made could not be
+ *   taken (see {@link JobKind.finish})
  */
-export type JobFailure = 'exit-code' | 'timed-out' | 'interrupted' | 'could-not-start';
+export type JobFailure =
+  | 'exit-code'
+  | 'timed-out'
+  | 'interrupted'
+  | 'could-not-start'
+  | 'could-not-prepare'
+  | 'could-not-finish';
+
+/** Every {@link JobFailure}, for whoever lists them. */
+export const JOB_FAILURES: readonly JobFailure[] = [
+  'exit-code',
+  'timed-out',
+  'interrupted',
+  'could-not-start',
+  'could-not-prepare',
+  'could-not-finish',
+];
 
 export interface Job {
   readonly id: string;
@@ -33,7 +53,10 @@ export interface Job {
   readonly inputs: JsonObject;
   /** How far along, from 0 to 1, as the worker last said; null before it says. */
   readonly progress: number | null;
-  /** What the worker last said it was doing. */
+  /**
+   * What the worker last said it was doing. For a job that failed in a step
+   * of its kind, the kind's word for why, when it had one (`JobStepError`).
+   */
   readonly message: string | null;
   /** What the worker reported as its result; null when it reported none. */
   readonly result: JsonObject | null;
@@ -82,6 +105,58 @@ export interface JobKind {
   command(inputs: JsonObject, context: { readonly workDir: string }): JobCommand;
   /** How long a job of this kind may run. Without it, for as long as it takes. */
   readonly timeoutMs?: number;
+  /**
+   * At submission, after `command` has taken the inputs: what of them can
+   * only be checked by asking, such as whether a series is there. Throws
+   * {@link InvalidJobInputError} to refuse the job; then nothing was taken
+   * in.
+   */
+  check?(inputs: JsonObject): Promise<void>;
+  /**
+   * Whose data a job with these inputs reads or changes, for the audit
+   * record of whoever asked for it. Null when it cannot be said (the inputs
+   * name nothing the server has). A kind that touches no patient's data has
+   * no need of it.
+   */
+  subject?(inputs: JsonObject): Promise<JobSubject | null>;
+  /**
+   * Before the worker is started: put what it needs into the job's
+   * directory, such as its inputs from the PACS. The job is running by then.
+   * It may take long; `signal` is aborted when the job is cancelled or the
+   * server stops, and it should give up then. When it throws, the job fails
+   * (`could-not-prepare`) and no worker is started. What it throws is not
+   * logged beyond its name, so it may say what it likes; a
+   * {@link JobStepError} says why in a word that the job keeps.
+   */
+  prepare?(inputs: JsonObject, context: JobContext): Promise<void>;
+  /**
+   * After the worker has ended with 0: take what it made, such as storing a
+   * result in the PACS. `result` is what the worker reported. What this
+   * returns is the job's result in its place. When it throws, the job fails
+   * (`could-not-finish`).
+   */
+  finish?(
+    inputs: JsonObject,
+    context: JobContext & { readonly result: JsonObject | null },
+  ): Promise<JsonObject | null>;
+  /**
+   * Whether the job's directory is removed once the job has ended, however
+   * it ended. For a kind that puts a patient's data there.
+   */
+  readonly removeWorkDir?: boolean;
+}
+
+/** Whose data a job touches: what an audit record keeps of it. */
+export interface JobSubject {
+  readonly patientId?: string | null;
+  readonly studyUid?: string | null;
+  readonly seriesUid?: string | null;
+}
+
+/** Where a job works, and how it is told to give up. */
+export interface JobContext {
+  readonly workDir: string;
+  readonly signal: AbortSignal;
 }
 
 /** No kind of that name is registered. */
@@ -97,6 +172,22 @@ export class JobsStoppedError extends Error {
   override readonly name = 'JobsStoppedError';
   constructor() {
     super('The server is stopping and takes no new jobs.');
+  }
+}
+
+/**
+ * A step of a kind (`prepare`, `finish`) failed for a reason the kind has a
+ * word for. The word becomes the failed job's `message` and is logged: it is
+ * a fixed word of the kind's, lower case with hyphens, and never anything of
+ * a patient. Anything else given as the reason is replaced by `failed`.
+ */
+export class JobStepError extends Error {
+  override readonly name = 'JobStepError';
+  readonly reason: string;
+  constructor(reason: string) {
+    const word = /^[a-z][a-z0-9-]{0,63}$/.test(reason) ? reason : 'failed';
+    super(`A step of the job failed: ${word}.`);
+    this.reason = word;
   }
 }
 
