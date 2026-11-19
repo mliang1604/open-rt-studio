@@ -26,6 +26,7 @@ import {
 } from '@playwright/test';
 
 import { gpuArgs, gpuEnv } from './gpu.js';
+import { standInKeychainArgs } from './keychain.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FOLDER = 'phantom-ct';
@@ -46,7 +47,7 @@ async function start(): Promise<void> {
     if (value !== undefined) env[name] = value;
   }
   application = await electron.launch({
-    args: [DESKTOP, ...gpuArgs()],
+    args: [DESKTOP, ...standInKeychainArgs(), ...gpuArgs()],
     cwd: DESKTOP,
     env: { ...env, ...gpuEnv(), OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },
   });

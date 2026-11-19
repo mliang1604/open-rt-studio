@@ -11,6 +11,7 @@ import { HELD_LOGIN, type ServerAnswer, type ServerRequest } from '@open-rt-stud
 import {
   isPlain,
   openConnections,
+  sealWhenNeeded,
   serverOrigin,
   type ConnectionsOptions,
   type Seal,
@@ -403,6 +404,46 @@ describe('a login', () => {
     expect(next.list()).toEqual([{ id, address: ADDRESS, loggedIn: true }]);
     expect(await next.request(id, request())).toMatchObject({ status: 200 });
     expect(sent.at(-1)!.headers['authorization']).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('asks the system for its seal only when there is a login to seal or to open (#357)', async () => {
+    let made = 0;
+    const seal = sealWhenNeeded(() => {
+      made += 1;
+      return SEAL;
+    });
+    const { fetcher } = withLogin();
+    // A start with nothing kept, a server connected to and asked: no login, no seal.
+    const first = await connectionsWith(fetcher, { seal });
+    const { id } = (await first.connect(ADDRESS))!;
+    expect(made).toBe(0);
+    // A login is something to seal.
+    await first.request(id, login());
+    expect(made).toBe(1);
+    expect(JSON.parse(await kept()).connections[0].login).toBe(SEAL.seal(TOKEN));
+
+    // The next start has a sealed login to open: its seal is made then, and once.
+    let again = 0;
+    const next = await connectionsWith(fetcher, {
+      seal: sealWhenNeeded(() => {
+        again += 1;
+        return SEAL;
+      }),
+    });
+    expect(next.list()).toEqual([{ id, address: ADDRESS, loggedIn: true }]);
+    expect(await next.request(id, request())).toMatchObject({ status: 200 });
+    expect(again).toBe(1);
+  });
+
+  it('keeps no login where the system has no seal to give, and asks it once', async () => {
+    let made = 0;
+    const seal = sealWhenNeeded(() => {
+      made += 1;
+      return null;
+    });
+    expect(seal.seal('a login')).toBeNull();
+    expect(seal.open('sealed<nigol a>')).toBeNull();
+    expect(made).toBe(1);
   });
 
   it.skipIf(process.platform === 'win32')('is in a file of the user alone', async () => {

@@ -55,9 +55,15 @@ are whole, and nothing of who made them.
 Until it is signed by someone (#66), macOS cannot tell that a newer version
 is the same application as the one before. The application keeps a key in
 your keychain (**Open RT Studio Safe Storage**), with which it seals the
-login of a server. After a newer version is installed, macOS asks whether
-this application may use that key: **Always Allow**. If you deny it, you log
-in to your servers again.
+login of a server. It asks for that key only when there is a login to seal
+or a sealed one to open (#357): an application that was never logged in to
+a server puts nothing into the keychain and asks for nothing. After a newer
+version is installed, macOS asks whether this application may use that key:
+**Always Allow**. If you deny it, you log in to your servers again, and
+nothing else is lost. The entry holds nothing but that key; deleting it in
+Keychain Access (or with `security delete-generic-password -s "Open RT
+Studio Safe Storage"`) logs the application out of its servers and does no
+other harm.
 
 ### Windows
 
@@ -350,8 +356,10 @@ process's is replaced by one that answers as the user would. A third
 (`e2e/server.spec.ts`) starts the server of this repository with one
 account and connects to it: through the bridge everywhere, and through the
 application's own card, down to a series on screen, where there is a GPU.
-It gives Chromium a stand-in for the keychain, so that a test writes nothing
-into yours. A fourth (`e2e/library.spec.ts`) has no server at all: it
+Every test that starts the application gives Chromium a stand-in for the
+keychain (`e2e/keychain.ts`), so that a test neither reads yours nor writes
+into it; `src/test-keychain.spec.ts` fails a test file that starts it
+another way. A fourth (`e2e/library.spec.ts`) has no server at all: it
 imports a folder into the library, browses it, views a series, saves a
 painted structure, and finds all of it after a restart. `E2E_NO_WEBGPU=1` takes the GPU away, to see on a machine that
 has one what a runner without one sees. `E2E_SOFTWARE_GPU=1` has the

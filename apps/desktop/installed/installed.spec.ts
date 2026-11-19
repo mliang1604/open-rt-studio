@@ -33,6 +33,7 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { standInKeychainArgs } from '../e2e/keychain.js';
 import { APP_HOME } from '../src/policy.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -55,11 +56,8 @@ test.beforeAll(async () => {
   // acknowledgement and no library, and leaves the user's own alone.
   const args = [`--user-data-dir=${profile}`];
   // A stand-in for the keychain, so that the test writes nothing into the
-  // user's. On macOS it is more than tidiness: an entry made by one build is
-  // not another build's to read while neither is signed by anyone, and the
-  // system asks, in a dialog no test can answer.
-  if (process.platform === 'darwin') args.push('--use-mock-keychain');
-  if (process.platform === 'linux') args.push('--password-store=basic');
+  // user's (`e2e/keychain.ts` says why it is more than tidiness).
+  args.push(...standInKeychainArgs());
   application = await electron.launch({ executablePath: INSTALLED, args });
   page = await application.firstWindow();
   page.on('pageerror', (error) => problems.push(String(error)));

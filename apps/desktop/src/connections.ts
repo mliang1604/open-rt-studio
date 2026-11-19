@@ -34,6 +34,22 @@ export interface Seal {
   open(sealed: string): string | null;
 }
 
+/**
+ * A seal that is made when it is first needed, and once: when there is a
+ * login to seal, or a sealed login to open (#357). Asking the system for
+ * its key is not free: on macOS it reads the keychain, makes the entry
+ * where there is none, and may have the system ask the user. An application
+ * that keeps no login asks for nothing.
+ */
+export function sealWhenNeeded(make: () => Seal | null): Seal {
+  let made: { readonly seal: Seal | null } | null = null;
+  const seal = (): Seal | null => (made ??= { seal: make() }).seal;
+  return {
+    seal: (text) => seal()?.seal(text) ?? null,
+    open: (sealed) => seal()?.open(sealed) ?? null,
+  };
+}
+
 export interface ConnectionsOptions {
   /** Where the connections are written. Null keeps them for this run only. */
   readonly file: string | null;

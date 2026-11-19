@@ -33,7 +33,7 @@ import {
   type DesktopPlatform,
 } from '@open-rt-studio/desktop-bridge';
 
-import { openConnections, type Seal } from './connections.js';
+import { openConnections, sealWhenNeeded, type Seal } from './connections.js';
 import { respond } from './content.js';
 import { fileAnswers, type Pickers } from './files.js';
 import { openGrants } from './grants.js';
@@ -314,7 +314,8 @@ async function start(): Promise<void> {
     file: join(app.getPath('userData'), CONNECTIONS_FILE),
     fetch: (input, init) => net.fetch(input as string | Request, init),
     approve: approveServer,
-    seal: systemSeal(),
+    // Not asked for before there is a login: on macOS asking reads the keychain.
+    seal: sealWhenNeeded(systemSeal),
   });
   // Kept grants are in the profile: they say where the user's data is, and nothing of it.
   const grants = await openGrants({ file: join(app.getPath('userData'), GRANTS_FILE) });
