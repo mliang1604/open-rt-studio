@@ -81,7 +81,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The packager signs nothing in a pull request's run unless it is told
+      # to, so that a certificate is not used on code from elsewhere. There is
+      # no certificate here: the signature is ad hoc, and without it the
+      # application of a pull request would not be the one a tag builds.
       - name: Package
+        env:
+          CSC_FOR_PULL_REQUEST: 'true'
         run: >
           npm run package -w @open-rt-studio/desktop --
           --publish never
