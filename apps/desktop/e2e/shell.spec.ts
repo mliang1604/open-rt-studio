@@ -28,6 +28,7 @@ import {
 import { APP_HOME, contentSecurityPolicy } from '../src/policy.js';
 
 import { draws, gpuArgs, gpuEnv, gpuOffer } from './gpu.js';
+import { standInKeychainArgs } from './keychain.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** An address that is nobody's (RFC 2606): nothing is ever sent to it, here or anywhere. */
@@ -49,7 +50,7 @@ test.beforeAll(async () => {
   }
   application = await electron.launch({
     // The GPU as the run asks for it: the machine's, none, or a software one.
-    args: [DESKTOP, ...gpuArgs()],
+    args: [DESKTOP, ...standInKeychainArgs(), ...gpuArgs()],
     cwd: DESKTOP,
     // A profile of its own: the test finds no acknowledgement and leaves none.
     env: { ...env, ...gpuEnv(), OPEN_RT_STUDIO_DESKTOP_USER_DATA: profile },

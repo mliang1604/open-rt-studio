@@ -36,6 +36,7 @@ import {
 } from '@playwright/test';
 
 import { draws, gpuArgs, gpuEnv, gpuOffer } from './gpu.js';
+import { standInKeychainArgs } from './keychain.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CT = syntheticCtSeries(6, 24);
@@ -55,7 +56,7 @@ async function start(): Promise<void> {
   for (const [name, value] of Object.entries(process.env)) {
     if (value !== undefined) env[name] = value;
   }
-  const args = [DESKTOP, ...gpuArgs()];
+  const args = [DESKTOP, ...standInKeychainArgs(), ...gpuArgs()];
   application = await electron.launch({
     args,
     cwd: DESKTOP,

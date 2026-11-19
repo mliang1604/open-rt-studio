@@ -112,7 +112,10 @@ application. Never commit patient data or real DICOM files
   main process with `openEmbeddedServer`, no port and no login; a folder is
   imported there from the system's dialog, and the page is told counts, never
   a name or a place), which need no Electron and are unit tested; only `src/main.ts` and `src/preload.cts`
-  import Electron. Do not loosen the policy to make something work: the page
+  import Electron. The system's keychain is asked only for a login
+  (`sealWhenNeeded`), never at a start; a test that starts the application
+  adds `standInKeychainArgs()` to its arguments (#357), and a unit test
+  fails one that does not. Do not loosen the policy to make something work: the page
   fetches from nowhere, a server is asked through the bridge, and files are
   read through it. Electron is pinned to an exact version. Installers are
   made by electron-builder from `electron-builder.yml` (#65): what the shell

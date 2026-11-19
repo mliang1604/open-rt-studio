@@ -36,6 +36,7 @@ import {
 } from '@playwright/test';
 
 import { draws, gpuArgs, gpuEnv, gpuOffer } from './gpu.js';
+import { standInKeychainArgs } from './keychain.js';
 import { startTestServer, type TestServer } from './test-server.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,12 +54,7 @@ async function start(): Promise<void> {
   for (const [name, value] of Object.entries(process.env)) {
     if (value !== undefined) env[name] = value;
   }
-  const args = [DESKTOP];
-  // Not the user's keychain: Chromium's stand-in on macOS, and on Linux its
-  // plain store, which the application takes for no protection at all.
-  if (process.platform === 'darwin') args.push('--use-mock-keychain');
-  if (process.platform === 'linux') args.push('--password-store=basic');
-  args.push(...gpuArgs());
+  const args = [DESKTOP, ...standInKeychainArgs(), ...gpuArgs()];
   application = await electron.launch({
     args,
     cwd: DESKTOP,
