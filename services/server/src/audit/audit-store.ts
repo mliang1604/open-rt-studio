@@ -26,6 +26,7 @@ export const AUDIT_ACTIONS = [
   'account-remove',
   'job-start',
   'job-cancel',
+  'job-discard',
   'job-read',
   'audit-read',
   'audit-export',

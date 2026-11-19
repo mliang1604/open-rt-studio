@@ -13,6 +13,7 @@ import {
   type Volume,
 } from '@open-rt-studio/dicom';
 import {
+  SYNTHETIC_REGISTERED_PAIR,
   populationStudies,
   SYNTHETIC_BEAM_DOSES as BEAM_DOSES,
   SYNTHETIC_PLAN_FRACTIONS,
@@ -24,6 +25,7 @@ import {
   syntheticBeamDoses,
   syntheticPopulation,
   syntheticRtCourse,
+  syntheticRegisteredPair,
 } from '@open-rt-studio/testdata';
 
 import { PartlySavedError, type SavedSeries } from './data-source';
@@ -31,6 +33,7 @@ import {
   AUDIT_PER_PAGE,
   auditFilters,
   connectToServer,
+  jobEnded,
   serverAddress,
   ServerError,
   ServerSource,
@@ -1682,5 +1685,98 @@ describe('asking another system through a server (#54)', () => {
     await expect(source.dicomRetrieve('retrieve-9')).rejects.toThrow(
       'The server has no such retrieve.',
     );
+  });
+});
+
+describe('jobs of a server: registrations it computes (#82)', () => {
+  const PAIR = SYNTHETIC_REGISTERED_PAIR;
+  const INPUTS = { fixedSeriesUid: PAIR.ct, movingSeriesUid: PAIR.mr };
+
+  async function computing() {
+    const pair = syntheticRegisteredPair();
+    const server = fakeServer([...pair.planningCt, ...pair.followUpMr]);
+    server.jobs.kinds = ['rigid-registration', 'deformable-registration'];
+    server.jobs.presets = [{ name: 'ct-ct', title: 'CT to CT', description: 'Two CTs.' }];
+    const source = await connectToServer('http://127.0.0.1:4300', {
+      fetch: server.fetch,
+      parse: parseHere,
+    });
+    await source.selectPatient(source.patients()[0].key);
+    return { server, source };
+  }
+
+  it('says what it can compute, and with which presets', async () => {
+    const { server, source } = await computing();
+    expect(await source.jobKinds()).toEqual(['rigid-registration', 'deformable-registration']);
+    expect(await source.registrationPresets()).toEqual([
+      { name: 'ct-ct', title: 'CT to CT', description: 'Two CTs.' },
+    ]);
+    // A server without the tools has none; one from before the list has no presets to give.
+    server.jobs.kinds = [];
+    server.jobs.noPresets = true;
+    expect(await source.jobKinds()).toEqual([]);
+    expect(await source.registrationPresets()).toEqual([]);
+  });
+
+  it('starts a job, follows it, and has the timeline show what it stored', async () => {
+    const { server, source } = await computing();
+    const started = await source.startJob('rigid-registration', INPUTS);
+    expect(started).toMatchObject({ kind: 'rigid-registration', status: 'queued', result: null });
+    expect(jobEnded(started)).toBe(false);
+    expect(server.jobs.list[0].inputs).toEqual(INPUTS);
+
+    server.jobs.progress(started.id, 0.5, 'Registering');
+    expect(await source.job(started.id)).toMatchObject({
+      status: 'running',
+      progress: 0.5,
+      message: 'Registering',
+    });
+    server.jobs.succeed(started.id);
+    const done = await source.job(started.id);
+    expect(jobEnded(done)).toBe(true);
+    expect(done).toMatchObject({ status: 'succeeded', discardedAt: null });
+    await source.arrived();
+    expect(source.currentPatient()!.links).toMatchObject([
+      { sopInstanceUid: done.result!['sopInstanceUid'], deformable: false },
+    ]);
+  });
+
+  it('says in the server’s words why a job was not taken', async () => {
+    const { server, source } = await computing();
+    await expect(source.startJob('no-such-kind', {})).rejects.toThrow(
+      'The server refused: The server has no job kind of that name.',
+    );
+    server.jobs.refuse = 'The two series share a frame of reference.';
+    await expect(source.startJob('rigid-registration', INPUTS)).rejects.toThrow(
+      'The server refused: The two series share a frame of reference.',
+    );
+    expect(server.jobs.list).toEqual([]);
+  });
+
+  it('cancels a job', async () => {
+    const { source } = await computing();
+    const started = await source.startJob('rigid-registration', INPUTS);
+    expect(await source.cancelJob(started.id)).toMatchObject({ status: 'cancelled' });
+    expect(jobEnded(await source.job(started.id))).toBe(true);
+  });
+
+  it('discards what a job stored, and the timeline no longer shows it', async () => {
+    const { server, source } = await computing();
+    const started = await source.startJob('deformable-registration', {
+      ...INPUTS,
+      preset: 'ct-ct',
+    });
+    // Nothing to take back before it has ended well.
+    await expect(source.discardJob(started.id)).rejects.toThrow(
+      'The server refused: The job made nothing that can be discarded.',
+    );
+    server.jobs.succeed(started.id);
+    await source.arrived();
+    expect(source.currentPatient()!.links).toMatchObject([{ deformable: true }]);
+
+    const discarded = await source.discardJob(started.id);
+    expect(discarded.discardedAt).not.toBeNull();
+    expect(source.currentPatient()!.links ?? []).toEqual([]);
+    expect((await source.fetchSeries(PAIR.ct)).registrations).toEqual([]);
   });
 });

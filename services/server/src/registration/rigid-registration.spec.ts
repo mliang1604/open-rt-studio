@@ -23,7 +23,13 @@ import {
 import { createCore, type Pacs, type ServerCore } from '../core/core.js';
 import { createJobManager, type JobManager } from '../jobs/job-manager.js';
 import { openSqliteJobStore } from '../jobs/job-store.js';
-import { InvalidJobInputError, type Job, type JobKind, type JsonObject } from '../jobs/job.js';
+import {
+  InvalidJobInputError,
+  JobStepError,
+  type Job,
+  type JobKind,
+  type JsonObject,
+} from '../jobs/job.js';
 import { createLogger } from '../logger.js';
 import { openSqliteIndex } from '../pacs-index/sqlite-index.js';
 import { createMemoryStore } from '../store/memory-store.js';
@@ -427,6 +433,42 @@ describe('a rigid registration job', () => {
     expect(job).toMatchObject({ status: 'cancelled', failure: null, result: null });
     expect(await registrations()).toEqual(before);
     expect(await readdir(join(scratch, 'work'))).toEqual([]);
+  });
+
+  it('takes its object out of the PACS again when it is discarded, and nothing else (#82)', async () => {
+    const before = await registrations();
+    const manager = await jobs();
+    const kept = await manager.whenEnded(
+      (await manager.submit(RIGID_REGISTRATION_KIND, INPUTS)).id,
+    );
+    const job = await manager.whenEnded((await manager.submit(RIGID_REGISTRATION_KIND, INPUTS)).id);
+    const [keptUid, uid] = [kept, job].map((one) => one.result!['sopInstanceUid'] as string);
+    expect(await registrations()).toEqual([...before, keptUid, uid].sort());
+    const images = (await pacs.index.counts()).instances - 2;
+
+    const discarded = (await manager.discard(job.id))!;
+    expect(discarded.discardedAt).not.toBeNull();
+    // The result still says what was made; the object is gone, from the index and the store.
+    expect(discarded.result).toEqual(job.result);
+    expect(await registrations()).toEqual([...before, keptUid].sort());
+    expect(await pacs.store.exists(uid)).toBe(false);
+    expect(await pacs.store.exists(keptUid)).toBe(true);
+    // The two series it was between are as they were.
+    expect((await pacs.index.counts()).instances).toBe(images + 1);
+    expect((await pacs.index.getSeries(PAIR.ct))!.instances).toBe(PAIR.count);
+    expect((await pacs.index.getSeries(PAIR.mr))!.instances).toBe(PAIR.count);
+  });
+
+  it('removes nothing that is not a registration object, whatever a result names', async () => {
+    const kind = kindWith();
+    const [slice] = await pacs.index.findInstances({ seriesInstanceUid: PAIR.ct });
+    await expect(kind.discard!(INPUTS, { sopInstanceUid: slice.sopInstanceUid })).rejects.toEqual(
+      new JobStepError('not-a-registration'),
+    );
+    await expect(kind.discard!(INPUTS, {})).rejects.toEqual(new JobStepError('no-result'));
+    expect(await pacs.store.exists(slice.sopInstanceUid)).toBe(true);
+    // One that is gone already is no failure.
+    await expect(kind.discard!(INPUTS, { sopInstanceUid: '1.2.3.4' })).resolves.toBeUndefined();
   });
 
   it('fails with a word for why when a series has gone by the time it runs', async () => {

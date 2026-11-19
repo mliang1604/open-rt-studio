@@ -604,6 +604,69 @@ describe('a failure part-way', () => {
   });
 });
 
+describe('removing', () => {
+  const [FIRST, SECOND] = syntheticCtSeries(2, 16);
+
+  it('takes an instance out of the index and the store, and says whether it was there', async () => {
+    const all = await pacs();
+    await all.ingest.ingest(FIRST.bytes);
+    await all.ingest.ingest(SECOND.bytes);
+
+    expect(await all.ingest.remove(uidOf(FIRST))).toBe(true);
+    expect(await all.index.getInstance(uidOf(FIRST))).toBeNull();
+    expect(await all.store.exists(uidOf(FIRST))).toBe(false);
+    // The other one of the series stays, and so does the series.
+    expect(await all.store.verify(uidOf(SECOND))).toBe(true);
+    expect(await all.index.counts()).toEqual({ patients: 1, studies: 1, series: 1, instances: 1 });
+
+    expect(await all.ingest.remove(uidOf(FIRST))).toBe(false);
+    expect(await all.ingest.remove('1.2.3.4')).toBe(false);
+    // The last one takes its series, study and patient with it.
+    expect(await all.ingest.remove(uidOf(SECOND))).toBe(true);
+    expect(await all.index.counts()).toEqual({ patients: 0, studies: 0, series: 0, instances: 0 });
+    // Nothing of which instance it was is logged.
+    expect(JSON.stringify(all.log())).not.toContain(uidOf(FIRST));
+  });
+
+  it('can be stored again afterwards', async () => {
+    const all = await pacs();
+    await all.ingest.ingest(FIRST.bytes);
+    await all.ingest.remove(uidOf(FIRST));
+    expect(await all.ingest.ingest(FIRST.bytes)).toMatchObject({ outcome: 'stored' });
+    expect(await all.store.verify(uidOf(FIRST))).toBe(true);
+  });
+
+  it('leaves the index without it when the store fails: the bytes are then what a crash leaves', async () => {
+    const all = await pacs({
+      store: (store) =>
+        new Proxy(store, {
+          get(target, property, receiver) {
+            if (property === 'delete') return () => Promise.reject(new Error('disk gone'));
+            return Reflect.get(target, property, receiver) as unknown;
+          },
+        }),
+    });
+    await all.ingest.ingest(FIRST.bytes);
+    await expect(all.ingest.remove(uidOf(FIRST))).rejects.toThrow('disk gone');
+    // Never the other way round: the index names nothing that may be gone.
+    expect(await all.index.getInstance(uidOf(FIRST))).toBeNull();
+    expect(await all.store.exists(uidOf(FIRST))).toBe(true);
+    // The file again puts it right.
+    expect(await all.ingest.ingest(FIRST.bytes)).toMatchObject({ outcome: 'stored' });
+  });
+
+  it('waits its turn behind an ingest of the same instance', async () => {
+    const all = await pacs();
+    const [stored, removed] = await Promise.all([
+      all.ingest.ingest(FIRST.bytes),
+      all.ingest.remove(uidOf(FIRST)),
+    ]);
+    expect(stored).toMatchObject({ outcome: 'stored' });
+    expect(removed).toBe(true);
+    expect(await all.store.exists(uidOf(FIRST))).toBe(false);
+  });
+});
+
 describe('importing a folder', () => {
   /** The course as a folder a user might have: by study, with other files among it. */
   async function folder(): Promise<string> {

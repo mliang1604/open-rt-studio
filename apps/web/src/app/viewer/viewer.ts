@@ -94,6 +94,8 @@ import { provenanceOf } from './provenance/provenance-of';
 import { StructurePropagation } from './structure-propagation/structure-propagation';
 import { StructurePropagationController } from './structure-propagation/structure-propagation-controller';
 import { ManualRegistrationController } from './manual-registration/manual-registration-controller';
+import { RegistrationWorkflow } from './registration-workflow/registration-workflow';
+import { RegistrationWorkflowController } from './registration-workflow/registration-workflow-controller';
 import { LayersController } from './layers-controller';
 import { ToolbarController, LAYOUT_MODES } from './toolbar-controller';
 import { StatusController } from './status-controller';
@@ -158,6 +160,7 @@ const MAX_ZOOM = 20;
     PaintedStructures,
     ServerPanel,
     ManualRegistration,
+    RegistrationWorkflow,
     DerivedSeries,
     StructurePropagation,
     Provenance,
@@ -199,6 +202,7 @@ const MAX_ZOOM = 20;
     LandmarkController,
     ReportController,
     ManualRegistrationController,
+    RegistrationWorkflowController,
     DerivedSeriesController,
     StructurePropagationController,
     ToolbarController,
@@ -247,6 +251,24 @@ export class Viewer {
   protected readonly brushCtl = inject(BrushController);
   protected readonly contourTools = inject(ContourToolsController);
   protected readonly manualRegistration = inject(ManualRegistrationController);
+  /** The flow from two series to a registration that was looked at and kept (#82). */
+  protected readonly registration = inject(RegistrationWorkflowController);
+  /** Whether the Registration group of the rail is open: as the user left it, and always while a registration is under way. */
+  private readonly registrationOpened = signal(false);
+  protected readonly registrationOpen = computed(
+    () =>
+      this.registrationOpened() ||
+      this.registration.run() !== null ||
+      this.registration.review() !== null,
+  );
+  protected onRegistrationToggle(event: Event): void {
+    if (event.target instanceof HTMLDetailsElement) this.registrationOpened.set(event.target.open);
+  }
+  /** What a click on the timeline picks for that flow, in words; null when it picks nothing. */
+  protected readonly registrationPicking = computed(() => {
+    const picking = this.registration.picking();
+    return picking === null ? null : `the ${picking} image`;
+  });
   protected readonly derivedSeries = inject(DerivedSeriesController);
   protected readonly propagation = inject(StructurePropagationController);
   protected readonly landmarks = inject(LandmarkController);
@@ -778,6 +800,13 @@ export class Viewer {
         const state = this.load();
         return state.status === 'ready' ? (state.result.overlayStructureSets?.[uid] ?? []) : [];
       },
+      notify: (message, problem) => this.loadCtl.showNotice(message, problem),
+      now: () => new Date(),
+    });
+
+    this.registration.init({
+      openPair: (baseUid, overlayUid) => this.loadCtl.openPair(baseUid, overlayUid),
+      baseSeries: () => this.baseSeries(),
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
       now: () => new Date(),
     });

@@ -153,6 +153,66 @@ describe('the job API', () => {
     expect(await (await post(`/jobs/${id}/cancel`)).json()).toMatchObject({ status: 'cancelled' });
   });
 
+  it('takes back what a job made, once, and says when', async () => {
+    const taken: unknown[] = [];
+    const keeps = {
+      ...dummyKind(),
+      discard: (_inputs: unknown, result: unknown) => {
+        taken.push(result);
+        return Promise.resolve();
+      },
+    };
+    const { submit, until, post, json } = await api({}, [keeps]);
+    const job = await until((await submit({ steps: 1, result: { stored: 'object-7' } })).id, ended);
+    expect(job.discardedAt).toBeNull();
+
+    const response = await post(`/jobs/${job.id}/discard`);
+    expect(response.status).toBe(200);
+    const discarded = (await response.json()) as Job;
+    expectSchema(discarded, 'Job');
+    expect(discarded).toEqual({ ...job, discardedAt: expect.any(String) as string });
+    expect(Date.parse(discarded.discardedAt!)).toBeGreaterThanOrEqual(Date.parse(job.endedAt!));
+    expect(taken).toEqual([{ stored: 'object-7' }]);
+    expect(await json(`/jobs/${job.id}`)).toEqual(discarded);
+
+    // Again: as it is, and the kind is not asked a second time.
+    const again = await post(`/jobs/${job.id}/discard`);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual(discarded);
+    expect(taken).toHaveLength(1);
+  });
+
+  it('refuses to discard what is not there to take back', async () => {
+    const failing = {
+      ...dummyKind({ name: 'failing' }),
+      discard: () => Promise.reject(new Error('instance 1.2.3.4 of the patient')),
+    };
+    const { submit, until, post, log } = await api({}, [dummyKind(), failing]);
+    // A kind that keeps nothing: 409.
+    const plain = await until((await submit({ steps: 1, result: { made: 1 } })).id, ended);
+    const refused = await post(`/jobs/${plain.id}/discard`);
+    expect(refused.status).toBe(409);
+    const body: unknown = await refused.json();
+    expectSchema(body, 'Error');
+    expect(body).toMatchObject({ error: 'nothing-to-discard' });
+    // A job that failed: 409 too.
+    const failed = await until((await submit({ steps: 1, exitCode: 2 }, 'failing')).id, ended);
+    expect((await post(`/jobs/${failed.id}/discard`)).status).toBe(409);
+    // No such job, and no job id.
+    expect((await post(`/jobs/${NO_SUCH}/discard`)).status).toBe(404);
+    expect((await post('/jobs/nonsense/discard')).status).toBe(400);
+    // A kind that could not take it back: 500, with nothing of why.
+    const made = await until(
+      (await submit({ steps: 1, result: { made: 1 } }, 'failing')).id,
+      ended,
+    );
+    const broken = await post(`/jobs/${made.id}/discard`);
+    expect(broken.status).toBe(500);
+    const said = JSON.stringify(await broken.json());
+    expect(said).toContain('not-discarded');
+    expect(said + JSON.stringify(log())).not.toContain('1.2.3.4');
+  });
+
   it('shows a failed job with why it failed', async () => {
     const { submit, until } = await api();
     const { id } = await submit({ exitCode: 7 });

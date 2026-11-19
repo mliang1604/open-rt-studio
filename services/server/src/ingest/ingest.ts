@@ -88,6 +88,13 @@ export interface Ingest {
   ingest(bytes: Uint8Array, options?: IngestOptions): Promise<IngestResult>;
   /** Ingest every file in a folder and the folders below it, one after another. */
   importFolder(directory: string, options?: ImportOptions): Promise<ImportSummary>;
+  /**
+   * Take an instance out again: out of the index, and then its bytes out of
+   * the store. True when the PACS held it. Nothing of the API removes what
+   * was sent to the server; this is for what the server made itself and was
+   * told is not wanted (a job's result that was discarded).
+   */
+  remove(sopInstanceUid: string): Promise<boolean>;
 }
 
 export interface IngestParts {
@@ -239,6 +246,18 @@ export function createIngest({ store, index, logger = SILENT_LOGGER }: IngestPar
 
   return {
     ingest,
+
+    // The other way round from ingest, for the same reason: the index first
+    // and the store second, so the index never names bytes that are not
+    // there. Bytes left by a failure between the two are what a crash in
+    // ingest leaves, and are found by nothing.
+    remove: (uid) =>
+      inTurn(uid, async () => {
+        const indexed = await index.removeInstance(uid);
+        const held = await store.delete(uid);
+        if (indexed || held) logger.debug('instance-removed', {});
+        return indexed || held;
+      }),
 
     async importFolder(directory, options = {}) {
       const entries = await readdir(directory, { recursive: true, withFileTypes: true });

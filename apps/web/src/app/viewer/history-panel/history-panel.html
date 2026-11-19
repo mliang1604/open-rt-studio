@@ -56,6 +56,15 @@
   >
     Server…
   </button>
+  @if (picking(); as what) {
+    <!-- A series is being picked for something: a click chooses, and loads nothing. -->
+    <span class="history-picking" role="status" data-picking>
+      Click a series for {{ what }}
+      <button type="button" (click)="pickCancelled.emit()" title="A click loads a series again">
+        Cancel
+      </button>
+    </span>
+  }
   @if (!collapsed() && hasCatalog()) {
     <button
       type="button"
@@ -151,6 +160,7 @@
                               [series]="series"
                               [thumbnail]="thumbnailFor(series)"
                               [loaded]="isLoaded(series)"
+                              [mark]="markOf(series)"
                               (activate)="onLoadSeries($event)"
                             />
                             @if (series.attached; as attached) {
@@ -243,6 +253,7 @@
                             [series]="series"
                             [thumbnail]="thumbnailFor(series)"
                             [loaded]="isLoaded(series)"
+                            [mark]="markOf(series)"
                             (activate)="onLoadSeries($event)"
                           />
                           @if (series.attached; as attached) {

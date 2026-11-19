@@ -151,6 +151,11 @@ and keeps your login in the system's keychain. See [apps/desktop/README.md](apps
 - Rigid registration by hand: shift and turn one series over another by
   dragging it in any plane or with numbers, see the fused picture follow,
   and save the result as a DICOM Spatial Registration object
+- A registration from start to end in one panel: choose the fixed and the
+  moving series on the timeline; register by hand, or have a server that
+  has the registration tools do it, rigidly or deformably with a preset;
+  follow it and cancel it; look at the result fused or side by side; then
+  keep it, under a name of your own if you like, or discard it
 - Curved planar reformat: draw a path through the volume and see the image
   straightened along it
 - Distance, angle and region measurements; cine; PNG and spin-video capture
@@ -198,7 +203,9 @@ rigidly and deformably; a server that is told where the tools are runs them
 as jobs and stores the results as DICOM Spatial Registration and Deformable
 Spatial Registration objects
 ([services/server/README.md](services/server/README.md#rigid-registration)).
-The viewer has no button for them yet.
+The viewer starts them from its Registration panel when it reads from such
+a server; a page that reads opened files, and the desktop application,
+compute none yet.
 
 ## License
 

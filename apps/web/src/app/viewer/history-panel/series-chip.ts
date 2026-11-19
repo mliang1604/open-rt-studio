@@ -43,6 +43,7 @@ export const SERIES_DND_MIME = 'application/x-dicom-series-uid';
   host: {
     class: 'series-chip',
     '[class.loaded]': 'loaded()',
+    '[class.marked]': 'mark() !== null',
     // Marks the chip of the series currently displayed in the viewer.
     '[attr.aria-current]': "loaded() ? 'true' : null",
     // A focusable, draggable button: click / Enter / Space / drag all load it.
@@ -62,6 +63,11 @@ export class SeriesChip {
   readonly thumbnail = input.required<SeriesThumbnail>();
   /** Whether this series is the one currently loaded in the viewport (highlight). */
   readonly loaded = input(false);
+  /**
+   * What the series is in something that is being set up, such as `Fixed` or
+   * `Moving` for a registration (#82); null when it is nothing there.
+   */
+  readonly mark = input<string | null>(null);
   /** Emitted when the chip is clicked, key-activated, or its drag completes a load. */
   readonly activate = output<SeriesSummary>();
 

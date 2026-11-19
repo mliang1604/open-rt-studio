@@ -68,6 +68,12 @@ export interface Job {
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly endedAt: string | null;
+  /**
+   * When what the job made was taken back ({@link JobKind.discard}): what
+   * its result names is then no longer there. Null for a job whose result
+   * stands.
+   */
+  readonly discardedAt: string | null;
 }
 
 /** One line a worker wrote, on standard output or standard error. */
@@ -144,6 +150,14 @@ export interface JobKind {
    * it ended. For a kind that puts a patient's data there.
    */
   readonly removeWorkDir?: boolean;
+  /**
+   * Take back what a job of this kind made: remove what its `finish` kept,
+   * for a result that was looked at and is not wanted. `result` is the
+   * job's result, which is the kind's own (`finish` returned it), so what
+   * it names is what the kind stored and nothing a request chose. A kind
+   * without it makes nothing that can be taken back.
+   */
+  discard?(inputs: JsonObject, result: JsonObject): Promise<void>;
 }
 
 /** Whose data a job touches: what an audit record keeps of it. */
@@ -164,6 +178,14 @@ export class UnknownJobKindError extends Error {
   override readonly name = 'UnknownJobKindError';
   constructor() {
     super('The server has no job kind of that name.');
+  }
+}
+
+/** A job whose result cannot be taken back: it made none, or its kind keeps nothing. */
+export class NothingToDiscardError extends Error {
+  override readonly name = 'NothingToDiscardError';
+  constructor() {
+    super('The job made nothing that can be discarded.');
   }
 }
 

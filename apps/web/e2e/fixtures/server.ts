@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -18,6 +18,12 @@ export interface TestServer {
   readonly address: string;
   /** Store files in it, as a client would. */
   upload(files: readonly SyntheticFile[]): Promise<void>;
+  /**
+   * For a server with {@link TestServerOptions.registrationTools}: from now
+   * on a registration says that it has begun and then waits to be stopped
+   * (`true`), or ends at once as it does to begin with (`false`).
+   */
+  slowRegistrations(slow: boolean): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -33,6 +39,33 @@ export interface TestServerOptions {
    * with TLS, and call itself with it.
    */
   readonly dicomCertificate?: boolean;
+  /**
+   * Give the server registration tools, so that it has the jobs that run
+   * them (#82). They are the stand-ins of the server's own specs
+   * (`services/server/src/registration/testing`), which register nothing:
+   * the rigid one answers with the move from the fixed image's first voxel
+   * to the moving image's. The presets are the repository's.
+   */
+  readonly registrationTools?: boolean;
+}
+
+/** A stand-in registration tool under the name the server looks for: a script that runs it with Node. */
+async function standInTool(directory: string, tool: string, standIn: string): Promise<void> {
+  const script = resolve(ROOT, 'services/server/src/registration/testing', standIn);
+  const quoted = (text: string): string => `'${text.replaceAll("'", `'\\''`)}'`;
+  await writeFile(
+    join(directory, tool),
+    [
+      '#!/bin/sh',
+      '# With a file named "slow" beside it, the stand-in waits to be stopped.',
+      'if [ -f "$(dirname "$0")/slow" ]; then',
+      `  exec ${quoted(process.execPath)} ${quoted(script)} --stand-in slow "$@"`,
+      'fi',
+      `exec ${quoted(process.execPath)} ${quoted(script)} "$@"`,
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
 }
 
 let built = false;
@@ -82,8 +115,23 @@ export async function startTestServer(
     await writeFile(join(certificates, 'cert.pem'), made.cert);
     await writeFile(join(certificates, 'key.pem'), made.key, { mode: 0o600 });
   }
+  // Tools as a build of the native tools lays them out: `bin`, and `presets` beside it.
+  const tools = options.registrationTools
+    ? await mkdtemp(join(tmpdir(), 'open-rt-studio-e2e-tools-'))
+    : null;
+  if (tools) {
+    await mkdir(join(tools, 'bin'));
+    await standInTool(join(tools, 'bin'), 'ors-register-rigid', 'stand-in-register-rigid.mjs');
+    await standInTool(
+      join(tools, 'bin'),
+      'ors-register-deformable',
+      'stand-in-register-deformable.mjs',
+    );
+    await cp(resolve(ROOT, 'native/presets'), join(tools, 'presets'), { recursive: true });
+  }
   const environment: Record<string, string | undefined> = {
     PATH: process.env['PATH'],
+    ...(tools ? { OPEN_RT_STUDIO_NATIVE_TOOLS: join(tools, 'bin') } : {}),
     OPEN_RT_STUDIO_PORT: '0',
     OPEN_RT_STUDIO_ALLOWED_ORIGINS: allowedOrigins.join(','),
     // Without an account to log in with: no login, which the server allows
@@ -161,6 +209,11 @@ export async function startTestServer(
         }
       }
     },
+    async slowRegistrations(slow) {
+      if (!tools) throw new Error('The test server was started without registration tools.');
+      if (slow) await writeFile(join(tools, 'bin', 'slow'), '');
+      else await rm(join(tools, 'bin', 'slow'), { force: true });
+    },
     async stop() {
       await new Promise<void>((done) => {
         if (child.exitCode !== null) return done();
@@ -169,6 +222,7 @@ export async function startTestServer(
       });
       if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 5 });
       if (certificates) await rm(certificates, { recursive: true, force: true, maxRetries: 5 });
+      if (tools) await rm(tools, { recursive: true, force: true, maxRetries: 5 });
     },
   };
 }

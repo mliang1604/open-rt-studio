@@ -282,6 +282,7 @@ export const AUDIT_ACTIONS = [
   ...[
     'job-start',
     'job-cancel',
+    'job-discard',
     'job-read',
     'audit-read',
     'audit-export',
@@ -526,6 +527,38 @@ export interface DicomRetrieve {
   readonly status: number | null;
   /** The instances of it the server holds, once it is done. */
   readonly held: number | null;
+}
+
+/** The statuses of a job of the server; the last three are where it ends. */
+export const JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+/** A job of the server (heavy work it does by itself), as far as the viewer follows one. */
+export interface ServerJob {
+  readonly id: string;
+  readonly kind: string;
+  readonly status: JobStatus;
+  /** How far along, from 0 to 1; null before the job says. */
+  readonly progress: number | null;
+  /** What it is doing; for one that failed in a step of its own, a word for why. */
+  readonly message: string | null;
+  readonly result: Readonly<Record<string, unknown>> | null;
+  /** Why it failed, as the server's word; null unless it did. */
+  readonly failure: string | null;
+  /** When what it made was taken back; null while its result stands. */
+  readonly discardedAt: string | null;
+}
+
+/** Whether a job has ended, however it ended. */
+export const jobEnded = (job: Pick<ServerJob, 'status'>): boolean =>
+  job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled';
+
+/** A preset a deformable registration can be run with, as the server lists it. */
+export interface RegistrationPreset {
+  /** What a job names it by. */
+  readonly name: string;
+  readonly title: string;
+  readonly description: string;
 }
 
 /** What to change of an account. What is left out stays as it is. */
@@ -1091,6 +1124,58 @@ export class ServerSource implements DataSource {
   async arrived(): Promise<void> {
     await this.refresh().catch(() => undefined);
     await this.listAgain();
+  }
+
+  /** The kinds of job the server runs, by name: none for a server without the tools for any. */
+  async jobKinds(signal?: AbortSignal): Promise<string[]> {
+    const kinds = await this.json<{ items: { name: string }[] }>('/job-kinds', signal);
+    return kinds.items.map((kind) => kind.name);
+  }
+
+  /**
+   * The presets the server has for a deformable registration. None for a
+   * server without the tools, and for one from before it had the list.
+   */
+  async registrationPresets(signal?: AbortSignal): Promise<RegistrationPreset[]> {
+    try {
+      const presets = await this.json<{ items: RegistrationPreset[] }>(
+        '/registration-presets',
+        signal,
+      );
+      return presets.items;
+    } catch (error) {
+      if (error instanceof ServerError && error.status === 404) return [];
+      throw error;
+    }
+  }
+
+  /** Have the server start a job. Answered at once; {@link job} follows it. */
+  async startJob(kind: string, inputs: Readonly<Record<string, unknown>>): Promise<ServerJob> {
+    return (await (await this.send('POST', '/jobs', { kind, inputs })).json()) as ServerJob;
+  }
+
+  /** A job as it is now. */
+  job(id: string, signal?: AbortSignal): Promise<ServerJob> {
+    return this.json<ServerJob>(`/jobs/${encodeURIComponent(id)}`, signal);
+  }
+
+  /** Ask the server to stop a job. One that runs may still say so in the answer. */
+  async cancelJob(id: string): Promise<ServerJob> {
+    return (await (
+      await this.send('POST', `/jobs/${encodeURIComponent(id)}/cancel`)
+    ).json()) as ServerJob;
+  }
+
+  /**
+   * Have the server take back what a job made: the registration it stored
+   * is removed. The timeline is asked for again, so that it no longer shows it.
+   */
+  async discardJob(id: string): Promise<ServerJob> {
+    const job = (await (
+      await this.send('POST', `/jobs/${encodeURIComponent(id)}/discard`)
+    ).json()) as ServerJob;
+    await this.listAgain();
+    return job;
   }
 
   /** Have the server send again what did not arrive, as a send of its own. */

@@ -229,6 +229,46 @@ describe('a rigid registration through the API', () => {
     ]);
   });
 
+  it('is discarded: the object is gone from the study, and who took it back is recorded', async () => {
+    const { upload, post, until, json, records, log } = await api(withStandIn());
+    const pair = syntheticRegisteredPair();
+    await upload([...pair.planningCt, ...pair.followUpMr]);
+    const submitted = (await (
+      await post('/jobs', { kind: RIGID_REGISTRATION_KIND, inputs: INPUTS })
+    ).json()) as Job;
+    const job = await until(submitted.id, ended);
+    const result = job.result as { sopInstanceUid: string; seriesInstanceUid: string };
+    const seriesOf = async (): Promise<string[]> =>
+      (
+        await json<{ items: { seriesInstanceUid: string }[] }>(
+          `/studies/${studyUid(SYNTHETIC_STUDY)}/series`,
+        )
+      ).items.map((one) => one.seriesInstanceUid);
+    expect(await seriesOf()).toContain(result.seriesInstanceUid);
+
+    const response = await post(`/jobs/${job.id}/discard`);
+    expect(response.status).toBe(200);
+    const discarded = (await response.json()) as Job;
+    expect(violations(discarded, SCHEMAS['Job'], SCHEMAS)).toEqual([]);
+    expect(discarded.discardedAt).not.toBeNull();
+    expect(await seriesOf()).toEqual([PAIR.ct]);
+    await json(`/instances/${result.sopInstanceUid}`, 404);
+
+    expect(records().filter((record) => record.action === 'job-discard')).toMatchObject([
+      {
+        outcome: 'ok',
+        detail: RIGID_REGISTRATION_KIND,
+        object: job.id,
+        patientId: SYNTHETIC_STUDY.patient.id,
+        studyUid: studyUid(SYNTHETIC_STUDY),
+        seriesUid: PAIR.ct,
+      },
+    ]);
+    for (const value of [SYNTHETIC_STUDY.patient.id, PAIR.ct, result.sopInstanceUid, job.id]) {
+      expect(log().includes(value), value).toBe(false);
+    }
+  });
+
   it('is cancelled while it runs', async () => {
     const { upload, post, until, json } = await api(withStandIn('slow'));
     const pair = syntheticRegisteredPair();

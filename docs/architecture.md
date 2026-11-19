@@ -1363,6 +1363,55 @@ for the deformable one alike. Status: **decided, and
 Michael's to overturn**, most of all refusing a registration within one
 frame of reference, which some systems may write.
 
+Decided in #82, the registration workflow in the viewer:
+
+- **One flow, in the tool rail** (`viewer/registration-workflow/`): which
+  two series, how, a run that can be cancelled, and a review that ends in
+  accept or discard. The controller holds the flow; the panel shows one of
+  its three steps at a time.
+- **The fixed image is the base, the moving one is laid over it.** That is
+  what the viewer already draws, and what both jobs take. The two are
+  chosen on the timeline: while the panel asks, a click on a series chooses
+  it and loads nothing, and the chips say which is which.
+- **Three ways**: by hand (#78), automatic rigid (#80) and automatic
+  deformable with a preset (#81). The preset first offered is the one named
+  for the two kinds of image (`mr-ct` for an MR and a CT), else the
+  server's first.
+- **Only a server computes.** The page asks the server it reads from which
+  job kinds it has. With opened files, with a server without the tools, and
+  in the desktop application's library, the panel says where a registration
+  is computed, and offers by hand alone.
+- **A job stores its result as it ends** (as in #80 and #81), and the
+  review is of that stored object: the pair is opened and placed by it.
+  Nothing is held back in the page for the review, so a registration that
+  was computed is never lost with a closed tab; one that nobody accepted
+  stays on the server under the name the job gave it.
+- **Discard takes it back**: `POST /jobs/{id}/discard` has the job's kind
+  remove what that job stored, and writes on the job that it did. It is no
+  way to delete an object in general: only what a job of the server made
+  itself, only by the job's id, and a registration kind removes nothing
+  that is not a registration object. The object leaves the index first and
+  the store after, the reverse of ingest. The audit record says whose data
+  it was.
+- **A rename is a new object.** A stored object is not rewritten: the
+  placement on screen is written again under the new name (as its series'
+  name too, which the timeline shows), stored, and then the job's own is
+  discarded. If the first step fails, the registration keeps its first
+  name; if the second does, both are there and the panel says so.
+- **An automatic registration may start from the screen**: where the moving
+  image is placed now goes to the job as its start (`initial`), unless the
+  user says not to. That is how a deformable registration starts from a
+  rigid one that was accepted. The two are not chained otherwise.
+- **Nothing judges the result.** The panel says that nothing has checked
+  it, passes on what the server said of a field (its size, its longest
+  vector, where it folds), and leaves the judging to who looks.
+- Not there: a list of the server's jobs, so a run is followed only by the
+  page that started it, and is not found again after a reload (its result
+  is on the timeline all the same); registering through the desktop
+  application's library (#70 brings it the tools).
+
+Status: **decided, and Michael's to overturn**.
+
 ## Resampling
 
 Putting one image on another image's grid, through a registration (epic #7).
