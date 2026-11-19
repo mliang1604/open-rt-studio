@@ -98,6 +98,59 @@ describe('the contouring tool bar (#106)', () => {
     );
   });
 
+  it("says under a tool's options whose settings they are, with the way back and the one place that forgets (#346)", () => {
+    const { tools, brush, store } = setup();
+    tools.setLabs(true);
+    const { fixture, host, button } = bar();
+    const line = () => host.querySelector('[data-remembered]');
+    const said = () =>
+      host.querySelector('[data-remembered-said]')?.textContent.replace(/\s+/g, ' ').trim();
+    const links = () =>
+      [...host.querySelectorAll('[data-remembered] button')].map((one) => one.textContent.trim());
+    const settle = () => {
+      TestBed.tick();
+      fixture.detectChanges();
+    };
+    // A tool with nothing to remember has no such line.
+    button('[data-contour-tool="sample"]').click();
+    settle();
+    expect(line()).toBeNull();
+
+    button('[data-contour-tool="wand"]').click();
+    settle();
+    // The wand made a structure ready, which nobody named.
+    expect(said()).toBe('Give the structure a name to have its settings remembered.');
+    expect(host.querySelector('[data-remembered-forget]')).toBeNull();
+
+    store.renameRoi(brush.activeRoiId()!, 'Heart');
+    settle();
+    expect(said()).toBe('What is used for “Heart” on CT is remembered for the next time.');
+
+    const tolerance = host.querySelector<HTMLInputElement>('[data-wand-tolerance]')!;
+    tolerance.value = '30';
+    tolerance.dispatchEvent(new Event('change'));
+    tools.begin(AXIAL_MID, pointer(50, 50));
+    tools.end();
+    settle();
+    expect(line()?.getAttribute('data-remembered-kind')).toBe('recalled');
+    expect(said()).toBe('These settings are the ones last used for “Heart” on CT.');
+    expect(links()).toEqual(["Tool's defaults", 'Forget all remembered (1)']);
+
+    button('[data-remembered-defaults]').click();
+    settle();
+    expect(tolerance.value).toBe('50');
+    expect(said()).toBe('What is used for “Heart” on CT is remembered for the next time.');
+    expect(links()).toEqual([]);
+
+    tools.begin(AXIAL_MID, pointer(50, 50));
+    tools.end();
+    settle();
+    button('[data-remembered-forget]').click();
+    settle();
+    expect(said()).toBe('What is used for “Heart” on CT is remembered for the next time.');
+    expect(localStorage.getItem('open-rt-studio.tool-settings')).toBeNull();
+  });
+
   it('is off without an image to edit', () => {
     setup();
     const { fixture, button } = bar();

@@ -31,6 +31,7 @@ import type {
   ToolPointer,
   ToolPreviewCircle,
 } from './contour-tool';
+import { choiceSetting, numberSetting, optionalNumberSetting } from './remembered-settings';
 
 /** Where the range comes from: the value where a stroke begins, or what is typed. */
 export type ThresholdFrom = 'sample' | 'typed';
@@ -237,6 +238,13 @@ export class ThresholdBrushTool implements ContourTool {
   readonly tolerance = signal<number | null>(50);
   readonly min = signal<number | null>(null);
   readonly max = signal<number | null>(null);
+
+  readonly remembered = [
+    choiceSetting('from', this.from, ['sample', 'typed']),
+    numberSetting('tolerance', this.tolerance, { min: 0 }),
+    optionalNumberSetting('min', this.min),
+    optionalNumberSetting('max', this.max),
+  ];
   /** The value where the last stroke began; null before one. */
   readonly sampled = signal<number | null>(null);
 

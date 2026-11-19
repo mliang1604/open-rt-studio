@@ -512,6 +512,30 @@ its own.
   runtime does it without Python today, and a user's few corrections
   cannot show that it got better. What would be kept, and where, is in
   [learning-from-corrections.md](learning-from-corrections.md).
+- **Remembered settings** (#346): a tool says which of its settings are
+  worth keeping (`remembered`), and does no remembering itself.
+  - **By what**: the structure's name, without regard to case or spacing,
+    and the modality of the image. A structure nobody named (`Structure 3`)
+    is not remembered: its name says nothing of what it is.
+  - **What**: the last values the tool was used with, kept when an edit is
+    made with it. A setting that is changed and never used is not kept. No
+    average and no model.
+  - **When they come back**: when the tool is taken up, or another
+    structure or image comes under it, the settings are those remembered,
+    or the tool's defaults where nothing is. So a tool no longer carries a
+    setting from one structure to the next. Naming the structure in hand
+    brings the settings of that name only if there are any.
+  - **Where**: in the browser's profile (`localStorage`, for the desktop
+    application its own), at most 200 structures, the one used longest ago
+    going first. A structure's name is the user's own text: nothing of this
+    is sent to a server or logged, and what is read back is believed only
+    as far as it can be a setting.
+  - **Shown** under the tool's options: whose settings these are, the way
+    back to the tool's defaults (which forgets that structure for that
+    tool), and the one place that forgets everything.
+  - The tools that have them: the magic wand, quick select, the threshold
+    brush, the cleanup and the rubber band. Not the brush, whose size goes
+    with what is being drawn more than with the structure.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

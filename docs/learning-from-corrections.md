@@ -181,8 +181,8 @@ The rules that follow:
 
 1. **Build "a correction is a prompt" with the tool** (#340). It is the
    learning a user notices most, and it keeps nothing.
-2. **Remember settings by structure and modality** (#346). Small, plain,
-   and useful to the tools that already exist.
+2. **Remember settings by structure and modality** (#346, since built).
+   Small, plain, and useful to the tools that already exist.
 3. **Try the remembered object where it answers an open question**: as the
    rule for stopping, and for finding the object without a click, in #343;
    then on the follow-up study of the same patient (#347). On real

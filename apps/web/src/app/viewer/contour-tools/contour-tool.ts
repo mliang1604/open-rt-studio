@@ -15,7 +15,9 @@
 //   whatever any tool asks for; no tool applies them itself.
 // - A tool may draw a preview over the pane while the pointer is over it,
 //   and may have options of its own, a component shown under the tools
-//   while it is in hand.
+//   while it is in hand. It may say which of them are remembered by
+//   structure and modality (`remembered`, #346); it does no remembering
+//   itself.
 // - A tool that is not finished says it is of the labs: it is offered only
 //   when the labs flag is on.
 //
@@ -26,6 +28,7 @@ import type { LabelChange, PlaneSpan, SliceMask } from '@open-rt-studio/dicom';
 import type { VoxelIndex } from '@open-rt-studio/render';
 
 import type { PanePlacement } from '../pane-placement';
+import type { RememberedSetting } from './remembered-settings';
 
 /** A pane the pointer is over, and the event. */
 export interface ToolPointer {
@@ -117,6 +120,12 @@ export interface ContourTool {
   readonly listed: boolean;
   /** Its options, shown under the tools while it is in hand; null for none. */
   readonly options: Type<unknown> | null;
+  /**
+   * The settings of it that are remembered by structure and modality
+   * (#346): what it was last used with for "Heart" on CT is what it starts
+   * with the next time. Left out for a tool that has none worth keeping.
+   */
+  readonly remembered?: readonly RememberedSetting[];
   /** What an edit by it is called in Undo and Redo: `Paint`, `Erase`. */
   editName(): string;
   /** Whether it can be used now: the brush paints only into a structure. */

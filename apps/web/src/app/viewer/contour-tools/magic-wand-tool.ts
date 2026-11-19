@@ -16,6 +16,7 @@ import { throughPlaneAxis } from '@open-rt-studio/render';
 
 import { BrushController } from '../brush-controller';
 import type { ContourTool, ContourToolContext, ToolPointer } from './contour-tool';
+import { choiceSetting, numberSetting } from './remembered-settings';
 
 @Injectable()
 export class MagicWandTool implements ContourTool {
@@ -36,6 +37,13 @@ export class MagicWandTool implements ContourTool {
   readonly mode = signal<'add' | 'subtract'>('add');
   /** No region of more voxels than this is taken. */
   readonly limit = signal<number | null>(500_000);
+
+  /** Adding or taking away is what is being done, not a setting: it is not remembered. */
+  readonly remembered = [
+    numberSetting('tolerance', this.tolerance, { min: 0 }),
+    choiceSetting('dimension', this.dimension, ['2d', '3d']),
+    numberSetting('limit', this.limit, { min: 1 }),
+  ];
   /** What came of the last click, or why nothing did. */
   readonly said = signal<string | null>(null);
 

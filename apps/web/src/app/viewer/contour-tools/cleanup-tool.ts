@@ -29,6 +29,7 @@ import {
 import { BrushController } from '../brush-controller';
 import { EditableStructuresStore } from '../editable-structures-store';
 import type { ContourTool } from './contour-tool';
+import { choiceSetting, numberSetting } from './remembered-settings';
 import { ContourToolsController } from './contour-tools-controller';
 
 /** The cleanups there are. */
@@ -61,6 +62,12 @@ export class CleanupTool implements ContourTool {
   readonly minSize = signal<number | null>(100);
   /** The smoothing's radius in mm. */
   readonly radiusMm = signal<number | null>(2);
+
+  readonly remembered = [
+    choiceSetting('dimension', this.dimension, ['2d', '3d']),
+    numberSetting('min-size', this.minSize, { min: 0 }),
+    numberSetting('radius-mm', this.radiusMm, { min: 0 }),
+  ];
 
   editName(): string {
     return this.name;
@@ -277,10 +284,14 @@ export class CleanupOptions {
       this.said.set(error.message);
       return;
     }
-    const changed = this.tools.apply(CLEANUP_NAMES[kind], [
-      { kind: 'paint', roiId, voxels: result.add },
-      { kind: 'erase', roiId, voxels: result.remove },
-    ]);
+    const changed = this.tools.apply(
+      CLEANUP_NAMES[kind],
+      [
+        { kind: 'paint', roiId, voxels: result.add },
+        { kind: 'erase', roiId, voxels: result.remove },
+      ],
+      this.tool,
+    );
     const asked = result.add.length + result.remove.length;
     this.said.set(
       changed === 0

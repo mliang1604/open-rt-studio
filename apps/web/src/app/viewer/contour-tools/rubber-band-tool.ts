@@ -39,6 +39,7 @@ import type {
   ToolPointer,
   ToolPreviewCircle,
 } from './contour-tool';
+import { numberSetting } from './remembered-settings';
 import { picturePixelOf, planePictureOf, type PlanePicture } from './plane-picture';
 import { POINT_GRAB_PX } from './point-tool';
 
@@ -76,6 +77,10 @@ export class RubberBandTool implements ContourTool {
 
   /** How far along the edge, either way, the drag reaches, in mm. */
   readonly influenceMm = signal<number | null>(10);
+
+  readonly remembered = [
+    numberSetting('influence-mm', this.influenceMm, { min: Number.MIN_VALUE }),
+  ];
   readonly said = signal<string | null>(null);
   private held: Held | null = null;
 
