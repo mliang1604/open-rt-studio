@@ -79,3 +79,28 @@ export function pictureToPane(
     o.y + u * (eu.y - o.y) + v * (ev.y - o.y),
   ];
 }
+
+/** Pixels of a slice of the grid to pixels of a pane that shows it: affine, from three points. */
+export function sliceToPane(
+  brush: BrushController,
+  placement: ToolPointer['placement'],
+  axis: 0 | 1 | 2,
+  slice: number,
+): ((point: PlanePoint) => [number, number]) | null {
+  const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
+  const voxel = (u: number, v: number): [number, number, number] => {
+    const out: [number, number, number] = [0, 0, 0];
+    out[axis] = slice;
+    out[a] = u;
+    out[b] = v;
+    return out;
+  };
+  const o = brush.paneLocalOfVoxel(placement, voxel(0, 0));
+  const ea = brush.paneLocalOfVoxel(placement, voxel(1, 0));
+  const eb = brush.paneLocalOfVoxel(placement, voxel(0, 1));
+  if (!o || !ea || !eb) return null;
+  return ([u, v]) => [
+    o.x + u * (ea.x - o.x) + v * (eb.x - o.x),
+    o.y + u * (ea.y - o.y) + v * (eb.y - o.y),
+  ];
+}

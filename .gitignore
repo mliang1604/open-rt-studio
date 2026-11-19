@@ -7,6 +7,8 @@ out-tsc/
 
 # Node
 node_modules/
+# What the web client serves and does not bundle: copied from a package (apps/web/scripts/runtime-assets.mjs)
+/apps/web/public/ort/
 npm-debug.log
 
 # Angular

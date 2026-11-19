@@ -7,6 +7,7 @@ import type { Provider } from '@angular/core';
 import { BooleanTool } from './boolean-tool';
 import { BrushTool } from './brush-tool';
 import { CleanupTool } from './cleanup-tool';
+import { ClickSegmentTool } from './click-segment-tool';
 import { CONTOUR_TOOLS } from './contour-tool';
 import { MagicWandTool } from './magic-wand-tool';
 import { MarginTool } from './margin-tool';
@@ -36,6 +37,8 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: MagicWandTool, multi: true },
   QuickSelectTool,
   { provide: CONTOUR_TOOLS, useExisting: QuickSelectTool, multi: true },
+  ClickSegmentTool,
+  { provide: CONTOUR_TOOLS, useExisting: ClickSegmentTool, multi: true },
   PointTool,
   { provide: CONTOUR_TOOLS, useExisting: PointTool, multi: true },
   LiveWireTool,

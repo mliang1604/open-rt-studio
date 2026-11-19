@@ -45,8 +45,14 @@ files:
 # The web client's build, beside the application: `src/main.ts` serves it
 # from `resources/web`.
 extraResources:
+  # Without the runtime of the click-to-segment tool's model (29 MB): the
+  # tool is off in the desktop application, whose page may not compile
+  # WebAssembly (#340), so nothing would ever fetch it.
   - from: ../web/dist/browser
     to: web
+    filter:
+      - '**/*'
+      - '!ort/**'
   - from: ../../LICENSE
     to: LICENSE.txt
   # The native tools (#70), as their build leaves them: the programs, the

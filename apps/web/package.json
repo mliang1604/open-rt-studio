@@ -6,8 +6,12 @@
   "license": "MPL-2.0",
   "scripts": {
     "ng": "ng",
+    "runtime-assets": "node scripts/runtime-assets.mjs",
+    "prestart": "npm run runtime-assets",
     "start": "ng serve",
+    "prebuild": "npm run runtime-assets",
     "build": "ng build",
+    "prewatch": "npm run runtime-assets",
     "watch": "ng build --watch --configuration development",
     "pretest": "tsc -p e2e/tsconfig.json",
     "test": "ng test --watch=false",
@@ -17,16 +21,17 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@open-rt-studio/desktop-bridge": "0.0.0",
     "@angular/common": "^22.0.0",
     "@angular/compiler": "^22.0.0",
     "@angular/core": "^22.0.0",
     "@angular/forms": "^22.0.0",
     "@angular/platform-browser": "^22.0.0",
     "@angular/router": "^22.0.0",
+    "@open-rt-studio/desktop-bridge": "0.0.0",
     "@open-rt-studio/dicom": "0.0.0",
     "@open-rt-studio/render": "0.0.0",
     "@open-rt-studio/testdata": "0.0.0",
+    "onnxruntime-web": "1.31.1",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

@@ -331,6 +331,18 @@ test('in the application: import a folder, browse the library, view a series and
   await expect(page.locator('.notice')).toContainText('(Library on this computer)');
   await expect(page.locator('.notice')).toContainText(/^\s*Saved “.+”/);
   await expect(onChip).toHaveAttribute('title', '2 structure sets');
+
+  // Click to segment is off here, and says why (#340): its model runs on
+  // WebAssembly, which the page's content policy does not let it compile.
+  // Whether the policy should is a decision that is not made by a tool.
+  await page.locator('[data-labs]').check();
+  await page.locator('[data-contour-tool="segment"]').click();
+  await expect(page.locator('[data-segment-off]')).toContainText(
+    'content policy does not let a page compile',
+  );
+  await expect(page.locator('[data-segment-files]')).toHaveCount(0);
+  await page.locator('[data-contour-tool="segment"]').click();
+  await page.locator('[data-labs]').uncheck();
 });
 
 test('in the application: after a restart the library holds what was imported and what was saved', async () => {

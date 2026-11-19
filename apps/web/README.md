@@ -39,6 +39,15 @@ drives the application in Chromium. Useful variations:
 Test inputs come from `@open-rt-studio/testdata` and exist only in memory;
 `e2e/fixtures/files.ts` turns them into file-input payloads.
 
+**The click-to-segment model in tests.** The model's files are not in the
+repository and are not ours to put there. `e2e/click-segment.spec.ts` runs
+the tool without its model everywhere, and with it where
+`OPEN_RT_STUDIO_TEST_SEGMENT_MODEL` names a folder that holds the four files
+the tool names (SAM 2.1 tiny at half precision, from
+`onnx-community/sam2.1-hiera-tiny-ONNX`); that needs a real graphics card.
+The runtime the model runs on is copied into `public/ort` before a build or
+a start (`npm run runtime-assets`); the folder is not committed.
+
 **WebGPU in tests.** CI runners have no GPU. CI asks Chromium for a software
 adapter (`E2E_SOFTWARE_GPU=1`); a test that needs WebGPU calls
 `requireWebGpu(page)` first, which marks it as skipped when no adapter is

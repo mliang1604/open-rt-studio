@@ -779,6 +779,10 @@ export class Viewer {
       obliques: this.obliques,
       sliceIndices: this.sliceIndices,
       sagittalFlipped: () => this.sagittalFlipped(),
+      displayWindow: () => ({
+        center: this.layersCtl.windowCenter(),
+        width: this.layersCtl.windowWidth(),
+      }),
       baseSeries: () => this.baseSeries(),
       notify: (message, problem) => this.loadCtl.showNotice(message, problem),
     });
