@@ -159,7 +159,8 @@ test('a deformable registration is run with a preset, and discarded again', asyn
   await expect(panel(page).locator('.facts li')).toHaveText([
     'Preset ct-ct',
     'Field of 3 × 3 × 2 vectors',
-    /^Longest vector \d+\.\d mm$/,
+    /^Inside the fixed image’s outline: longest vector \d+\.\d mm, mean \d+\.\d mm$/,
+    /^In the whole field, the air around it too: longest vector \d+\.\d mm$/,
   ]);
   await expect(panel(page).locator('[data-registration-name]')).toHaveValue(
     /^Automatic deformable ct-ct /,

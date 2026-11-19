@@ -710,6 +710,15 @@ it('takes the deformed pair of the test below as two series to register (with th
   }
 });
 
+/**
+ * How far a deformable registration may move the inside of two images that
+ * differ by nothing, in mm: on average and at most (#351). Measured 0.8 to
+ * 0.9 and 2.1 to 2.4 mm with the two presets that go by mutual information;
+ * with half as many steps of grey to an image they were 2.2 and 5.1 to 5.7.
+ */
+const STILL_MEAN_MM = 1.5;
+const STILL_LARGEST_MM = 3.5;
+
 describe.skipIf(!HAVE_TOOLS)('a deformable registration by the tools themselves', () => {
   it('finds a known deformation between two series, from a rigid registration, and stores it the right way round', async () => {
     const { upload, post, until, bytes, json } = await api({}, { nativeTools: TOOLS });
@@ -746,6 +755,9 @@ describe.skipIf(!HAVE_TOOLS)('a deformable registration by the tools themselves'
       sopInstanceUid: string;
       foldedPoints: number;
       largestMm: number;
+      insidePoints: number;
+      largestInsideMm: number;
+      meanInsideMm: number;
       fieldSize: number[];
     };
 
@@ -792,12 +804,97 @@ describe.skipIf(!HAVE_TOOLS)('a deformable registration by the tools themselves'
         `The deformation moves them ${(moved / errors.length).toFixed(3)} mm on average; ` +
         `by the rigid registration alone they are ${(rigidOnly / errors.length).toFixed(3)} mm off. ` +
         `Field ${result.fieldSize.join(' x ')}, longest vector ${result.largestMm} mm, ` +
-        `${result.foldedPoints} folded points.`,
+        `inside the outline ${result.largestInsideMm} mm at most and ${result.meanInsideMm} mm ` +
+        `on average at ${result.insidePoints} points, ${result.foldedPoints} folded points.`,
     );
     expect(errors.length).toBeGreaterThan(500);
     expect(mean).toBeLessThanOrEqual(DEFORMED_MEAN_MM);
     expect(p95).toBeLessThanOrEqual(DEFORMED_P95_MM);
     expect(result.foldedPoints).toBe(0);
+    // Inside the phantom the field is the deformation, about as long on
+    // average; the longest vector of all is in the air around it.
+    expect(result.insidePoints).toBeGreaterThan(1000);
+    expect(result.largestInsideMm).toBeLessThanOrEqual(result.largestMm);
+    // The field is what the registration found beyond the matrix it
+    // started from, so inside the phantom it is as long as that matrix
+    // alone is off: all through the phantom, on average.
+    let leftToField = 0;
+    let inside = 0;
+    for (let z = -45; z <= 45; z += 3) {
+      for (let y = -69; y <= 69; y += 3) {
+        for (let x = -69; x <= 69; x += 3) {
+          const p: Vec3 = [x, y, z];
+          if (depth(p) > 1) continue;
+          const u = deformationAt(p);
+          const truth: Vec3 = [x + u[0] + OFFSET[0], y + u[1] + OFFSET[1], z + u[2] + OFFSET[2]];
+          leftToField += Math.hypot(
+            ...transformPoint(start, p).map((value, i) => value - truth[i]),
+          );
+          inside += 1;
+        }
+      }
+    }
+    console.log(
+      `inside the whole phantom the rigid registration leaves ${(leftToField / inside).toFixed(3)} mm ` +
+        `on average to the field, at ${inside} points`,
+    );
+    expect(Math.abs(result.meanInsideMm - leftToField / inside)).toBeLessThan(1);
+  }, 900_000);
+
+  it('moves little inside two images that differ by nothing, and says so apart from the air around them (#351)', async () => {
+    const { upload, post, until, json } = await api({}, { nativeTools: TOOLS });
+    const pair = knownPair();
+    await upload([...pair.fixed, ...pair.moving]);
+    const finished = async (kind: string, inputs: Record<string, unknown>): Promise<Job> => {
+      const response = await post('/jobs', { kind, inputs });
+      expect(response.status).toBe(202);
+      const submitted = (await response.json()) as Job;
+      const job = await until(submitted.id, ended, 600_000);
+      if (job.status !== 'succeeded') {
+        const log = await json<{ items: { text: string }[] }>(`/jobs/${submitted.id}/log`);
+        throw new Error(
+          `${kind}: ${job.status} ${job.failure} ${job.message}: ${JSON.stringify(log.items)}`,
+        );
+      }
+      return job;
+    };
+    const inputs = {
+      fixedSeriesUid: seriesUid(SYNTHETIC_STUDY, 1),
+      movingSeriesUid: seriesUid(SYNTHETIC_FOLLOW_UP_STUDY, 2),
+    };
+    const rigid = await finished(RIGID_REGISTRATION_KIND, inputs);
+    const start = (rigid.result as { fixedToMoving: number[] }).fixedToMoving;
+    // The phantom is an ellipsoid of half-axes 55, 45 and 38 mm in a volume
+    // of 141 x 141 x 93 mm: a fifth of it. Nothing is deformed between the
+    // two series, so a field that is right is nothing everywhere.
+    for (const preset of ['mr-ct', 'cbct-ct']) {
+      const job = await finished(DEFORMABLE_REGISTRATION_KIND, {
+        ...inputs,
+        preset,
+        initial: start,
+      });
+      const result = job.result as {
+        fieldSize: number[];
+        foldedPoints: number;
+        largestMm: number;
+        insidePoints: number;
+        largestInsideMm: number;
+        meanInsideMm: number;
+      };
+      const points = result.fieldSize.reduce((product, size) => product * size, 1);
+      console.log(
+        `${preset} on two images that differ by nothing: inside the outline ` +
+          `(${result.insidePoints} of ${points} points) ${result.meanInsideMm} mm on average and ` +
+          `${result.largestInsideMm} mm at most (tolerance ${STILL_MEAN_MM} and ${STILL_LARGEST_MM} mm); ` +
+          `in the whole field ${result.largestMm} mm at most.`,
+      );
+      expect(result.foldedPoints).toBe(0);
+      expect(result.insidePoints / points).toBeGreaterThan(0.15);
+      expect(result.insidePoints / points).toBeLessThan(0.25);
+      expect(result.meanInsideMm).toBeLessThanOrEqual(STILL_MEAN_MM);
+      expect(result.largestInsideMm).toBeLessThanOrEqual(STILL_LARGEST_MM);
+      expect(result.largestInsideMm).toBeLessThanOrEqual(result.largestMm);
+    }
   }, 900_000);
 });
 

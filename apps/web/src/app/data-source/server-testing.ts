@@ -827,6 +827,9 @@ export function fakeServer(
                 fixedToMovingAfterField: fixedToMoving,
                 fieldSize: [2, 2, 2],
                 largestMm: 1.7321,
+                insidePoints: 4,
+                largestInsideMm: 1.7321,
+                meanInsideMm: 1.2,
                 foldedPoints: 0,
               }
             : { movingToFixed, fixedToMoving }),

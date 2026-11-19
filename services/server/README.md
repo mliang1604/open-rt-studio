@@ -1202,6 +1202,11 @@ curl -X POST http://127.0.0.1:4300/api/v1/jobs -H 'Content-Type: application/jso
   (at how many points it folds space over itself, which no anatomy does).
   More than a few folded points says the registration went wrong
   somewhere; the job stores the object all the same and judges nothing.
+  The field covers the air around what was imaged too, where nothing holds
+  it and where its longest vector usually is, so the result also says what
+  it is inside the fixed image's outline: `insidePoints`,
+  `largestInsideMm` and `meanInsideMm` (null when no point is inside one).
+  How the tool finds the outline is in `native/README.md`.
 - **When it fails**: as the rigid job, and `could-not-finish` with
   `no-field` or `bad-field` when what the tool wrote is not a field that
   can be stored; `timed-out` after an hour.

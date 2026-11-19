@@ -25,7 +25,10 @@
 
 // Bone is bright in one and dark in the other: mutual information.
 (Metric "AdvancedMattesMutualInformation" "TransformBendingEnergyPenalty")
-(NumberOfHistogramBins 32)
+// 64 steps of grey to an image. With 32, two images that differ by nothing
+// were found 2 mm apart inside a smooth phantom, where a step of grey is
+// wider than what a millimetre changes (#351).
+(NumberOfHistogramBins 64)
 (Metric0Weight 1.0)
 // Stiff: where the two images show different things there is little to
 // go by, and the field should not invent detail.

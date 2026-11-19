@@ -718,7 +718,12 @@ describe('an automatic deformable registration', () => {
       method: 'deformable',
       name: 'Automatic deformable ct-ct 2026-11-18 09:05',
       shown: true,
-      facts: ['Preset ct-ct', 'Field of 2 × 2 × 2 vectors', 'Longest vector 1.7 mm'],
+      facts: [
+        'Preset ct-ct',
+        'Field of 2 × 2 × 2 vectors',
+        'Inside the fixed image’s outline: longest vector 1.7 mm, mean 1.2 mm',
+        'In the whole field, the air around it too: longest vector 1.7 mm',
+      ],
       warning: null,
     });
     // Placed through the field, from the fixed image's frame into the moving one's.
@@ -851,5 +856,33 @@ describe('what a server says of a job, in words', () => {
       'Longest vector 12.3 mm',
     ]);
     expect(folded.warning).toContain('folds space over itself at 17 of its points');
+  });
+
+  it('says what a field is inside the fixed image’s outline before what it is in the air around it (#351)', () => {
+    const said = resultFacts('deformable', {
+      preset: 'mr-ct',
+      fieldSize: [37, 37, 25],
+      largestMm: 4.2771,
+      insidePoints: 6663,
+      largestInsideMm: 2.0597,
+      meanInsideMm: 0.8328,
+      foldedPoints: 0,
+    });
+    expect(said.facts).toEqual([
+      'Preset mr-ct',
+      'Field of 37 × 37 × 25 vectors',
+      'Inside the fixed image’s outline: longest vector 2.1 mm, mean 0.8 mm',
+      'In the whole field, the air around it too: longest vector 4.3 mm',
+    ]);
+    expect(said.warning).toBeNull();
+    // A tool that found no outline says null, and the whole field is all there is to say.
+    expect(
+      resultFacts('deformable', {
+        largestMm: 4.2771,
+        insidePoints: 0,
+        largestInsideMm: null,
+        meanInsideMm: null,
+      }).facts,
+    ).toEqual(['Longest vector 4.3 mm']);
   });
 });

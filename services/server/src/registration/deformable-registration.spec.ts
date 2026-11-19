@@ -327,6 +327,13 @@ describe('a deformable registration job', () => {
     });
     // The longest vector of the stand-in's field is at its far corner.
     expect(result['largestMm']).toBeCloseTo(Math.hypot(...standInVector(2, 2, 1)), 3);
+    // What it says is inside an outline is its first slice (#351).
+    const inside = [0, 1, 2].flatMap((j) =>
+      [0, 1, 2].map((i) => Math.hypot(...standInVector(i, j, 0))),
+    );
+    expect(result['insidePoints']).toBe(9);
+    expect(result['largestInsideMm']).toBeCloseTo(Math.max(...inside), 3);
+    expect(result['meanInsideMm']).toBeCloseTo(inside.reduce((sum, length) => sum + length) / 9, 3);
 
     const after = await registrations();
     const added = after.filter((uid) => !before.includes(uid));

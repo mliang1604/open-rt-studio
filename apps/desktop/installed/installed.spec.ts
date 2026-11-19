@@ -266,10 +266,10 @@ test('it registers two series a known offset apart, with no server', async () =>
   // Deformable, as someone would: from where the rigid registration ended.
   // The tool reads a preset from beside it, by a path with spaces in it on
   // every system. It has to run to its end and fold nothing. Its field is
-  // not judged: this phantom is smooth inside and has air around it, which
-  // gives a deformable registration little to hold on to, and how well a
-  // real deformation is found is for the tools' own tests, on a phantom
-  // made for that.
+  // not judged here: how little it may move this pair, which differs by
+  // nothing, is held to a tolerance by the server's test with the tools
+  // (#351), and how well a real deformation is found by the tools' own
+  // tests, on a phantom made for that.
   const deformable = await run('deformable-registration', {
     ...inputs,
     preset: 'mr-ct',
@@ -278,14 +278,21 @@ test('it registers two series a known offset apart, with no server', async () =>
   const field = deformable.result as {
     fieldSize: number[];
     largestMm: number;
+    insidePoints: number;
+    largestInsideMm: number;
+    meanInsideMm: number;
     foldedPoints: number;
   };
   console.log(
     `deformable: field ${field.fieldSize.join(' x ')}, longest vector ${field.largestMm} mm, ` +
-      `${field.foldedPoints} folded points`,
+      `inside the outline ${field.largestInsideMm} mm at most and ${field.meanInsideMm} mm on ` +
+      `average at ${field.insidePoints} points, ${field.foldedPoints} folded points`,
   );
   expect(field.fieldSize).toHaveLength(3);
   expect(field.foldedPoints).toBe(0);
+  // The tools packed are ones that say what the field is inside the outline (#351).
+  expect(field.insidePoints).toBeGreaterThan(0);
+  expect(field.largestInsideMm).toBeLessThanOrEqual(field.largestMm);
 
   // Both were stored in the library, beside the images.
   const counts = (await ask('GET', '/api/v1/counts')).said as { instances: number };

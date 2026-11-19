@@ -12,7 +12,9 @@
 // points, from the first voxel of the fixed volume to its last, with the
 // vector (1 + i, -2j, 0.5k + 0.25) mm at point (i, j, k): see
 // `standInVector` in stand-in.ts. So a spec that knows where the two series
-// are knows what to expect.
+// are knows what to expect. It finds no outline: it says that the points of
+// the field's first slice (k = 0) are inside one, and what the field is
+// there.
 //
 // It reads the preset it is given, and ends as the tool does for one that
 // is no preset. What was set over the preset comes back in its result as
@@ -121,12 +123,20 @@ const header = [
 const vectors = Buffer.alloc(dims[0] * dims[1] * dims[2] * 12);
 let at = 0;
 let largest = 0;
+let insidePoints = 0;
+let largestInside = 0;
+let sumInside = 0;
 for (let k = 0; k < dims[2]; k++) {
   for (let j = 0; j < dims[1]; j++) {
     for (let i = 0; i < dims[0]; i++) {
       const vector = [1 + i, -2 * j, 0.5 * k + 0.25];
       if (how === 'endless' && at === 0) vector[0] = Infinity;
       largest = Math.max(largest, Math.hypot(...vector));
+      if (k === 0) {
+        insidePoints += 1;
+        largestInside = Math.max(largestInside, Math.hypot(...vector));
+        sumInside += Math.hypot(...vector);
+      }
       for (const value of vector) at = vectors.writeFloatLE(value, at);
     }
   }
@@ -138,6 +148,9 @@ const result = JSON.stringify({
   spacing,
   largestMm: Number.isFinite(largest) ? Number(largest.toFixed(4)) : 0,
   points: dims[0] * dims[1] * dims[2],
+  insidePoints,
+  largestInsideMm: Number.isFinite(largestInside) ? Number(largestInside.toFixed(4)) : null,
+  meanInsideMm: Number.isFinite(sumInside) ? Number((sumInside / insidePoints).toFixed(4)) : null,
   foldedPoints: 0,
   seed: Number(options.get('--seed')),
   resolutions: 4,
