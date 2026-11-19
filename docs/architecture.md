@@ -492,6 +492,16 @@ its own.
   measurements and recommendation are in
   [image-aware-interpolation.md](image-aware-interpolation.md); its
   follow-ups are #295 and #296.
+- **Click-to-segment** (#121, a spike; nothing is built): a model that
+  segments what is clicked on can run in the browser on ONNX Runtime with
+  no Python. The ones trained on medical images may not be shipped (their
+  weights are for research or non-commercial use only); of those that may,
+  SAM 2.1 tiny on WebGPU answered a first click on a slice in 0.7 s and
+  later ones in 55 ms on a laptop's discrete card, and took 3 to 16 s for
+  the slice without one. Measured on the phantom only. The measurements and
+  the recommendation (in the browser, in a worker, on WebGPU, behind the
+  labs flag) are in [click-to-segment.md](click-to-segment.md); its
+  follow-ups are #340 to #344.
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes
