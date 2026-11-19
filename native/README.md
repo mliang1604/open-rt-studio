@@ -294,11 +294,11 @@ Like the rigid tool it is no judge of its own answer.
   a hundred; the voxels are 3 to 3.5 mm, and the deformation moves the
   points 3.6 mm on average. Each preset has to manage that from the exact
   turn and move. On the runners: 0.29 mm on average with `ct-ct` (0.60 mm
-  at the 95th percentile), 0.32 mm with `cbct-ct`, 0.34 mm with `mr-ct`.
+  at the 95th percentile), 0.32 to 0.35 mm with `cbct-ct`, 0.34 to 0.36 mm with `mr-ct`.
   What each result says of the field inside the outline has to be the
   deformation too: a little under a quarter of the field's points, moved
   3.3 to 3.5 mm on average and none more than 9.5 mm, while the longest
-  vector of all, in the air around the phantom, is 10 mm.
+  vector of all, in the air around the phantom, is about 10 mm.
   From a start that is 2 mm and a degree off, and from no start at all,
   `ct-ct` has to come within 1.5 mm on average (0.30 and 0.32 mm). The
   same seed has to give the same field twice, byte for byte; a parameter
