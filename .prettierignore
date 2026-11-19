@@ -15,3 +15,6 @@ third_party/
 
 # What CMake builds of the native tools
 native/build/
+
+# The desktop application's installers
+apps/desktop/release/

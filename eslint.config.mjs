@@ -38,6 +38,8 @@ export default tseslint.config(
       '**/third_party/**',
       // What CMake builds: ITK and elastix are unpacked there.
       'native/build/**',
+      // The desktop application as it is packaged: Electron and the web client's build.
+      'apps/desktop/release/**',
     ],
   },
   js.configs.recommended,

@@ -8,7 +8,118 @@ unchanged.
 client, and the same rules hold for it: synthetic or clearly shareable data
 only.
 
-There are no installers yet (#65); it runs from the repository.
+It is installed from an installer ([Install it](#install-it)), or run from
+the repository ([Run it](#run-it)).
+
+## Install it
+
+Installers are built for every tagged version, and attached to that version's
+release: [Releases](https://github.com/mliang1604/open-rt-studio/releases).
+A release is published by hand. Where there is none yet, the installers of a
+run of the `Installers` workflow are among that run's artifacts for a week.
+
+| System                           | File                                             |
+| -------------------------------- | ------------------------------------------------ |
+| macOS, Apple silicon and Intel   | `open-rt-studio-<version>-mac-universal.dmg`     |
+| Windows, 64-bit                  | `open-rt-studio-<version>-win-x64.exe`           |
+| Linux, Debian and Ubuntu, 64-bit | `open-rt-studio-<version>-linux-amd64.deb`       |
+| Linux, any other, 64-bit         | `open-rt-studio-<version>-linux-x86_64.AppImage` |
+
+`SHA256SUMS.txt` beside them has the checksum of each (`shasum -a 256 -c
+SHA256SUMS.txt` on macOS and Linux, `Get-FileHash` on Windows).
+
+**The installers are not signed with a certificate** (#66), so macOS and
+Windows do not know who made them, and say so before they open one. What
+follows is how to install all the same. Only do it with a file from this
+repository's releases whose checksum you compared.
+
+### macOS
+
+1. Open the disk image and drag **Open RT Studio** into **Applications**.
+2. Open it. macOS says that it could not verify the application, and does
+   not open it.
+3. Open **System Settings**, **Privacy & Security**, and scroll down to the
+   line about Open RT Studio: **Open Anyway**. It asks once more, and for
+   your password. (Before macOS 15: hold Control, click the application,
+   choose **Open**, and **Open** again.)
+
+In a terminal, instead of steps 2 and 3:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Open RT Studio.app"
+```
+
+The application carries an ad hoc signature: it says of the files that they
+are whole, and nothing of who made them.
+
+Until it is signed by someone (#66), macOS cannot tell that a newer version
+is the same application as the one before. The application keeps a key in
+your keychain (**Open RT Studio Safe Storage**), with which it seals the
+login of a server. After a newer version is installed, macOS asks whether
+this application may use that key: **Always Allow**. If you deny it, you log
+in to your servers again.
+
+### Windows
+
+Run the installer. Windows says that it protected your PC: **More info**,
+then **Run anyway**. It asks nothing else, needs no administrator, and
+installs for you alone, into `%LOCALAPPDATA%\Programs\open-rt-studio`.
+**Settings**, **Apps** removes it.
+
+### Linux
+
+The Debian package, on Debian and Ubuntu:
+
+```sh
+sudo apt install ./open-rt-studio-<version>-linux-amd64.deb
+```
+
+It installs into `/opt/Open RT Studio`, with an entry in the applications
+menu. `sudo apt remove open-rt-studio` removes it.
+
+The AppImage is one file that runs where it lies:
+
+```sh
+chmod +x open-rt-studio-<version>-linux-x86_64.AppImage
+./open-rt-studio-<version>-linux-x86_64.AppImage
+```
+
+It needs FUSE 2 to mount itself (`libfuse2`, or `libfuse2t64` on Ubuntu
+24.04); without it, `--appimage-extract-and-run` after the file's name
+unpacks it and runs. On Ubuntu 24.04 and later it also needs the system to
+allow Chromium's sandbox, which nothing installs for a file that is not
+installed: see [Run it](#run-it). The Debian package needs neither.
+
+For WebGPU on Linux, see [Linux](#linux).
+
+### What an installed application is
+
+- **The same shell and the same viewer** as from the repository, with the
+  developer tools off, and reading none of the [settings](#settings).
+- **Its profile** (the acknowledgement, preferences, the library) is in the
+  system's place for it: `~/Library/Application Support/Open RT Studio`,
+  `%APPDATA%\Open RT Studio`, `~/.config/Open RT Studio`. Removing the
+  application leaves it.
+- **It does not update itself** (#67). A newer installer installs over the
+  older one.
+- **It computes no registration**: the native tools are not in it yet (#70).
+- **Its icon is Electron's.** The project has none yet.
+
+### Build the installers
+
+```sh
+npm ci
+npm run build
+npm run package -w @open-rt-studio/desktop
+```
+
+leaves them in `apps/desktop/release`, for the system it runs on: a disk
+image on macOS, the installer on Windows, the AppImage and the Debian
+package on Linux. The first time, the packager
+([electron-builder](https://www.electron.build)) fetches Electron for the
+system it packs for, and its own tools. How it packs is in
+`electron-builder.yml`. `-- --dir` after the command stops at the
+application itself, without an installer.
 
 ## Run it
 
@@ -174,6 +285,8 @@ src/library.ts       the library on this computer: the server, inside the main p
 src/library-calls.ts the bridge's calls about the library, answered from it
 scripts/dev.mjs   npm run desktop:dev
 e2e/              the shell as it runs, with Playwright
+installed/        an installed application as it runs
+electron-builder.yml   how the installers are made
 ```
 
 `policy.ts`, `content.ts`, `ipc.ts`, `grants.ts`, `files.ts`, `connections.ts`,
@@ -227,6 +340,23 @@ e2e:desktop`.
 
 CI runs it on Linux, macOS and Windows (the `Desktop` jobs). It is not
 retried.
+
+An installed application has a test of its own (`installed/`), which builds
+nothing: it starts the program an installer left, and asks what only a
+packaged application gets wrong. That it starts on its own files, that it
+knows it is installed and which version it is, that it has the Electron
+this repository pins, and that the library answers, for which every module
+of the server has to have been packed.
+
+```sh
+OPEN_RT_STUDIO_INSTALLED="/Applications/Open RT Studio.app/Contents/MacOS/Open RT Studio" \
+  npm run e2e:installed -w @open-rt-studio/desktop
+```
+
+It gives the application a profile of its own, and leaves yours alone. The
+`Installers` workflow builds the installers on all three systems, installs
+each as a user would, and runs this test on what was installed; for a tag it
+then drafts a release with them.
 
 ## Electron
 
