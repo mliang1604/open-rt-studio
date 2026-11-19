@@ -31,7 +31,7 @@ application. Never commit patient data or real DICOM files
   `metadata-panel/`, `dvr-panel/`, `shortcut-help/`, `server-panel/`,
   `server-browser/`, `audit-panel/`, `accounts-panel/`, `dicom-panel/`, `send-panel/`, `retrieve-panel/`, `derived-series/`,
   `structure-propagation/`, `provenance/`, `dose-display/`, `dvh/`,
-  `alpha-beta/`, `dose-sum/`, `contour-tools/`). Every tool that changes
+  `alpha-beta/`, `dose-sum/`, `contour-tools/`, `registration-workflow/`). Every tool that changes
   painted structures is a contouring tool on the framework in
   `contour-tools/` (#106): it changes voxels through its context, never the
   label volume itself, so that constraints and undo apply. The viewer route
@@ -51,7 +51,9 @@ application. Never commit patient data or real DICOM files
   reads a patient's data does it in `prepare`, stores what was made in
   `finish`, has its directory removed, and says whose data it is with
   `subject`; what a step throws is never logged, only a fixed word given
-  with `JobStepError`); `src/registration` is the jobs that run the native
+  with `JobStepError`; a kind whose result can be taken back says how in
+  `discard`, which removes only what that job stored, and there is no
+  other way to delete an object through the API); `src/registration` is the jobs that run the native
   registration tools, rigid and deformable (`nativeTools` says where the
   tools are, with the deformable presets beside them; what the two share is
   in `pair.ts`; a request names a preset and never a file; specs run

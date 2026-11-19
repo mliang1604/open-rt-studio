@@ -189,8 +189,20 @@ describe('ManualRegistrationController', () => {
 
   it('saves nothing for a layer that is not being registered by hand', async () => {
     const { controller, source } = setup();
-    await controller.save('mr');
+    expect(await controller.save('mr')).toBe(false);
     expect(source.saved).toEqual([]);
+  });
+
+  it('saves under a name that is given, and says whether it was saved (#82)', async () => {
+    const { controller, store, source, notices } = setup();
+    controller.begin('mr');
+    expect(await controller.save('mr', 'Set by eye')).toBe(true);
+    expect(parseSpatialRegistration(source.saved[0].bytes)!.description).toBe('Set by eye');
+    expect(notices[0].message).toMatch(/^Saved the registration “Set by eye”/);
+
+    source.saveAnswer = () => Promise.reject(new Error('The server refused it.'));
+    controller.set('mr', { ...store.byHand().get('mr')!.start, translation: [1, 2, 3] });
+    expect(await controller.save('mr', 'Set by eye')).toBe(false);
   });
 
   it('resets and discards through the store', () => {

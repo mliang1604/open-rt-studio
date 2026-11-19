@@ -330,30 +330,30 @@ export class RegistrationWorkflowController {
 
   private async ask(server: ServerSource | null): Promise<void> {
     const asked = ++this.asking;
-    if (!server) {
-      this.computes.set({ kind: 'files' });
-      return;
-    }
-    this.computes.set({ kind: 'asking' });
-    let next: Computing;
-    try {
-      const kinds = await server.jobKinds();
-      const rigid = kinds.includes(JOB_KINDS.rigid);
-      const deformable = kinds.includes(JOB_KINDS.deformable);
-      const presets = deformable ? await server.registrationPresets() : [];
-      next =
-        rigid || deformable
-          ? { kind: 'ready', rigid, deformable: deformable && presets.length > 0, presets }
-          : { kind: 'none', library: server.label === LIBRARY_LABEL };
-    } catch (error) {
-      next = { kind: 'unreachable', why: messageOf(error) };
-    }
+    let next: Computing = { kind: 'files' };
+    if (server) next = await this.asked(server);
     if (asked !== this.asking) return;
     this.computes.set(next);
     // A way that cannot be gone here is not left chosen.
     const method = this.method();
     if (method !== 'by-hand' && (next.kind !== 'ready' || !next[method])) {
       this.method.set('by-hand');
+    }
+  }
+
+  /** What a server says it can compute. */
+  private async asked(server: ServerSource): Promise<Computing> {
+    this.computes.set({ kind: 'asking' });
+    try {
+      const kinds = await server.jobKinds();
+      const rigid = kinds.includes(JOB_KINDS.rigid);
+      const deformable = kinds.includes(JOB_KINDS.deformable);
+      const presets = deformable ? await server.registrationPresets() : [];
+      return rigid || deformable
+        ? { kind: 'ready', rigid, deformable: deformable && presets.length > 0, presets }
+        : { kind: 'none', library: server.label === LIBRARY_LABEL };
+    } catch (error) {
+      return { kind: 'unreachable', why: messageOf(error) };
     }
   }
 
@@ -672,10 +672,8 @@ export class RegistrationWorkflowController {
     try {
       const file = registrationFile(placement, d.baseSeries(), d.now(), {
         name,
-        seriesDescription:
-          review.method === 'deformable'
-            ? 'Automatic deformable registration'
-            : 'Automatic rigid registration',
+        // The name of its series too, which is what the timeline shows of it.
+        seriesDescription: name,
         filePrefix: 'registration',
       });
       await server.save({

@@ -97,6 +97,53 @@ describe('the history panel on a data source', () => {
     expect(asked.map((series) => series.uid)).toEqual(['1.2.1']);
   });
 
+  it('gives a clicked series to whoever is picking one, and loads nothing meanwhile (#82)', async () => {
+    const { click, asked, fixture, host, text } = await render(withPatient());
+    const picked: SeriesSummary[] = [];
+    let cancelled = 0;
+    fixture.componentInstance.pickSeries.subscribe((series) => picked.push(series));
+    fixture.componentInstance.pickCancelled.subscribe(() => cancelled++);
+    await click('.study-tile');
+    expect(host.querySelector('[data-picking]')).toBeNull();
+
+    fixture.componentRef.setInput('picking', 'the fixed image');
+    await fixture.whenStable();
+    expect(text('[data-picking]')[0]).toContain('Click a series for the fixed image');
+    await click('app-series-chip');
+    expect(picked.map((series) => series.uid)).toEqual(['1.1.1']);
+    expect(asked).toEqual([]);
+    // Giving up is asked of whoever is picking.
+    await click('[data-picking] button');
+    expect(cancelled).toBe(1);
+
+    // No longer picking: a click loads again.
+    fixture.componentRef.setInput('picking', null);
+    await fixture.whenStable();
+    expect(host.querySelector('[data-picking]')).toBeNull();
+    await click('app-series-chip');
+    expect(asked.map((series) => series.uid)).toEqual(['1.1.1']);
+    expect(picked).toHaveLength(1);
+  });
+
+  it('marks the series that were picked with what each is', async () => {
+    const { click, fixture, host, text } = await render(withPatient());
+    fixture.componentRef.setInput('marks', new Map([['1.1.1', 'Fixed']]));
+    await click('.study-tile');
+    expect(text('.chip-mark')).toEqual(['Fixed']);
+    const [first, second] = [...host.querySelectorAll('app-series-chip')];
+    expect(first.classList.contains('marked')).toBe(true);
+    expect(second.classList.contains('marked')).toBe(false);
+  });
+
+  it('is unfolded for a series to be picked from it', async () => {
+    const { click, fixture, host } = await render(withPatient());
+    await click('.history-toggle');
+    expect(host.querySelector('#history-body')).toBeNull();
+    fixture.componentRef.setInput('picking', 'the moving image');
+    await fixture.whenStable();
+    expect(host.querySelector('#history-body')).not.toBeNull();
+  });
+
   it('marks the chips of the series that are on screen', async () => {
     const { click, fixture, host } = await render(withPatient());
     fixture.componentRef.setInput('loadedSeriesUids', ['1.1.2']);

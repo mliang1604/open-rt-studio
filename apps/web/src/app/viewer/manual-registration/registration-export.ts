@@ -127,7 +127,8 @@ export function registrationFile(
 /**
  * Turn the placement of a layer by hand into a DICOM Spatial Registration
  * file ({@link registrationFile}), under the name given or, without one,
- * under {@link byHandName}.
+ * under {@link byHandName}. A name that was given is the name of its series
+ * too, which is what a timeline shows of it.
  */
 export function registrationByHandFile(
   placement: LayerPlacement,
@@ -137,7 +138,7 @@ export function registrationByHandFile(
 ): RegistrationExport {
   return registrationFile(placement, base, now, {
     name: name || byHandName(now),
-    seriesDescription: 'Registration by hand',
+    seriesDescription: name || 'Registration by hand',
     filePrefix: 'registration-by-hand',
   });
 }
