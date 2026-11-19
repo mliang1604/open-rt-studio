@@ -4,7 +4,7 @@
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import type { ServerAnswer, ServerRequest } from '@open-rt-studio/desktop-bridge';
 import {
@@ -16,7 +16,7 @@ import {
 import { syntheticCtSeries, SYNTHETIC_STUDY } from '@open-rt-studio/testdata';
 
 import { libraryAnswers } from './library-calls.js';
-import { openLibrary, type Library, type LibraryOptions } from './library.js';
+import { nativeToolsDirectory, openLibrary, type Library, type LibraryOptions } from './library.js';
 
 const FILES = syntheticCtSeries(4, 16);
 const REQUEST = 'Zm9sZGVyLW9mLXRlc3RzIQ';
@@ -277,6 +277,79 @@ describe("the bridge's calls about the library", () => {
       for (const wrong of [['/Users/someone/dicom'], [{ folder: '/x' }], [null]]) {
         expect(calls[channel].accepts(wrong), channel).toBe(false);
       }
+    }
+  });
+});
+
+describe('the native tools of the library (#70)', () => {
+  /** The names of the two tools the registration jobs run, on this system. */
+  const TOOLS = ['ors-register-rigid', 'ors-register-deformable'].map(
+    (name) => name + (process.platform === 'win32' ? '.exe' : ''),
+  );
+
+  /** A folder laid out as the tools are packed. The files are never run here. */
+  async function toolsDirectory(tools: readonly string[] = TOOLS): Promise<string> {
+    const bin = join(scratch, 'resources', 'native', 'bin');
+    await mkdir(bin, { recursive: true });
+    for (const tool of tools) await writeFile(join(bin, tool), '');
+    const presets = join(scratch, 'resources', 'native', 'presets', 'deformable');
+    await mkdir(presets, { recursive: true });
+    await writeFile(join(presets, 'ct-ct.txt'), '// title: CT to CT\n(Metric "X")\n');
+    return bin;
+  }
+  const kinds = async (lib: Library): Promise<string[]> =>
+    (
+      said(await lib.request(request({ path: '/api/v1/job-kinds' }))) as {
+        items: { name: string }[];
+      }
+    ).items.map((kind) => kind.name);
+
+  it('are where the installer put them, and nowhere a setting says, once installed', () => {
+    const resources = join(scratch, 'resources');
+    expect(nativeToolsDirectory({ resources, named: undefined })).toBe(
+      join(resources, 'native', 'bin'),
+    );
+    expect(nativeToolsDirectory({ resources, named: join(scratch, 'elsewhere') })).toBe(
+      join(resources, 'native', 'bin'),
+    );
+    // Run from the repository: those a setting names, or none.
+    expect(nativeToolsDirectory({ resources: null, named: undefined })).toBeNull();
+    expect(nativeToolsDirectory({ resources: null, named: '' })).toBeNull();
+    expect(nativeToolsDirectory({ resources: null, named: 'native/build/dist/bin' })).toBe(
+      resolve('native/build/dist/bin'),
+    );
+  });
+
+  it('give the library the registration jobs', async () => {
+    const lib = library({ nativeTools: await toolsDirectory() });
+    expect(await kinds(lib)).toEqual(['rigid-registration', 'deformable-registration']);
+    expect(said(await lib.request(request({ path: '/api/v1/registration-presets' })))).toEqual({
+      items: [{ name: 'ct-ct', title: 'CT to CT', description: '' }],
+    });
+  });
+
+  it('are not there by default, and the library has no such job', async () => {
+    expect(await kinds(library())).toEqual([]);
+  });
+
+  it('that are not all there leave a library that works, without the jobs, and say so once', async () => {
+    const lines: string[] = [];
+    const logger = createLogger({ level: 'debug', write: (line) => lines.push(line) });
+    for (const nativeTools of [join(scratch, 'nowhere'), await toolsDirectory(TOOLS.slice(0, 1))]) {
+      lines.length = 0;
+      const lib = library({
+        directory: join(scratch, 'profile', `library-${nativeTools.length}`),
+        nativeTools,
+        logger,
+      });
+      expect(await kinds(lib)).toEqual([]);
+      expect(said(await lib.request(request()))).toMatchObject({ instances: 0 });
+      const events = lines.map((line) => JSON.parse(line) as { event: string });
+      expect(events.filter((line) => line.event === 'library-without-native-tools')).toHaveLength(
+        1,
+      );
+      // The log does not say where: a profile's path can name a person.
+      expect(lines.join('\n')).not.toContain(scratch);
     }
   });
 });

@@ -733,6 +733,42 @@ Decided in #65, the installers:
   (`runAsNode`, `enableNodeCliInspectArguments`) are not flipped. That is to
   be decided with signing (#66), where it matters most.
 
+Decided in #70, the native tools in the installers:
+
+- **The library runs the tools as a server does.** The embedded server
+  takes `nativeTools` as a server's configuration does and has the same two
+  jobs; nothing about a job is different for having no network. The panel
+  in the viewer is the one a server gets, and says "library" where it says
+  "server".
+- **Where the tools are is the application's to say, and nothing else's.**
+  An installed application looks in its own `resources/native/bin` and
+  nowhere else; one run from the repository takes a setting. The page
+  cannot name a program or a folder, as with everything else it asks.
+- **A library without tools is still a library.** The folder is asked about
+  before the server is opened with it (`hasNativeTools`): where a tool or
+  the presets are missing, the library opens without the jobs, logs one
+  line that names no place, and the panel says the application came
+  without them.
+- **The installers workflow builds the tools itself**, by calling the
+  `Native tools` workflow, and each installer packs the build for its
+  system; macOS the one for both processors, which the packager is told
+  not to take for a mistake. A tag runs the tools' own tests first. A pull
+  request does not: the installed application registering a known offset is
+  its test, and the tools' tests run whenever the tools change.
+- **Signed with the application.** On macOS the tools get the same ad hoc
+  signature in the same pass; with a certificate (#66) they will need the
+  hardened runtime as the application does, which is not tried.
+- **Licences travel with the tools.** `resources/native/licenses` holds
+  ITK's and elastix's licence and notice files and `THIRD-PARTY.md`, as the
+  build of the tools writes them.
+- **A registration is tried in every installed application**: two
+  synthetic series a known offset apart (`knownOffsetPair`, the pair the
+  server's test with the real tool uses), rigid and deformable.
+- Not there: the tools for ARM on Windows and Linux (no installer is);
+  cancelling when the application quits is the job manager's stopping, as
+  on a server, and was not looked at for a registration half done; the
+  container image still has no tools.
+
 Status: **decided, and Michael's to overturn**: the scheme, that the web
 build gives up inlined critical styles for the policy, that a server is
 reached through the main process and agreed to in its dialog, that the
@@ -1464,8 +1500,7 @@ Decided in #82, the registration workflow in the viewer:
   vector, where it folds), and leaves the judging to who looks.
 - Not there: a list of the server's jobs, so a run is followed only by the
   page that started it, and is not found again after a reload (its result
-  is on the timeline all the same); registering through the desktop
-  application's library (#70 brings it the tools).
+  is on the timeline all the same).
 
 Status: **decided, and Michael's to overturn**.
 
@@ -2357,8 +2392,8 @@ Decided in #80, automatic rigid registration:
   built. In the `Native tools` workflow, with the tool itself: two series
   with a known offset go in as DICOM and the stored object is held against
   it. The tool's own test is on a phantom that is turned as well as moved.
-- **Not there**: the tools are not in the container image or the desktop
-  application yet (#70); a volume whose axes are not at right angles (a
+- **Not there**: the tools are not in the container image (the desktop
+  application has them since #70); a volume whose axes are not at right angles (a
   tilted gantry) is refused, not resampled; nothing judges how good a
   registration is.
 

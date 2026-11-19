@@ -102,7 +102,11 @@ For WebGPU on Linux, see [Linux](#linux).
   application leaves it.
 - **It does not update itself** (#67). A newer installer installs over the
   older one.
-- **It computes no registration**: the native tools are not in it yet (#70).
+- **It registers images by itself**: the native tools (rigid and
+  deformable registration, on ITK and elastix) are in it, in
+  `resources/native`, with their presets and the licences of what is built
+  into them (`resources/native/licenses`). The library runs them as a
+  server does; see [the library](#the-library-on-this-computer).
 - **Its icon is Electron's.** The project has none yet.
 
 ### Build the installers
@@ -110,6 +114,8 @@ For WebGPU on Linux, see [Linux](#linux).
 ```sh
 npm ci
 npm run build
+node scripts/native.mjs deps    # once: ITK and elastix, 15 to 30 minutes
+node scripts/native.mjs build   # the native tools, into native/build/dist
 npm run package -w @open-rt-studio/desktop
 ```
 
@@ -120,6 +126,14 @@ package on Linux. The first time, the packager
 system it packs for, and its own tools. How it packs is in
 `electron-builder.yml`. `-- --dir` after the command stops at the
 application itself, without an installer.
+
+The native tools are packed from where their build leaves them,
+`native/build/dist` ([native/README.md](../../native/README.md)), for the
+system and the processor they were built on. **Without that build the
+installer is made all the same, and its application registers nothing**:
+the panel says so, and the test of an installed application fails. The
+`Installers` workflow builds the tools for each system first, and on macOS
+for both processors.
 
 ## Run it
 
@@ -239,6 +253,14 @@ to a server…**, then **Open the library on this computer**.
   copies nothing.
 - It is the server of this repository inside the application. **No port is
   opened and nobody logs in**: nothing but this application can ask it.
+- **It registers two series of what it holds**, rigid or deformable, under
+  **Registration** in the viewer, with the native tools the application was
+  installed with. They run on this computer as programs of their own, one
+  registration at a time, and what they find is kept in the library until
+  it is discarded. Files opened with **Open folder…** are not in the
+  library: import the folder to register them. Run from the repository,
+  the application has the tools only when
+  [a setting](#settings) says where a build of them is.
 - Its DICOM listener is off. It can be turned on under **DICOM** on the
   library's card, and then listens on this computer only.
 
@@ -281,7 +303,7 @@ src/grants.ts     what the page may read of the disk
 src/files.ts      the bridge's calls about files, answered from the grants
 src/connections.ts   the servers the page may ask, and the login held for each
 src/server-calls.ts  the bridge's calls about servers, answered from the connections
-src/library.ts       the library on this computer: the server, inside the main process
+src/library.ts       the library on this computer: the server, inside the main process, and where its native tools are
 src/library-calls.ts the bridge's calls about the library, answered from it
 scripts/dev.mjs   npm run desktop:dev
 e2e/              the shell as it runs, with Playwright
@@ -302,10 +324,11 @@ its types only.
 
 For working on the application; an installed one reads none of them.
 
-| Variable                            |                                                                                                                                                                                           |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPEN_RT_STUDIO_DESKTOP_DEV_SERVER` | Load the page from a development server: a port of this machine over HTTP, such as `http://localhost:4200`, and nothing else. `npm run desktop:dev` sets it.                              |
-| `OPEN_RT_STUDIO_DESKTOP_USER_DATA`  | A folder for the profile (what the page keeps: the acknowledgement, preferences, recent folders), instead of the system's place for it. The end-to-end test gives itself a temporary one. |
+| Variable                              |                                                                                                                                                                                           |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPEN_RT_STUDIO_DESKTOP_DEV_SERVER`   | Load the page from a development server: a port of this machine over HTTP, such as `http://localhost:4200`, and nothing else. `npm run desktop:dev` sets it.                              |
+| `OPEN_RT_STUDIO_DESKTOP_USER_DATA`    | A folder for the profile (what the page keeps: the acknowledgement, preferences, recent folders), instead of the system's place for it. The end-to-end test gives itself a temporary one. |
+| `OPEN_RT_STUDIO_DESKTOP_NATIVE_TOOLS` | The folder of a build of the native tools (`native/build/dist/bin`), so that the library registers images. None without. An installed application has its own, and looks nowhere else.    |
 
 ## Tests
 
@@ -346,7 +369,10 @@ nothing: it starts the program an installer left, and asks what only a
 packaged application gets wrong. That it starts on its own files, that it
 knows it is installed and which version it is, that it has the Electron
 this repository pins, and that the library answers, for which every module
-of the server has to have been packed.
+of the server has to have been packed. Then it registers two synthetic
+series a known offset apart with the native tools that were packed, rigid
+(held against the offset, to a millimetre) and deformable (which has to
+read a preset from beside the tool): no server, and no setting.
 
 ```sh
 OPEN_RT_STUDIO_INSTALLED="/Applications/Open RT Studio.app/Contents/MacOS/Open RT Studio" \

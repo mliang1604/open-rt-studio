@@ -4,8 +4,9 @@ name: Native tools
 # ITK and elastix from their pinned sources, then the tools against them,
 # then the tools' tests. Not a required check. It runs when native/ or its
 # build script changes, or the server's job that runs a tool (#80), which
-# is tested here with the tool itself; `workflow_call` is for the
-# installers, which will want the tools it makes.
+# is tested here with the tool itself. `workflow_call` is for the
+# installers (#70), which pack the tools it makes; they may ask for the
+# tools without their tests, which take six to eight minutes on each system.
 #
 # ITK and elastix take a quarter of an hour to half an hour to build on a
 # runner. They are kept in the Actions
@@ -29,12 +30,19 @@ on:
       - 'services/server/src/registration/**'
   workflow_dispatch:
   workflow_call:
+    inputs:
+      test:
+        description: Run the tools' tests before giving the tools.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# By the workflow that runs it as well: called by the installers, this is
+# part of their run, and must not cancel its own run for the same branch.
 concurrency:
-  group: native-${{ github.ref }}
+  group: native-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -108,7 +116,10 @@ jobs:
       - name: Build the tools
         run: node scripts/native.mjs build
 
+      # `inputs.test` is nothing at all unless this was called: only a
+      # caller's plain "no" skips the tests.
       - name: Test
+        if: format('{0}', inputs.test) != 'false'
         run: node scripts/native.mjs test
 
       # The server's registration job with the tool itself (#80): two series
@@ -117,11 +128,11 @@ jobs:
       # against a stand-in for the tool. On one system: what differs between
       # systems is the tool, and its own tests ran on each just now.
       - name: Install the server's packages
-        if: matrix.id == 'linux-x64'
+        if: matrix.id == 'linux-x64' && format('{0}', inputs.test) != 'false'
         run: npm ci
 
       - name: The registration job, with the tool itself
-        if: matrix.id == 'linux-x64'
+        if: matrix.id == 'linux-x64' && format('{0}', inputs.test) != 'false'
         working-directory: services/server
         env:
           OPEN_RT_STUDIO_TEST_NATIVE_TOOLS: ${{ github.workspace }}/${{ matrix.build }}/dist/bin

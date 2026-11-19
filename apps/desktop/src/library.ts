@@ -10,6 +10,13 @@
 // A folder is taken into the library here, from the disk: the user chooses
 // it in the system's dialog, and the page is told how the import went and
 // never where the folder was. This needs no Electron.
+//
+// With the native tools (#70) the library registers images as a server
+// does, by the same jobs. Where the tools are is the application's to say,
+// from where it was installed; no request and no setting of the page names
+// a program.
+
+import { join, resolve } from 'node:path';
 
 import {
   isServerRequest,
@@ -21,20 +28,49 @@ import {
 import {
   createLogger,
   errorFields,
+  hasNativeTools,
   openEmbeddedServer,
   type EmbeddedServer,
   type Logger,
 } from '@open-rt-studio/server';
+
+/** Where an installer puts the native tools, from the folder of the application's resources. */
+export const NATIVE_TOOLS_IN_RESOURCES = ['native', 'bin'] as const;
+
+/**
+ * Where the native tools of this application are. An installed application
+ * has them in its own resources and looks nowhere else; one run from the
+ * repository has those a setting names, or none.
+ */
+export function nativeToolsDirectory(where: {
+  /** The folder of an installed application's resources; null when it is not installed. */
+  readonly resources: string | null;
+  /** What the setting for working on the application says. */
+  readonly named: string | undefined;
+}): string | null {
+  if (where.resources !== null) return join(where.resources, ...NATIVE_TOOLS_IN_RESOURCES);
+  return where.named === undefined || where.named === '' ? null : resolve(where.named);
+}
 
 export interface LibraryOptions {
   /** Where the library is kept: a folder of the profile. */
   readonly directory: string;
   /** Ask the user for a folder to take in, in the system's dialog. Null when none was chosen. */
   pickFolder(): Promise<string | null>;
+  /**
+   * The directory of the native tools this application came with, or null:
+   * with them the library has the registration jobs. A directory that does
+   * not hold them all is as none, and the library opens without the jobs.
+   */
+  readonly nativeTools?: string | null;
   /** Where its log goes. Warnings and errors to the standard output without. */
   readonly logger?: Logger;
   /** How the server is opened; a spec gives its own. */
-  readonly open?: (directory: string, logger: Logger) => Promise<EmbeddedServer>;
+  readonly open?: (
+    directory: string,
+    logger: Logger,
+    nativeTools: string | null,
+  ) => Promise<EmbeddedServer>;
 }
 
 export interface Library {
@@ -60,9 +96,20 @@ export function openLibrary(options: LibraryOptions): Library {
   const logger = options.logger ?? createLogger({ level: 'warn' });
   const open =
     options.open ??
-    ((directory, log) =>
-      openEmbeddedServer({ dataDir: directory, shutdownTimeoutMs: STOP_TIMEOUT_MS }, log));
-  const opened: Promise<EmbeddedServer | null> = open(options.directory, logger).catch(
+    ((directory, log, nativeTools) =>
+      openEmbeddedServer(
+        { dataDir: directory, shutdownTimeoutMs: STOP_TIMEOUT_MS, nativeTools },
+        log,
+      ));
+  // Asked first: a server told of tools that are not there does not open,
+  // and a library without registration is better than no library.
+  let nativeTools = options.nativeTools ?? null;
+  if (nativeTools !== null && !hasNativeTools(nativeTools)) {
+    // Not where: that is of no use to a reader of the log, and a profile's path can name a person.
+    logger.warn('library-without-native-tools');
+    nativeTools = null;
+  }
+  const opened: Promise<EmbeddedServer | null> = open(options.directory, logger, nativeTools).catch(
     (error: unknown) => {
       logger.error('library-not-opened', errorFields(error));
       return null;

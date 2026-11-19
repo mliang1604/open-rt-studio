@@ -92,7 +92,7 @@
     @if (review.method === 'by-hand') {
       Not saved: it is in the viewer only until it is accepted.
     } @else {
-      It is on the server already. Accept keeps it; Discard removes it there.
+      It is {{ flow.keptWhere() }} already. Accept keeps it; Discard removes it there.
     }
   </p>
 } @else if (flow.run(); as run) {

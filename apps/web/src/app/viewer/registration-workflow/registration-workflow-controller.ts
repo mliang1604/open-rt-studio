@@ -218,6 +218,14 @@ export class RegistrationWorkflowController {
     return source instanceof ServerSource ? source : null;
   });
 
+  /**
+   * Where a registration is computed and kept, in the words of the panel:
+   * the desktop application's own library is no server to its user.
+   */
+  readonly keptWhere = computed<'in the library' | 'on the server'>(() =>
+    this.server()?.label === LIBRARY_LABEL ? 'in the library' : 'on the server',
+  );
+
   /** The image series of the patient on the timeline. */
   private readonly images = computed(() =>
     listedSeries(this.active).filter((series) => isImageSeries(series.modality)),
@@ -737,7 +745,9 @@ export class RegistrationWorkflowController {
       if (onScreen) await d.openPair(review.fixedUid, review.movingUid);
       this.reviewing.set(null);
       d.notify(
-        `Discarded the registration “${review.name}”. It was removed from the server.`,
+        `Discarded the registration “${review.name}”. It was removed ${
+          this.keptWhere() === 'in the library' ? 'from the library' : 'from the server'
+        }.`,
         false,
       );
     } catch (error) {

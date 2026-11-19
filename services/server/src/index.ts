@@ -202,6 +202,7 @@ export {
   type SqliteIndexOptions,
 } from './pacs-index/sqlite-index.js';
 export {
+  hasNativeTools,
   openEmbeddedServer,
   startServer,
   type EmbeddedAnswer,

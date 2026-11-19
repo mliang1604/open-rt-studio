@@ -11,8 +11,16 @@ import { join } from 'node:path';
 
 import { syntheticCtSeries, SYNTHETIC_STUDY } from '@open-rt-studio/testdata';
 
+import { ConfigError } from './config.js';
 import { createLogger } from './logger.js';
-import { openEmbeddedServer, type EmbeddedAnswer, type EmbeddedServer } from './server.js';
+import { DEFORMABLE_REGISTRATION_TOOL } from './registration/deformable-registration.js';
+import { RIGID_REGISTRATION_TOOL } from './registration/rigid-registration.js';
+import {
+  hasNativeTools,
+  openEmbeddedServer,
+  type EmbeddedAnswer,
+  type EmbeddedServer,
+} from './server.js';
 
 const FILES = syntheticCtSeries(3, 16);
 const PATIENT = SYNTHETIC_STUDY.patient;
@@ -22,7 +30,9 @@ let dataDir: string;
 let lines: string[];
 const open: EmbeddedServer[] = [];
 
-async function embedded(more: { maxUploadBytes?: number } = {}): Promise<EmbeddedServer> {
+async function embedded(
+  more: { maxUploadBytes?: number; nativeTools?: string | null } = {},
+): Promise<EmbeddedServer> {
   const logger = createLogger({ level: 'debug', write: (line) => lines.push(line) });
   const server = await openEmbeddedServer({ dataDir, ...more }, logger);
   open.push(server);
@@ -184,5 +194,59 @@ describe('an embedded server', () => {
     const after = await get(server, '/api/v1/patients');
     expect(after.status).toBe(503);
     expect(said(after)).toMatchObject({ error: 'stopping' });
+  });
+});
+
+describe('an embedded server that is told where the native tools are (#70)', () => {
+  /** A directory laid out as a build of the native tools. The files are never run here. */
+  async function toolsDirectory(
+    given: { tools?: readonly string[]; presets?: boolean } = {},
+  ): Promise<string> {
+    const bin = join(scratch, 'native', 'bin');
+    await mkdir(bin, { recursive: true });
+    for (const tool of given.tools ?? [RIGID_REGISTRATION_TOOL, DEFORMABLE_REGISTRATION_TOOL]) {
+      await writeFile(join(bin, tool), '');
+    }
+    if (given.presets ?? true) {
+      await mkdir(join(scratch, 'native', 'presets', 'deformable'), { recursive: true });
+      await writeFile(
+        join(scratch, 'native', 'presets', 'deformable', 'ct-ct.txt'),
+        '// title: CT to CT\n// description: For a test.\n(Metric "X")\n',
+      );
+    }
+    return bin;
+  }
+
+  it('has the registration jobs and the presets, as a server has', async () => {
+    const nativeTools = await toolsDirectory();
+    expect(hasNativeTools(nativeTools)).toBe(true);
+    const server = await embedded({ nativeTools });
+    const kinds = said<Listed<{ name: string }>>(await get(server, '/api/v1/job-kinds'));
+    expect(kinds.items.map((kind) => kind.name)).toEqual([
+      'rigid-registration',
+      'deformable-registration',
+    ]);
+    expect(said(await get(server, '/api/v1/registration-presets'))).toEqual({
+      items: [{ name: 'ct-ct', title: 'CT to CT', description: 'For a test.' }],
+    });
+  });
+
+  it('has none when it is told of none', async () => {
+    const server = await embedded();
+    expect(said(await get(server, '/api/v1/job-kinds'))).toEqual({ items: [] });
+    const told = await embedded({ nativeTools: null });
+    expect(said(await get(told, '/api/v1/job-kinds'))).toEqual({ items: [] });
+  });
+
+  it('says beforehand whether a directory will do, and does not open on one that will not', async () => {
+    expect(hasNativeTools(join(scratch, 'nowhere'))).toBe(false);
+    const half = await toolsDirectory({ tools: [RIGID_REGISTRATION_TOOL] });
+    expect(hasNativeTools(half)).toBe(false);
+    await expect(embedded({ nativeTools: half })).rejects.toThrow(ConfigError);
+  });
+
+  it('will not do without a preset beside the tools', async () => {
+    const bare = await toolsDirectory({ presets: false });
+    expect(hasNativeTools(bare)).toBe(false);
   });
 });

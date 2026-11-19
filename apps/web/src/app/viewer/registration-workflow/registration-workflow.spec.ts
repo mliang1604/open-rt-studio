@@ -64,6 +64,7 @@ function fakeFlow() {
     preset: signal<string | null>(null),
     fromScreen: signal(true),
     computing: signal<Computing>(READY),
+    keptWhere: signal<'in the library' | 'on the server'>('on the server'),
     run: signal<RegistrationRun | null>(null),
     review: signal<RegistrationReview | null>(null),
     problem: signal<string | null>(null),
@@ -193,7 +194,7 @@ describe('the registration panel: setting one up', () => {
       'An automatic registration is computed by an Open RT Studio server that has the registration tools, not by this page.',
     );
     expect(said('[data-computing]')).toContain(
-      'The desktop application does not have the tools yet.',
+      'In the desktop application the library on this computer is one, for what was imported into it.',
     );
     expect(said('[data-computing]')).toContain('By hand works here.');
     // By hand is the one way that is offered.
@@ -205,7 +206,7 @@ describe('the registration panel: setting one up', () => {
       'This server has no registration tools',
     );
     expect(await given({ kind: 'none', library: true })).toContain(
-      'The library on this computer has no registration tools yet.',
+      'The library on this computer has no registration tools: this copy of the application came without them.',
     );
     expect(await given({ kind: 'asking' })).toBe('Asking the server what it can compute…');
     expect(await given({ kind: 'ready', rigid: true, deformable: false, presets: [] })).toBe(
@@ -283,6 +284,12 @@ describe('the registration panel: one a server is computing', () => {
     expect(await shown({ job: { ...JOB, status: 'queued', progress: null, message: null } })).toBe(
       'Waiting for its turn on the server…',
     );
+    // The desktop application's library is no server to its user (#70).
+    flow.keptWhere.set('in the library');
+    expect(await shown({ job: { ...JOB, status: 'queued', progress: null, message: null } })).toBe(
+      'Waiting for its turn in the library…',
+    );
+    flow.keptWhere.set('on the server');
     // No number until the server gives one: the bar says only that it is going.
     expect(host.querySelector('progress')!.hasAttribute('value')).toBe(false);
     expect(await shown({ job: { ...JOB, progress: null, message: null } })).toBe('Registering…');
@@ -322,6 +329,11 @@ describe('the registration panel: one to be looked at', () => {
     expect(host.textContent).toContain('Nothing has checked this registration.');
     expect(said('[data-registration-state]')).toBe(
       'It is on the server already. Accept keeps it; Discard removes it there.',
+    );
+    flow.keptWhere.set('in the library');
+    await fixture.whenStable();
+    expect(said('[data-registration-state]')).toBe(
+      'It is in the library already. Accept keeps it; Discard removes it there.',
     );
     const name = host.querySelector<HTMLInputElement>('[data-registration-name]')!;
     expect(name.value).toBe(REVIEW.name);
