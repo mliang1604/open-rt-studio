@@ -18,9 +18,10 @@
 // The model sees the slice as it is shown: through the window. So the
 // slice is made ready again when the window changes, which is the wait of
 // this tool; a click after that is fast. Without WebGPU the tool is off and
-// says why, and so it is where a page may not compile WebAssembly, as in the
-// desktop application today. Of the labs: the model was trained on photographs, and nothing
-// here says how good it is on a real CT or MR.
+// says why, and so it is where a page may not compile WebAssembly (a
+// content policy can refuse it; the desktop application's allows it, #359).
+// Of the labs: the model was trained on photographs, and nothing here says
+// how good it is on a real CT or MR.
 
 import {
   ChangeDetectionStrategy,

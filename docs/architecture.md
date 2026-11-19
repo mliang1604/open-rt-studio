@@ -567,9 +567,10 @@ its own.
     the size and the SHA-256 of the file that was measured, which are in
     the code, and one that differs is refused. They are kept in memory for
     the session and nowhere else, and nothing is sent anywhere.
-  - **In the desktop application it is off.** Its content policy lets no
-    page compile WebAssembly. Letting it (`'wasm-unsafe-eval'`) is a
-    loosening of the policy and Michael's to decide; nothing here does it.
+  - **In the desktop application it works as in a browser** (#359). Its
+    content policy let no page compile WebAssembly, and the tool was off
+    there; Michael decided on 2026-11-19 to allow it (see the desktop
+    section), and the runtime is in the installers.
   - **Tests** run with a stand-in for the model. With
     `OPEN_RT_STUDIO_TEST_SEGMENT_MODEL` naming a folder that holds the four
     files, an end-to-end test runs the model itself; it is skipped
@@ -622,6 +623,17 @@ Decided for the shell (#61):
   fetched come from the application's own files; no script written into the
   page runs and no text is evaluated. Styles written into the page are
   allowed, which is how Angular gives a component its styles.
+  - **WebAssembly may be compiled** (`'wasm-unsafe-eval'` in `script-src`;
+    decided by Michael on 2026-11-19, #359). The model of the
+    click-to-segment tool runs on ONNX Runtime's WebAssembly build, which
+    is one of the application's own files, and without this the tool was
+    off in the desktop application. What it allows is bytes made into a
+    WebAssembly module. What it does not: text made into script (`eval`
+    and `new Function` are refused as before, and the end-to-end test asks),
+    a script from another address, or anything a page could not already
+    reach, since a module runs in the page that compiled it, under this
+    policy and with no Node. It is the one loosening of the policy, and
+    was made for this and not to get something past it.
   - The web client's production build therefore **does not inline critical
     styles** (`inlineCritical: false` in `angular.json`): inlining needs a
     script written into the page, which the policy refuses, and the style

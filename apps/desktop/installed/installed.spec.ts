@@ -85,6 +85,28 @@ test('it starts on its own files, with the notice first', async () => {
   expect(problems).toEqual([]);
 });
 
+test('the runtime of the click-to-segment model was packed, and the page may compile WebAssembly (#359)', async () => {
+  const runtime = await page.evaluate(async () => {
+    const answer = await fetch('ort/ort-wasm-simd-threaded.asyncify.wasm', { method: 'HEAD' });
+    let compiled = 'compiled';
+    try {
+      new WebAssembly.Module(Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0));
+    } catch (error) {
+      compiled = (error as Error).name;
+    }
+    return {
+      status: answer.status,
+      type: answer.headers.get('content-type'),
+      bytes: Number(answer.headers.get('content-length')),
+      compiled,
+    };
+  });
+  expect(runtime.status).toBe(200);
+  expect(runtime.type).toBe('application/wasm');
+  expect(runtime.bytes).toBeGreaterThan(20_000_000);
+  expect(runtime.compiled).toBe('compiled');
+});
+
 test('it knows it is installed, which version it is, and keeps its profile where it was told', async () => {
   const info = await page.evaluate(
     (name) => ((globalThis as Record<string, unknown>)[name] as DesktopBridge).info(),
