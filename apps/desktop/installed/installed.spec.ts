@@ -263,10 +263,18 @@ test('it registers two series a known offset apart, with no server', async () =>
   );
   expect(error).toBeLessThanOrEqual(1);
 
-  // Deformable: the tool reads a preset from beside it, by a path with
-  // spaces in it on every system. How well it registers is for the tools'
-  // own tests; here it has to run to its end and fold nothing.
-  const deformable = await run('deformable-registration', { ...inputs, preset: 'mr-ct' });
+  // Deformable, as someone would: from where the rigid registration ended.
+  // The tool reads a preset from beside it, by a path with spaces in it on
+  // every system. It has to run to its end and fold nothing. Its field is
+  // not judged: this phantom is smooth inside and has air around it, which
+  // gives a deformable registration little to hold on to, and how well a
+  // real deformation is found is for the tools' own tests, on a phantom
+  // made for that.
+  const deformable = await run('deformable-registration', {
+    ...inputs,
+    preset: 'mr-ct',
+    initial: found,
+  });
   const field = deformable.result as {
     fieldSize: number[];
     largestMm: number;
