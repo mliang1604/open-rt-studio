@@ -1,0 +1,236 @@
+name: Installers
+
+# Builds the desktop application's installers (#65): a disk image for macOS
+# (one for both processors), an installer for Windows, an AppImage and a
+# Debian package for Linux. Each is then installed on the system it is for,
+# and the program that was installed is started and asked what only a packaged
+# application can get wrong (`apps/desktop/installed`).
+#
+#   a tag v1.2.3     the installers are that version, and are attached to a
+#                    draft release of the tag, which is published by hand
+#   a pull request   that touches how the application is packaged: built and
+#                    tried, and kept a week as artifacts of the run
+#   by hand          the same, from any branch
+#
+# Nothing is signed with a certificate (#66): macOS gets an ad hoc signature
+# and Windows none, so both systems warn. apps/desktop/README.md says what a
+# user does about it. Not for clinical use.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - apps/desktop/**
+      - packages/desktop-bridge/**
+      - package-lock.json
+      - .github/workflows/installers.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Installer (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-latest }
+          - { name: macOS, os: macos-latest }
+          - { name: Windows, os: windows-latest }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # A tag names the version. Anything else is a build of no version, and
+      # says which run it is of.
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::The tag must be v and a version, such as v0.1.0 or v0.1.0-alpha.1"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package
+        run: >
+          npm run package -w @open-rt-studio/desktop --
+          --publish never
+          "-c.extraMetadata.version=$VERSION"
+
+      - name: What was made
+        run: ls -l apps/desktop/release
+
+      # macOS: the application is taken out of the disk image, as a user drags
+      # it out. Its signature is ad hoc, and has to hold: an Apple silicon Mac
+      # starts nothing that is not signed at all.
+      - name: Install it (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          image="apps/desktop/release/open-rt-studio-$VERSION-mac-universal.dmg"
+          hdiutil attach "$image" -nobrowse -readonly -mountpoint "$RUNNER_TEMP/image"
+          mkdir -p "$RUNNER_TEMP/Applications"
+          cp -R "$RUNNER_TEMP/image/Open RT Studio.app" "$RUNNER_TEMP/Applications/"
+          hdiutil detach "$RUNNER_TEMP/image"
+          application="$RUNNER_TEMP/Applications/Open RT Studio.app"
+          codesign --verify --deep --strict "$application"
+          lipo -archs "$application/Contents/MacOS/Open RT Studio" | tee "$RUNNER_TEMP/archs"
+          grep -q x86_64 "$RUNNER_TEMP/archs" && grep -q arm64 "$RUNNER_TEMP/archs"
+          echo "OPEN_RT_STUDIO_INSTALLED=$application/Contents/MacOS/Open RT Studio" >> "$GITHUB_ENV"
+
+      # Windows: the installer asks nothing and installs for this user.
+      - name: Install it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = "apps\desktop\release\open-rt-studio-$env:VERSION-win-x64.exe"
+          $done = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          if ($done.ExitCode -ne 0) { throw "The installer ended with $($done.ExitCode)" }
+          $program = Join-Path $env:LOCALAPPDATA 'Programs\open-rt-studio\Open RT Studio.exe'
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $program); $i++) { Start-Sleep -Seconds 1 }
+          if (-not (Test-Path $program)) { throw 'The installer left no program' }
+          "OPEN_RT_STUDIO_INSTALLED=$program" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Linux, the Debian package: installed as a user installs it, on the
+      # runner as it comes. Ubuntu lets no program build Chromium's sandbox
+      # unless it is told to; the package tells it for this one program, so
+      # nothing is loosened here first.
+      - name: Install it (Linux, the Debian package)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y "./apps/desktop/release/open-rt-studio-$VERSION-linux-amd64.deb"
+          test -x "/opt/Open RT Studio/open-rt-studio"
+          echo "OPEN_RT_STUDIO_INSTALLED=/opt/Open RT Studio/open-rt-studio" >> "$GITHUB_ENV"
+
+      - name: Start what was installed
+        if: runner.os != 'Linux'
+        env:
+          OPEN_RT_STUDIO_INSTALLED_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run e2e:installed -w @open-rt-studio/desktop
+
+      - name: Start what was installed (Linux, on a virtual display)
+        if: runner.os == 'Linux'
+        env:
+          OPEN_RT_STUDIO_INSTALLED_VERSION: ${{ steps.version.outputs.version }}
+        run: xvfb-run --auto-servernum npm run e2e:installed -w @open-rt-studio/desktop
+
+      # Linux, the AppImage: one file that is run where it lies. Nothing
+      # installs it, so nothing tells Ubuntu about its sandbox: the user does
+      # (apps/desktop/README.md), and so does this step. The runner has no
+      # FUSE to mount the image with, so it unpacks itself and runs.
+      - name: Start the AppImage (Linux)
+        if: runner.os == 'Linux'
+        env:
+          OPEN_RT_STUDIO_INSTALLED_VERSION: ${{ steps.version.outputs.version }}
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          image="$PWD/apps/desktop/release/open-rt-studio-$VERSION-linux-x86_64.AppImage"
+          chmod +x "$image"
+          OPEN_RT_STUDIO_INSTALLED="$image" \
+            xvfb-run --auto-servernum npm run e2e:installed -w @open-rt-studio/desktop
+
+      - name: Keep the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload what a failed test left
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-test-results-${{ matrix.name }}
+          path: apps/desktop/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # A tag's installers go to a release of that tag, as a draft: nobody
+  # outside the repository sees it until it is published by hand.
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch the installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: installers
+
+      - name: Checksums
+        working-directory: installers
+        run: |
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          cat > notes.md <<EOF
+          **Not for clinical use.** Open RT Studio is a prototype for research and
+          demonstration. Use synthetic or clearly shareable data only.
+
+          These installers are not signed with a certificate, so macOS and Windows
+          warn before they open one. How to install on each system is in
+          [apps/desktop/README.md](https://github.com/$GITHUB_REPOSITORY/blob/$TAG/apps/desktop/README.md#install-it).
+
+          | System | File |
+          | --- | --- |
+          | macOS, Apple silicon and Intel | \`open-rt-studio-$version-mac-universal.dmg\` |
+          | Windows, 64-bit | \`open-rt-studio-$version-win-x64.exe\` |
+          | Linux, Debian and Ubuntu | \`open-rt-studio-$version-linux-amd64.deb\` |
+          | Linux, any other | \`open-rt-studio-$version-linux-x86_64.AppImage\` |
+
+          \`SHA256SUMS.txt\` has the checksum of each.
+          EOF
+          flags=(--draft --title "Open RT Studio $version" --notes-file notes.md)
+          if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" installers/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" installers/* --repo "$GITHUB_REPOSITORY" --verify-tag "${flags[@]}"
+          fi

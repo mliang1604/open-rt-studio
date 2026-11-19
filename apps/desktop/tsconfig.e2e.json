@@ -6,5 +6,10 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node", "@webgpu/types"]
   },
-  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+  "include": [
+    "e2e/**/*.ts",
+    "installed/**/*.ts",
+    "playwright.config.ts",
+    "playwright.installed.config.ts"
+  ]
 }

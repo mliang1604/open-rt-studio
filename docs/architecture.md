@@ -522,7 +522,8 @@ in the renderer) and a typed preload bridge. Two modes:
   local storage.
 - **Connected**: the client talks to a remote server.
 
-Installers are built in CI and published on GitHub Releases, with auto-update.
+Installers are built in CI and published on GitHub Releases (#65);
+auto-update is to come (#67).
 
 Decided for the shell (#61):
 
@@ -685,6 +686,42 @@ Decided for the shell (#61):
     then starts the application as the runner comes, and with the GPU
     taken away, and reads the notice. No Linux machine with a graphics
     card has run it.
+
+Decided in #65, the installers:
+
+- **electron-builder packs the shell as it is built**: `apps/desktop/dist`
+  and the packages it runs on (the server, the DICOM core, the bridge and
+  what they depend on) in one archive, and the web client's build beside it
+  in `resources/web`, where the shell already looked for it. Nothing is
+  bundled or rewritten on the way, so what is installed is the code the
+  `Desktop` jobs test.
+- **One installer per system, and the Debian package beside the AppImage**:
+  a disk image for macOS that holds both processors' code, an installer for
+  Windows that asks nothing and installs for one user, and for Linux both,
+  since the Debian package can tell Ubuntu about Chromium's sandbox and a
+  file that is only run cannot.
+- **Unsigned means ad hoc on macOS.** An Apple silicon Mac starts nothing
+  that carries no signature, so the application is signed with none of
+  anyone's: it says the files are whole and not who made them. Windows gets
+  no signature. Both warn, and the README says what a user does (#66 is the
+  certificates).
+- **An installed application is tested as installed.** The workflow
+  installs each installer the way a user does (out of the disk image, the
+  silent installer, `apt install`, the AppImage run where it lies) and
+  starts the program that leaves, with a test that builds nothing
+  (`apps/desktop/installed`). It asks what a packaged application gets
+  wrong: its own files, that it is packaged, its version, the pinned
+  Electron, and the library, which needs every module of the server.
+- **The version is the tag's.** The repository's packages stay at 0.0.0;
+  `v1.2.3` builds 1.2.3, and anything else a `0.0.0-dev` build that names
+  its run.
+- **A tag drafts a release; a person publishes it.** The installers and
+  their checksums are attached to a draft, so nothing is offered to anyone
+  by a push alone.
+- **Test access is left on.** The test drives the installed program through
+  Electron's inspector switches, so the fuses that would close them
+  (`runAsNode`, `enableNodeCliInspectArguments`) are not flipped. That is to
+  be decided with signing (#66), where it matters most.
 
 Status: **decided, and Michael's to overturn**: the scheme, that the web
 build gives up inlined critical styles for the policy, that a server is
@@ -2367,6 +2404,12 @@ Status: **decided, and Michael's to overturn**.
   processor, then joined) and Windows, runs the tools' tests and uploads
   the tools. On Linux it then runs the server's registration job with the
   tool it built. Not required.
+
+- `Installers` (`.github/workflows/installers.yml`) is a workflow of its
+  own (#65): on a tag `v*`, on a pull request that touches the desktop
+  application or the lockfile, or by hand, it builds the installers on
+  macOS, Windows and Linux, installs each and starts what was installed.
+  For a tag it then drafts a release with them. Not required.
 
 The job names `Build & test` and `End-to-end smoke` are what the `main`
 ruleset requires. Keep them stable.

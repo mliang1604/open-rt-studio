@@ -13,6 +13,8 @@
     "start": "npm run build && electron .",
     "dev": "npm run build && node scripts/dev.mjs",
     "e2e": "npm run build && playwright test",
+    "package": "electron-builder",
+    "e2e:installed": "playwright test -c playwright.installed.config.ts",
     "lint": "eslint ."
   },
   "dependencies": {
@@ -22,6 +24,7 @@
   "devDependencies": {
     "@open-rt-studio/testdata": "0.0.0",
     "@playwright/test": "^1.65.0",
-    "electron": "45.3.4"
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0"
   }
 }

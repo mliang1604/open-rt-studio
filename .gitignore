@@ -1,5 +1,7 @@
 # Build output
 dist/
+# The desktop application's installers (apps/desktop/README.md)
+/apps/desktop/release/
 out-tsc/
 *.tsbuildinfo
 

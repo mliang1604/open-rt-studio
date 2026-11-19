@@ -1,0 +1,88 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# How the desktop application is packaged into installers (#65). Run through
+# `npm run package -w @open-rt-studio/desktop`, after `npm run build`.
+#
+# Nothing here signs with a certificate (#66): macOS gets an ad hoc signature,
+# without which an Apple silicon Mac starts nothing, and Windows none.
+
+appId: io.github.mliang1604.open-rt-studio
+productName: Open RT Studio
+copyright: Open RT Studio contributors. MPL 2.0. Not for clinical use.
+
+# The package is `@open-rt-studio/desktop` in the repository. What is
+# installed goes by a name without the scope: it names the program on Linux
+# and the folder Windows installs into.
+extraMetadata:
+  name: open-rt-studio
+
+directories:
+  output: release
+
+# One way of naming for every system, with no space in it.
+artifactName: open-rt-studio-${version}-${os}-${arch}.${ext}
+
+# The shell as it is built, and nothing of how it is made or tested.
+files:
+  - package.json
+  - dist/**/*.js
+  - dist/**/*.cjs
+  - '!**/*.spec.*'
+  - '!**/*.map'
+  - '!**/*.d.ts'
+  - '!**/*.d.cts'
+  - '!**/*.tsbuildinfo'
+  # A package of this repository is in `node_modules` by a link to its
+  # folder, sources and all; only what it builds is the application's.
+  - '!**/node_modules/@open-rt-studio/*/src'
+  - '!**/node_modules/@open-rt-studio/*/Dockerfile'
+
+# The web client's build, beside the application: `src/main.ts` serves it
+# from `resources/web`.
+extraResources:
+  - from: ../web/dist/browser
+    to: web
+  - from: ../../LICENSE
+    to: LICENSE.txt
+
+asar: true
+# No dependency of the shell has code to compile.
+npmRebuild: false
+# Releases are made by the workflow, not by the packager.
+publish: null
+
+mac:
+  category: public.app-category.medical
+  target:
+    - target: dmg
+      arch: universal
+  identity: '-'
+  # The hardened runtime is for a notarised application (#66). Ad hoc, it
+  # would refuse Electron's own libraries.
+  hardenedRuntime: false
+  # An ad hoc signature has no time to vouch for; asking Apple's server for
+  # one, file by file, is most of the minutes a build takes.
+  timestamp: none
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+
+nsis:
+  # An installer with nothing to choose: for this user, with no administrator.
+  oneClick: true
+  perMachine: false
+
+linux:
+  executableName: open-rt-studio
+  category: Science
+  maintainer: Open RT Studio contributors
+  synopsis: Radiotherapy imaging viewer. Not for clinical use.
+  target:
+    - target: AppImage
+      arch: x64
+    - target: deb
+      arch: x64
