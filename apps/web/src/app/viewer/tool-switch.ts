@@ -64,8 +64,16 @@ export class ToolSwitch {
     if (this.contour.takenId() !== null) this.putDownAllBut('brush');
   }
 
-  /** Create a structure, which also starts painting it. */
+  /**
+   * Create a structure. A listed contouring tool in hand stays in hand, for
+   * the new structure: whoever chose the wand wants the wand (#353).
+   * Otherwise painting starts.
+   */
   newStructure(): void {
+    if (this.contour.takenId() !== null) {
+      this.brush.newStructure(false);
+      return;
+    }
     this.brush.newStructure();
     if (this.brush.mode() !== 'off') this.putDownAllBut('brush');
   }

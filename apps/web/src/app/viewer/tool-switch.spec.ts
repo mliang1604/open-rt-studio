@@ -157,6 +157,24 @@ describe('ToolSwitch and the contouring tools that are listed (#106)', () => {
     return { ...made, contour };
   }
 
+  it('stays in hand when a structure is made, for the new structure; the brush does not start (#353)', () => {
+    const { tools, contour, brush, on } = withLabs();
+    tools.toggleContourTool('sample');
+    const before = brush.activeRoiId();
+    tools.newStructure();
+    expect([contour.takenId(), on().brush]).toEqual(['sample', 'off']);
+    // The tool whose button shows as pressed is the one a press on a pane uses.
+    expect(contour.held()?.id).toBe('sample');
+    expect(brush.activeRoiId()).not.toBeNull();
+    expect(brush.activeRoiId()).not.toBe(before);
+    // Chosen again, it is put down: one click, as ever.
+    tools.toggleContourTool('sample');
+    expect(contour.takenId()).toBeNull();
+    // With none in hand, a new structure starts the brush as before.
+    tools.newStructure();
+    expect([contour.takenId(), on().brush]).toEqual([null, 'paint']);
+  });
+
   it('takes one up in place of the brush and a measurement tool, and is put down by them', () => {
     const { tools, contour, on } = withLabs();
     tools.toggleBrush('paint');

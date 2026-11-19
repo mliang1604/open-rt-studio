@@ -355,6 +355,57 @@ test('the magic wand selects the region clicked, as one undo (#109)', async ({ p
   expectNoProblems(problems);
 });
 
+test("a new structure made with the wand in hand is the wand's: the tool stays, and the brush does not start (#353)", async ({
+  page,
+}) => {
+  const problems = watchProblems(page);
+  await preAcknowledge(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await requireWebGpu(page);
+  await importAndLoad(page, syntheticThoraxPatient({ size: 64, slices: 16 }));
+  await page.locator('[data-labs]').check();
+  const wand = page.locator('[data-contour-tool="wand"]');
+  await wand.click();
+  const structure = page.getByRole('combobox', { name: 'Active structure', exact: true });
+  await expect(structure.locator('option')).toHaveText(['Structure 1']);
+
+  const make = page.getByRole('button', { name: '＋ New' });
+  await expect(make).toHaveAttribute(
+    'title',
+    'Create a new structure for the contouring tool in hand',
+  );
+  await make.click();
+  await expect(structure.locator('option')).toHaveText(['Structure 1', 'Structure 2']);
+  await expect(structure.locator('option:checked')).toHaveText('Structure 2');
+  // The wand is still the tool: its button, its options, and what a click does.
+  await expect(wand).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-wand-tolerance]')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Paint/ })).not.toHaveClass(/active/);
+  const lung = await at(page, 0.67, 0.5);
+  await page.mouse.click(lung.x, lung.y);
+  await expect(page.locator('[data-wand-said]')).toHaveText(
+    /^\d+ voxels about -?\d+(\.\d+)?; \d+ added\.$/,
+  );
+  // One click puts it down, as ever.
+  await wand.click();
+  await expect(wand).toHaveAttribute('aria-pressed', 'false');
+
+  // With no tool in hand a new structure starts the brush, and the rail
+  // says which structure it paints into: the new one.
+  await expect(make).toHaveAttribute('title', 'Create a new structure and paint it');
+  await make.click();
+  await expect(page.getByRole('button', { name: /Paint/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(structure.locator('option:checked')).toHaveText('Structure 3');
+  // Another set, and the rail says that new structures go into it.
+  const set = page.getByRole('combobox', { name: 'Active structure set', exact: true });
+  const sets = await set.locator('option').count();
+  await page.locator('.brush-set-new').click();
+  await expect(set.locator('option')).toHaveCount(sets + 1);
+  expect(await set.evaluate((el: HTMLSelectElement) => el.selectedIndex)).toBe(sets);
+  expectNoProblems(problems);
+});
+
 test('points set on a pane are drawn as a smooth curve, and clicking the first fills it, as one undo (#114)', async ({
   page,
 }) => {
