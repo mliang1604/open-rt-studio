@@ -474,6 +474,22 @@ function nativeJobKinds(
 /** Where the presets of the deformable registration are, from the directory of the tools. */
 const PRESETS_BESIDE_TOOLS = ['..', 'presets', 'deformable'] as const;
 
+/**
+ * Whether a directory holds what a server needs of the native tools: both
+ * registration tools, and a preset for the deformable one beside them. A
+ * server told of a directory that does not, does not start; a program that
+ * embeds one asks first, and goes without the jobs where the answer is no.
+ */
+export function hasNativeTools(directory: string): boolean {
+  if (!existsSync(join(directory, RIGID_REGISTRATION_TOOL))) return false;
+  if (!existsSync(join(directory, DEFORMABLE_REGISTRATION_TOOL))) return false;
+  try {
+    return readPresets(join(directory, ...PRESETS_BESIDE_TOOLS)).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** The presets a server has: those a test gave it, or those beside its native tools, or none. */
 function presetsOf(config: ServerConfig, parts: ServerParts): readonly RegistrationPreset[] {
   if (parts.registrationPresets) return parts.registrationPresets;
@@ -690,6 +706,14 @@ export interface EmbeddedOptions {
   readonly maxUploadBytes?: number;
   /** How long stopping waits for work in flight, in milliseconds. The server's default without. */
   readonly shutdownTimeoutMs?: number;
+  /**
+   * The directory of the native tools, as `nativeTools` is for a server: with
+   * it the embedded server has the jobs that run them. The program that
+   * embeds it says where its own copy of the tools is; it is never a
+   * request's to say. {@link hasNativeTools} tells whether a directory will
+   * do, since one that will not keeps the server from opening.
+   */
+  readonly nativeTools?: string | null;
 }
 
 /** A server inside another program: the same API, asked without a network. */
@@ -728,6 +752,7 @@ export async function openEmbeddedServer(
     dataDir: options.dataDir,
     maxUploadBytes: options.maxUploadBytes ?? DEFAULT_CONFIG.maxUploadBytes,
     shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_CONFIG.shutdownTimeoutMs,
+    nativeTools: options.nativeTools ?? null,
   };
   const assembled = await assemble(config, logger, parts, null, null);
   const { core, dicom } = assembled;

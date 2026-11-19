@@ -79,14 +79,14 @@ export class RegistrationWorkflow {
     const computing = this.flow.computing();
     switch (computing.kind) {
       case 'files':
-        return 'An automatic registration is computed by an Open RT Studio server that has the registration tools, not by this page. Connect to one with “Server…” on the history bar. The desktop application does not have the tools yet. By hand works here.';
+        return 'An automatic registration is computed by an Open RT Studio server that has the registration tools, not by this page. Connect to one with “Server…” on the history bar. In the desktop application the library on this computer is one, for what was imported into it. By hand works here.';
       case 'asking':
         return 'Asking the server what it can compute…';
       case 'unreachable':
         return `The server could not be asked what it can compute. ${computing.why}`;
       case 'none':
         return computing.library
-          ? 'The library on this computer has no registration tools yet. Connect to a server that has them for an automatic registration. By hand works here.'
+          ? 'The library on this computer has no registration tools: this copy of the application came without them. Connect to a server that has them for an automatic registration. By hand works here.'
           : 'This server has no registration tools, so it computes no registration: whoever runs it sets them up (its nativeTools setting). By hand works here.';
       case 'ready':
         return computing.rigid && !computing.deformable
@@ -119,7 +119,7 @@ export class RegistrationWorkflow {
     if (!run) return '';
     if (run.opening) return 'Done. Opening the two images with the registration…';
     if (run.cancelling) return 'Asking the server to stop…';
-    if (run.job.status === 'queued') return 'Waiting for its turn on the server…';
+    if (run.job.status === 'queued') return `Waiting for its turn ${this.flow.keptWhere()}…`;
     const doing = run.job.message?.trim() || 'Registering';
     const percent = this.percent();
     return percent === null ? `${doing}…` : `${doing} · ${percent}%`;

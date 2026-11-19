@@ -39,7 +39,7 @@ import { fileAnswers, type Pickers } from './files.js';
 import { openGrants } from './grants.js';
 import { serveBridge } from './ipc.js';
 import { libraryAnswers } from './library-calls.js';
-import { openLibrary, type Library } from './library.js';
+import { nativeToolsDirectory, openLibrary, type Library } from './library.js';
 import { serverAnswers } from './server-calls.js';
 import {
   APP_HOME,
@@ -62,6 +62,7 @@ const LIBRARY_DIRECTORY = 'library';
 const DEV_SERVER = 'OPEN_RT_STUDIO_DESKTOP_DEV_SERVER';
 const USER_DATA = 'OPEN_RT_STUDIO_DESKTOP_USER_DATA';
 const SOFTWARE_GPU = 'OPEN_RT_STUDIO_DESKTOP_SOFTWARE_GPU';
+const NATIVE_TOOLS = 'OPEN_RT_STUDIO_DESKTOP_NATIVE_TOOLS';
 const settings: NodeJS.ProcessEnv = app.isPackaged ? {} : process.env;
 /** Whether the application was told to draw in software, for want of a graphics card. */
 const softwareGpu = settings[SOFTWARE_GPU] === '1';
@@ -89,6 +90,16 @@ const policy = contentSecurityPolicy(devServer);
 const webRoot = app.isPackaged
   ? join(process.resourcesPath, 'web')
   : join(HERE, '../../web/dist/browser');
+
+/**
+ * The native tools (#70): beside an installed application, where its
+ * installer put them; for one run from the repository, the build of them
+ * that the setting names, if any.
+ */
+const nativeTools = nativeToolsDirectory({
+  resources: app.isPackaged ? process.resourcesPath : null,
+  named: settings[NATIVE_TOOLS],
+});
 
 // Its own profile, for a test or a second copy: what one keeps is not the other's.
 const userData = settings[USER_DATA];
@@ -310,6 +321,7 @@ async function start(): Promise<void> {
   // The server of this repository, inside this process: no port, no login.
   library = openLibrary({
     directory: join(app.getPath('userData'), LIBRARY_DIRECTORY),
+    nativeTools,
     pickFolder: async () => {
       const chosen = await showOpenDialog({
         title: 'Import a folder into the library',

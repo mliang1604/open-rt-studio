@@ -24,6 +24,10 @@ import {
   seriesUid,
   studyUid,
   syntheticRegisteredPair,
+  KNOWN_OFFSET,
+  KNOWN_OFFSET_FIXED,
+  KNOWN_OFFSET_MOVING,
+  knownOffsetPair,
   writeImageSeries,
   type SyntheticFile,
 } from '@open-rt-studio/testdata';
@@ -472,99 +476,13 @@ const HAVE_TOOLS =
   existsSync(join(TOOLS, RIGID_REGISTRATION_TOOL)) &&
   existsSync(join(TOOLS, DEFORMABLE_REGISTRATION_TOOL));
 
-/** What the phantom holds at a point of the fixed image's coordinates, in mm: like CT numbers. */
-function phantomAt([x, y, z]: Vec3): number {
-  const r = Math.hypot(x / 55, y / 45, z / 38);
-  const inside = 1 / (1 + Math.exp((r - 1) * 20));
-  const blobs: [height: number, width: number, centre: Vec3][] = [
-    [800, 10, [18, 9, 5]],
-    [-600, 12, [-25, -12, -14]],
-    [500, 8, [4, -28, 16]],
-    [300, 14, [-9, 24, -18]],
-  ];
-  let value = 0;
-  for (const [height, width, [cx, cy, cz]] of blobs) {
-    const squared = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2;
-    value += height * Math.exp(-squared / (2 * width * width));
-  }
-  return -1000 + inside * (1000 + value);
-}
-
-/**
- * Where a point of the fixed image is in the moving image's coordinates:
- * the moving image's frame is somewhere else altogether, as that of another
- * scanner is.
- */
-const OFFSET: Vec3 = [120.5, -64, 38];
-const FIXED = {
-  size: 48,
-  count: 32,
-  pixel: 3,
-  slice: 3,
-  origin: [-70.5, -70.5, -46.5] as Vec3,
-};
-/** Another grid, whose middle is (6, -4.5, 5) mm from where the phantom's middle is. */
-const MOVING = {
-  size: 44,
-  count: 30,
-  pixel: 3.2,
-  slice: 3.4,
-  origin: [OFFSET[0] + 6 - 68.8, OFFSET[1] - 4.5 - 68.8, OFFSET[2] + 5 - 49.3] as Vec3,
-};
+/** The pair a known offset apart, which an installed desktop application is tried with too (#70). */
+const OFFSET = KNOWN_OFFSET;
+const FIXED = KNOWN_OFFSET_FIXED;
+const MOVING = KNOWN_OFFSET_MOVING;
+const knownPair = knownOffsetPair;
 /** How near the registration found has to come at the corners of the fixed image, in mm. */
 const TOLERANCE_MM = 1;
-
-function knownPair(): { fixed: SyntheticFile[]; moving: SyntheticFile[] } {
-  const common = { window: [1000, 2000] as const, namePrefix: 'known-offset' };
-  const fixed = writeImageSeries({
-    ...common,
-    modality: 'CT',
-    study: SYNTHETIC_STUDY,
-    seriesIndex: 1,
-    description: 'Phantom',
-    rows: FIXED.size,
-    columns: FIXED.size,
-    count: FIXED.count,
-    pixelSpacing: FIXED.pixel,
-    sliceSpacing: FIXED.slice,
-    origin: FIXED.origin,
-    stored: (column, row, slice) =>
-      Math.round(
-        phantomAt([
-          FIXED.origin[0] + column * FIXED.pixel,
-          FIXED.origin[1] + row * FIXED.pixel,
-          FIXED.origin[2] + slice * FIXED.slice,
-        ]) + 1000,
-      ),
-  });
-  const moving = writeImageSeries({
-    ...common,
-    modality: 'MR',
-    study: SYNTHETIC_FOLLOW_UP_STUDY,
-    seriesIndex: 2,
-    description: 'Phantom, elsewhere',
-    rows: MOVING.size,
-    columns: MOVING.size,
-    count: MOVING.count,
-    pixelSpacing: MOVING.pixel,
-    sliceSpacing: MOVING.slice,
-    origin: MOVING.origin,
-    // The same anatomy where the offset puts it, and not in the same grey
-    // values: dense is dark here, as an MR is no CT.
-    stored: (column, row, slice) =>
-      Math.round(
-        1500 -
-          0.6 *
-            (phantomAt([
-              MOVING.origin[0] + column * MOVING.pixel - OFFSET[0],
-              MOVING.origin[1] + row * MOVING.pixel - OFFSET[1],
-              MOVING.origin[2] + slice * MOVING.slice - OFFSET[2],
-            ]) +
-              1000),
-      ),
-  });
-  return { fixed, moving };
-}
 
 it('takes the pair of the test below as two series to register (with the stand-in)', async () => {
   const { upload, post, until } = await api(withStandIn());

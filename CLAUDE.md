@@ -112,7 +112,10 @@ application. Never commit patient data or real DICOM files
   made by electron-builder from `electron-builder.yml` (#65): what the shell
   needs at run time is a `dependency` of it or of the server, never a
   `devDependency`, or it is not packed; an installed application reads no
-  setting from the environment, and `installed/` is the test of one.
+  setting from the environment, and `installed/` is the test of one. The
+  native tools are packed from `native/build/dist` into `resources/native`
+  (#70) and the library runs them; where they are is said in
+  `src/library.ts` (`nativeToolsDirectory`), never by the page or a request.
 - `native/`: the C++ command-line tools on ITK and elastix (#79), a CMake
   project and not an npm workspace. `deps/` builds ITK and elastix from
   sources pinned by checksum in `cmake/versions.cmake` (the one place a
@@ -199,9 +202,12 @@ client is built. A separate workflow, `Publish the
 server image`, pushes the image of `main` to GHCR after merging; look at
 its run when a change touches the Dockerfile or `compose.yaml`. Another,
 `Installers`, runs on a tag `v*` and on a pull request that touches
-`apps/desktop`, `packages/desktop-bridge` or the lockfile: three jobs
-(`Installer (Linux)`, `(macOS)`, `(Windows)`) build the installers, install
-each as a user would and start what was installed; wait for all three. A
+`apps/desktop`, `packages/desktop-bridge`, `native/` or the lockfile: it
+calls `Native tools` first (its jobs show as `Native tools / Native (...)`;
+without the tools' tests, except for a tag), then three jobs
+(`Installer (Linux)`, `(macOS)`, `(Windows)`) build the installers with the
+tools in them, install each as a user would, start what was installed and
+register two series in it; wait for all three. A
 tag also drafts a release, which is published by hand. Another,
 `Native tools`, runs only when `native/`, `scripts/native.mjs` or
 `services/server/src/registration` changes:

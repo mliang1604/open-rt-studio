@@ -894,7 +894,11 @@ curl 'http://127.0.0.1:4300/api/v1/studies?patientName=synthetic*&date=20260101-
   that work.
   `openEmbeddedServer()` (in `src/server.ts`) is the whole server without
   the HTTP host, for that: the same PACS and routes on a data directory,
-  asked with `ask()` and no port, with no accounts.
+  asked with `ask()` and no port, with no accounts. Given `nativeTools`,
+  the directory of the program's own copy of the native tools, it has the
+  registration jobs as a server has; `hasNativeTools()` says beforehand
+  whether a directory will do, since one that will not keeps it from
+  opening.
 - `src/host/`: HTTP in front of a core, on Node's `node:http`. No framework;
   see [docs/architecture.md](../../docs/architecture.md), "Server and PACS",
   for why. A route is a method, a path pattern, a function and its

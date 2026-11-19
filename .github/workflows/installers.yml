@@ -6,6 +6,12 @@ name: Installers
 # and the program that was installed is started and asked what only a packaged
 # application can get wrong (`apps/desktop/installed`).
 #
+# The native tools are packed with it (#70): the `Native tools` workflow is
+# run first, as a part of this one, and each installer takes the tools for
+# its system. The installed application then registers two series with them.
+# A tag runs the tools' own tests before it packs them; a pull request, which
+# need not change them, only builds them.
+#
 #   a tag v1.2.3     the installers are that version, and are attached to a
 #                    draft release of the tag, which is published by hand
 #   a pull request   that touches how the application is packaged: built and
@@ -24,6 +30,9 @@ on:
       - packages/desktop-bridge/**
       - package-lock.json
       - .github/workflows/installers.yml
+      - .github/workflows/native.yml
+      - native/**
+      - scripts/native.mjs
   workflow_dispatch:
 
 permissions:
@@ -34,17 +43,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The tools, for each system: its jobs are named `Native tools / Native (...)`.
+  native:
+    name: Native tools
+    uses: ./.github/workflows/native.yml
+    with:
+      test: ${{ startsWith(github.ref, 'refs/tags/') }}
+
   build:
     name: Installer (${{ matrix.name }})
+    needs: native
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: Linux, os: ubuntu-latest }
-          - { name: macOS, os: macos-latest }
-          - { name: Windows, os: windows-latest }
+          - { name: Linux, os: ubuntu-latest, tools: linux-x64 }
+          - { name: macOS, os: macos-latest, tools: macos-universal }
+          - { name: Windows, os: windows-latest, tools: windows-x64 }
     defaults:
       run:
         shell: bash
@@ -81,6 +98,21 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Where a build of the tools leaves them in the repository, which is
+      # where the packager takes them from. By paths from here: on Windows
+      # tar takes a drive's letter for the name of another machine.
+      - name: Fetch the native tools
+        uses: actions/download-artifact@v4
+        with:
+          name: native-tools-${{ matrix.tools }}
+          path: native/build/fetched
+
+      - name: Put the native tools where they are built
+        run: |
+          mkdir -p native/build/dist
+          tar -xzf "native/build/fetched/native-tools-${{ matrix.tools }}.tar.gz" -C native/build/dist
+          ls -l native/build/dist native/build/dist/bin native/build/dist/presets/deformable
+
       # The packager signs nothing in a pull request's run unless it is told
       # to, so that a certificate is not used on code from elsewhere. There is
       # no certificate here: the signature is ad hoc, and without it the
@@ -111,6 +143,12 @@ jobs:
           codesign --verify --deep --strict "$application"
           lipo -archs "$application/Contents/MacOS/Open RT Studio" | tee "$RUNNER_TEMP/archs"
           grep -q x86_64 "$RUNNER_TEMP/archs" && grep -q arm64 "$RUNNER_TEMP/archs"
+          # The tools in it: signed with the application, and for both processors.
+          for tool in "$application/Contents/Resources/native/bin/"*; do
+            codesign --verify --strict "$tool"
+            codesign --display --verbose=2 "$tool" 2>&1 | grep -E '^(Identifier|Signature|flags)' || true
+            lipo "$tool" -verify_arch x86_64 arm64
+          done
           echo "OPEN_RT_STUDIO_INSTALLED=$application/Contents/MacOS/Open RT Studio" >> "$GITHUB_ENV"
 
       # Windows: the installer asks nothing and installs for this user.

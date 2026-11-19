@@ -49,6 +49,17 @@ extraResources:
     to: web
   - from: ../../LICENSE
     to: LICENSE.txt
+  # The native tools (#70), as their build leaves them: the programs, the
+  # presets beside them and the licences of what is built into them. Built
+  # for the system the installer is for, before packaging; an installer made
+  # without them registers nothing, and the test of the installed
+  # application fails it.
+  - from: ../../native/build/dist
+    to: native
+    filter:
+      - bin/**
+      - presets/**
+      - licenses/**
 
 asar: true
 # No dependency of the shell has code to compile.
@@ -62,6 +73,9 @@ mac:
     - target: dmg
       arch: universal
   identity: '-'
+  # The native tools come as programs for both processors already, the same
+  # file in both halves; without this the two halves are taken for a mistake.
+  x64ArchFiles: Contents/Resources/native/bin/*
   # The hardened runtime is for a notarised application (#66). Ad hoc, it
   # would refuse Electron's own libraries.
   hardenedRuntime: false

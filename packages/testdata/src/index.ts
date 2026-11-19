@@ -78,6 +78,14 @@ export {
   type PhantomTransform,
 } from './resampling-phantom.js';
 export {
+  KNOWN_OFFSET,
+  KNOWN_OFFSET_FIXED,
+  KNOWN_OFFSET_MOVING,
+  KNOWN_OFFSET_SERIES,
+  knownOffsetError,
+  knownOffsetPair,
+} from './known-offset.js';
+export {
   DOSE_PHANTOM,
   PHANTOM_HILL_DOSE_MOST,
   PHANTOM_HILL_DOSE_SLOPE,

@@ -30,6 +30,7 @@ import {
 import { ActiveDataSource } from '../../data-source/active-data-source';
 import { listedSeries, type SeriesSummary } from '../../data-source/data-source';
 import { connectToServer } from '../../data-source/server-source';
+import { LIBRARY_LABEL } from '../../desktop-library';
 import { fakeServer, parseHere, type FakeServer } from '../../data-source/server-testing';
 import { LayersController } from '../layers-controller';
 import { LayersStore } from '../layers-store';
@@ -90,6 +91,7 @@ async function setup(given: Given = {}) {
   const source = await connectToServer('http://127.0.0.1:4300', {
     fetch: server.fetch,
     parse: parseHere,
+    ...(given.label ? { named: { label: given.label, the: given.label } } : {}),
   });
   await source.selectPatient(source.patients()[0].key);
 
@@ -225,6 +227,18 @@ describe('what can be computed', () => {
   it('is nothing on a server without the tools', async () => {
     const { controller } = await setup({ kinds: [] });
     expect(controller.computing()).toEqual({ kind: 'none', library: false });
+    expect(controller.keptWhere()).toBe('on the server');
+  });
+
+  it("knows the desktop application's library from a server, with the tools and without (#70)", async () => {
+    const { controller } = await setup({ label: LIBRARY_LABEL });
+    expect(controller.computing()).toMatchObject({ kind: 'ready', rigid: true });
+    expect(controller.keptWhere()).toBe('in the library');
+  });
+
+  it('is nothing in a library that came without the tools', async () => {
+    const { controller } = await setup({ kinds: [], label: LIBRARY_LABEL });
+    expect(controller.computing()).toEqual({ kind: 'none', library: true });
   });
 
   it('is rigid alone on a server that has no presets, or is from before it listed them', async () => {
