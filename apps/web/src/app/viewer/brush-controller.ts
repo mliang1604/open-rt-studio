@@ -507,6 +507,14 @@ export class BrushController {
     return this.deps?.volume()?.spacing ?? [1, 1, 1];
   }
 
+  /**
+   * The modality of the image the structures are drawn on; null before one
+   * is loaded. What remembers a tool's settings goes by it (#346).
+   */
+  imageModality(): string | null {
+    return this.deps?.volume()?.modality ?? null;
+  }
+
   /** Ensure an ROI is selected to paint into, picking the first or creating one. */
   ensureActiveRoi(): void {
     if (this.activeRoiId() !== null) return;

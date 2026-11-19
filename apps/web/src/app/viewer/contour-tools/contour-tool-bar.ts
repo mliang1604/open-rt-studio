@@ -7,11 +7,15 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 
 import { ToolSwitch } from '../tool-switch';
 import { ContourToolsController } from './contour-tools-controller';
+import { RememberedSettingsController } from './remembered-settings-controller';
 
 /**
  * Undo and Redo of the painted structures, the contouring tools that are
  * listed (#106), and the options of the one in hand. The brush's Paint and
- * Erase buttons stand above it, where they always have.
+ * Erase buttons stand above it, where they always have. Under the options
+ * of a tool whose settings are remembered (#346): for which structure they
+ * are, the way back to the tool's defaults, and the one place that forgets
+ * everything.
  */
 @Component({
   selector: 'app-contour-tool-bar',
@@ -68,6 +72,51 @@ import { ContourToolsController } from './contour-tools-controller';
       <div class="options" data-contour-tool-options>
         <ng-container *ngComponentOutlet="component" />
       </div>
+      @if (remembered.state(); as state) {
+        <div class="remembered" data-remembered [attr.data-remembered-kind]="state.kind">
+          <span data-remembered-said>
+            @switch (state.kind) {
+              @case ('recalled') {
+                These settings are the ones last used for “{{ state.structure }}” on
+                {{ state.modality }}.
+              }
+              @case ('fresh') {
+                What is used for “{{ state.structure }}” on {{ state.modality }} is remembered for
+                the next time.
+              }
+              @case ('unnamed') {
+                Give the structure a name to have its settings remembered.
+              }
+            }
+          </span>
+          @if (state.kind === 'recalled' || remembered.count() > 0) {
+            <span class="remembered-actions">
+              @if (state.kind === 'recalled') {
+                <button
+                  type="button"
+                  class="link"
+                  data-remembered-defaults
+                  title="Set them to what the tool starts with, and forget what was remembered for this structure"
+                  (click)="remembered.useDefaults()"
+                >
+                  Tool's defaults
+                </button>
+              }
+              @if (remembered.count() > 0) {
+                <button
+                  type="button"
+                  class="link"
+                  data-remembered-forget
+                  title="Remembered settings are kept in this browser only, by structure name and modality. This forgets them all, for every tool."
+                  (click)="remembered.forgetAll()"
+                >
+                  Forget all remembered ({{ remembered.count() }})
+                </button>
+              }
+            </span>
+          }
+        </div>
+      }
     }
   `,
   styleUrls: ['../panel-card.css', './contour-tools.css'],
@@ -75,6 +124,7 @@ import { ContourToolsController } from './contour-tools-controller';
 export class ContourToolBar {
   protected readonly tools = inject(ContourToolsController);
   protected readonly switcher = inject(ToolSwitch);
+  protected readonly remembered = inject(RememberedSettingsController);
 
   /** No image to edit: the buttons are off. */
   readonly disabled = input(false);

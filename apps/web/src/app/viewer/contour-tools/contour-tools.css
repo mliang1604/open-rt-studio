@@ -35,6 +35,32 @@ button.active {
   box-shadow: var(--accent-ring);
 }
 
+/* Under a tool's options: for which structure its settings are (#346). */
+.remembered {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.remembered-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+}
+
+.remembered button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .labs-tag {
   margin-left: 4px;
   font-size: 10px;

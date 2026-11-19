@@ -18,6 +18,8 @@ import { PushTool } from './push-tool';
 import { QuickSelectTool } from './quick-select-tool';
 import { RubberBandTool } from './rubber-band-tool';
 import { ContourToolsController } from './contour-tools-controller';
+import { RememberedToolSettings } from './remembered-settings';
+import { RememberedSettingsController } from './remembered-settings-controller';
 import { SampleTool } from './sample-tool';
 import { ThresholdBrushTool } from './threshold-brush-tool';
 
@@ -54,4 +56,6 @@ export const CONTOUR_TOOL_PROVIDERS: Provider[] = [
   { provide: CONTOUR_TOOLS, useExisting: BooleanTool, multi: true },
   { provide: CONTOUR_TOOLS, useClass: SampleTool, multi: true },
   ContourToolsController,
+  RememberedToolSettings,
+  RememberedSettingsController,
 ];

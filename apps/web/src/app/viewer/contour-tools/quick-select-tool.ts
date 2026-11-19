@@ -56,6 +56,7 @@ import type {
   ToolPreviewCircle,
 } from './contour-tool';
 import { ContourToolsController } from './contour-tools-controller';
+import { numberSetting } from './remembered-settings';
 import {
   picturePixelOf,
   pictureToPane,
@@ -158,6 +159,11 @@ export class QuickSelectTool implements ContourTool {
   readonly marginMm = signal<number | null>(30);
   /** How sharply an edge stops the walk. */
   readonly beta = signal<number | null>(QUICK_SELECT_BETA);
+
+  readonly remembered = [
+    numberSetting('margin-mm', this.marginMm, { min: Number.MIN_VALUE }),
+    numberSetting('beta', this.beta, { min: Number.MIN_VALUE }),
+  ];
   readonly said = signal<string | null>(null);
   /** Whether a selection is through the volume (#293), not of the one slice. */
   readonly through = signal(false);
@@ -439,7 +445,7 @@ export class QuickSelectTool implements ContourTool {
       this.discard();
       const changed = this.injector
         .get(ContourToolsController)
-        .apply(this.editName(), [{ kind: 'paint', roiId, voxels: found }]);
+        .apply(this.editName(), [{ kind: 'paint', roiId, voxels: found }], this);
       this.said.set(`${changed} voxel${changed === 1 ? '' : 's'} added.`);
       return changed;
     }
@@ -469,7 +475,7 @@ export class QuickSelectTool implements ContourTool {
     this.discard();
     const changed = this.injector
       .get(ContourToolsController)
-      .apply(this.editName(), [{ kind: 'paint', roiId, voxels }]);
+      .apply(this.editName(), [{ kind: 'paint', roiId, voxels }], this);
     this.said.set(`${changed} voxel${changed === 1 ? '' : 's'} added.`);
     return changed;
   }

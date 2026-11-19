@@ -244,21 +244,24 @@ export class ContourToolsController {
     tool.end(this.context);
     this.stroking = null;
     this.store.commitEdit();
-    this.announce(tool.editName());
+    this.announce(tool.editName(), tool);
   }
 
   /**
    * The edits made through the tools, one more each time one is made: its
-   * name and a count. A tool that keeps up with the others (interpolation,
-   * #115) follows it. Undo and redo are not edits made.
+   * name, a count, and the tool that made it where that is known. A tool
+   * that keeps up with the others (interpolation, #115) follows it, and so
+   * does what remembers a tool's settings (#346). Undo and redo are not
+   * edits made.
    */
-  readonly edited = signal<{ readonly name: string; readonly count: number }>({
-    name: '',
-    count: 0,
-  });
+  readonly edited = signal<{
+    readonly name: string;
+    readonly count: number;
+    readonly tool: ContourTool | null;
+  }>({ name: '', count: 0, tool: null });
 
-  private announce(name: string): void {
-    this.edited.update((last) => ({ name, count: last.count + 1 }));
+  private announce(name: string, tool: ContourTool | null): void {
+    this.edited.update((last) => ({ name, count: last.count + 1, tool }));
   }
 
   /** Put back what the stroke under way changed. Returns whether there was one. */
@@ -283,15 +286,16 @@ export class ContourToolsController {
    * Make changes at once, as one edit called `name` that can be undone,
    * through the constraints: for a tool that is a click and not a stroke
    * (a cleanup, #110). Nothing is done while a stroke is under way.
-   * Returns how many voxels changed.
+   * Returns how many voxels changed. `by` is the tool, for one whose
+   * settings are remembered.
    */
-  apply(name: string, changes: readonly LabelChange[]): number {
+  apply(name: string, changes: readonly LabelChange[], by: ContourTool | null = null): number {
     if (this.stroking) return 0;
     this.store.beginEdit(name);
     let changed = 0;
     for (const change of changes) changed += this.store.applyChange(change, this.constraints());
     this.store.commitEdit();
-    if (changed > 0) this.announce(name);
+    if (changed > 0) this.announce(name, by);
     return changed;
   }
 

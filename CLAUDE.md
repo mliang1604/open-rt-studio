@@ -34,7 +34,10 @@ application. Never commit patient data or real DICOM files
   `alpha-beta/`, `dose-sum/`, `contour-tools/`, `registration-workflow/`). Every tool that changes
   painted structures is a contouring tool on the framework in
   `contour-tools/` (#106): it changes voxels through its context, never the
-  label volume itself, so that constraints and undo apply. The viewer route
+  label volume itself, so that constraints and undo apply. A tool's settings
+  that are worth keeping by structure and modality are named in its
+  `remembered` (#346); a structure's name is the user's text and stays in
+  the browser, never in a log or a request. The viewer route
   is loaded on demand, so it is not in the initial bundle.
 - `services/server`: the Node server, a small PACS. `src/core` is the server
   without the network (no port, no environment), which the desktop
