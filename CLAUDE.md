@@ -37,7 +37,10 @@ application. Never commit patient data or real DICOM files
   label volume itself, so that constraints and undo apply. A tool's settings
   that are worth keeping by structure and modality are named in its
   `remembered` (#346); a structure's name is the user's text and stays in
-  the browser, never in a log or a request. The viewer route
+  the browser, never in a log or a request. A model a tool runs (click to
+  segment, #340) is never in the repository: its files are named in the
+  code with their checksums, and a test that needs them is skipped where
+  they are not. The viewer route
   is loaded on demand, so it is not in the initial bundle.
 - `services/server`: the Node server, a small PACS. `src/core` is the server
   without the network (no port, no environment), which the desktop

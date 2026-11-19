@@ -104,6 +104,7 @@ describe('ThresholdBrushTool (#107)', () => {
       'threshold',
       'wand',
       'quick',
+      'segment',
       'points',
       'wire',
       'push',

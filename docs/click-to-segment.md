@@ -270,7 +270,10 @@ ship.
 
 ## Follow-up issues
 
-- #340: the tool, behind the labs flag.
+- #340: the tool, behind the labs flag. Built: what it does and what was
+  decided for it are in [architecture.md](architecture.md), under the
+  contouring tools. Until #341 the user chooses the model's four files from
+  the computer.
 - #341: where the model files come from, checking and keeping them. Has a
   decision of Michael's in it.
 - #342: measure on today's integrated graphics and on public images. Waits

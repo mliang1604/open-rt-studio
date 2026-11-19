@@ -62,6 +62,7 @@ import {
   pictureToPane,
   pictureVoxelAt,
   planePictureOf,
+  sliceToPane,
   type PlanePicture,
 } from './plane-picture';
 import {
@@ -231,7 +232,7 @@ export class QuickSelectTool implements ContourTool {
         continue;
       }
       const axis = throughPlaneAxis(pane.orientation);
-      const toPane = this.sliceToPane(pane, axis, slice);
+      const toPane = sliceToPane(this.brush, pane, axis, slice);
       if (!toPane) continue;
       const [a] = ([0, 1, 2] as const).filter((one) => one !== axis);
       const width = dims[a];
@@ -756,31 +757,7 @@ export class QuickSelectTool implements ContourTool {
   /** Pixels of the session's slice to pixels of its pane: affine, from three points. */
   private toPane(session: Session): ((point: PlanePoint) => [number, number]) | null {
     if (session.plane) return pictureToPane(this.brush, session.placement, session.plane);
-    return this.sliceToPane(session.placement, session.axis, session.slice);
-  }
-
-  /** Pixels of a slice of the grid to pixels of a pane that shows it: affine, from three points. */
-  private sliceToPane(
-    placement: MprPlacement,
-    axis: 0 | 1 | 2,
-    slice: number,
-  ): ((point: PlanePoint) => [number, number]) | null {
-    const [a, b] = ([0, 1, 2] as const).filter((one) => one !== axis);
-    const voxel = (u: number, v: number): [number, number, number] => {
-      const out: [number, number, number] = [0, 0, 0];
-      out[axis] = slice;
-      out[a] = u;
-      out[b] = v;
-      return out;
-    };
-    const o = this.brush.paneLocalOfVoxel(placement, voxel(0, 0));
-    const ea = this.brush.paneLocalOfVoxel(placement, voxel(1, 0));
-    const eb = this.brush.paneLocalOfVoxel(placement, voxel(0, 1));
-    if (!o || !ea || !eb) return null;
-    return ([u, v]) => [
-      o.x + u * (ea.x - o.x) + v * (eb.x - o.x),
-      o.y + u * (ea.y - o.y) + v * (eb.y - o.y),
-    ];
+    return sliceToPane(this.brush, session.placement, session.axis, session.slice);
   }
 }
 

@@ -536,6 +536,54 @@ its own.
   - The tools that have them: the magic wand, quick select, the threshold
     brush, the cleanup and the rubber band. Not the brush, whose size goes
     with what is being drawn more than with the structure.
+- **Click to segment** (#340, labs): a model outlines the object that is
+  clicked on, on the slice of the pane. The spike is
+  [click-to-segment.md](click-to-segment.md); this is the arrangement it
+  recommends.
+  - **What is asked of the model**: clicks on the object and off it, and a
+    box dragged about it, all of them together each time. The model answers
+    with three readings; the surest is shown and the others are a key (M)
+    or a button away. What is shown is a preview: it is added to the
+    structure when it is accepted, as one edit, through the constraints.
+  - **Which click is which is a setting, not a modifier.** Alt with the
+    left button pans and Shift moves the crosshair, before any tool sees
+    the press; N switches, and so do the two buttons.
+  - **The model sees the slice as it is shown**: through the window on
+    screen, stretched to the model's 1024 pixels each way. The slice is
+    made ready once for a window (the encoder, the wait of this tool) and
+    again when the window changes; the worker keeps the last four.
+  - **Where it runs**: ONNX Runtime Web (MIT) on WebGPU, in a worker, with
+    one thread. The runtime's JavaScript is in the worker's bundle and is
+    loaded when a model is; its WebAssembly, 29 MB, is copied from the
+    package into `public/ort` before a build (`scripts/runtime-assets.mjs`,
+    since the build takes no asset from outside the workspace) and fetched
+    when a model is first loaded, never before.
+  - **Off, and says why**, where the page has no WebGPU (no falling back
+    to the processor, at 8 to 16 s a slice), and where it may not compile
+    WebAssembly.
+  - **The model's files are not in the application, and are chosen from
+    the computer** until #341 decides where they come from: the four files
+    of SAM 2.1 tiny at half precision (Apache 2.0, 78 MB). Each is held to
+    the size and the SHA-256 of the file that was measured, which are in
+    the code, and one that differs is refused. They are kept in memory for
+    the session and nowhere else, and nothing is sent anywhere.
+  - **In the desktop application it is off.** Its content policy lets no
+    page compile WebAssembly. Letting it (`'wasm-unsafe-eval'`) is a
+    loosening of the policy and Michael's to decide; nothing here does it.
+  - **Tests** run with a stand-in for the model. With
+    `OPEN_RT_STUDIO_TEST_SEGMENT_MODEL` naming a folder that holds the four
+    files, an end-to-end test runs the model itself; it is skipped
+    everywhere else, and so in CI.
+  - Measured on the spike's laptop (a 2018 MacBook Pro, Radeon Pro 560X),
+    on the thorax phantom at 256 × 256: Dice 0.995 for the left lung from
+    one click; the model ready 2.7 s after its files were chosen; with the
+    model warm, 0.8 s for the first click on a slice and 0.1 s for a click
+    after it. The first click of all took 1.4 to 3.9 s, while shaders are
+    compiled.
+  - Not there: a tilted pane (the tool says so); the model's previous mask
+    given back to it, which this export does not take; anything through
+    the volume (#343); keeping the model between sessions (#341); real
+    images, on which nothing here was measured (#342).
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes

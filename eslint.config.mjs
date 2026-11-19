@@ -54,6 +54,7 @@ export default tseslint.config(
     // Playwright side of end-to-end tests run in Node.
     files: [
       'scripts/**/*.mjs',
+      'apps/web/scripts/**/*.mjs',
       '**/*.config.{js,mjs,ts}',
       'packages/*/test/**/*.mjs',
       'apps/*/e2e/**/*.ts',

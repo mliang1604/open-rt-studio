@@ -57,6 +57,11 @@ export interface BrushInit {
   readonly sagittalFlipped: () => boolean;
   /** The panes on screen, for the sphere brush's cuts through the others (#108). */
   readonly panes: () => readonly PanePlacement[];
+  /**
+   * The window the image is shown through now, for a tool that sees the
+   * image as the user does (#340). Left out, it is the image's own.
+   */
+  readonly displayWindow?: () => { readonly center: number; readonly width: number };
   /** The image series on screen, which an exported structure set is tied to. */
   readonly baseSeries: () => Series | null;
   /** Say something over the viewport for a while; longer when it is a problem. */
@@ -509,6 +514,20 @@ export class BrushController {
   /** The spacing of the grid's voxels, in mm along each axis; [1, 1, 1] before an image. */
   voxelSpacing(): readonly [number, number, number] {
     return this.deps?.volume()?.spacing ?? [1, 1, 1];
+  }
+
+  /**
+   * The values the image is shown between now, darkest to brightest: the
+   * window on screen. Null before an image is loaded.
+   */
+  displayWindow(): { readonly low: number; readonly high: number } | null {
+    const volume = this.deps?.volume();
+    if (!volume) return null;
+    const shown = this.deps?.displayWindow?.() ?? {
+      center: volume.windowCenter,
+      width: volume.windowWidth,
+    };
+    return { low: shown.center - shown.width / 2, high: shown.center + shown.width / 2 };
   }
 
   /**
