@@ -211,13 +211,26 @@ It reports as `ors-register-rigid` does, and its result says a little about
 the field:
 
 ```
-@result {"fixedToMovingAfterField":[...],"size":[49,49,43],"spacing":[...],"largestMm":...,"points":103243,"foldedPoints":0,"seed":121212,"resolutions":4,"iterations":300}
+@result {"fixedToMovingAfterField":[...],"size":[49,49,43],"spacing":[...],"largestMm":...,"points":103243,"insidePoints":23339,"largestInsideMm":...,"meanInsideMm":...,"foldedPoints":0,"seed":121212,"resolutions":4,"iterations":300}
 ```
 
 `largestMm` is the longest vector. `foldedPoints` is how many points of the
 field are where it folds space over itself (where what it does to a small
 box turns the box inside out), which no anatomy does: more than a few says
 the registration went wrong there. The tool counts them and judges nothing.
+
+**Where the field means something.** The field covers the whole fixed
+volume, the air around what was imaged too. There nothing in the images
+holds it: what it is there is what the grid and its stiffness carry out
+from where there is something, and its longest vector is usually there. So
+the result also says what the field is inside the fixed volume's outline:
+`insidePoints` of its points are, and `largestInsideMm` and `meanInsideMm`
+are the longest and the mean vector at those (null when none is). The
+outline is found on each slice: what is brighter than a threshold between
+the volume's dark and its bright (Otsu's), and what that encloses on the
+slice, as a chest wall encloses the lungs. It is a rough outline for a
+number, not a contour of the patient, and it takes the bright for the
+patient: of an image whose background is the brighter, it is everything.
 
 | Option                                      | What it does                                                                                    |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -230,17 +243,34 @@ the registration went wrong there. The tool counts them and judges nothing.
 **Presets** are in `presets/deformable`, one file each, with a title and a
 description in its first lines:
 
-| Preset    | For                     | Compares by                | Control points | Stiffness |
-| --------- | ----------------------- | -------------------------- | -------------- | --------- |
-| `ct-ct`   | Two CTs of one patient  | Correlation of grey values | 16 mm          | 1         |
-| `cbct-ct` | A cone-beam CT and a CT | Mutual information         | 20 mm          | 5         |
-| `mr-ct`   | An MR and a CT          | Mutual information         | 24 mm          | 10        |
+| Preset    | For                     | Compares by                          | Control points | Stiffness |
+| --------- | ----------------------- | ------------------------------------ | -------------- | --------- |
+| `ct-ct`   | Two CTs of one patient  | Correlation of grey values           | 16 mm          | 1         |
+| `cbct-ct` | A cone-beam CT and a CT | Mutual information, 64 steps of grey | 20 mm          | 5         |
+| `mr-ct`   | An MR and a CT          | Mutual information, 64 steps of grey | 24 mm          | 10        |
 
 Stiffness is the weight of elastix's bending energy penalty beside the
 measure. **None of the three was tuned on real images**: the numbers are
 elastix's usual ones for a B-spline registration, the differences between
 them are what the three cases are generally held to need, and all were only
 ever run on a synthetic phantom. Treat them as a place to start.
+
+**What a preset does where nothing differs** (#351). Two series of one
+smooth phantom, with nothing deformed between them and the rigid
+registration to start from, should give a field of nothing. Inside the
+phantom the two presets that go by mutual information gave 2.2 mm on
+average (5.1 and 5.7 mm at most) with elastix's usual 32 steps of grey to
+an image, and 0.8 and 0.9 mm (2.1 and 2.4 mm at most) with 64, which they
+now have; the deformation of the tools' own test was found to 0.34 and
+0.32 mm on average instead of 0.80 and 0.70. Where the image is smooth, a
+step of grey is wider than what a millimetre changes, and the measure
+cannot tell. A stiffer penalty (ten times), four times the samples and a
+third of the step length each changed little. With noise in both images
+(2 % and 5 % of their range) 64 steps were still the better: 1.0 and 1.4 mm
+on average inside the smooth phantom, against 1.5 and 2.0. `ct-ct` on that
+pair ends without a result (`registration-failed`): its moving series is
+bright where the fixed one is dark, which is no pair of CTs, and a
+correlation has nothing to find in it.
 
 What the tool decides itself cannot be set, by a preset or by `--set`: that
 the transform is a B-spline composed with the start, the seed, and
@@ -264,7 +294,11 @@ Like the rigid tool it is no judge of its own answer.
   a hundred; the voxels are 3 to 3.5 mm, and the deformation moves the
   points 3.6 mm on average. Each preset has to manage that from the exact
   turn and move. On the runners: 0.29 mm on average with `ct-ct` (0.60 mm
-  at the 95th percentile), 0.70 mm with `cbct-ct`, 0.80 mm with `mr-ct`.
+  at the 95th percentile), 0.32 to 0.35 mm with `cbct-ct`, 0.34 to 0.36 mm with `mr-ct`.
+  What each result says of the field inside the outline has to be the
+  deformation too: a little under a quarter of the field's points, moved
+  3.3 to 3.5 mm on average and none more than 9.5 mm, while the longest
+  vector of all, in the air around the phantom, is about 10 mm.
   From a start that is 2 mm and a degree off, and from no start at all,
   `ct-ct` has to come within 1.5 mm on average (0.30 and 0.32 mm). The
   same seed has to give the same field twice, byte for byte; a parameter

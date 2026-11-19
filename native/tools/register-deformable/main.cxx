@@ -40,13 +40,25 @@
 // to the job that started the tool:
 //
 //   @progress 0.42 Registering
-//   @result {"fixedToMovingAfterField":[...],"size":[41,41,33],"largestMm":7.2,...}
+//   @result {"fixedToMovingAfterField":[...],"size":[41,41,33],"largestMm":7.2,"largestInsideMm":4.1,...}
 //
 // `largestMm` is the longest vector of the field. `foldedPoints` is how
 // many points of the field are where it folds space over itself (where
 // what it does to a small box turns the box inside out), which no anatomy
 // does: more than a few says the registration went wrong there. The tool
 // reports it and judges nothing.
+//
+// The field covers the whole fixed volume, the air around what was imaged
+// too, and there nothing in the images holds it: what it is there is what
+// the grid and its stiffness carry out from where there is something. So
+// the result also says what the field is where the fixed volume shows
+// something (#351): `insidePoints` is how many points of the field lie
+// inside the volume's outline, and `largestInsideMm` and `meanInsideMm` are
+// the longest and the mean vector there (null when no point does). The
+// outline is found on each slice of the volume: what is brighter than a
+// threshold between the volume's dark and its bright (Otsu's), and what
+// that encloses on the slice, as a chest wall encloses the lungs. It is a
+// rough outline for a number, not a contour of the patient.
 //
 // --set       changes a parameter of the preset, for whoever knows elastix:
 //             --set MaximumNumberOfIterations=500. What the tool decides
@@ -61,6 +73,7 @@
 // that cannot be read as what it should be, 4 for a registration that did
 // not succeed.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -253,6 +266,148 @@ gridOver(const ors::VolumeType & fixed, double spacing)
   }
   field.vectors.assign(3 * count, 0.0f);
   return field;
+}
+
+/**
+ * Where a volume shows something: for each voxel, the first index running
+ * fastest, whether it is inside the volume's outline. On each slice that is
+ * what is at or above a threshold between the volume's dark and its bright
+ * (Otsu's, of 256 steps), and what that encloses on the slice: whatever
+ * cannot be reached from the slice's edge without crossing it. Nothing is
+ * inside a volume of one value.
+ */
+std::vector<unsigned char>
+outlineOf(const ors::VolumeType & volume)
+{
+  const auto          size = volume.GetLargestPossibleRegion().GetSize();
+  const std::size_t   columns = size[0];
+  const std::size_t   rows = size[1];
+  const std::size_t   slices = size[2];
+  const std::size_t   count = columns * rows * slices;
+  const float * const values = volume.GetBufferPointer();
+  std::vector<unsigned char> inside(count, 0);
+
+  float lowest = 0.0f;
+  float highest = 0.0f;
+  bool  any = false;
+  for (std::size_t at = 0; at < count; ++at)
+  {
+    if (std::isfinite(values[at]))
+    {
+      lowest = !any || values[at] < lowest ? values[at] : lowest;
+      highest = !any || values[at] > highest ? values[at] : highest;
+      any = true;
+    }
+  }
+  if (!any || !(highest > lowest))
+  {
+    return inside;
+  }
+
+  // The threshold that parts the values into two groups most unlike each other.
+  constexpr int       STEPS = 256;
+  std::vector<double> histogram(STEPS, 0.0);
+  const double        step = (static_cast<double>(highest) - lowest) / STEPS;
+  double              counted = 0.0;
+  const auto          stepOf = [&](float value) {
+    const int found = static_cast<int>((static_cast<double>(value) - lowest) / step);
+    return found < 0 ? 0 : (found >= STEPS ? STEPS - 1 : found);
+  };
+  for (std::size_t at = 0; at < count; ++at)
+  {
+    if (std::isfinite(values[at]))
+    {
+      histogram[stepOf(values[at])] += 1.0;
+      counted += 1.0;
+    }
+  }
+  double sum = 0.0;
+  for (int at = 0; at < STEPS; ++at)
+  {
+    sum += at * histogram[at];
+  }
+  double below = 0.0;
+  double sumBelow = 0.0;
+  double best = -1.0;
+  int    first = STEPS;
+  for (int at = 0; at + 1 < STEPS; ++at)
+  {
+    below += histogram[at];
+    sumBelow += at * histogram[at];
+    const double above = counted - below;
+    if (below <= 0.0 || above <= 0.0)
+    {
+      continue;
+    }
+    const double apart = sumBelow / below - (sum - sumBelow) / above;
+    const double between = below * above * apart * apart;
+    if (between > best)
+    {
+      best = between;
+      first = at + 1;
+    }
+  }
+  if (first >= STEPS)
+  {
+    return inside;
+  }
+
+  // On each slice: what is bright, and what cannot be reached from the
+  // slice's edge through what is not.
+  std::vector<unsigned char> reached(columns * rows);
+  std::vector<std::size_t>   waiting;
+  for (std::size_t slice = 0; slice < slices; ++slice)
+  {
+    const float * const of = values + slice * columns * rows;
+    const auto          bright = [&](std::size_t at) { return std::isfinite(of[at]) && stepOf(of[at]) >= first; };
+    std::fill(reached.begin(), reached.end(), static_cast<unsigned char>(0));
+    waiting.clear();
+    const auto reach = [&](std::size_t at) {
+      if (reached[at] == 0 && !bright(at))
+      {
+        reached[at] = 1;
+        waiting.push_back(at);
+      }
+    };
+    for (std::size_t column = 0; column < columns; ++column)
+    {
+      reach(column);
+      reach((rows - 1) * columns + column);
+    }
+    for (std::size_t row = 0; row < rows; ++row)
+    {
+      reach(row * columns);
+      reach(row * columns + columns - 1);
+    }
+    while (!waiting.empty())
+    {
+      const std::size_t at = waiting.back();
+      waiting.pop_back();
+      const std::size_t column = at % columns;
+      const std::size_t row = at / columns;
+      if (column > 0)
+      {
+        reach(at - 1);
+      }
+      if (column + 1 < columns)
+      {
+        reach(at + 1);
+      }
+      if (row > 0)
+      {
+        reach(at - columns);
+      }
+      if (row + 1 < rows)
+      {
+        reach(at + columns);
+      }
+    }
+    for (std::size_t at = 0; at < columns * rows; ++at)
+    {
+      inside[slice * columns * rows + at] = reached[at] == 0 ? 1 : 0;
+    }
+  }
+  return inside;
 }
 
 /** How many points of the field are where it folds space over: where the map's Jacobian has no positive determinant. */
@@ -477,6 +632,12 @@ registerDeformable(const Options & options)
   ors::progress(REGISTERING_FROM, "Registering");
   Field  field = gridOver(*fixed, options.fieldSpacing);
   double largest = 0.0;
+  // The same where the fixed volume shows something.
+  const std::vector<unsigned char> outline = outlineOf(*fixed);
+  const auto                       fixedSize = fixed->GetLargestPossibleRegion().GetSize();
+  std::size_t                      insidePoints = 0;
+  double                           largestInside = 0.0;
+  double                           sumInside = 0.0;
   try
   {
     ors::LogWatcher watcher(resolutions, iterations, REGISTERING_FROM, REGISTERING_TO, "Registering", options.verbose);
@@ -528,6 +689,22 @@ registerDeformable(const Options & options)
             squared += vector * vector;
           }
           largest = squared > largest ? squared : largest;
+          // The voxel of the fixed volume the point is in, or the nearest at its edge.
+          itk::ContinuousIndex<double, 3> where;
+          fixed->TransformPhysicalPointToContinuousIndex(point, where);
+          std::size_t voxel[3];
+          for (unsigned int axis = 0; axis < 3; ++axis)
+          {
+            const double nearest = std::floor(where[axis] + 0.5);
+            const double last = static_cast<double>(fixedSize[axis]) - 1.0;
+            voxel[axis] = static_cast<std::size_t>(nearest < 0.0 ? 0.0 : (nearest > last ? last : nearest));
+          }
+          if (outline[(voxel[2] * fixedSize[1] + voxel[1]) * fixedSize[0] + voxel[0]] != 0)
+          {
+            ++insidePoints;
+            sumInside += std::sqrt(squared);
+            largestInside = squared > largestInside ? squared : largestInside;
+          }
         }
       }
       ors::progress(REGISTERING_TO + (WRITING_FROM - REGISTERING_TO) * (k + 1.0) / field.size[2],
@@ -539,6 +716,7 @@ registerDeformable(const Options & options)
     return ors::fail(ors::STATUS_FAILED, "registration-failed", options.verbose ? problem.what() : "");
   }
   largest = std::sqrt(largest);
+  largestInside = std::sqrt(largestInside);
 
   ors::progress(WRITING_FROM, "Writing the result");
   if (!writeField(options.field, field))
@@ -551,6 +729,9 @@ registerDeformable(const Options & options)
     "," + std::to_string(field.size[1]) + "," + std::to_string(field.size[2]) +
     "],\"spacing\":" + ors::list({ field.spacing[0], field.spacing[1], field.spacing[2] }) +
     ",\"largestMm\":" + ors::number(largest, "%.4f") + ",\"points\":" + std::to_string(points) +
+    ",\"insidePoints\":" + std::to_string(insidePoints) + ",\"largestInsideMm\":" +
+    (insidePoints > 0 ? ors::number(largestInside, "%.4f") : std::string("null")) + ",\"meanInsideMm\":" +
+    (insidePoints > 0 ? ors::number(sumInside / static_cast<double>(insidePoints), "%.4f") : std::string("null")) +
     ",\"foldedPoints\":" + std::to_string(foldedPoints(field)) + ",\"seed\":" + std::to_string(options.seed) +
     ",\"resolutions\":" + std::to_string(resolutions) + ",\"iterations\":" + std::to_string(iterations) + "}";
   {

@@ -169,7 +169,12 @@ const measure = (value: JsonValue | undefined): number | null =>
  * in the study of the fixed series), the two frames, the matrix after the
  * field, and what the tool said of the field: its size, the longest vector
  * (`largestMm`), and at how many of its points it folds space over
- * (`foldedPoints`), which no anatomy does.
+ * (`foldedPoints`), which no anatomy does. The field covers the air around
+ * what was imaged too, where nothing holds it, so the tool also says what
+ * it is inside the fixed image's outline (#351): how many of its points
+ * are (`insidePoints`), and the longest and the mean vector there
+ * (`largestInsideMm`, `meanInsideMm`; null when no point is, or when the
+ * tool is one that does not say).
  */
 export function deformableRegistrationKind(parts: DeformableRegistrationParts): JobKind {
   const [program, ...leading] = parts.program;
@@ -280,6 +285,9 @@ export function deformableRegistrationKind(parts: DeformableRegistrationParts): 
         fixedToMovingAfterField: after,
         fieldSize: [...grid.dims],
         largestMm: measure(result['largestMm']),
+        insidePoints: measure(result['insidePoints']),
+        largestInsideMm: measure(result['largestInsideMm']),
+        meanInsideMm: measure(result['meanInsideMm']),
         foldedPoints: measure(result['foldedPoints']),
       };
     },

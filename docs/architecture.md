@@ -1521,7 +1521,8 @@ Decided in #82, the registration workflow in the viewer:
   rigid one that was accepted. The two are not chained otherwise.
 - **Nothing judges the result.** The panel says that nothing has checked
   it, passes on what the server said of a field (its size, its longest
-  vector, where it folds), and leaves the judging to who looks.
+  vector inside the fixed image's outline and in all of it (#351), where
+  it folds), and leaves the judging to who looks.
 - Not there: a list of the server's jobs, so a run is followed only by the
   page that started it, and is not found again after a reload (its result
   is on the timeline all the same).
@@ -2451,6 +2452,42 @@ Decided in #81, deformable registration:
 - **Rigid first, then deformable**: the deformable job takes the rigid
   job's `fixedToMoving` as where to start. The two are not chained by the
   server; whoever asks does that (#82).
+
+Status: **decided, and Michael's to overturn**.
+
+Decided in #351, a field where it means something:
+
+- **Measured first.** Two series of one smooth phantom, nothing deformed
+  between them, rigidly registered to 0.02 mm: the presets that go by
+  mutual information then moved the inside of the phantom 2.2 mm on
+  average, and the air around it 7.7 mm, with a longest vector of 10.5 mm
+  in air that both images cover.
+- **The cause was the measure's steps of grey, not the stiffness.** With 64
+  steps to an image instead of elastix's usual 32, the inside moves 0.8 to
+  0.9 mm on average and the longest vector of all is 4.1 to 4.3 mm; ten times the
+  stiffness, four times the samples or a third of the step length changed
+  little. The two presets have 64 now. With noise added to both images 64
+  was still the better; on real images neither was tried.
+- **The tool says what the field is inside the fixed image's outline**,
+  beside what it is in all of it: how many of its points are inside, and
+  the longest and the mean vector there. The outline is found by the tool,
+  slice by slice: what is brighter than Otsu's threshold, and what that
+  encloses. It is for a number and is stored nowhere. The other candidate,
+  the part both images cover, was measured and does not help: the long
+  vectors are inside it.
+- **The field is stored whole.** Its vectors in air are not written as
+  undefined: a DICOM object has a vector at every point, and whoever maps a
+  point through it gets what the registration found.
+- **The panel says the inside first**, then the whole field "the air
+  around it too". A server whose tool says nothing of an outline gets the
+  one line it had.
+- **A tolerance holds it**: the server's test with the tools lets the two
+  presets move the inside of that pair 1.5 mm on average and 3.5 mm at
+  most.
+- Not there: a preset for a pair whose one image is bright where the other
+  is dark and that is given as two CTs (`ct-ct` ends without a result on
+  it, as it may); numbers by region in the panel beyond this one, which
+  the field view's panel gives inside any structure (#83).
 
 Status: **decided, and Michael's to overturn**.
 

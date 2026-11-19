@@ -154,6 +154,34 @@ if(NOT written MATCHES "\"size\":\\[49,49,43\\]")
   message(FATAL_ERROR "The field is not laid over the fixed volume 4 mm apart: ${written}")
 endif()
 
+# --- What the field is where the fixed volume shows something (#351) ------------------
+
+# The phantom fills a little under a quarter of its volume; the deformation
+# moves its points 3.6 mm on average and none more than 7.3 mm, and what is
+# found may be a millimetre or two off (P95_MM).
+foreach(preset ct-ct cbct-ct mr-ct)
+  file(READ "${folder}/${preset}.json" said)
+  if(NOT said MATCHES "\"largestMm\":([0-9.]+),\"points\":([0-9]+),\"insidePoints\":([0-9]+),\"largestInsideMm\":([0-9.]+),\"meanInsideMm\":([0-9.]+),")
+    message(FATAL_ERROR "${preset}: the result does not say what the field is inside the outline: ${said}")
+  endif()
+  set(largest "${CMAKE_MATCH_1}")
+  set(points "${CMAKE_MATCH_2}")
+  set(inside "${CMAKE_MATCH_3}")
+  set(largest_inside "${CMAKE_MATCH_4}")
+  set(mean_inside "${CMAKE_MATCH_5}")
+  message(STATUS "${preset}: ${inside} of ${points} points inside the outline, longest ${largest_inside} mm, mean ${mean_inside} mm; longest of all ${largest} mm")
+  math(EXPR share "100 * ${inside} / ${points}")
+  if(share LESS 15 OR share GREATER 30)
+    message(FATAL_ERROR "${preset}: the outline holds ${share} % of the field, which is not the phantom: ${said}")
+  endif()
+  if(largest_inside GREATER largest)
+    message(FATAL_ERROR "${preset}: the longest vector inside is longer than the longest of all: ${said}")
+  endif()
+  if(largest_inside GREATER 9.5 OR mean_inside LESS 2.6 OR mean_inside GREATER 4.6)
+    message(FATAL_ERROR "${preset}: the field inside the outline is not the deformation the pair was made with: ${said}")
+  endif()
+endforeach()
+
 # --- The same seed gives the same field ------------------------------------------
 
 registered(again --preset "${PRESETS}/ct-ct.txt" --initial "${rigid}" --seed 7)

@@ -147,8 +147,24 @@ export function resultFacts(
   if (typeof result['preset'] === 'string') facts.push(`Preset ${result['preset']}`);
   const size = result['fieldSize'];
   if (Array.isArray(size) && size.length === 3) facts.push(`Field of ${size.join(' × ')} vectors`);
+  // The field covers the air around what was imaged too, where nothing
+  // holds it: what it is inside the fixed image's outline comes first (#351).
   const largest = numberOf(result['largestMm']);
-  if (largest !== null) facts.push(`Longest vector ${largest.toFixed(1)} mm`);
+  const largestInside = numberOf(result['largestInsideMm']);
+  const meanInside = numberOf(result['meanInsideMm']);
+  if (largestInside !== null) {
+    const mean = meanInside !== null ? `, mean ${meanInside.toFixed(1)} mm` : '';
+    facts.push(
+      `Inside the fixed image’s outline: longest vector ${largestInside.toFixed(1)} mm${mean}`,
+    );
+    if (largest !== null) {
+      facts.push(
+        `In the whole field, the air around it too: longest vector ${largest.toFixed(1)} mm`,
+      );
+    }
+  } else if (largest !== null) {
+    facts.push(`Longest vector ${largest.toFixed(1)} mm`);
+  }
   const folded = numberOf(result['foldedPoints']);
   return {
     facts,

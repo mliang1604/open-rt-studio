@@ -26,7 +26,10 @@
 // A cone-beam CT's numbers drift across the image and are no CT numbers:
 // mutual information asks only that the two go together.
 (Metric "AdvancedMattesMutualInformation" "TransformBendingEnergyPenalty")
-(NumberOfHistogramBins 32)
+// 64 steps of grey to an image. With 32, two images that differ by nothing
+// were found 2 mm apart inside a smooth phantom, where a step of grey is
+// wider than what a millimetre changes (#351).
+(NumberOfHistogramBins 64)
 (Metric0Weight 1.0)
 // Stiffer: scatter and truncation are not anatomy to follow.
 (Metric1Weight 5.0)
