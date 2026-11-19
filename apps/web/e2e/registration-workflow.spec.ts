@@ -226,7 +226,7 @@ test('with opened files, the panel says where a registration is computed, and by
   await page.locator('[data-registration-group] > summary').click();
 
   await expect(panel(page).locator('[data-computing]')).toHaveText(
-    'An automatic registration is computed by an Open RT Studio server that has the registration tools, not by this page. Connect to one with “Server…” on the history bar. The desktop application does not have the tools yet. By hand works here.',
+    'An automatic registration is computed by an Open RT Studio server that has the registration tools, not by this page. Connect to one with “Server…” on the history bar. In the desktop application the library on this computer is one, for what was imported into it. By hand works here.',
   );
   await expect(panel(page).getByLabel('Automatic, rigid')).toBeDisabled();
   await expect(panel(page).getByLabel('Automatic, deformable')).toBeDisabled();
