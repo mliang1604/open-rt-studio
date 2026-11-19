@@ -502,6 +502,16 @@ its own.
   the recommendation (in the browser, in a worker, on WebGPU, behind the
   labs flag) are in [click-to-segment.md](click-to-segment.md); its
   follow-ups are #340 to #344.
+- **Learning from corrections** (#122, an assessment; nothing is built):
+  the tools can get better from a user's edits without training anything
+  and without anything leaving the device. A correction becomes the model's
+  next prompt, the settings a user ends with are remembered by structure
+  and modality (#346), and an object contoured once can be found again from
+  what the model already computed (#347; on the phantom, Dice 0.937 to
+  0.996 with SAM 2.1 tiny). Training a model on the device is not pursued: no
+  runtime does it without Python today, and a user's few corrections
+  cannot show that it got better. What would be kept, and where, is in
+  [learning-from-corrections.md](learning-from-corrections.md).
 - **Labs.** A tool that is not finished is offered only when "Show
   unfinished tools (labs)" is ticked; the flag is kept with the view
   preferences. A tool of the labs in hand is put down when the flag goes
