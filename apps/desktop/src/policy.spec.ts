@@ -102,7 +102,8 @@ describe('the content security policy', () => {
   it('takes scripts, workers and what is fetched from the application only', () => {
     const policy = directives(contentSecurityPolicy());
     expect(policy.get('default-src')).toEqual(["'none'"]);
-    expect(policy.get('script-src')).toEqual(["'self'"]);
+    // Its own files, and WebAssembly made of bytes (#359): never text made into script.
+    expect(policy.get('script-src')).toEqual(["'self'", "'wasm-unsafe-eval'"]);
     expect(policy.get('worker-src')).toEqual(["'self'"]);
     expect(policy.get('connect-src')).toEqual(["'self'"]);
     expect(policy.get('frame-src')).toEqual(["'none'"]);
@@ -114,7 +115,16 @@ describe('the content security policy', () => {
 
   it('lets nothing be evaluated, no script be written in, and nothing come from any address', () => {
     const policy = contentSecurityPolicy();
-    expect(policy).not.toContain('unsafe-eval');
+    // No directive lets text be evaluated; `'wasm-unsafe-eval'` is not that.
+    for (const [, sources] of directives(policy)) {
+      expect(sources).not.toContain("'unsafe-eval'");
+      expect(sources).not.toContain("'unsafe-hashes'");
+      expect(sources).not.toContain("'strict-dynamic'");
+    }
+    const compiling = [...directives(policy)].filter(([, sources]) =>
+      sources.includes("'wasm-unsafe-eval'"),
+    );
+    expect(compiling.map(([name]) => name)).toEqual(['script-src']);
     expect(policy).not.toContain('*');
     expect(policy).not.toMatch(/https?:/);
     // Written into the page: styles alone, which is how a component gets its own.

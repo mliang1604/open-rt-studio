@@ -180,11 +180,19 @@ test("the page runs no script but the application's, and fetches from nowhere el
     } catch (error) {
       evaluated = (error as Error).name;
     }
+    // WebAssembly made of bytes is allowed (#359): the smallest module there is, its header alone.
+    let compiled = 'compiled';
+    try {
+      new WebAssembly.Module(Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0));
+    } catch (error) {
+      compiled = (error as Error).name;
+    }
     // What was refused is told a moment later.
     await new Promise((resolve) => setTimeout(resolve, 50));
     return {
       written: '__written' in globalThis,
       evaluated,
+      compiled,
       fetched,
       refused: [...new Set(refused)].sort(),
     };
@@ -192,6 +200,7 @@ test("the page runs no script but the application's, and fetches from nowhere el
   expect(tried).toEqual({
     written: false,
     evaluated: 'EvalError',
+    compiled: 'compiled',
     fetched: 'refused',
     refused: ['connect-src', 'script-src', 'script-src-elem'],
   });

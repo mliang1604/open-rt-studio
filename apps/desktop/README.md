@@ -185,7 +185,7 @@ gives a web site, not more.
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Node             | None. Every page process is sandboxed, with context isolation and no Node integration, in workers and frames too.                                                     |
 | Its files        | The web client's build, served by the main process under `app://open-rt-studio/`. A request reaches a file of that build or nothing.                                  |
-| Scripts          | Only the application's own files. No script written into the page runs; no text is evaluated.                                                                         |
+| Scripts          | Only the application's own files. No script written into the page runs; no text is evaluated. WebAssembly may be compiled (#359), for the click-to-segment model.     |
 | The network      | None of its own: the page fetches from the application itself. A server is asked through the main process, and only one the user agreed to. See [Servers](#servers).  |
 | Going elsewhere  | It goes to no other address, opens no window and embeds no page. A file dropped on the window is the viewer's to open.                                                |
 | The disk         | The folders and files the user chose in the system's dialog, to read. See [Folders and files](#folders-and-files).                                                    |

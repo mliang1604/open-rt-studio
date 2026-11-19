@@ -11,6 +11,7 @@
 // everywhere. The last go through the application's own card and viewer,
 // which needs a GPU: they are skipped on a machine without one.
 
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -39,6 +40,23 @@ import { draws, gpuArgs, gpuEnv, gpuOffer } from './gpu.js';
 import { standInKeychainArgs } from './keychain.js';
 
 const DESKTOP = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * The files of the click-to-segment tool's model, where
+ * `OPEN_RT_STUDIO_TEST_SEGMENT_MODEL` names a folder that holds them; null
+ * everywhere else, and so in CI. They are not in the repository and are not
+ * ours to put there (`apps/web/README.md`).
+ */
+const SEGMENT_MODEL_FILES = ((): string[] | null => {
+  const folder = process.env['OPEN_RT_STUDIO_TEST_SEGMENT_MODEL'] ?? '';
+  const files = [
+    'vision_encoder_fp16.onnx',
+    'vision_encoder_fp16.onnx_data',
+    'prompt_encoder_mask_decoder_fp16.onnx',
+    'prompt_encoder_mask_decoder_fp16.onnx_data',
+  ].map((name) => join(folder, name));
+  return folder !== '' && files.every((file) => existsSync(file)) ? files : null;
+})();
 const CT = syntheticCtSeries(6, 24);
 const THORAX = syntheticThoraxPatient({ size: 48, slices: 16 });
 
@@ -333,15 +351,30 @@ test('in the application: import a folder, browse the library, view a series and
   await expect(page.locator('.notice')).toContainText(/^\s*Saved “.+”/);
   await expect(onChip).toHaveAttribute('title', '2 structure sets');
 
-  // Click to segment is off here, and says why (#340): its model runs on
-  // WebAssembly, which the page's content policy does not let it compile.
-  // Whether the policy should is a decision that is not made by a tool.
+  // Click to segment is not off here (#359): its model runs on WebAssembly,
+  // which the page may compile. It asks for its model's files, as in a browser.
   await page.locator('[data-labs]').check();
   await page.locator('[data-contour-tool="segment"]').click();
-  await expect(page.locator('[data-segment-off]')).toContainText(
-    'content policy does not let a page compile',
-  );
-  await expect(page.locator('[data-segment-files]')).toHaveCount(0);
+  await expect(page.locator('[data-segment-model]')).toContainText('SAM 2.1 tiny');
+  await expect(page.locator('[data-segment-off]')).toHaveCount(0);
+  if (SEGMENT_MODEL_FILES !== null) {
+    // With the model itself, where its files are: it is made ready in the
+    // application's own worker, from the application's own files, and a
+    // click in the left lung is answered. Nothing is added.
+    const said = page.locator('[data-segment-said]');
+    await page.locator('[data-segment-files]').setInputFiles(SEGMENT_MODEL_FILES);
+    await expect(said).toHaveText('The model is ready. Click an object on a pane.', {
+      timeout: 90_000,
+    });
+    await page.mouse.click(pane.x + pane.width * 0.67, pane.y + pane.height * 0.5);
+    await expect(said).toHaveText(/^Found in \d+\.\d s\./, { timeout: 60_000 });
+    await expect(page.locator('[data-tool-preview-fill]')).toHaveCount(1);
+    test.info().annotations.push({
+      type: 'click to segment',
+      description: `with the model itself: ${await said.textContent()}`,
+    });
+    await page.locator('[data-segment-discard]').click();
+  }
   await page.locator('[data-contour-tool="segment"]').click();
   await page.locator('[data-labs]').uncheck();
 });

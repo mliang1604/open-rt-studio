@@ -48,6 +48,13 @@ export function devServerSite(setting: string): string | null {
  * page are allowed, because that is how Angular gives a component its
  * styles. Images and downloads may be made in the page (`blob:`, `data:`).
  *
+ * WebAssembly may be compiled (`'wasm-unsafe-eval'`, decided in #359): the
+ * model of the click-to-segment tool runs on a WebAssembly runtime, which
+ * is one of the application's own files. That lets bytes be made into a
+ * WebAssembly module and nothing else: text is still never made into
+ * script (`eval`, `new Function`), and what a module can reach is what the
+ * page that compiled it can, which is this policy and no Node.
+ *
  * `devServer` is the site of a development server the page is loaded from,
  * which also needs its socket for live reload.
  */
@@ -55,7 +62,7 @@ export function contentSecurityPolicy(devServer: string | null = null): string {
   const connect = devServer === null ? "'self'" : `'self' ${devServer.replace(/^http:/, 'ws:')}`;
   return [
     "default-src 'none'",
-    "script-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
     "worker-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",

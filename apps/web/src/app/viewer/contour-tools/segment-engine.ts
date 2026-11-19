@@ -49,8 +49,8 @@ export function pageLacks(): SegmentLack | null {
 export interface SegmentEngine {
   /**
    * What this page lacks to run the model at all, or null: WebGPU, or
-   * leave to compile WebAssembly (a content policy may refuse it, as the
-   * desktop application's does). Asked when the tool is taken up, not
+   * leave to compile WebAssembly (a content policy may refuse it; the
+   * desktop application's allows it, #359). Asked when the tool is taken up, not
    * before: a policy that refuses says so in the console.
    */
   lacks(): SegmentLack | null;
