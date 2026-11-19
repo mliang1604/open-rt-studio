@@ -699,7 +699,11 @@
             type="button"
             (click)="tools.newStructure()"
             [disabled]="!isReady()"
-            title="Create a new structure and paint it"
+            [title]="
+              contourTools.takenId() !== null
+                ? 'Create a new structure for the contouring tool in hand'
+                : 'Create a new structure and paint it'
+            "
           >
             ＋ New
           </button>
@@ -725,7 +729,9 @@
                 <option value="">No set yet</option>
               }
               @for (set of brushCtl.sets(); track set.id) {
-                <option [value]="set.id">{{ set.label }}</option>
+                <option [value]="set.id" [selected]="set.id === brushCtl.activeSetId()">
+                  {{ set.label }}
+                </option>
               }
             </select>
           </label>
@@ -787,7 +793,10 @@
               <option value="">No structures yet</option>
             }
             @for (roi of brushCtl.rois(); track roi.id) {
-              <option [value]="roi.id">{{ roi.name }}</option>
+              <!-- Said on the option too: the select's value is set before a new option is there (#353). -->
+              <option [value]="roi.id" [selected]="roi.id === brushCtl.activeRoiId()">
+                {{ roi.name }}
+              </option>
             }
           </select>
         </label>

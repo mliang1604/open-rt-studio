@@ -145,11 +145,15 @@ export class BrushController {
     this.mode.set('off');
   }
 
-  /** Create a fresh structure in the active set, select it, and switch to painting it. */
-  newStructure(): void {
+  /**
+   * Create a fresh structure in the active set, select it, and switch to
+   * painting it; or leave the brush as it is, for another tool that is in
+   * hand to work on the new structure (#353).
+   */
+  newStructure(paint = true): void {
     const roi = this.store.createRoi();
     this.activeRoiId.set(roi.id);
-    this.mode.set('paint');
+    if (paint) this.mode.set('paint');
   }
 
   /**
