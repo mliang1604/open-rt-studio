@@ -17,6 +17,9 @@ copyright: Open RT Studio contributors. MPL 2.0. Not for clinical use.
 # and the folder Windows installs into.
 extraMetadata:
   name: open-rt-studio
+  # A Debian package says where its program comes from, and who looks after it.
+  homepage: https://github.com/mliang1604/open-rt-studio
+  author: Open RT Studio contributors
 
 directories:
   output: release
